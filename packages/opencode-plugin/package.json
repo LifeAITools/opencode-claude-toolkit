@@ -1,6 +1,6 @@
 {
   "name": "@life-ai-tools/opencode-claude",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenCode plugin — use Claude Max/Pro subscription with OAuth login, auto-refresh, per-project credentials",
   "type": "module",
   "exports": {

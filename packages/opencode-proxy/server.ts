@@ -17,7 +17,7 @@
  *   GET  /health                 — health check
  */
 
-import { ClaudeCodeSDK, RateLimitError, AuthError, APIError } from '@life-ai-tools/claude-code-sdk'
+import { ClaudeCodeSDK, RateLimitError, AuthError, APIError, oauthLogin } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 import {
   toSDKMessages,
@@ -31,7 +31,7 @@ import type { OAIChatRequest } from './translate.js'
 import { randomUUID } from 'crypto'
 import { spawn } from 'bun'
 import { writeFileSync, readFileSync, unlinkSync } from 'fs'
-import { tmpdir } from 'os'
+import { tmpdir, homedir } from 'os'
 import { join } from 'path'
 
 // ============================================================
@@ -263,6 +263,108 @@ const server = Bun.serve({
       console.log(`[proxy] ${ts()} Reload requested — spawning new instance...`)
       const result = await gracefulReload()
       return json(result)
+    }
+
+    // Admin: login — initiate OAuth flow for a new account
+    // POST /admin/login { name?: "work", credentialsPath?: "/path/to/.credentials.json" }
+    if (url.pathname === '/admin/login' && req.method === 'POST') {
+      let body: { name?: string; credentialsPath?: string } = {}
+      try { body = await req.json() } catch { /* empty body ok */ }
+
+      const accountName = body.name ?? 'default'
+      const cPath = body.credentialsPath
+        ?? (accountName !== 'default' && accountAliases[accountName])
+        || join(homedir(), '.claude', '.credentials.json')
+
+      console.log(`[proxy] ${ts()} Login requested for account "${accountName}" → ${cPath}`)
+
+      try {
+        const result = await oauthLogin({
+          credentialsPath: cPath,
+          onAuthUrl: (autoUrl: string, manualUrl: string) => {
+            console.log(`[proxy] ${ts()} Auth URL for "${accountName}":`)
+            console.log(`  ${manualUrl}`)
+          },
+        })
+
+        // Register the new SDK instance in the pool
+        const newSdk = new ClaudeCodeSDK({ credentialsPath: result.credentialsPath, timeout: 600_000 })
+        sdkPool.set(result.credentialsPath, {
+          sdk: newSdk,
+          path: result.credentialsPath,
+          lastUsed: Date.now(),
+        })
+
+        // Add to aliases if named
+        if (accountName !== 'default') {
+          accountAliases[accountName] = result.credentialsPath
+        }
+
+        return json({
+          status: 'ok',
+          account: accountName,
+          credentialsPath: result.credentialsPath,
+          message: `Login successful! Account "${accountName}" is ready.`,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[proxy] ${ts()} Login failed for "${accountName}":`, msg)
+        return errorResponse(500, 'login_error', msg)
+      }
+    }
+
+    // Admin: login status — returns the auth URL for manual flow (for headless/remote use)
+    if (url.pathname === '/admin/login-url' && req.method === 'POST') {
+      let body: { name?: string; credentialsPath?: string } = {}
+      try { body = await req.json() } catch { /* empty body ok */ }
+
+      const accountName = body.name ?? 'default'
+      const cPath = body.credentialsPath
+        ?? (accountName !== 'default' && accountAliases[accountName])
+        || join(homedir(), '.claude', '.credentials.json')
+
+      // Start login but capture the URL instead of opening browser
+      let authUrl = ''
+      let manualUrl = ''
+      const loginPromise = oauthLogin({
+        credentialsPath: cPath,
+        openBrowser: false,
+        onAuthUrl: (auto: string, manual: string) => {
+          authUrl = auto
+          manualUrl = manual
+        },
+      })
+
+      // Wait a moment for URL to be generated
+      await new Promise(r => setTimeout(r, 500))
+
+      if (!manualUrl) {
+        return errorResponse(500, 'login_error', 'Failed to generate auth URL')
+      }
+
+      // Don't await loginPromise — it'll complete when user finishes in browser
+      // Store a reference so it completes in background
+      loginPromise.then(result => {
+        const newSdk = new ClaudeCodeSDK({ credentialsPath: result.credentialsPath, timeout: 600_000 })
+        sdkPool.set(result.credentialsPath, {
+          sdk: newSdk,
+          path: result.credentialsPath,
+          lastUsed: Date.now(),
+        })
+        if (accountName !== 'default') {
+          accountAliases[accountName] = result.credentialsPath
+        }
+        console.log(`[proxy] ${ts()} Login completed for "${accountName}" via manual flow`)
+      }).catch(err => {
+        console.error(`[proxy] ${ts()} Login failed for "${accountName}":`, err)
+      })
+
+      return json({
+        status: 'waiting',
+        account: accountName,
+        authUrl: manualUrl,
+        message: 'Open this URL in your browser to log in. The proxy will detect when login completes.',
+      })
     }
 
     // Models list

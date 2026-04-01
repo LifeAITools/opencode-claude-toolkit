@@ -1,6 +1,6 @@
 {
   "name": "@life-ai-tools/opencode-proxy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "OpenAI-compatible proxy — use Claude Max/Pro subscription in opencode, Cursor, or any OpenAI-compatible client",
   "type": "module",
   "bin": {

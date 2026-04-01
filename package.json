@@ -1,5 +1,5 @@
 {
-  "name": "@lifeaitools/claude-code-sdk",
+  "name": "@life-ai-tools/claude-code-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for Claude Code API — use your Claude Max/Pro subscription programmatically",
   "type": "module",
@@ -16,7 +16,7 @@
     "build:dev": "tsc",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "echo 'dist/ already built'"
   },
   "dependencies": {},
   "devDependencies": {

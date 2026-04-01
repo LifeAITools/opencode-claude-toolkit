@@ -17,8 +17,8 @@
  *   GET  /health                 — health check
  */
 
-import { ClaudeCodeSDK } from '@lifeaitools/claude-code-sdk'
-import type { GenerateOptions, StreamEvent } from '@lifeaitools/claude-code-sdk'
+import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
+import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 import {
   toSDKMessages,
   toSDKTools,

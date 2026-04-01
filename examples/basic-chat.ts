@@ -5,7 +5,7 @@
  * Usage: bun run examples/basic-chat.ts "Your question here"
  */
 
-import { ClaudeCodeSDK } from '@lifeaitools/claude-code-sdk'
+import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
 
 const sdk = new ClaudeCodeSDK()
 const question = process.argv[2] ?? 'What is the meaning of life?'

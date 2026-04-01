@@ -5,7 +5,7 @@
  * Usage: bun run examples/conversation.ts
  */
 
-import { ClaudeCodeSDK, Conversation } from '@lifeaitools/claude-code-sdk'
+import { ClaudeCodeSDK, Conversation } from '@life-ai-tools/claude-code-sdk'
 
 const sdk = new ClaudeCodeSDK()
 const conv = new Conversation(sdk, {

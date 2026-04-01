@@ -3,8 +3,8 @@
 Use your **Claude Max/Pro subscription** programmatically — no API key needed.
 
 This toolkit provides:
-- **`@lifeaitools/claude-code-sdk`** — TypeScript SDK for the Claude Code API (streaming, tool use, conversation management)
-- **`@lifeaitools/opencode-proxy`** — OpenAI-compatible proxy server that lets you use Claude Max/Pro in [opencode](https://github.com/opencode-ai/opencode), Cursor, or any OpenAI-compatible client
+- **`@life-ai-tools/claude-code-sdk`** — TypeScript SDK for the Claude Code API (streaming, tool use, conversation management)
+- **`@life-ai-tools/opencode-proxy`** — OpenAI-compatible proxy server that lets you use Claude Max/Pro in [opencode](https://github.com/opencode-ai/opencode), Cursor, or any OpenAI-compatible client
 
 > **Why this exists?** Read our [Open Letter to Anthropic](OPEN-LETTER.md) about token efficiency, developer freedom, and collaboration.
 
@@ -49,7 +49,7 @@ Before you start, make sure you have:
 
 ```bash
 # Start proxy and launch opencode in one go
-bunx @lifeaitools/opencode-proxy &
+bunx @life-ai-tools/opencode-proxy &
 LOCAL_ENDPOINT=http://localhost:4040/v1 opencode
 ```
 
@@ -57,7 +57,7 @@ Or step by step:
 
 ```bash
 # Terminal 1: Start the proxy
-bunx @lifeaitools/opencode-proxy --port 4040
+bunx @life-ai-tools/opencode-proxy --port 4040
 
 # Terminal 2: Launch opencode pointing to the proxy
 LOCAL_ENDPOINT=http://localhost:4040/v1 opencode
@@ -106,7 +106,7 @@ export LOCAL_ENDPOINT=http://localhost:4040/v1
 ## SDK Usage
 
 ```typescript
-import { ClaudeCodeSDK } from '@lifeaitools/claude-code-sdk'
+import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
 
 const sdk = new ClaudeCodeSDK()
 
@@ -130,7 +130,7 @@ for await (const event of sdk.stream({
 }
 
 // Multi-turn conversation
-import { Conversation } from '@lifeaitools/claude-code-sdk'
+import { Conversation } from '@life-ai-tools/claude-code-sdk'
 
 const conv = new Conversation(sdk, { model: 'claude-sonnet-4-6-20250415' })
 const reply1 = await conv.send('What is TypeScript?')
@@ -182,7 +182,7 @@ If opencode shows a timeout while waiting for a response (especially with Opus):
 lsof -i :4040
 
 # Use a different port
-bunx @lifeaitools/opencode-proxy --port 4041
+bunx @life-ai-tools/opencode-proxy --port 4041
 ```
 
 ### "Token expired" / 401 errors

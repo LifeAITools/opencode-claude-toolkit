@@ -27,7 +27,7 @@ import { homedir } from 'os'
 
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const AUTH_BASE = 'https://platform.claude.com'
-const AUTH_URL = `${AUTH_BASE}/oauth/authorize`
+const AUTH_URL = 'https://claude.com/cai/oauth/authorize'
 const TOKEN_URL = `${AUTH_BASE}/v1/oauth/token`
 const API_BASE = 'https://api.anthropic.com'
 

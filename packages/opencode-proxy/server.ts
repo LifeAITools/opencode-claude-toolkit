@@ -154,7 +154,7 @@ const accountAliases: Record<string, string> = (() => {
   const accountsFile = accountsIdx >= 0 ? args[accountsIdx + 1] : process.env.PROXY_ACCOUNTS
   if (!accountsFile) return {}
   try {
-    const raw = require('fs').readFileSync(accountsFile, 'utf8')
+    const raw = readFileSync(accountsFile, 'utf8')
     const parsed = JSON.parse(raw) as Record<string, string>
     console.log(`[opencode-proxy] Loaded ${Object.keys(parsed).length} account alias(es): ${Object.keys(parsed).join(', ')}`)
     return parsed
@@ -164,22 +164,44 @@ const accountAliases: Record<string, string> = (() => {
   }
 })()
 
+function expandHomePath(value: string | undefined): string | undefined {
+  if (!value) return value
+  if (value.startsWith('~/')) return join(homedir(), value.slice(2))
+  return value
+}
+
+function resolveAccountCredentialsPath(accountName: string, explicitPath?: string): string {
+  const fromRequest = expandHomePath(explicitPath)
+  if (fromRequest) return fromRequest
+
+  const fromAlias = expandHomePath(accountAliases[accountName])
+  if (fromAlias) return fromAlias
+
+  if (accountName !== 'default') {
+    // Give each named account its own credential file by default.
+    // Prevents collisions between work/personal subscriptions.
+    return join(homedir(), '.claude', 'accounts', `${accountName}.credentials.json`)
+  }
+
+  return join(homedir(), '.claude', '.credentials.json')
+}
+
 function getSDK(req?: Request): { sdk: ClaudeCodeSDK; accountLabel: string } {
-  let cPath = DEFAULT_CREDENTIALS
+  let cPath = expandHomePath(DEFAULT_CREDENTIALS)
   let label = 'default'
 
   if (req) {
     // Check X-Credentials-Path header
     const headerPath = req.headers.get('x-credentials-path')
     if (headerPath) {
-      cPath = headerPath
+      cPath = expandHomePath(headerPath)
       label = headerPath
     }
 
     // Check X-Account header (alias lookup)
     const accountName = req.headers.get('x-account')
-    if (accountName && accountAliases[accountName]) {
-      cPath = accountAliases[accountName]
+    if (accountName) {
+      cPath = resolveAccountCredentialsPath(accountName)
       label = accountName
     }
   }
@@ -272,18 +294,19 @@ const server = Bun.serve({
       try { body = await req.json() } catch { /* empty body ok */ }
 
       const accountName = body.name ?? 'default'
-      const cPath = body.credentialsPath
-        ?? (accountName !== 'default' && accountAliases[accountName])
-        || join(homedir(), '.claude', '.credentials.json')
+      const cPath = resolveAccountCredentialsPath(accountName, body.credentialsPath)
 
       console.log(`[proxy] ${ts()} Login requested for account "${accountName}" → ${cPath}`)
 
       try {
         const result = await oauthLogin({
           credentialsPath: cPath,
+          // Prefer personal Pro/Max route to avoid org-only flow for individuals.
+          loginWithClaudeAi: true,
           onAuthUrl: (autoUrl: string, manualUrl: string) => {
             console.log(`[proxy] ${ts()} Auth URL for "${accountName}":`)
-            console.log(`  ${manualUrl}`)
+            console.log(`  auto:   ${autoUrl}`)
+            console.log(`  manual: ${manualUrl}`)
           },
         })
 
@@ -319,15 +342,14 @@ const server = Bun.serve({
       try { body = await req.json() } catch { /* empty body ok */ }
 
       const accountName = body.name ?? 'default'
-      const cPath = body.credentialsPath
-        ?? (accountName !== 'default' && accountAliases[accountName])
-        || join(homedir(), '.claude', '.credentials.json')
+      const cPath = resolveAccountCredentialsPath(accountName, body.credentialsPath)
 
       // Start login but capture the URL instead of opening browser
       let authUrl = ''
       let manualUrl = ''
       const loginPromise = oauthLogin({
         credentialsPath: cPath,
+        loginWithClaudeAi: true,
         openBrowser: false,
         onAuthUrl: (auto: string, manual: string) => {
           authUrl = auto
@@ -362,8 +384,10 @@ const server = Bun.serve({
       return json({
         status: 'waiting',
         account: accountName,
-        authUrl: manualUrl,
-        message: 'Open this URL in your browser to log in. The proxy will detect when login completes.',
+        credentialsPath: cPath,
+        authUrl,
+        manualUrl,
+        message: 'Open authUrl in a browser on this same machine to complete localhost callback. manualUrl is a fallback for manual flow.',
       })
     }
 

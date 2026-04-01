@@ -20,6 +20,14 @@ export interface OAuthLoginOptions {
     onAuthUrl?: (url: string, manualUrl: string) => void;
     /** Try to open browser automatically. Default: true */
     openBrowser?: boolean;
+    /** Prefer Claude.ai personal login route (better for Pro/Max users). Default: true */
+    loginWithClaudeAi?: boolean;
+    /** Optional login hint (email) */
+    loginHint?: string;
+    /** Optional login method hint (e.g. sso, google, magic_link) */
+    loginMethod?: string;
+    /** Optional organization UUID for enterprise flows */
+    orgUUID?: string;
 }
 export interface OAuthResult {
     accessToken: string;

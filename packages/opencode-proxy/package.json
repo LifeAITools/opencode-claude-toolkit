@@ -1,0 +1,37 @@
+{
+  "name": "@lifeaitools/opencode-proxy",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible proxy — use Claude Max/Pro subscription in opencode, Cursor, or any OpenAI-compatible client",
+  "type": "module",
+  "bin": {
+    "opencode-claude": "./launch.ts",
+    "opencode-proxy": "./server.ts"
+  },
+  "scripts": {
+    "start": "bun run server.ts",
+    "launch": "bun run launch.ts",
+    "dev": "bun run --watch server.ts",
+    "install-global": "bash install.sh"
+  },
+  "dependencies": {
+    "@lifeaitools/claude-code-sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "opencode",
+    "claude",
+    "proxy",
+    "openai-compatible",
+    "claude-max"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LifeAITools/opencode-claude-toolkit"
+  },
+  "license": "MIT"
+}

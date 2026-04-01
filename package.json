@@ -1,0 +1,53 @@
+{
+  "name": "@lifeaitools/claude-code-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Claude Code API — use your Claude Max/Pro subscription programmatically",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun run scripts/build-sdk.ts",
+    "build:dev": "tsc",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "latest",
+    "esbuild": "^0.27.4",
+    "terser": "^5.46.1",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "claude",
+    "anthropic",
+    "claude-code",
+    "claude-max",
+    "sdk",
+    "openai-compatible",
+    "streaming"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LifeAITools/opencode-claude-toolkit"
+  },
+  "homepage": "https://github.com/LifeAITools/opencode-claude-toolkit",
+  "license": "MIT",
+  "files": [
+    "dist/index.js",
+    "dist/*.d.ts",
+    "README.md",
+    "LICENSE"
+  ]
+}

@@ -1,6 +1,6 @@
 # Request Source Code Access
 
-The `@lifeaitools/claude-code-sdk` package is distributed as a compiled bundle on npm.
+The `@life-ai-tools/claude-code-sdk` package is distributed as a compiled bundle on npm.
 
 The **opencode-proxy** is fully open source in this repository.
 

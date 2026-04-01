@@ -1,81 +1,144 @@
 # opencode-claude-toolkit
 
-Use your **Claude Max/Pro subscription** programmatically — no API key needed.
-
-This toolkit provides:
-- **`@life-ai-tools/claude-code-sdk`** — TypeScript SDK for the Claude Code API (streaming, tool use, conversation management)
-- **`@life-ai-tools/opencode-proxy`** — OpenAI-compatible proxy server that lets you use Claude Max/Pro in [opencode](https://github.com/opencode-ai/opencode), Cursor, or any OpenAI-compatible client
+Use your **Claude Max/Pro subscription** in [opencode](https://github.com/opencode-ai/opencode) — no API key needed.
 
 > **Why this exists?** Read our [Open Letter to Anthropic](OPEN-LETTER.md) about token efficiency, developer freedom, and collaboration.
 
 ---
 
-## Prerequisites
+## Three Ways to Use
 
-Before you start, make sure you have:
-
-1. **Bun** (runtime for the proxy server):
-   ```bash
-   curl -fsSL https://bun.sh/install | bash
-   ```
-
-2. **opencode** (or any OpenAI-compatible coding client):
-   ```bash
-   # Via Go
-   go install github.com/opencode-ai/opencode@latest
-   # Or via npm
-   npm install -g opencode-ai
-   ```
-
-3. **Claude Code CLI** (needed once, to authenticate your subscription):
-   ```bash
-   # Install Claude Code CLI
-   npm install -g @anthropic-ai/claude-code
-   
-   # Log in (this creates ~/.claude/.credentials.json)
-   claude
-   # Follow the OAuth flow in your browser, then exit Claude CLI
-   ```
-
-4. **Verify credentials exist:**
-   ```bash
-   ls ~/.claude/.credentials.json
-   # Should show the file — if not, run `claude` again
-   ```
+| Approach | Best for | Install |
+|----------|----------|---------|
+| **[Plugin](#-plugin-recommended)** | opencode users — native integration, no proxy | `opencode plugin @life-ai-tools/opencode-claude` |
+| **[Proxy](#-proxy)** | Cursor, other OpenAI-compatible clients | `bunx @life-ai-tools/opencode-proxy` |
+| **[SDK](#-sdk)** | Building your own tools | `npm i @life-ai-tools/claude-code-sdk` |
 
 ---
 
-## Quick Start — One Liner
+## 🔌 Plugin (Recommended)
+
+The cleanest approach — installs directly into opencode as a native provider. No separate proxy, no configuration files. Each opencode instance manages its own credentials.
+
+### Setup
 
 ```bash
-# Start proxy and launch opencode in one go
-bunx @life-ai-tools/opencode-proxy &
-LOCAL_ENDPOINT=http://localhost:4040/v1 opencode
+# 1. Install the plugin
+opencode plugin @life-ai-tools/opencode-claude
+
+# 2. Login (opens browser)
+opencode providers login -p claude-max
+
+# 3. Done — Claude models appear in opencode's model list
+opencode
 ```
 
-Or step by step:
+That's it. Select **Claude Sonnet 4.6 (Max)**, **Opus 4.6 (Max)**, or **Haiku 4.5 (Max)** from the model picker. Costs show as $0 (subscription-included).
 
-```bash
-# Terminal 1: Start the proxy
-bunx @life-ai-tools/opencode-proxy --port 4040
+### Per-Project Credentials
 
-# Terminal 2: Launch opencode pointing to the proxy
-LOCAL_ENDPOINT=http://localhost:4040/v1 opencode
+During login, choose where to save credentials:
+
+- **"This project"** → saves to `./‌.claude/.credentials.json` — isolated to this project
+- **"Global"** → saves to `~/.claude/.credentials.json` — shared across projects
+
+This means you can use **different Anthropic accounts for different projects** simultaneously:
+
+```
+Project A (personal account):
+  /projects/personal/.claude/.credentials.json
+  
+Project B (work account):
+  /projects/work/.claude/.credentials.json
+  
+Project C (shared/global):
+  ~/.claude/.credentials.json
 ```
 
-That's it. opencode will now use your Claude Max subscription for all requests.
+Each opencode instance loads credentials from its CWD, holds tokens in isolated closure memory, and refreshes independently. No interference between instances.
 
 ### Supported Models
 
-| Model ID | Maps to | Best for |
-|----------|---------|----------|
-| `claude-v4.6-sonnet` | Claude Sonnet 4.6 | Fast coding, daily driver |
-| `claude-v4.6-opus` | Claude Opus 4.6 | Complex reasoning, architecture |
-| `claude-v4.5-haiku` | Claude Haiku 4.5 | Quick tasks, low latency |
+| Model | Name in opencode | Best for |
+|-------|-----------------|----------|
+| `claude-sonnet-4-6-20250415` | Claude Sonnet 4.6 (Max) | Fast coding, daily driver |
+| `claude-opus-4-6-20250415` | Claude Opus 4.6 (Max) | Complex reasoning, architecture |
+| `claude-haiku-4-5-20251001` | Claude Haiku 4.5 (Max) | Quick tasks, low latency |
 
 ---
 
-## opencode Configuration
+## 🔀 Proxy
+
+For Cursor, Continue, or any OpenAI-compatible client. Runs a local server that translates between OpenAI format and Claude's API.
+
+### Prerequisites
+
+```bash
+# Install Bun (runtime for the proxy)
+curl -fsSL https://bun.sh/install | bash
+```
+
+### Quick Start
+
+```bash
+# Start proxy (runs as a background daemon)
+bunx @life-ai-tools/opencode-proxy
+
+# In opencode:
+LOCAL_ENDPOINT=http://localhost:4040/v1 opencode
+```
+
+Or use the launcher that starts proxy + opencode together:
+
+```bash
+bunx @life-ai-tools/opencode-proxy launch
+```
+
+### First-Time Login (no Claude CLI needed)
+
+```bash
+# Interactive login — opens browser
+curl -X POST http://localhost:4040/admin/login
+
+# Headless/remote — get URL to open manually
+curl -X POST http://localhost:4040/admin/login-url
+```
+
+### Proxy Features
+
+- **Daemon mode** — proxy survives opencode exit, shared by multiple instances
+- **Zero-downtime reload** — `POST /admin/reload` drains active streams, starts new instance
+- **Multi-account** — per-request credential routing via `X-Account` header
+- **Active stream tracking** — `GET /health` shows `activeStreams`, `pid`, `uptime`
+- **Error surfacing** — rate limits, auth errors shown in opencode (not swallowed)
+- **Token usage logging** — `in/out/cache_read/cache_write/hit%` on every request
+- **Verbose mode** — `--verbose` dumps raw SSE events for debugging
+
+### Proxy Configuration
+
+```bash
+# Custom port
+bunx @life-ai-tools/opencode-proxy --port 8080
+
+# Verbose logging
+PROXY_VERBOSE=1 bunx @life-ai-tools/opencode-proxy
+
+# Log to files
+PROXY_LOG_DIR=/tmp/proxy-logs bunx @life-ai-tools/opencode-proxy
+
+# Multiple accounts
+bunx @life-ai-tools/opencode-proxy --accounts ~/.config/opencode-proxy/accounts.json
+```
+
+Accounts file format:
+```json
+{
+  "work": "/home/user/.claude-work/.credentials.json",
+  "personal": "/home/user/.claude/.credentials.json"
+}
+```
+
+### opencode Configuration
 
 To make opencode always use the proxy, add to your `.opencode.json`:
 
@@ -94,7 +157,7 @@ To make opencode always use the proxy, add to your `.opencode.json`:
 }
 ```
 
-Set the environment variable permanently:
+Or set the environment variable permanently:
 
 ```bash
 # Add to your .bashrc / .zshrc
@@ -103,20 +166,18 @@ export LOCAL_ENDPOINT=http://localhost:4040/v1
 
 ---
 
-## SDK Usage
+## 📦 SDK
+
+For building your own tools on top of Claude Max/Pro.
+
+```bash
+npm install @life-ai-tools/claude-code-sdk
+```
 
 ```typescript
 import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
 
 const sdk = new ClaudeCodeSDK()
-
-// Non-streaming
-const response = await sdk.generate({
-  model: 'claude-sonnet-4-6-20250415',
-  messages: [{ role: 'user', content: 'Hello!' }],
-  maxTokens: 1024,
-})
-console.log(response.content)
 
 // Streaming
 for await (const event of sdk.stream({
@@ -135,82 +196,76 @@ import { Conversation } from '@life-ai-tools/claude-code-sdk'
 const conv = new Conversation(sdk, { model: 'claude-sonnet-4-6-20250415' })
 const reply1 = await conv.send('What is TypeScript?')
 const reply2 = await conv.send('How does it compare to JavaScript?')
+
+// OAuth login (no Claude CLI needed)
+import { oauthLogin } from '@life-ai-tools/claude-code-sdk'
+
+const creds = await oauthLogin({
+  credentialsPath: './my-credentials.json',
+})
 ```
 
 See [`examples/`](examples/) for more usage patterns.
 
----
+### SDK Features
 
-## Features
-
-- **Zero API key** — uses your existing Claude Max/Pro OAuth credentials from `~/.claude`
+- **Zero API key** — uses Claude Max/Pro OAuth credentials
 - **Streaming** — real SSE streaming with text, thinking, and tool use events
-- **Auto-refresh** — tokens are refreshed automatically when expired
-- **Retry logic** — exponential backoff for 5xx errors, proper 429 handling
-- **Tool use** — full support for function calling
-- **Thinking** — extended thinking / chain-of-thought support
-- **Caching** — prompt caching support for cost efficiency
-- **Conversation** — stateful multi-turn conversation management
-- **OpenAI-compatible** — proxy translates OpenAI format to/from Claude
-- **Client disconnect handling** — clean abort propagation from client to API
-
----
-
-## Troubleshooting
-
-### "No credentials found"
-```
-Error: No credentials found. Run `claude` first or provide credentials.
-```
-**Fix:** Run `claude` in your terminal, complete the OAuth login, then try again. The file `~/.claude/.credentials.json` must exist.
-
-### "Rate limited" / 429 errors
-```
-[proxy] error: Rate limited: ...
-```
-**Fix:** You've hit your subscription's usage limit. Wait for the reset window (usually resets daily). The proxy never retries 429 errors — this is by design, as subscription rate limits are window-based.
-
-### "Stream idle timeout"
-If opencode shows a timeout while waiting for a response (especially with Opus):
-- The proxy has a 255-second idle timeout and 600-second request timeout
-- Opus can take 30+ seconds for complex reasoning
-- If timeouts persist, check your network connection to `api.anthropic.com`
-
-### Proxy won't start
-```bash
-# Check if port 4040 is already in use
-lsof -i :4040
-
-# Use a different port
-bunx @life-ai-tools/opencode-proxy --port 4041
-```
-
-### "Token expired" / 401 errors
-The SDK auto-refreshes tokens. If you see persistent 401 errors:
-```bash
-# Re-authenticate
-claude  # log in again
-# Restart the proxy
-```
+- **Auto-refresh** — tokens refreshed automatically when expired
+- **OAuth login** — full PKCE flow, no Claude CLI dependency
+- **Retry logic** — exponential backoff for 5xx errors
+- **Tool use** — full function calling support
+- **Thinking** — extended thinking / chain-of-thought
+- **Prompt caching** — automatic cache markers (5-min TTL, server-side)
+- **Conversation** — stateful multi-turn management
 
 ---
 
 ## How It Works
 
+### Plugin (direct)
+```
+opencode ──→ plugin ──→ Anthropic API
+              │
+              ├── OAuth token from closure memory
+              ├── Auto-refresh on expiry
+              └── Per-project credential isolation
+```
+
+### Proxy (OpenAI-compatible)
 ```
 ┌─────────────┐    OpenAI format     ┌──────────────────┐    Claude API     ┌──────────────┐
 │   opencode   │ ──── SSE stream ──→ │  opencode-proxy   │ ──── SSE ──────→ │  Anthropic    │
-│   (client)   │ ←── SSE stream ──── │  (Bun.serve)      │ ←── SSE ──────── │  API          │
-└─────────────┘                      └──────────────────┘                   └──────────────┘
-                                            │
-                                     claude-code-sdk
-                                     • OAuth auth + refresh
-                                     • Request building
-                                     • SSE parsing
-                                     • Retry logic
+│   Cursor     │ ←── SSE stream ──── │  (daemon)         │ ←── SSE ──────── │  API          │
+│   any client │                     └──────────────────┘                   └──────────────┘
+└─────────────┘
 ```
 
-The proxy translates between OpenAI's chat completion format and Claude's native API format. Streaming is end-to-end — chunks flow from Anthropic through the proxy to your client with minimal buffering.
+---
+
+## Troubleshooting
+
+### "Not logged in"
+```
+Run: opencode providers login -p claude-max
+```
+Or for proxy: `curl -X POST http://localhost:4040/admin/login`
+
+### "Rate limited" / 429
+You've hit your subscription's usage limit. Wait for the reset window (usually daily). Rate limits are never retried — this is by design for subscription-based rate limiting.
+
+### "Token expired" / 401
+Tokens auto-refresh. If persistent:
+```bash
+# Plugin: re-login
+opencode providers login -p claude-max
+
+# Proxy: re-login
+curl -X POST http://localhost:4040/admin/login
+```
+
+### Stream timeout (Opus)
+Opus can take 30+ seconds for complex reasoning. The proxy has a 255-second idle timeout and 600-second request timeout. If timeouts persist, check your network to `api.anthropic.com`.
 
 ---
 
@@ -219,19 +274,27 @@ The proxy translates between OpenAI's chat completion format and Claude's native
 ```
 opencode-claude-toolkit/
 ├── packages/
-│   └── opencode-proxy/         # OpenAI-compatible proxy (open source)
-│       ├── server.ts           # HTTP server (Bun.serve)
+│   ├── opencode-plugin/        # opencode plugin (recommended)
+│   │   └── src/index.ts        # OAuth, token management, model config
+│   └── opencode-proxy/         # OpenAI-compatible proxy server
+│       ├── server.ts           # HTTP server with daemon mode
 │       ├── translate.ts        # OpenAI ↔ Claude format translation
 │       └── launch.ts           # Auto-launcher
-├── dist/                       # Compiled SDK (published to npm)
+├── dist/                       # Compiled SDK
 ├── examples/                   # Usage examples
-│   ├── basic-chat.ts
-│   └── conversation.ts
 ├── OPEN-LETTER.md              # Our message to Anthropic
-├── REQUEST-SOURCE.md           # How to request SDK source access
+├── REQUEST-SOURCE.md           # SDK source access requests
 ├── LICENSE                     # MIT
 └── README.md
 ```
+
+## npm Packages
+
+| Package | Version | Description |
+|---------|---------|-------------|
+| [`@life-ai-tools/opencode-claude`](https://www.npmjs.com/package/@life-ai-tools/opencode-claude) | 0.1.1 | opencode plugin — native Claude Max/Pro |
+| [`@life-ai-tools/opencode-proxy`](https://www.npmjs.com/package/@life-ai-tools/opencode-proxy) | 0.3.1 | OpenAI-compatible proxy server |
+| [`@life-ai-tools/claude-code-sdk`](https://www.npmjs.com/package/@life-ai-tools/claude-code-sdk) | 0.1.1 | TypeScript SDK |
 
 ---
 

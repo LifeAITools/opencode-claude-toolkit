@@ -124,10 +124,89 @@ function removePidFile() {
 }
 
 // ============================================================
-// SDK instance (shared, lazy auth)
+// SDK pool — multi-account support
 // ============================================================
+// Each unique credentials path gets its own SDK instance with
+// independent OAuth tokens and refresh cycles.
+//
+// Account selection (in order of precedence):
+//   1. X-Credentials-Path header (absolute path to .credentials.json)
+//   2. X-Account header (alias resolved via --accounts config)
+//   3. Default: --credentials flag or ~/.claude/.credentials.json
+//
+// This allows multiple opencode instances to use different accounts
+// simultaneously, each with its own subscription and rate limits.
 
-const sdk = new ClaudeCodeSDK({ credentialsPath, timeout: 600_000 })
+const DEFAULT_CREDENTIALS = credentialsPath ?? undefined
+
+interface SDKPoolEntry {
+  sdk: ClaudeCodeSDK
+  path: string
+  lastUsed: number
+}
+
+const sdkPool = new Map<string, SDKPoolEntry>()
+
+// Account aliases: --accounts /path/to/accounts.json or PROXY_ACCOUNTS env
+// Format: { "work": "/home/user/.claude-work/.credentials.json", "personal": "~/.claude/.credentials.json" }
+const accountAliases: Record<string, string> = (() => {
+  const accountsIdx = args.indexOf('--accounts')
+  const accountsFile = accountsIdx >= 0 ? args[accountsIdx + 1] : process.env.PROXY_ACCOUNTS
+  if (!accountsFile) return {}
+  try {
+    const raw = require('fs').readFileSync(accountsFile, 'utf8')
+    const parsed = JSON.parse(raw) as Record<string, string>
+    console.log(`[opencode-proxy] Loaded ${Object.keys(parsed).length} account alias(es): ${Object.keys(parsed).join(', ')}`)
+    return parsed
+  } catch (err) {
+    console.error(`[opencode-proxy] Failed to load accounts file: ${accountsFile}`, err)
+    return {}
+  }
+})()
+
+function getSDK(req?: Request): { sdk: ClaudeCodeSDK; accountLabel: string } {
+  let cPath = DEFAULT_CREDENTIALS
+  let label = 'default'
+
+  if (req) {
+    // Check X-Credentials-Path header
+    const headerPath = req.headers.get('x-credentials-path')
+    if (headerPath) {
+      cPath = headerPath
+      label = headerPath
+    }
+
+    // Check X-Account header (alias lookup)
+    const accountName = req.headers.get('x-account')
+    if (accountName && accountAliases[accountName]) {
+      cPath = accountAliases[accountName]
+      label = accountName
+    }
+  }
+
+  // Normalize key
+  const key = cPath ?? '~default~'
+
+  const existing = sdkPool.get(key)
+  if (existing) {
+    existing.lastUsed = Date.now()
+    return { sdk: existing.sdk, accountLabel: label }
+  }
+
+  // Create new SDK instance for this credential path
+  const newSdk = new ClaudeCodeSDK({
+    credentialsPath: cPath,
+    timeout: 600_000,
+  })
+
+  sdkPool.set(key, { sdk: newSdk, path: cPath ?? 'default', lastUsed: Date.now() })
+  console.log(`[proxy] ${ts()} New SDK instance for account "${label}" (path=${cPath ?? 'default'}, pool_size=${sdkPool.size})`)
+
+  return { sdk: newSdk, accountLabel: label }
+}
+
+// Convenience: default SDK for non-request contexts
+const defaultSDK = getSDK().sdk
 
 // ============================================================
 // Server
@@ -164,6 +243,15 @@ const server = Bun.serve({
         draining,
         uptime: Math.floor(process.uptime()),
         verbose: VERBOSE,
+        accounts: {
+          aliases: Object.keys(accountAliases),
+          poolSize: sdkPool.size,
+          active: Array.from(sdkPool.entries()).map(([key, entry]) => ({
+            key: key === '~default~' ? 'default' : key,
+            path: entry.path,
+            lastUsed: new Date(entry.lastUsed).toISOString(),
+          })),
+        },
       })
     }
 
@@ -204,11 +292,14 @@ const server = Bun.serve({
         return errorResponse(400, 'invalid_request', 'Invalid JSON body')
       }
 
+      // Resolve account for this request
+      const { sdk, accountLabel } = getSDK(req)
+
       try {
         if (body.stream) {
-          return handleStream(body, req.signal)
+          return handleStream(body, req.signal, sdk, accountLabel)
         } else {
-          return await handleNonStream(body)
+          return await handleNonStream(body, sdk, accountLabel)
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -245,10 +336,10 @@ console.log(`[opencode-proxy] Verbose: ${VERBOSE ? 'ON (--verbose)' : 'off'}${LO
 // Non-streaming handler
 // ============================================================
 
-async function handleNonStream(body: OAIChatRequest): Promise<Response> {
+async function handleNonStream(body: OAIChatRequest, sdk: ClaudeCodeSDK, accountLabel: string): Promise<Response> {
   const start = Date.now()
   const reqId = randomUUID().slice(0, 8)
-  console.log(`[proxy] ${ts()} [${reqId}] generate ${body.model} msgs=${body.messages.length}`)
+  console.log(`[proxy] ${ts()} [${reqId}] generate ${body.model} msgs=${body.messages.length} account=${accountLabel}`)
   const opts = buildSDKOptions(body)
   const response = await sdk.generate(opts)
   logUsage(`[proxy] ${ts()} [${reqId}] done ${Date.now() - start}ms`, response.usage)
@@ -301,14 +392,14 @@ async function handleNonStream(body: OAIChatRequest): Promise<Response> {
 // Streaming handler — SSE
 // ============================================================
 
-function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
+function handleStream(body: OAIChatRequest, signal: AbortSignal, sdk: ClaudeCodeSDK, accountLabel: string): Response {
   const opts = buildSDKOptions(body)
   const completionId = `chatcmpl-${randomUUID()}`
   const reqId = completionId.slice(-8)
   const startTime = Date.now()
 
   streamStart()
-  console.log(`[proxy] ${ts()} [${reqId}] stream ${body.model} msgs=${body.messages.length} (active=${activeStreams})`)
+  console.log(`[proxy] ${ts()} [${reqId}] stream ${body.model} msgs=${body.messages.length} account=${accountLabel} (active=${activeStreams})`)
 
   const stream = new ReadableStream({
     async start(controller) {

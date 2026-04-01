@@ -16,9 +16,8 @@
  */
 
 import { spawn } from 'bun'
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs'
+import { existsSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 // ─── Parse args ────────────────────────────────────────────
 
@@ -52,134 +51,64 @@ const BUN = process.execPath  // path to the currently running bun
 // ─── Check for existing proxy ──────────────────────────────
 
 let proxyUrl = `http://localhost:${port}`
-let existingProxy = false
-let proxy: ReturnType<typeof spawn> | null = null
 
 // Check if a proxy is already running on the target port
+let proxyReady = false
 try {
   const r = await fetch(`${proxyUrl}/health`, { signal: AbortSignal.timeout(1000) })
   if (r.ok) {
-    const health = await r.json() as { status: string }
-    if (health.status === 'ok') {
-      existingProxy = true
-      console.log(`\n✅ Existing proxy found at ${proxyUrl}/v1 — reusing it`)
+    const health = await r.json() as { status: string; pid?: number; activeStreams?: number }
+    if (health.status === 'ok' || health.status === 'draining') {
+      proxyReady = true
+      console.log(`\n✅ Proxy running at ${proxyUrl}/v1 (pid=${health.pid}, streams=${health.activeStreams ?? 0})`)
     }
   }
 } catch {
-  // No existing proxy, start a new one
+  // No existing proxy
 }
 
-if (!existingProxy) {
-  // ─── Start proxy ───────────────────────────────────────────
+if (!proxyReady) {
+  // ─── Start proxy as detached daemon ────────────────────────
 
-  console.log(`\n🔌 Starting opencode-proxy on port ${port}...`)
+  console.log(`\n🔌 Starting opencode-proxy daemon on port ${port}...`)
 
-  proxy = spawn({
-    cmd: [BUN, 'run', serverPath],
-    env: {
-      ...process.env,
-      PROXY_PORT: String(port),
-    },
-    stdout: 'pipe',
-    stderr: 'pipe',
+  // Start detached — proxy lives independently of this launcher
+  const proxyProc = spawn({
+    cmd: [BUN, 'run', serverPath, '--port', String(port)],
+    env: { ...process.env, PROXY_PORT: String(port) },
+    stdout: 'ignore',
+    stderr: 'ignore',
+    // @ts-ignore — Bun supports detached option
+    detached: true,
   })
-
-  // Forward proxy logs with prefix
-  ;(async () => {
-    const reader = (proxy!.stdout as ReadableStream<Uint8Array>).getReader()
-    const dec = new TextDecoder()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      process.stdout.write(`\x1b[2m[proxy] ${dec.decode(value)}\x1b[0m`)
-    }
-  })()
+  // Unref so this process can exit without waiting for the daemon
+  proxyProc.unref?.()
 
   // ─── Wait for proxy ready ──────────────────────────────────
 
   const ready = await waitForProxy(proxyUrl)
 
   if (!ready) {
-    console.error('❌ Proxy failed to start. Check bun is installed.')
-    proxy.kill()
+    console.error('❌ Proxy failed to start. Check bun is installed and ~/.claude/.credentials.json exists.')
+    try { proxyProc.kill() } catch { /* ok */ }
     process.exit(1)
   }
 
-  console.log(`✅ Proxy ready at ${proxyUrl}/v1`)
+  console.log(`✅ Proxy daemon started at ${proxyUrl}/v1 (pid=${proxyProc.pid})`)
 }
 
-console.log(`📋 Models: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001\n`)
-
-// ─── Client ref-counting ───────────────────────────────────
-// Track how many launcher instances are using this proxy port.
-// Only the last one to exit kills the proxy.
-
-const clientsFile = join(tmpdir(), `opencode-proxy-${port}.clients`)
-
-function readClients(): number[] {
-  try {
-    return JSON.parse(readFileSync(clientsFile, 'utf8')).filter((pid: number) => {
-      // Remove stale PIDs (process no longer running)
-      try { process.kill(pid, 0); return true } catch { return false }
-    })
-  } catch { return [] }
-}
-
-function registerClient(): void {
-  const clients = readClients()
-  if (!clients.includes(process.pid)) clients.push(process.pid)
-  writeFileSync(clientsFile, JSON.stringify(clients))
-}
-
-function unregisterClient(): number {
-  const clients = readClients().filter(pid => pid !== process.pid)
-  if (clients.length > 0) {
-    writeFileSync(clientsFile, JSON.stringify(clients))
-  } else {
-    try { unlinkSync(clientsFile) } catch { /* ok */ }
-  }
-  return clients.length
-}
-
-registerClient()
-
-// ─── Setup cleanup ─────────────────────────────────────────
-
-let cleanedUp = false
-function cleanup(exitCode = 0) {
-  if (cleanedUp) return
-  cleanedUp = true
-
-  const remaining = unregisterClient()
-
-  if (proxy && !proxy.killed) {
-    if (remaining === 0) {
-      process.stdout.write('\n🛑 Last client — stopping proxy...\n')
-      proxy.kill('SIGTERM')
-    } else {
-      process.stdout.write(`\n✅ Proxy stays running (${remaining} other client${remaining > 1 ? 's' : ''} connected)\n`)
-    }
-  }
-  process.exit(exitCode)
-}
-
-process.on('SIGINT', () => cleanup(0))
-process.on('SIGTERM', () => cleanup(0))
-process.on('exit', () => {
-  if (!cleanedUp) {
-    const remaining = unregisterClient()
-    if (proxy && !proxy.killed && remaining === 0) proxy.kill()
-  }
-})
+console.log(`📋 Models: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001`)
+console.log(`💡 Proxy runs as a daemon — it stays alive after opencode exits.`)
+console.log(`   To stop: kill $(cat /tmp/opencode-proxy-${port}.pid)`)
+console.log(`   To reload: bash safe-restart.sh\n`)
 
 // ─── Launch opencode ───────────────────────────────────────
 
 if (!opencodeCmd) {
   console.log(`⚠️  opencode not found in PATH.`)
   console.log(`   Set LOCAL_ENDPOINT=${proxyUrl}/v1 and run opencode manually.`)
-  console.log(`   Proxy is running. Press Ctrl+C to stop.\n`)
-  if (proxy) await proxy.exited
-  cleanup(0)
+  console.log(`   Proxy daemon is running in the background.\n`)
+  process.exit(0)
 } else {
   console.log(`🚀 Launching: ${opencodeCmd} ${opencodeArgs.join(' ')}\n`)
 
@@ -195,7 +124,8 @@ if (!opencodeCmd) {
   })
 
   const exitCode = await opencode.exited
-  cleanup(exitCode)
+  // Proxy daemon keeps running — just exit the launcher
+  process.exit(exitCode)
 }
 
 // ─── Helpers ───────────────────────────────────────────────

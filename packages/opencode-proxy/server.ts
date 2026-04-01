@@ -29,6 +29,10 @@ import {
 } from './translate.js'
 import type { OAIChatRequest } from './translate.js'
 import { randomUUID } from 'crypto'
+import { spawn } from 'bun'
+import { writeFileSync, readFileSync, unlinkSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 // ============================================================
 // CLI args
@@ -82,6 +86,44 @@ function dumpEvent(requestId: string, event: StreamEvent) {
 }
 
 // ============================================================
+// Active connection tracking
+// ============================================================
+
+let activeStreams = 0
+let draining = false  // when true, new requests get redirected to new proxy
+
+function streamStart() { activeStreams++ }
+function streamEnd() {
+  activeStreams--
+  if (draining && activeStreams <= 0) {
+    console.log(`[proxy] ${ts()} All streams drained — shutting down old instance`)
+    process.exit(0)
+  }
+}
+
+// ============================================================
+// PID file for daemon management
+// ============================================================
+
+const PID_FILE = join(tmpdir(), `opencode-proxy-${PORT}.pid`)
+
+function writePidFile() {
+  writeFileSync(PID_FILE, String(process.pid))
+}
+
+function readPidFile(): number | null {
+  try {
+    const pid = parseInt(readFileSync(PID_FILE, 'utf8').trim())
+    // Check if process is actually running
+    try { process.kill(pid, 0); return pid } catch { return null }
+  } catch { return null }
+}
+
+function removePidFile() {
+  try { unlinkSync(PID_FILE) } catch { /* ok */ }
+}
+
+// ============================================================
 // SDK instance (shared, lazy auth)
 // ============================================================
 
@@ -104,7 +146,35 @@ const server = Bun.serve({
 
     // Health
     if (url.pathname === '/health' && req.method === 'GET') {
-      return json({ status: 'ok', models: SUPPORTED_MODELS.map(m => m.id) })
+      return json({
+        status: draining ? 'draining' : 'ok',
+        models: SUPPORTED_MODELS.map(m => m.id),
+        pid: process.pid,
+        activeStreams,
+        uptime: Math.floor(process.uptime()),
+      })
+    }
+
+    // Admin: status
+    if (url.pathname === '/admin/status' && req.method === 'GET') {
+      return json({
+        pid: process.pid,
+        port: PORT,
+        activeStreams,
+        draining,
+        uptime: Math.floor(process.uptime()),
+        verbose: VERBOSE,
+      })
+    }
+
+    // Admin: graceful reload — start new proxy, drain old
+    if (url.pathname === '/admin/reload' && req.method === 'POST') {
+      if (draining) {
+        return json({ status: 'already_draining', activeStreams })
+      }
+      console.log(`[proxy] ${ts()} Reload requested — spawning new instance...`)
+      const result = await gracefulReload()
+      return json(result)
     }
 
     // Models list
@@ -122,6 +192,11 @@ const server = Bun.serve({
 
     // Chat completions
     if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
+      // If draining, reject new requests — client should retry and hit new proxy
+      if (draining) {
+        return errorResponse(503, 'service_unavailable', 'Proxy is reloading, retry in a moment')
+      }
+
       let body: OAIChatRequest
       try {
         body = await req.json() as OAIChatRequest
@@ -232,7 +307,8 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
   const reqId = completionId.slice(-8)
   const startTime = Date.now()
 
-  console.log(`[proxy] ${ts()} [${reqId}] stream ${body.model} msgs=${body.messages.length}`)
+  streamStart()
+  console.log(`[proxy] ${ts()} [${reqId}] stream ${body.model} msgs=${body.messages.length} (active=${activeStreams})`)
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -265,14 +341,16 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
           controller.enqueue(enc.encode('data: [DONE]\n\n'))
           controller.close()
         } catch { /* already closed by client disconnect */ }
-        console.log(`[proxy] ${ts()} [${reqId}] done ${chunks} chunks ${Date.now() - startTime}ms`)
+        streamEnd()
+        console.log(`[proxy] ${ts()} [${reqId}] done ${chunks} chunks ${Date.now() - startTime}ms (active=${activeStreams})`)
       }
 
       // Detect client disconnect via abort signal
       signal.addEventListener('abort', () => {
         if (!closed) {
           closed = true
-          console.log(`[proxy] ${ts()} [${reqId}] client disconnected after ${chunks} chunks ${Date.now() - startTime}ms`)
+          streamEnd()
+          console.log(`[proxy] ${ts()} [${reqId}] client disconnected after ${chunks} chunks ${Date.now() - startTime}ms (active=${activeStreams})`)
           try { controller.close() } catch { /* ok */ }
         }
       })
@@ -548,3 +626,112 @@ function corsHeaders(): Record<string, string> {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   }
 }
+
+// ============================================================
+// Graceful reload — zero-downtime restart
+// ============================================================
+
+async function gracefulReload(): Promise<Record<string, unknown>> {
+  // 1. Find a free port for the new instance
+  let newPort = PORT
+  for (let p = PORT + 1; p < PORT + 20; p++) {
+    try {
+      const s = Bun.listen({ hostname: '127.0.0.1', port: p, socket: { data() {}, open() {}, close() {}, error() {} } })
+      s.stop()
+      newPort = p
+      break
+    } catch { /* port in use */ }
+  }
+  if (newPort === PORT) {
+    return { status: 'error', message: 'No free port found for new instance' }
+  }
+
+  // 2. Spawn new proxy on the new port
+  const serverPath = import.meta.url.replace('file://', '')
+  const newProxy = spawn({
+    cmd: [process.execPath, 'run', serverPath, '--port', String(newPort)],
+    env: { ...process.env, PROXY_PORT: String(newPort) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  // 3. Wait for new instance to be healthy
+  const maxWait = 10_000
+  const start = Date.now()
+  let healthy = false
+  while (Date.now() - start < maxWait) {
+    try {
+      const r = await fetch(`http://localhost:${newPort}/health`, { signal: AbortSignal.timeout(1000) })
+      if (r.ok) { healthy = true; break }
+    } catch { /* not ready */ }
+    await Bun.sleep(200)
+  }
+
+  if (!healthy) {
+    try { newProxy.kill() } catch { /* ok */ }
+    return { status: 'error', message: 'New instance failed health check' }
+  }
+
+  console.log(`[proxy] ${ts()} New instance healthy on :${newPort} (pid=${newProxy.pid})`)
+
+  // 4. Start draining — new requests to this instance get 503
+  draining = true
+
+  // 5. Update PID file to point to new instance
+  writeFileSync(PID_FILE, String(newProxy.pid))
+
+  // 6. If no active streams, exit immediately
+  if (activeStreams <= 0) {
+    console.log(`[proxy] ${ts()} No active streams — exiting immediately`)
+    setTimeout(() => process.exit(0), 100)
+    return { status: 'reloaded', newPort, newPid: newProxy.pid, drained: true }
+  }
+
+  // 7. Otherwise, drain will happen when last stream finishes (see streamEnd())
+  console.log(`[proxy] ${ts()} Draining ${activeStreams} active stream(s)...`)
+
+  // Safety timeout: force exit after 10 minutes even if streams are stuck
+  setTimeout(() => {
+    if (draining) {
+      console.log(`[proxy] ${ts()} Drain timeout — force exit (${activeStreams} streams still active)`)
+      process.exit(0)
+    }
+  }, 600_000)
+
+  return { status: 'draining', newPort, newPid: newProxy.pid, activeStreams }
+}
+
+// ============================================================
+// Startup — handle daemon mode, kill old instance, write PID
+// ============================================================
+
+// Kill old instance if running on same port (we take over)
+const oldPid = readPidFile()
+if (oldPid && oldPid !== process.pid) {
+  // Ask old instance to drain gracefully via the reload endpoint
+  // If that fails, we're starting fresh (old instance may have crashed)
+  try {
+    const r = await fetch(`http://localhost:${PORT}/admin/reload`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(2000),
+    })
+    if (r.ok) {
+      const result = await r.json() as Record<string, unknown>
+      console.log(`[opencode-proxy] Asked old instance (pid=${oldPid}) to drain:`, result.status)
+    }
+  } catch {
+    // Old instance not responding — kill it
+    try {
+      process.kill(oldPid, 'SIGTERM')
+      console.log(`[opencode-proxy] Killed stale instance (pid=${oldPid})`)
+      await Bun.sleep(500)
+    } catch { /* already dead */ }
+  }
+}
+
+writePidFile()
+process.on('exit', removePidFile)
+process.on('SIGTERM', () => {
+  console.log(`[proxy] ${ts()} SIGTERM received — shutting down`)
+  removePidFile()
+  process.exit(0)
+})

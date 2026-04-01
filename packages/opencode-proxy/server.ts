@@ -41,6 +41,45 @@ const credentialsPath = (() => {
   const idx = args.indexOf('--credentials')
   return idx >= 0 ? args[idx + 1] : undefined
 })()
+const VERBOSE = args.includes('--verbose') || process.env.PROXY_VERBOSE === '1'
+const LOG_DIR = process.env.PROXY_LOG_DIR ?? ''
+
+// ============================================================
+// Logging helpers
+// ============================================================
+
+function ts(): string {
+  return new Date().toISOString()
+}
+
+function logUsage(prefix: string, usage: { inputTokens: number; outputTokens: number; cacheCreationInputTokens?: number; cacheReadInputTokens?: number }) {
+  const parts = [
+    `in=${usage.inputTokens}`,
+    `out=${usage.outputTokens}`,
+  ]
+  if (usage.cacheReadInputTokens) {
+    parts.push(`cache_read=${usage.cacheReadInputTokens}`)
+    const hitRate = ((usage.cacheReadInputTokens / usage.inputTokens) * 100).toFixed(0)
+    parts.push(`hit=${hitRate}%`)
+  }
+  if (usage.cacheCreationInputTokens) {
+    parts.push(`cache_write=${usage.cacheCreationInputTokens}`)
+  }
+  console.log(`${prefix} ${parts.join(' ')}`)
+}
+
+/** Dump raw SSE event to log file for debugging */
+function dumpEvent(requestId: string, event: StreamEvent) {
+  if (!VERBOSE) return
+  const line = `[${ts()}] [${requestId}] ${JSON.stringify(event)}`
+  console.log(`[proxy:dump] ${event.type}${event.type === 'text_delta' ? ` (${(event as any).text?.length ?? 0} chars)` : ''}`)
+  if (LOG_DIR) {
+    try {
+      const file = `${LOG_DIR}/proxy-${requestId}.jsonl`
+      Bun.write(file, line + '\n', { append: true } as any)
+    } catch { /* best effort */ }
+  }
+}
 
 // ============================================================
 // SDK instance (shared, lazy auth)
@@ -125,6 +164,7 @@ const server = Bun.serve({
 console.log(`[opencode-proxy] Running on http://localhost:${PORT}`)
 console.log(`[opencode-proxy] Set LOCAL_ENDPOINT=http://localhost:${PORT}/v1 in opencode`)
 console.log(`[opencode-proxy] Credentials: ${credentialsPath ?? '~/.claude/.credentials.json'}`)
+console.log(`[opencode-proxy] Verbose: ${VERBOSE ? 'ON (--verbose)' : 'off'}${LOG_DIR ? ` Log dir: ${LOG_DIR}` : ''}`)
 
 // ============================================================
 // Non-streaming handler
@@ -132,10 +172,11 @@ console.log(`[opencode-proxy] Credentials: ${credentialsPath ?? '~/.claude/.cred
 
 async function handleNonStream(body: OAIChatRequest): Promise<Response> {
   const start = Date.now()
-  console.log(`[proxy] ${new Date().toISOString()} generate ${body.model} msgs=${body.messages.length}`)
+  const reqId = randomUUID().slice(0, 8)
+  console.log(`[proxy] ${ts()} [${reqId}] generate ${body.model} msgs=${body.messages.length}`)
   const opts = buildSDKOptions(body)
   const response = await sdk.generate(opts)
-  console.log(`[proxy] ${new Date().toISOString()} done ${Date.now() - start}ms in=${response.usage.inputTokens} out=${response.usage.outputTokens}`)
+  logUsage(`[proxy] ${ts()} [${reqId}] done ${Date.now() - start}ms`, response.usage)
 
   const content = response.content
     .filter(b => b.type === 'text')
@@ -175,6 +216,7 @@ async function handleNonStream(body: OAIChatRequest): Promise<Response> {
       total_tokens: response.usage.inputTokens + response.usage.outputTokens,
       prompt_tokens_details: {
         cached_tokens: response.usage.cacheReadInputTokens ?? 0,
+        cache_creation_tokens: response.usage.cacheCreationInputTokens ?? 0,
       },
     },
   })
@@ -187,9 +229,10 @@ async function handleNonStream(body: OAIChatRequest): Promise<Response> {
 function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
   const opts = buildSDKOptions(body)
   const completionId = `chatcmpl-${randomUUID()}`
+  const reqId = completionId.slice(-8)
   const startTime = Date.now()
 
-  console.log(`[proxy] ${new Date().toISOString()} stream ${body.model} msgs=${body.messages.length}`)
+  console.log(`[proxy] ${ts()} [${reqId}] stream ${body.model} msgs=${body.messages.length}`)
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -222,14 +265,14 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
           controller.enqueue(enc.encode('data: [DONE]\n\n'))
           controller.close()
         } catch { /* already closed by client disconnect */ }
-        console.log(`[proxy] ${new Date().toISOString()} done ${chunks} chunks ${Date.now() - startTime}ms`)
+        console.log(`[proxy] ${ts()} [${reqId}] done ${chunks} chunks ${Date.now() - startTime}ms`)
       }
 
       // Detect client disconnect via abort signal
       signal.addEventListener('abort', () => {
         if (!closed) {
           closed = true
-          console.log(`[proxy] ${new Date().toISOString()} client disconnected after ${chunks} chunks ${Date.now() - startTime}ms`)
+          console.log(`[proxy] ${ts()} [${reqId}] client disconnected after ${chunks} chunks ${Date.now() - startTime}ms`)
           try { controller.close() } catch { /* ok */ }
         }
       })
@@ -253,17 +296,17 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
           errorType = 'rate_limit_error'
           errorStatus = 429
           const retryAfter = err.rateLimitInfo?.retryAfter
-          console.error(`[proxy] ${new Date().toISOString()} rate limited${retryAfter ? ` (retry after ${retryAfter}s)` : ''}: ${msg}`)
+          console.error(`[proxy] ${ts()} [${reqId}] RATE LIMITED${retryAfter ? ` (retry after ${retryAfter}s)` : ''}: ${msg}`)
         } else if (err instanceof AuthError) {
           errorType = 'authentication_error'
           errorStatus = 401
-          console.error(`[proxy] ${new Date().toISOString()} auth error: ${msg}`)
+          console.error(`[proxy] ${ts()} [${reqId}] AUTH ERROR: ${msg}`)
         } else if (err instanceof APIError) {
           errorType = 'api_error'
           errorStatus = err.status
-          console.error(`[proxy] ${new Date().toISOString()} API error ${err.status}: ${msg}`)
+          console.error(`[proxy] ${ts()} [${reqId}] API ERROR ${err.status}: ${msg}`)
         } else {
-          console.error(`[proxy] ${new Date().toISOString()} error: ${msg}`)
+          console.error(`[proxy] ${ts()} [${reqId}] ERROR: ${msg}`)
         }
 
         // Send error as an SSE event that OpenAI-compatible clients understand
@@ -294,6 +337,7 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
       finish()
 
       async function dispatchEvent(event: StreamEvent) {
+        dumpEvent(reqId, event)
         switch (event.type) {
           case 'text_delta': {
             emit({
@@ -384,6 +428,9 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
           }
 
           case 'message_stop': {
+            // Log usage with cache breakdown
+            logUsage(`[proxy] ${ts()} [${reqId}] usage`, event.usage)
+
             emit({
               id: completionId,
               object: 'chat.completion.chunk',
@@ -400,6 +447,7 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
                 total_tokens: event.usage.inputTokens + event.usage.outputTokens,
                 prompt_tokens_details: {
                   cached_tokens: event.usage.cacheReadInputTokens ?? 0,
+                  cache_creation_tokens: event.usage.cacheCreationInputTokens ?? 0,
                 },
               },
             })
@@ -407,7 +455,7 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
           }
 
           case 'error': {
-            console.error('[proxy] SDK stream error:', event.error.message)
+            console.error(`[proxy] ${ts()} [${reqId}] SDK stream error:`, event.error.message)
             // Send error as visible content so client displays it
             emit({
               id: completionId,

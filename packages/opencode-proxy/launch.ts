@@ -48,49 +48,72 @@ const serverPath = join(thisDir, 'server.ts')
 // Bun binary — use absolute path since spawn may not inherit PATH
 const BUN = process.execPath  // path to the currently running bun
 
-// ─── Start proxy ───────────────────────────────────────────
+// ─── Check for existing proxy ──────────────────────────────
 
-console.log(`\n🔌 Starting opencode-proxy on port ${port}...`)
+let proxyUrl = `http://localhost:${port}`
+let existingProxy = false
+let proxy: ReturnType<typeof spawn> | null = null
 
-const proxy = spawn({
-  cmd: [BUN, 'run', serverPath],
-  env: {
-    ...process.env,
-    PROXY_PORT: String(port),
-  },
-  stdout: 'pipe',
-  stderr: 'pipe',
-})
-
-// Forward proxy logs with prefix
-;(async () => {
-  const reader = proxy.stdout.getReader()
-  const dec = new TextDecoder()
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    process.stdout.write(`\x1b[2m[proxy] ${dec.decode(value)}\x1b[0m`)
+// Check if a proxy is already running on the target port
+try {
+  const r = await fetch(`${proxyUrl}/health`, { signal: AbortSignal.timeout(1000) })
+  if (r.ok) {
+    const health = await r.json() as { status: string }
+    if (health.status === 'ok') {
+      existingProxy = true
+      console.log(`\n✅ Existing proxy found at ${proxyUrl}/v1 — reusing it`)
+    }
   }
-})()
-
-// ─── Wait for proxy ready ──────────────────────────────────
-
-const proxyUrl = `http://localhost:${port}`
-const ready = await waitForProxy(proxyUrl)
-
-if (!ready) {
-  console.error('❌ Proxy failed to start. Check bun is installed.')
-  proxy.kill()
-  process.exit(1)
+} catch {
+  // No existing proxy, start a new one
 }
 
-console.log(`✅ Proxy ready at ${proxyUrl}/v1`)
+if (!existingProxy) {
+  // ─── Start proxy ───────────────────────────────────────────
+
+  console.log(`\n🔌 Starting opencode-proxy on port ${port}...`)
+
+  proxy = spawn({
+    cmd: [BUN, 'run', serverPath],
+    env: {
+      ...process.env,
+      PROXY_PORT: String(port),
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+
+  // Forward proxy logs with prefix
+  ;(async () => {
+    const reader = proxy!.stdout.getReader()
+    const dec = new TextDecoder()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      process.stdout.write(`\x1b[2m[proxy] ${dec.decode(value)}\x1b[0m`)
+    }
+  })()
+
+  // ─── Wait for proxy ready ──────────────────────────────────
+
+  const ready = await waitForProxy(proxyUrl)
+
+  if (!ready) {
+    console.error('❌ Proxy failed to start. Check bun is installed.')
+    proxy.kill()
+    process.exit(1)
+  }
+
+  console.log(`✅ Proxy ready at ${proxyUrl}/v1`)
+}
+
 console.log(`📋 Models: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001\n`)
 
 // ─── Setup cleanup ─────────────────────────────────────────
 
 function cleanup(exitCode = 0) {
-  if (!proxy.killed) {
+  // Only kill proxy if WE started it (not reusing existing)
+  if (proxy && !proxy.killed) {
     process.stdout.write('\n🛑 Stopping proxy...\n')
     proxy.kill('SIGTERM')
   }
@@ -99,7 +122,7 @@ function cleanup(exitCode = 0) {
 
 process.on('SIGINT', () => cleanup(0))
 process.on('SIGTERM', () => cleanup(0))
-process.on('exit', () => { if (!proxy.killed) proxy.kill() })
+process.on('exit', () => { if (proxy && !proxy.killed) proxy.kill() })
 
 // ─── Launch opencode ───────────────────────────────────────
 
@@ -107,7 +130,7 @@ if (!opencodeCmd) {
   console.log(`⚠️  opencode not found in PATH.`)
   console.log(`   Set LOCAL_ENDPOINT=${proxyUrl}/v1 and run opencode manually.`)
   console.log(`   Proxy is running. Press Ctrl+C to stop.\n`)
-  await proxy.exited
+  if (proxy) await proxy.exited
   cleanup(0)
 } else {
   console.log(`🚀 Launching: ${opencodeCmd} ${opencodeArgs.join(' ')}\n`)
@@ -158,13 +181,13 @@ async function findFreePort(preferred: number): Promise<number> {
 
 async function resolveOpencode(): Promise<string | null> {
   // Check common locations
+  const home = process.env.HOME ?? '/home'
   const candidates = [
     'opencode',                                          // PATH
     '/usr/local/bin/opencode',
-    '/home/relishev/.local/bin/opencode',
-    '/home/relishev/.npm-global/bin/opencode',
-    // Dev: build from source
-    join(dirname(import.meta.url.replace('file://', '')), '../../..', 'kiberos-code', 'opencode'),
+    join(home, '.local/bin/opencode'),
+    join(home, '.npm-global/bin/opencode'),
+    join(home, 'go/bin/opencode'),
   ]
 
   for (const cmd of candidates) {

@@ -16,8 +16,9 @@
  */
 
 import { spawn } from 'bun'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
+import { tmpdir } from 'os'
 
 // ─── Parse args ────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ if (!existingProxy) {
 
   // Forward proxy logs with prefix
   ;(async () => {
-    const reader = proxy!.stdout.getReader()
+    const reader = (proxy!.stdout as ReadableStream<Uint8Array>).getReader()
     const dec = new TextDecoder()
     while (true) {
       const { done, value } = await reader.read()
@@ -109,20 +110,67 @@ if (!existingProxy) {
 
 console.log(`📋 Models: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001\n`)
 
+// ─── Client ref-counting ───────────────────────────────────
+// Track how many launcher instances are using this proxy port.
+// Only the last one to exit kills the proxy.
+
+const clientsFile = join(tmpdir(), `opencode-proxy-${port}.clients`)
+
+function readClients(): number[] {
+  try {
+    return JSON.parse(readFileSync(clientsFile, 'utf8')).filter((pid: number) => {
+      // Remove stale PIDs (process no longer running)
+      try { process.kill(pid, 0); return true } catch { return false }
+    })
+  } catch { return [] }
+}
+
+function registerClient(): void {
+  const clients = readClients()
+  if (!clients.includes(process.pid)) clients.push(process.pid)
+  writeFileSync(clientsFile, JSON.stringify(clients))
+}
+
+function unregisterClient(): number {
+  const clients = readClients().filter(pid => pid !== process.pid)
+  if (clients.length > 0) {
+    writeFileSync(clientsFile, JSON.stringify(clients))
+  } else {
+    try { unlinkSync(clientsFile) } catch { /* ok */ }
+  }
+  return clients.length
+}
+
+registerClient()
+
 // ─── Setup cleanup ─────────────────────────────────────────
 
+let cleanedUp = false
 function cleanup(exitCode = 0) {
-  // Only kill proxy if WE started it (not reusing existing)
+  if (cleanedUp) return
+  cleanedUp = true
+
+  const remaining = unregisterClient()
+
   if (proxy && !proxy.killed) {
-    process.stdout.write('\n🛑 Stopping proxy...\n')
-    proxy.kill('SIGTERM')
+    if (remaining === 0) {
+      process.stdout.write('\n🛑 Last client — stopping proxy...\n')
+      proxy.kill('SIGTERM')
+    } else {
+      process.stdout.write(`\n✅ Proxy stays running (${remaining} other client${remaining > 1 ? 's' : ''} connected)\n`)
+    }
   }
   process.exit(exitCode)
 }
 
 process.on('SIGINT', () => cleanup(0))
 process.on('SIGTERM', () => cleanup(0))
-process.on('exit', () => { if (proxy && !proxy.killed) proxy.kill() })
+process.on('exit', () => {
+  if (!cleanedUp) {
+    const remaining = unregisterClient()
+    if (proxy && !proxy.killed && remaining === 0) proxy.kill()
+  }
+})
 
 // ─── Launch opencode ───────────────────────────────────────
 

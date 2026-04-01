@@ -17,7 +17,7 @@
  *   GET  /health                 — health check
  */
 
-import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
+import { ClaudeCodeSDK, RateLimitError, AuthError, APIError } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 import {
   toSDKMessages,
@@ -98,6 +98,21 @@ const server = Bun.serve({
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
+        if (err instanceof RateLimitError) {
+          const retryAfter = err.rateLimitInfo?.retryAfter
+          console.error(`[proxy] Rate limited${retryAfter ? ` (retry after ${retryAfter}s)` : ''}`)
+          const headers: Record<string, string> = {}
+          if (retryAfter) headers['retry-after'] = String(Math.ceil(retryAfter))
+          return errorResponse(429, 'rate_limit_error', msg, headers)
+        }
+        if (err instanceof AuthError) {
+          console.error('[proxy] Auth error:', msg)
+          return errorResponse(401, 'authentication_error', msg)
+        }
+        if (err instanceof APIError) {
+          console.error(`[proxy] API error ${err.status}:`, msg)
+          return errorResponse(err.status, 'api_error', msg)
+        }
         console.error('[proxy] Error:', msg)
         return errorResponse(500, 'internal_error', msg)
       }
@@ -230,13 +245,49 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[proxy] ${new Date().toISOString()} error: ${msg}`)
+
+        // Determine error type and status for OpenAI-compatible error response
+        let errorType = 'internal_error'
+        let errorStatus = 500
+        if (err instanceof RateLimitError) {
+          errorType = 'rate_limit_error'
+          errorStatus = 429
+          const retryAfter = err.rateLimitInfo?.retryAfter
+          console.error(`[proxy] ${new Date().toISOString()} rate limited${retryAfter ? ` (retry after ${retryAfter}s)` : ''}: ${msg}`)
+        } else if (err instanceof AuthError) {
+          errorType = 'authentication_error'
+          errorStatus = 401
+          console.error(`[proxy] ${new Date().toISOString()} auth error: ${msg}`)
+        } else if (err instanceof APIError) {
+          errorType = 'api_error'
+          errorStatus = err.status
+          console.error(`[proxy] ${new Date().toISOString()} API error ${err.status}: ${msg}`)
+        } else {
+          console.error(`[proxy] ${new Date().toISOString()} error: ${msg}`)
+        }
+
+        // Send error as an SSE event that OpenAI-compatible clients understand
+        // First send an error data chunk so the client can display it
+        emit({
+          id: completionId,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: body.model,
+          choices: [{
+            index: 0,
+            delta: { role: 'assistant', content: `\n\n[${errorType.toUpperCase()}] ${msg}` },
+            finish_reason: null,
+          }],
+        })
+
+        // Then send the finish with error reason
         emit({
           id: completionId,
           object: 'chat.completion.chunk',
           created: Math.floor(Date.now() / 1000),
           model: body.model,
           choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          error: { type: errorType, message: msg, status: errorStatus },
         })
       }
 
@@ -357,6 +408,18 @@ function handleStream(body: OAIChatRequest, signal: AbortSignal): Response {
 
           case 'error': {
             console.error('[proxy] SDK stream error:', event.error.message)
+            // Send error as visible content so client displays it
+            emit({
+              id: completionId,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model: body.model,
+              choices: [{
+                index: 0,
+                delta: { role: 'assistant', content: `\n\n[ERROR] ${event.error.message}` },
+                finish_reason: null,
+              }],
+            })
             break
           }
         }
@@ -419,15 +482,15 @@ function mapFinishReason(stopReason: string | null): string {
   }
 }
 
-function json(data: unknown, status = 200): Response {
+function json(data: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders(), 'Content-Type': 'application/json', ...extraHeaders },
   })
 }
 
-function errorResponse(status: number, type: string, message: string): Response {
-  return json({ error: { type, message } }, status)
+function errorResponse(status: number, type: string, message: string, extraHeaders?: Record<string, string>): Response {
+  return json({ error: { type, message } }, status, extraHeaders)
 }
 
 function corsHeaders(): Record<string, string> {

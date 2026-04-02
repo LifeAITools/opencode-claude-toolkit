@@ -203,12 +203,7 @@ export default {
     const creds = new CredentialManager(cwd)
     const deviceId = randomBytes(64).toString('hex')
 
-    console.log(`[claude-max] Credentials: ${creds.credPath}`)
-    if (creds.hasCredentials) {
-      console.log(`[claude-max] Logged in — tokens loaded from disk`)
-    } else {
-      console.log(`[claude-max] Not logged in — run: opencode providers login -p claude-max`)
-    }
+    console.log(`[claude-max] v0.2.0 (native @ai-sdk/anthropic) | creds: ${creds.credPath} | logged_in: ${creds.hasCredentials}`)
 
     return {
       // ─── Config: register Claude Max as a provider ───────

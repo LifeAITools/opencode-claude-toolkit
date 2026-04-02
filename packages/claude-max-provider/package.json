@@ -1,0 +1,14 @@
+{
+  "name": "@life-ai-tools/claude-max-provider",
+  "version": "0.1.0",
+  "description": "Vercel AI SDK provider for Claude Max/Pro — powered by claude-code-sdk OAuth",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@life-ai-tools/claude-code-sdk": "^0.1.2"
+  },
+  "license": "MIT"
+}

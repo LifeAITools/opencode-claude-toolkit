@@ -63,7 +63,10 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
       const content: any[] = []
       for (const p of parts) {
         if (p.type === 'text' && p.text) content.push({ type: 'text', text: p.text })
-        if (p.type === 'reasoning' && p.text) content.push({ type: 'thinking', thinking: p.text })
+        if (p.type === 'reasoning' && p.text) {
+          const sig = p.providerMetadata?.['claude-max']?.signature ?? p.providerOptions?.['claude-max']?.signature
+          content.push({ type: 'thinking', thinking: p.text, ...(sig ? { signature: sig } : {}) })
+        }
         if (p.type === 'tool-call') {
           content.push({
             type: 'tool_use',
@@ -213,7 +216,10 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
         if (block.type === 'text') {
           content.push({ type: 'text', text: block.text })
         } else if (block.type === 'thinking') {
-          content.push({ type: 'reasoning', text: (block as any).thinking })
+          content.push({
+            type: 'reasoning', text: (block as any).thinking,
+            providerMetadata: (block as any).signature ? { 'claude-max': { signature: (block as any).signature } } : undefined,
+          })
         } else if (block.type === 'tool_use') {
           content.push({
             type: 'tool-call',
@@ -271,6 +277,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       let textActive = false
       let reasoningActive = false
       let currentToolInput = ''
+      let currentSignature: string | undefined
 
       const stream = new ReadableStream({
         async start(controller) {
@@ -298,6 +305,15 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                     reasoningActive = true
                   }
                   controller.enqueue({ type: 'reasoning-delta', id: reasoningId, delta: event.text })
+                  break
+                }
+
+                case 'thinking_end': {
+                  currentSignature = event.signature
+                  if (reasoningActive) {
+                    controller.enqueue({ type: 'reasoning-end', id: reasoningId, providerMetadata: currentSignature ? { 'claude-max': { signature: currentSignature } } : undefined })
+                    reasoningActive = false
+                  }
                   break
                 }
 

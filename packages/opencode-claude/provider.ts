@@ -64,8 +64,12 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
       for (const p of parts) {
         if (p.type === 'text' && p.text) content.push({ type: 'text', text: p.text })
         if (p.type === 'reasoning' && p.text) {
+          // Only include thinking blocks if we have the signature (required by API)
           const sig = p.providerMetadata?.['claude-max']?.signature ?? p.providerOptions?.['claude-max']?.signature
-          content.push({ type: 'thinking', thinking: p.text, ...(sig ? { signature: sig } : {}) })
+          if (sig) {
+            content.push({ type: 'thinking', thinking: p.text, signature: sig })
+          }
+          // Without signature: skip thinking block — API rejects it
         }
         if (p.type === 'tool-call') {
           content.push({

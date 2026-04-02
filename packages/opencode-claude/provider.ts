@@ -13,6 +13,9 @@
 import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 
+const DEBUG = process.env.CLAUDE_MAX_DEBUG === '1'
+function dbg(...args: any[]) { if (DEBUG) console.error('[claude-max:provider]', ...args) }
+
 // ─── Types (subset of @ai-sdk/provider v3) ────────────────
 // We inline these to avoid a dependency on @ai-sdk/provider
 
@@ -175,6 +178,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
     supportedUrls: {},
 
     async doGenerate(options: any) {
+      dbg('doGenerate', { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length })
       const { system, messages } = convertPrompt(options.prompt)
       const tools = convertTools(options.tools)
       const toolChoice = convertToolChoice(options.toolChoice)
@@ -224,6 +228,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
     },
 
     async doStream(options: any) {
+      dbg('doStream', { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length })
       const { system, messages } = convertPrompt(options.prompt)
       const tools = convertTools(options.tools)
       const toolChoice = convertToolChoice(options.toolChoice)
@@ -358,6 +363,7 @@ export interface ClaudeMaxProviderOptions {
 }
 
 export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
+  dbg('createClaudeMax called with:', { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, allKeys: Object.keys(options) })
   const sdk = new ClaudeCodeSDK({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
@@ -367,6 +373,7 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
 
   return {
     languageModel(modelId: string): LanguageModelV3 {
+      dbg('languageModel requested:', modelId)
       return createLanguageModel(sdk, modelId, 'claude-max')
     },
   }

@@ -194,11 +194,17 @@ class CredentialManager {
 // Each opencode instance calls server() independently.
 // The closure + CredentialManager give complete isolation.
 
+const DEBUG = process.env.CLAUDE_MAX_DEBUG === '1'
+function dbg(...args: any[]) { if (DEBUG) console.error('[claude-max:dbg]', ...args) }
+
 export default {
   id: 'opencode-claude-max',
   server: async (input: any) => {
     const cwd = input.directory ?? process.cwd()
     const creds = new CredentialManager(cwd)
+    const providerPath = `file://${import.meta.dir}`
+
+    dbg('plugin init', { cwd, credPath: creds.credPath, hasCredentials: creds.hasCredentials, providerPath })
 
     if (!creds.hasCredentials) {
       console.error(`[claude-max] Not logged in — run: opencode providers login -p claude-max`)
@@ -209,11 +215,13 @@ export default {
       config: async (config: any) => {
         if (!config.provider) config.provider = {}
 
+        dbg('config hook called')
+
         config.provider['claude-max'] = {
           id: 'claude-max',
           name: 'Claude Max/Pro',
           api: 'https://api.anthropic.com',
-          npm: `file://${import.meta.dir}`,
+          npm: providerPath,
           env: [],
           models: {},
         }
@@ -222,7 +230,7 @@ export default {
           config.provider['claude-max'].models[id] = {
             id,
             name: `${info.name} (Max)`,
-            api: { id, url: 'https://api.anthropic.com', npm: `file://${import.meta.dir}` },
+            api: { id, url: 'https://api.anthropic.com', npm: providerPath },
             providerID: 'claude-max',
             capabilities: {
               temperature: true,
@@ -246,13 +254,18 @@ export default {
         // Called at startup — return SDK options with per-request fetch
         // Mirrors src/services/api/client.ts:88-315 (getAnthropicClient)
         loader: async (_getAuth: () => Promise<any>, provider: any) => {
+          dbg('auth.loader called', { providerModels: Object.keys(provider.models ?? {}) })
           for (const m of Object.values(provider.models ?? {}) as any[]) {
             if (m.cost) m.cost = { input: 0, output: 0, cache: { read: 0, write: 0 } }
           }
 
-          // Pass credentials to our claude-max-provider via options
-          // The provider factory (createClaudeMax) reads these
-          await creds.ensureValid()
+          try {
+            await creds.ensureValid()
+            dbg('auth.loader: credentials valid, token length:', creds.token?.length)
+          } catch (err) {
+            dbg('auth.loader: ensureValid FAILED:', err)
+            throw err
+          }
           return {
             accessToken: creds.token,
             credentialsPath: creds.credPath,

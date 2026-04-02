@@ -227,14 +227,16 @@ export default {
         }
 
         for (const [id, info] of Object.entries(MAX_MODELS)) {
+          const is46 = id.includes('opus-4-6') || id.includes('sonnet-4-6')
           config.provider['claude-max'].models[id] = {
             id,
             name: `${info.name} (Max)`,
             api: { id, url: 'https://api.anthropic.com', npm: providerPath },
             providerID: 'claude-max',
+            reasoning: is46,
             capabilities: {
               temperature: true,
-              reasoning: true,
+              reasoning: is46,
               attachment: true,
               toolcall: true,
             },
@@ -243,6 +245,14 @@ export default {
             status: 'active',
             options: {},
             headers: {},
+            // Effort variants — opencode uses these for the reasoning effort selector
+            ...(is46 ? {
+              variants: {
+                low:  { thinking: { type: 'enabled', budgetTokens: 5000 } },
+                medium: { thinking: { type: 'enabled', budgetTokens: 16000 } },
+                high: { thinking: { type: 'enabled', budgetTokens: 32000 } },
+              },
+            } : {}),
           }
         }
       },

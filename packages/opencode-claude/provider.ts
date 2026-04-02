@@ -195,9 +195,15 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       if (options.temperature !== undefined) sdkOpts.temperature = options.temperature
       if (options.stopSequences?.length) sdkOpts.stopSequences = options.stopSequences
 
-      // Thinking for 4.6 models
-      const is46 = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
-      if (is46) sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
+      // Thinking config from providerOptions (effort variant) or default
+      const po = options.providerOptions?.['claude-max'] ?? options.providerOptions ?? {}
+      const thinking = po.thinking ?? po
+      if (thinking?.type === 'enabled' && thinking?.budgetTokens) {
+        sdkOpts.thinking = { type: 'enabled', budgetTokens: thinking.budgetTokens }
+      } else {
+        const is46 = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
+        if (is46) sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
+      }
 
       const response = await sdk.generate(sdkOpts)
 
@@ -245,8 +251,16 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       if (options.temperature !== undefined) sdkOpts.temperature = options.temperature
       if (options.stopSequences?.length) sdkOpts.stopSequences = options.stopSequences
 
-      const is46 = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
-      if (is46) sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
+      // Thinking config from providerOptions (effort variant) or default
+      const po = options.providerOptions?.['claude-max'] ?? options.providerOptions ?? {}
+      const thinking = po.thinking ?? po
+      if (thinking?.type === 'enabled' && thinking?.budgetTokens) {
+        sdkOpts.thinking = { type: 'enabled', budgetTokens: thinking.budgetTokens }
+        dbg('doStream thinking from variant:', sdkOpts.thinking)
+      } else {
+        const is46 = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
+        if (is46) sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
+      }
 
       const sdkStream = sdk.stream(sdkOpts)
 

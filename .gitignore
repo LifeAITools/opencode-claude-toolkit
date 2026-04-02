@@ -1,1 +1,2 @@
 node_modules/\n*.bak\n*.log\n.env\nsrc/\nscripts/\nPRPs/
+packages/opencode-claude/.claude/

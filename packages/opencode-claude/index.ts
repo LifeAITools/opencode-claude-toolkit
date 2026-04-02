@@ -213,7 +213,7 @@ export default {
           id: 'claude-max',
           name: 'Claude Max/Pro',
           api: 'https://api.anthropic.com',
-          npm: `file://${join(import.meta.dir, '..', 'claude-max-provider')}`,
+          npm: '@life-ai-tools/opencode-claude',
           env: [],
           models: {},
         }

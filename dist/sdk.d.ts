@@ -13,6 +13,12 @@ export declare class ClaudeCodeSDK {
     private lastRateLimitInfo;
     private pending401;
     private lastFailedToken;
+    private keepaliveConfig;
+    private keepaliveSnapshot;
+    private keepaliveLastActivityAt;
+    private keepaliveTimer;
+    private keepaliveAbortController;
+    private keepaliveInFlight;
     constructor(options?: ClaudeCodeSDKOptions);
     /** Non-streaming: send messages, get full response */
     generate(options: GenerateOptions): Promise<GenerateResponse>;
@@ -21,6 +27,10 @@ export declare class ClaudeCodeSDK {
     getRateLimitInfo(): RateLimitInfo;
     private doStreamRequest;
     private parseSSE;
+    private onStreamComplete;
+    private startKeepaliveTimer;
+    private keepaliveTick;
+    stopKeepalive(): void;
     /** HTTP headers — mimics getAnthropicClient() + getAuthHeaders() */
     private buildHeaders;
     /** Request body — mirrors paramsFromContext() in claude.ts:1699 */

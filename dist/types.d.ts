@@ -49,6 +49,21 @@ export interface ClaudeCodeSDKOptions {
     timeout?: number;
     /** Max retries for 5xx/529. Default: 3. Note: 429 is NEVER retried for subscribers. */
     maxRetries?: number;
+    /** Cache keepalive configuration. Keeps Claude's prompt cache warm between requests. */
+    keepalive?: KeepaliveConfig;
+}
+export interface KeepaliveConfig {
+    enabled?: boolean;
+    intervalMs?: number;
+    idleTimeoutMs?: number;
+    minTokens?: number;
+    onHeartbeat?: (stats: KeepaliveStats) => void;
+}
+export interface KeepaliveStats {
+    usage: TokenUsage;
+    durationMs: number;
+    idleMs: number;
+    model: string;
 }
 /** What we read from ~/.claude/.credentials.json */
 export interface CredentialsFile {

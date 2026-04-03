@@ -34,6 +34,24 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
   let system: string | undefined
   const messages: any[] = []
 
+  // Debug: dump what opencode sends us
+  for (const msg of prompt) {
+    if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+      for (const p of msg.content) {
+        if (p.type === 'reasoning') {
+          dbg('PROMPT reasoning part:', {
+            textLen: p.text?.length,
+            hasProviderMetadata: !!p.providerMetadata,
+            providerMetadataKeys: p.providerMetadata ? Object.keys(p.providerMetadata) : [],
+            hasProviderOptions: !!p.providerOptions,
+            providerOptionsKeys: p.providerOptions ? Object.keys(p.providerOptions) : [],
+            fullPart: JSON.stringify(p).slice(0, 500),
+          })
+        }
+      }
+    }
+  }
+
   for (const msg of prompt) {
     if (msg.role === 'system') {
       system = typeof msg.content === 'string' ? msg.content : msg.content

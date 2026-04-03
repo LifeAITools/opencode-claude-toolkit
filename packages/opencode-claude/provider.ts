@@ -451,9 +451,12 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       enabled: process.env.CLAUDE_MAX_KEEPALIVE !== '0',
       intervalMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '180') || 180) * 1000,
       idleTimeoutMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '1800') || 1800) * 1000,
+      onTick: (tick) => {
+        dbg(`keepalive tick: idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
+      },
       onHeartbeat: (stats) => {
         logStats(`[${new Date().toISOString()}] model=${stats.model} type=keepalive dur=${stats.durationMs}ms | in=${stats.usage.inputTokens} out=${stats.usage.outputTokens} cacheRead=${stats.usage.cacheReadInputTokens ?? 0} cacheWrite=${stats.usage.cacheCreationInputTokens ?? 0} | idle=${Math.round(stats.idleMs / 1000)}s`)
-        dbg('keepalive heartbeat', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0 })
+        dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0 })
       },
     },
   })

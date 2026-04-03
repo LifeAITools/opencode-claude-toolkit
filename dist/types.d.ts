@@ -58,6 +58,13 @@ export interface KeepaliveConfig {
     idleTimeoutMs?: number;
     minTokens?: number;
     onHeartbeat?: (stats: KeepaliveStats) => void;
+    onTick?: (tick: KeepaliveTick) => void;
+}
+export interface KeepaliveTick {
+    idleMs: number;
+    nextFireMs: number;
+    model: string;
+    tokens: number;
 }
 export interface KeepaliveStats {
     usage: TokenUsage;

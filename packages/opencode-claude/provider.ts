@@ -19,6 +19,12 @@ import { homedir } from 'os'
 
 const DEBUG = process.env.CLAUDE_MAX_DEBUG === '1'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
+const STATS_FILE = join(homedir(), '.claude', 'claude-max-stats.log')
+
+function logStats(line: string) {
+  try { appendFileSync(STATS_FILE, line + '\n') } catch {}
+}
+
 function dbg(...args: any[]) {
   if (!DEBUG) return
   try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
@@ -260,6 +266,9 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
         }
       }
 
+      const u = response.usage
+      logStats(`[${new Date().toISOString()}] model=${modelId} type=generate | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${response.stopReason}`)
+
       return {
         content,
         finishReason: convertFinishReason(response.stopReason),
@@ -393,7 +402,10 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                 }
 
                 case 'message_stop': {
-                  dbg(`doStream complete in ${Date.now() - t0}ms`, { modelId, stopReason: event.stopReason })
+                  const dur = Date.now() - t0
+                  const u = event.usage
+                  logStats(`[${new Date().toISOString()}] model=${modelId} type=stream dur=${dur}ms | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${event.stopReason}`)
+                  dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }
 

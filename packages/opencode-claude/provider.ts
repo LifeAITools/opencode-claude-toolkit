@@ -21,8 +21,9 @@ const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
 const STATS_FILE = join(homedir(), '.claude', 'claude-max-stats.log')
 
+const PID = process.pid
 function logStats(line: string) {
-  try { appendFileSync(STATS_FILE, line + '\n') } catch {}
+  try { appendFileSync(STATS_FILE, `${line} pid=${PID}\n`) } catch {}
 }
 
 function dbg(...args: any[]) {

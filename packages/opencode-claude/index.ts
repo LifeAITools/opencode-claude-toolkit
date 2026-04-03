@@ -207,7 +207,9 @@ export default {
   id: 'opencode-claude-max',
   server: async (input: any) => {
     const cwd = input.directory ?? process.cwd()
+    const sessionId = process.env.OPENCODE_SESSION_ID ?? process.env.OPENCODE_SESSION_SLUG ?? input.sessionID ?? 'unknown'
     const creds = new CredentialManager(cwd)
+    dbg(`plugin init pid=${process.pid} session=${sessionId}`, { cwd, inputKeys: Object.keys(input) })
     const providerPath = `file://${import.meta.dir}`
 
     dbg('plugin init', { cwd, credPath: creds.credPath, hasCredentials: creds.hasCredentials, providerPath })

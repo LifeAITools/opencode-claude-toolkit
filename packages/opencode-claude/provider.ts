@@ -187,12 +187,18 @@ function convertToolChoice(tc?: any): any {
 // ─── Usage conversion: SDK → V3 ──────────────────────────
 
 function convertUsage(usage: any) {
+  // Total input = base + cacheRead + cacheWrite (full prompt size)
+  const baseIn = usage?.inputTokens ?? 0
+  const cacheRead = usage?.cacheReadInputTokens ?? 0
+  const cacheWrite = usage?.cacheCreationInputTokens ?? 0
+  const totalIn = baseIn + cacheRead + cacheWrite
+
   return {
     inputTokens: {
-      total: usage?.inputTokens ?? 0,
-      noCache: undefined,
-      cacheRead: usage?.cacheReadInputTokens ?? undefined,
-      cacheWrite: usage?.cacheCreationInputTokens ?? undefined,
+      total: totalIn,
+      noCache: baseIn,
+      cacheRead: cacheRead || undefined,
+      cacheWrite: cacheWrite || undefined,
     },
     outputTokens: {
       total: usage?.outputTokens ?? 0,
@@ -286,6 +292,16 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
         content,
         finishReason: convertFinishReason(response.stopReason),
         usage: convertUsage(response.usage),
+        providerMetadata: {
+          'claude-max': {
+            cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0,
+            cacheReadInputTokens: u?.cacheReadInputTokens ?? 0,
+          },
+          anthropic: {
+            cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0,
+            cacheReadInputTokens: u?.cacheReadInputTokens ?? 0,
+          },
+        },
         warnings: [],
         response: { id: undefined, timestamp: new Date(), modelId },
       }
@@ -428,10 +444,22 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }
 
+                  const eu = event.usage
                   controller.enqueue({
                     type: 'finish',
-                    usage: convertUsage(event.usage),
+                    usage: convertUsage(eu),
                     finishReason: convertFinishReason(event.stopReason ?? null),
+                    providerMetadata: {
+                      'claude-max': {
+                        cacheCreationInputTokens: eu?.cacheCreationInputTokens ?? 0,
+                        cacheReadInputTokens: eu?.cacheReadInputTokens ?? 0,
+                      },
+                      // Also under 'anthropic' key for opencode compatibility
+                      anthropic: {
+                        cacheCreationInputTokens: eu?.cacheCreationInputTokens ?? 0,
+                        cacheReadInputTokens: eu?.cacheReadInputTokens ?? 0,
+                      },
+                    },
                   })
                   break
                 }

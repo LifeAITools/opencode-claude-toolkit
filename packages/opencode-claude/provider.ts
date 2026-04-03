@@ -269,7 +269,9 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       }
 
       const u = response.usage
-      logStats(`[${new Date().toISOString()}] model=${modelId} type=generate | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${response.stopReason}`)
+      const rl = sdk.getRateLimitInfo()
+      const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'}` : ''
+      logStats(`[${new Date().toISOString()}] model=${modelId} type=generate | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${response.stopReason}${rlStr}`)
 
       return {
         content,
@@ -406,7 +408,9 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                 case 'message_stop': {
                   const dur = Date.now() - t0
                   const u = event.usage
-                  logStats(`[${new Date().toISOString()}] model=${modelId} type=stream dur=${dur}ms | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${event.stopReason}`)
+                  const rl = sdk.getRateLimitInfo()
+                  const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'}` : ''
+                  logStats(`[${new Date().toISOString()}] model=${modelId} type=stream dur=${dur}ms | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${event.stopReason}${rlStr}`)
                   dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }

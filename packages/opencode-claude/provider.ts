@@ -408,7 +408,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   // Capture snapshot for keepalive
                   const totalInput = (u?.inputTokens ?? 0) + (u?.cacheReadInputTokens ?? 0) + (u?.cacheCreationInputTokens ?? 0)
                   if (keepalive && totalInput > 0) {
-                    keepalive.capture(modelId, system, messages, tools, totalInput)
+                    keepalive.capture(modelId, system, messages, tools, sdkOpts.thinking, totalInput)
                   }
                   dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
@@ -457,6 +457,7 @@ interface CacheSnapshot {
   system?: string
   messages: any[]
   tools?: any[]
+  thinking?: any
   inputTokens: number
   lastActivityAt: number
 }
@@ -468,8 +469,8 @@ class CacheKeepalive {
 
   constructor(sdk: ClaudeCodeSDK) { this.sdk = sdk }
 
-  capture(model: string, system: string | undefined, messages: any[], tools: any[] | undefined, inputTokens: number) {
-    this.snapshot = { model, system, messages, tools, inputTokens, lastActivityAt: Date.now() }
+  capture(model: string, system: string | undefined, messages: any[], tools: any[] | undefined, thinking: any, inputTokens: number) {
+    this.snapshot = { model, system, messages, tools, thinking, inputTokens, lastActivityAt: Date.now() }
     this.ensureTimer()
   }
 
@@ -515,11 +516,11 @@ class CacheKeepalive {
       const opts: any = {
         model: this.snapshot.model,
         messages: this.snapshot.messages,
-        maxTokens: 1,
-        thinking: { type: 'disabled' },
+        maxTokens: this.snapshot.thinking ? 4096 : 1, // thinking requires max_tokens > budget
       }
       if (this.snapshot.system) opts.system = this.snapshot.system
       if (this.snapshot.tools?.length) opts.tools = this.snapshot.tools
+      if (this.snapshot.thinking) opts.thinking = this.snapshot.thinking
 
       let usage: any
       for await (const event of this.sdk.stream(opts)) {

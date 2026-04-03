@@ -5,5 +5,6 @@ export type { ClaudeCodeSDKOptions, GenerateOptions, GenerateResponse, StreamEve
 export { ClaudeCodeSDKError, AuthError, APIError, RateLimitError, } from './types.js';
 export type { SessionEntry } from './session.js';
 export { oauthLogin } from './auth.js';
+export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js';
 export type { OAuthLoginOptions, OAuthResult } from './auth.js';
 //# sourceMappingURL=index.d.ts.map

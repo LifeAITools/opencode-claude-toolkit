@@ -168,6 +168,9 @@ export type StreamEvent = {
     type: 'thinking_delta';
     text: string;
 } | {
+    type: 'thinking_end';
+    signature?: string;
+} | {
     type: 'tool_use_start';
     id: string;
     name: string;

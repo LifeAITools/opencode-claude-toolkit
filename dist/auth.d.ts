@@ -11,6 +11,8 @@
  * Usage:
  *   const creds = await oauthLogin({ credentialsPath: '~/.claude/.credentials.json' })
  */
+export declare function getClaudeConfigDir(): string;
+export declare function getDefaultCredentialsPath(): string;
 export interface OAuthLoginOptions {
     /** Where to save credentials. Default: ~/.claude/.credentials.json */
     credentialsPath?: string;

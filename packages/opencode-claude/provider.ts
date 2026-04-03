@@ -22,8 +22,9 @@ const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
 const STATS_FILE = join(homedir(), '.claude', 'claude-max-stats.log')
 
 const PID = process.pid
+const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? '?'
 function logStats(line: string) {
-  try { appendFileSync(STATS_FILE, `${line} pid=${PID}\n`) } catch {}
+  try { appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}\n`) } catch {}
 }
 
 function dbg(...args: any[]) {

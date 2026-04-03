@@ -47,8 +47,8 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000
 
 // Models available via Max/Pro subscription
 const MAX_MODELS: Record<string, { name: string; context: number; output: number }> = {
-  'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', context: 200000, output: 16384 },
-  'claude-opus-4-6': { name: 'Claude Opus 4.6', context: 200000, output: 16384 },
+  'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', context: 1000000, output: 16384 },
+  'claude-opus-4-6': { name: 'Claude Opus 4.6', context: 1000000, output: 16384 },
   'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', context: 200000, output: 8192 },
 }
 

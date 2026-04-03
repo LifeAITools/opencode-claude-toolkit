@@ -450,7 +450,7 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     keepalive: {
       enabled: process.env.CLAUDE_MAX_KEEPALIVE !== '0',
       intervalMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '180') || 180) * 1000,
-      idleTimeoutMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '1800') || 1800) * 1000,
+      idleTimeoutMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '0') || 0) * 1000 || Infinity,
       onTick: (tick) => {
         dbg(`keepalive tick: idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
       },

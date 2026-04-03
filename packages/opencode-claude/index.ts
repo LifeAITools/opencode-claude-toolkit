@@ -269,15 +269,10 @@ export default {
             if (m.cost) m.cost = { input: 0, output: 0, cache: { read: 0, write: 0 } }
           }
 
-          try {
-            await creds.ensureValid()
-            dbg('auth.loader: credentials valid, token length:', creds.token?.length)
-          } catch (err) {
-            dbg('auth.loader: ensureValid FAILED:', err)
-            throw err
-          }
+          // Only pass credentialsPath — let SDK's FileCredentialStore
+          // handle token reading AND auto-refresh (with triple-check)
+          dbg('auth.loader: credPath:', creds.credPath)
           return {
-            accessToken: creds.token,
             credentialsPath: creds.credPath,
           }
         },

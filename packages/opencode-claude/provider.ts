@@ -20,11 +20,16 @@ import { homedir } from 'os'
 const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
 const STATS_FILE = join(homedir(), '.claude', 'claude-max-stats.log')
+const STATS_JSONL = join(homedir(), '.claude', 'claude-max-stats.jsonl')
 
 const PID = process.pid
 const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? '?'
-function logStats(line: string) {
+
+function logStats(line: string, structured?: Record<string, unknown>) {
   try { appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}\n`) } catch {}
+  if (structured) {
+    try { appendFileSync(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + '\n') } catch {}
+  }
 }
 
 function dbg(...args: any[]) {
@@ -270,8 +275,12 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
 
       const u = response.usage
       const rl = sdk.getRateLimitInfo()
-      const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'}` : ''
-      logStats(`[${new Date().toISOString()}] model=${modelId} type=generate | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${response.stopReason}${rlStr}`)
+      const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'} util5h=${rl.utilization5h ?? '?'} util7d=${rl.utilization7d ?? '?'}` : ''
+      logStats(`[${new Date().toISOString()}] model=${modelId} type=generate | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${response.stopReason}${rlStr}`, {
+        type: 'generate', model: modelId, dur: 0, stop: response.stopReason,
+        usage: { in: u?.inputTokens ?? 0, out: u?.outputTokens ?? 0, cacheRead: u?.cacheReadInputTokens ?? 0, cacheWrite: u?.cacheCreationInputTokens ?? 0 },
+        rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
+      })
 
       return {
         content,
@@ -409,8 +418,12 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   const dur = Date.now() - t0
                   const u = event.usage
                   const rl = sdk.getRateLimitInfo()
-                  const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'}` : ''
-                  logStats(`[${new Date().toISOString()}] model=${modelId} type=stream dur=${dur}ms | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${event.stopReason}${rlStr}`)
+                  const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'} util5h=${rl.utilization5h ?? '?'} util7d=${rl.utilization7d ?? '?'}` : ''
+                  logStats(`[${new Date().toISOString()}] model=${modelId} type=stream dur=${dur}ms | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${event.stopReason}${rlStr}`, {
+                    type: 'stream', model: modelId, dur, stop: event.stopReason,
+                    usage: { in: u?.inputTokens ?? 0, out: u?.outputTokens ?? 0, cacheRead: u?.cacheReadInputTokens ?? 0, cacheWrite: u?.cacheCreationInputTokens ?? 0 },
+                    rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
+                  })
                   dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }
@@ -462,7 +475,11 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       },
       onHeartbeat: (stats) => {
         const rl = stats.rateLimit ? ` | quota=${stats.rateLimit.status ?? '?'} claim=${stats.rateLimit.claim ?? '?'}` : ''
-        logStats(`[${new Date().toISOString()}] model=${stats.model} type=keepalive dur=${stats.durationMs}ms | in=${stats.usage.inputTokens} out=${stats.usage.outputTokens} cacheRead=${stats.usage.cacheReadInputTokens ?? 0} cacheWrite=${stats.usage.cacheCreationInputTokens ?? 0} | idle=${Math.round(stats.idleMs / 1000)}s${rl}`)
+        logStats(`[${new Date().toISOString()}] model=${stats.model} type=keepalive dur=${stats.durationMs}ms | in=${stats.usage.inputTokens} out=${stats.usage.outputTokens} cacheRead=${stats.usage.cacheReadInputTokens ?? 0} cacheWrite=${stats.usage.cacheCreationInputTokens ?? 0} | idle=${Math.round(stats.idleMs / 1000)}s${rl}`, {
+          type: 'keepalive', model: stats.model, dur: stats.durationMs, idle: Math.round(stats.idleMs / 1000),
+          usage: { in: stats.usage.inputTokens, out: stats.usage.outputTokens, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0 },
+          rateLimit: stats.rateLimit ?? undefined,
+        })
         dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, rateLimit: stats.rateLimit })
       },
     },

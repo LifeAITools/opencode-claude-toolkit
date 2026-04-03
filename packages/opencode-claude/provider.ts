@@ -448,7 +448,7 @@ export interface ClaudeMaxProviderOptions {
 // ─── Cache Keepalive ──────────────────────────────────────
 
 const KEEPALIVE_ENABLED = process.env.CLAUDE_MAX_KEEPALIVE !== '0'
-const KEEPALIVE_INTERVAL = (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '240') || 240) * 1000
+const KEEPALIVE_INTERVAL = (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '180') || 180) * 1000
 const KEEPALIVE_IDLE_TIMEOUT = (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '1800') || 1800) * 1000
 const KEEPALIVE_MIN_TOKENS = parseInt(process.env.CLAUDE_MAX_KEEPALIVE_MIN_TOKENS ?? '2000') || 2000
 

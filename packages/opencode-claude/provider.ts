@@ -209,7 +209,7 @@ function convertFinishReason(stopReason: string | null) {
 
 // ─── The LanguageModelV3 implementation ───────────────────
 
-function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: string): LanguageModelV3 {
+function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: string, keepalive?: CacheKeepalive): LanguageModelV3 {
   return {
     specificationVersion: 'v3' as const,
     provider: providerId,
@@ -405,6 +405,11 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   const dur = Date.now() - t0
                   const u = event.usage
                   logStats(`[${new Date().toISOString()}] model=${modelId} type=stream dur=${dur}ms | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${event.stopReason}`)
+                  // Capture snapshot for keepalive
+                  const totalInput = (u?.inputTokens ?? 0) + (u?.cacheReadInputTokens ?? 0) + (u?.cacheCreationInputTokens ?? 0)
+                  if (keepalive && totalInput > 0) {
+                    keepalive.capture(modelId, system, messages, tools, totalInput)
+                  }
                   dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }
@@ -440,6 +445,99 @@ export interface ClaudeMaxProviderOptions {
   credentialsPath?: string
 }
 
+// ─── Cache Keepalive ──────────────────────────────────────
+
+const KEEPALIVE_ENABLED = process.env.CLAUDE_MAX_KEEPALIVE !== '0'
+const KEEPALIVE_INTERVAL = (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '240') || 240) * 1000
+const KEEPALIVE_IDLE_TIMEOUT = (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '1800') || 1800) * 1000
+const KEEPALIVE_MIN_TOKENS = parseInt(process.env.CLAUDE_MAX_KEEPALIVE_MIN_TOKENS ?? '2000') || 2000
+
+interface CacheSnapshot {
+  model: string
+  system?: string
+  messages: any[]
+  tools?: any[]
+  inputTokens: number
+  lastActivityAt: number
+}
+
+class CacheKeepalive {
+  private snapshot: CacheSnapshot | null = null
+  private timer: ReturnType<typeof setInterval> | null = null
+  private sdk: ClaudeCodeSDK
+
+  constructor(sdk: ClaudeCodeSDK) { this.sdk = sdk }
+
+  capture(model: string, system: string | undefined, messages: any[], tools: any[] | undefined, inputTokens: number) {
+    this.snapshot = { model, system, messages, tools, inputTokens, lastActivityAt: Date.now() }
+    this.ensureTimer()
+  }
+
+  private ensureTimer() {
+    if (this.timer || !KEEPALIVE_ENABLED) return
+    this.timer = setInterval(() => this.tick(), KEEPALIVE_INTERVAL)
+    // Unref so timer doesn't prevent process exit
+    if (this.timer && typeof this.timer === 'object' && 'unref' in this.timer) {
+      (this.timer as any).unref()
+    }
+    dbg('keepalive timer started', { interval: KEEPALIVE_INTERVAL / 1000 + 's', idleTimeout: KEEPALIVE_IDLE_TIMEOUT / 1000 + 's' })
+  }
+
+  private async tick() {
+    if (!this.snapshot) return
+    const idle = Date.now() - this.snapshot.lastActivityAt
+
+    // Stop if idle too long
+    if (idle > KEEPALIVE_IDLE_TIMEOUT) {
+      dbg('keepalive stopped: idle timeout', { idle: Math.round(idle / 1000) + 's' })
+      this.stop()
+      return
+    }
+
+    // Skip if context too small
+    if (this.snapshot.inputTokens < KEEPALIVE_MIN_TOKENS) {
+      dbg('keepalive skip: context too small', { tokens: this.snapshot.inputTokens })
+      return
+    }
+
+    // Only fire if actually idle (not during active request)
+    if (idle < KEEPALIVE_INTERVAL * 0.8) {
+      dbg('keepalive skip: recent activity', { idle: Math.round(idle / 1000) + 's' })
+      return
+    }
+
+    dbg('keepalive firing', { model: this.snapshot.model, tokens: this.snapshot.inputTokens, idle: Math.round(idle / 1000) + 's' })
+
+    try {
+      const t0 = Date.now()
+      const opts: any = {
+        model: this.snapshot.model,
+        messages: this.snapshot.messages,
+        maxTokens: 1,
+        thinking: { type: 'disabled' },
+      }
+      if (this.snapshot.system) opts.system = this.snapshot.system
+      if (this.snapshot.tools?.length) opts.tools = this.snapshot.tools
+
+      let usage: any
+      for await (const event of this.sdk.stream(opts)) {
+        if (event.type === 'message_stop') usage = event.usage
+      }
+      const dur = Date.now() - t0
+      const u = usage ?? {}
+      logStats(`[${new Date().toISOString()}] model=${this.snapshot.model} type=keepalive dur=${dur}ms | in=${u.inputTokens ?? 0} out=${u.outputTokens ?? 0} cacheRead=${u.cacheReadInputTokens ?? 0} cacheWrite=${u.cacheCreationInputTokens ?? 0} | idle=${Math.round(idle / 1000)}s`)
+      dbg('keepalive done', { dur, cacheRead: u.cacheReadInputTokens ?? 0 })
+    } catch (err) {
+      dbg('keepalive error:', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  stop() {
+    if (this.timer) { clearInterval(this.timer); this.timer = null }
+    this.snapshot = null
+  }
+}
+
 export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
   dbg('createClaudeMax called with:', { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, allKeys: Object.keys(options) })
   const sdk = new ClaudeCodeSDK({
@@ -449,10 +547,15 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     credentialsPath: options.credentialsPath,
   })
 
+  const keepalive = new CacheKeepalive(sdk)
+
+  // Cleanup on process exit
+  process.on('exit', () => keepalive.stop())
+
   return {
     languageModel(modelId: string): LanguageModelV3 {
       dbg('languageModel requested:', modelId)
-      return createLanguageModel(sdk, modelId, 'claude-max')
+      return createLanguageModel(sdk, modelId, 'claude-max', keepalive)
     },
   }
 }

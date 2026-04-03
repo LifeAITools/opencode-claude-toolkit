@@ -14,7 +14,10 @@ export declare class ClaudeCodeSDK {
     private pending401;
     private lastFailedToken;
     private keepaliveConfig;
-    private keepaliveSnapshot;
+    private keepaliveRegistry;
+    private _pendingSnapshotModel;
+    private _pendingSnapshotBody;
+    private _pendingSnapshotHeaders;
     private keepaliveLastActivityAt;
     private keepaliveTimer;
     private keepaliveAbortController;

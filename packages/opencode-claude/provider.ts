@@ -17,7 +17,7 @@ import { appendFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const DEBUG = process.env.CLAUDE_MAX_DEBUG === '1'
+const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
 const STATS_FILE = join(homedir(), '.claude', 'claude-max-stats.log')
 

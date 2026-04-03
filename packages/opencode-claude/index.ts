@@ -196,7 +196,7 @@ class CredentialManager {
 
 import { appendFileSync } from 'fs'
 
-const DEBUG = process.env.CLAUDE_MAX_DEBUG === '1'
+const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
 function dbg(...args: any[]) {
   if (!DEBUG) return

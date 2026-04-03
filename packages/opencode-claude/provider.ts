@@ -475,38 +475,40 @@ class CacheKeepalive {
 
   private ensureTimer() {
     if (this.timer || !KEEPALIVE_ENABLED) return
-    this.timer = setInterval(() => this.tick(), KEEPALIVE_INTERVAL)
-    // Unref so timer doesn't prevent process exit
+    const TICK_INTERVAL = 30_000 // 30s ticks for countdown visibility
+    this.timer = setInterval(() => this.tick(), TICK_INTERVAL)
     if (this.timer && typeof this.timer === 'object' && 'unref' in this.timer) {
       (this.timer as any).unref()
     }
-    dbg('keepalive timer started', { interval: KEEPALIVE_INTERVAL / 1000 + 's', idleTimeout: KEEPALIVE_IDLE_TIMEOUT / 1000 + 's' })
+    dbg('keepalive timer started', { tickEvery: '30s', fireAt: KEEPALIVE_INTERVAL / 1000 + 's', idleTimeout: KEEPALIVE_IDLE_TIMEOUT / 1000 + 's' })
   }
 
   private async tick() {
     if (!this.snapshot) return
     const idle = Date.now() - this.snapshot.lastActivityAt
+    const idleSec = Math.round(idle / 1000)
+    const nextFireIn = Math.max(0, Math.round((KEEPALIVE_INTERVAL - idle) / 1000))
 
     // Stop if idle too long
     if (idle > KEEPALIVE_IDLE_TIMEOUT) {
-      dbg('keepalive stopped: idle timeout', { idle: Math.round(idle / 1000) + 's' })
+      dbg('keepalive stopped: idle timeout', { idle: idleSec + 's' })
       this.stop()
       return
     }
 
     // Skip if context too small
     if (this.snapshot.inputTokens < KEEPALIVE_MIN_TOKENS) {
-      dbg('keepalive skip: context too small', { tokens: this.snapshot.inputTokens })
+      dbg('keepalive tick: context too small', { tokens: this.snapshot.inputTokens, idle: idleSec + 's' })
       return
     }
 
-    // Only fire if actually idle (not during active request)
-    if (idle < KEEPALIVE_INTERVAL * 0.8) {
-      dbg('keepalive skip: recent activity', { idle: Math.round(idle / 1000) + 's' })
+    // Not time to fire yet — log countdown
+    if (idle < KEEPALIVE_INTERVAL * 0.9) {
+      dbg(`keepalive tick: idle=${idleSec}s nextFire=${nextFireIn}s tokens=${this.snapshot.inputTokens} model=${this.snapshot.model}`)
       return
     }
 
-    dbg('keepalive firing', { model: this.snapshot.model, tokens: this.snapshot.inputTokens, idle: Math.round(idle / 1000) + 's' })
+    dbg('keepalive FIRING', { model: this.snapshot.model, tokens: this.snapshot.inputTokens, idle: idleSec + 's' })
 
     try {
       const t0 = Date.now()

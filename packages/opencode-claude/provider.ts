@@ -270,6 +270,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
     },
 
     async doStream(options: any) {
+      const t0 = Date.now()
       dbg('doStream', { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length })
       const { system, messages } = convertPrompt(options.prompt)
       const tools = convertTools(options.tools)
@@ -315,8 +316,13 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
           controller.enqueue({ type: 'stream-start', warnings: [] })
           controller.enqueue({ type: 'response-metadata', modelId })
 
+          let firstEvent = true
           try {
             for await (const event of sdkStream) {
+              if (firstEvent) {
+                dbg(`doStream first event after ${Date.now() - t0}ms`, { type: event.type, modelId })
+                firstEvent = false
+              }
               switch (event.type) {
                 case 'text_delta': {
                   if (!textActive) {
@@ -387,7 +393,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                 }
 
                 case 'message_stop': {
-                  // Close any open lifecycle
+                  dbg(`doStream complete in ${Date.now() - t0}ms`, { modelId, stopReason: event.stopReason })
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }
 

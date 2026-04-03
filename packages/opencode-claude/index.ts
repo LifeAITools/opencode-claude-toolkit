@@ -194,8 +194,14 @@ class CredentialManager {
 // Each opencode instance calls server() independently.
 // The closure + CredentialManager give complete isolation.
 
+import { appendFileSync } from 'fs'
+
 const DEBUG = process.env.CLAUDE_MAX_DEBUG === '1'
-function dbg(...args: any[]) { if (DEBUG) console.error('[claude-max:dbg]', ...args) }
+const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
+function dbg(...args: any[]) {
+  if (!DEBUG) return
+  try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
+}
 
 export default {
   id: 'opencode-claude-max',
@@ -207,7 +213,7 @@ export default {
     dbg('plugin init', { cwd, credPath: creds.credPath, hasCredentials: creds.hasCredentials, providerPath })
 
     if (!creds.hasCredentials) {
-      console.error(`[claude-max] Not logged in — run: opencode providers login -p claude-max`)
+      dbg('Not logged in — run: opencode providers login -p claude-max')
     }
 
     return {
@@ -368,7 +374,7 @@ export default {
                     })
                     if (!tokenRes.ok) {
                       const body = await tokenRes.text()
-                      console.error(`[claude-max] Token exchange failed (${tokenRes.status}): ${body}`)
+                      dbg(`Token exchange failed (${tokenRes.status}): ${body}`)
                       return { type: 'failed' as const }
                     }
 

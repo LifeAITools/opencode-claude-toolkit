@@ -13,8 +13,16 @@
 import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 
+import { appendFileSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
+
 const DEBUG = process.env.CLAUDE_MAX_DEBUG === '1'
-function dbg(...args: any[]) { if (DEBUG) console.error('[claude-max:provider]', ...args) }
+const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
+function dbg(...args: any[]) {
+  if (!DEBUG) return
+  try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
+}
 
 // ─── Types (subset of @ai-sdk/provider v3) ────────────────
 // We inline these to avoid a dependency on @ai-sdk/provider

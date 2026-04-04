@@ -5,12 +5,13 @@
   "type": "module",
   "exports": {
     ".": "./provider.ts",
-    "./server": "./index.ts"
+    "./server": "./index.ts",
+    "./tui": "./tui.tsx"
   },
   "main": "./provider.ts",
-  "files": ["index.ts", "provider.ts"],
+  "files": ["index.ts", "provider.ts", "tui.tsx"],
   "dependencies": {
-    "@life-ai-tools/claude-code-sdk": "^0.1.2"
+    "@life-ai-tools/claude-code-sdk": "^0.3.0"
   },
   "keywords": [
     "opencode", "opencode-plugin", "claude", "anthropic",

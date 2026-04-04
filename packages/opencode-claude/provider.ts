@@ -75,7 +75,26 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
 
   for (const msg of prompt) {
     if (msg.role === 'system') {
-      system = typeof msg.content === 'string' ? msg.content : msg.content
+      // MUST deep-copy — addCacheMarkers mutates message content in-place,
+      // and opencode passes content arrays by reference. Without copy,
+      // cache_control markers leak into opencode's internal state, causing
+      // cache misses on session restart (content differs by baked-in markers).
+      system = typeof msg.content === 'string' ? msg.content : JSON.parse(JSON.stringify(msg.content))
+      // Strip opencode's billing header from system prompt — it contains a non-deterministic
+      // version number (cc_version=0.1.0.XXX) that changes on every process restart,
+      // invalidating the entire cache prefix. The LLM doesn't need this header.
+      if (typeof system === 'string') {
+        system = system.replace(/x-anthropic-billing-header:[^\n]*\n?/g, '').trim() || undefined
+      } else if (Array.isArray(system)) {
+        for (const block of system as { type: string; text?: string }[]) {
+          if (block.type === 'text' && block.text) {
+            block.text = block.text.replace(/x-anthropic-billing-header:[^\n]*\n?/g, '').trim()
+          }
+        }
+        // Remove empty text blocks
+        system = (system as { type: string; text?: string }[]).filter(b => b.type !== 'text' || (b.text && b.text.length > 0))
+        if ((system as unknown[]).length === 0) system = undefined
+      }
       continue
     }
 
@@ -84,12 +103,44 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
       const content: any[] = []
       for (const p of parts) {
         if (p.type === 'text') content.push({ type: 'text', text: p.text || '...' })
-        // file parts: pass as base64 image if image/*
-        if (p.type === 'file' && typeof p.mediaType === 'string' && p.mediaType.startsWith('image/')) {
+        // file parts: convert to Anthropic content blocks based on mediaType
+        if (p.type === 'file' && typeof p.mediaType === 'string') {
+          // Check if data is a URL (string URL or URL object)
+          const isUrl = p.data instanceof URL || (typeof p.data === 'string' && (p.data.startsWith('http://') || p.data.startsWith('https://')))
+          if (isUrl) {
+            const url = typeof p.data === 'string' ? p.data : p.data.toString()
+            if (p.mediaType.startsWith('image/')) {
+              content.push({ type: 'image', source: { type: 'url', url } } as any)
+              dbg('Converted file part to image URL block:', p.mediaType, url)
+            } else if (p.mediaType === 'application/pdf') {
+              content.push({ type: 'document', source: { type: 'url', url } } as any)
+              dbg('Converted file part to document URL block:', url)
+            }
+            continue
+          }
+          // Inline data: base64 string, Uint8Array, or ArrayBuffer
           const data = typeof p.data === 'string' ? p.data
             : p.data instanceof Uint8Array ? Buffer.from(p.data).toString('base64')
-            : String(p.data)
-          content.push({ type: 'image', source: { type: 'base64', media_type: p.mediaType, data } })
+            : p.data instanceof ArrayBuffer ? Buffer.from(p.data).toString('base64')
+            : null
+          if (!data) {
+            dbg('Skipping file part: could not convert data to base64, type:', typeof p.data)
+            continue
+          }
+          if (p.mediaType.startsWith('image/')) {
+            // image/* → Anthropic image content block
+            // Anthropic requires specific MIME type — "image/*" wildcard is invalid, default to jpeg
+            const mediaType = p.mediaType === 'image/*' ? 'image/jpeg' : p.mediaType
+            content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } })
+            dbg('Converted file part to image block:', mediaType, `${data.length} chars base64`)
+          } else if (p.mediaType === 'application/pdf') {
+            // PDF → Anthropic document content block
+            content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } })
+            dbg('Converted file part to document block:', `${data.length} chars base64`)
+          } else {
+            // Unsupported mediaType — skip silently (don't crash)
+            dbg('Skipping file part with unsupported mediaType:', p.mediaType)
+          }
         }
       }
       if (content.length === 0) content.push({ type: 'text', text: '...' })
@@ -496,8 +547,11 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     credentialsPath: options.credentialsPath,
     keepalive: {
       enabled: process.env.CLAUDE_MAX_KEEPALIVE !== '0',
-      intervalMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '270') || 270) * 1000,
-      idleTimeoutMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '0') || 0) * 1000 || Infinity,
+      // Fire at ~120s (2 min), giving ~180s margin before 5-min cache TTL for retries.
+      // Override with CLAUDE_MAX_KEEPALIVE_INTERVAL env var (seconds).
+      intervalMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '120') || 120) * 1000,
+      // Stop keepalive after 30 min of no real user activity.
+      idleTimeoutMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '1800') || 1800) * 1000,
       onTick: (tick) => {
         dbg(`keepalive tick: idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
       },

@@ -7,4 +7,6 @@ export type { SessionEntry } from './session.js';
 export { oauthLogin } from './auth.js';
 export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js';
 export type { OAuthLoginOptions, OAuthResult } from './auth.js';
+export { connectVoiceStream, transcribeFile, transcribeAudioFile, startMicRecording, checkVoiceDeps, } from './voice.js';
+export type { VoiceStreamCallbacks, VoiceStreamConnection, VoiceStreamOptions, TranscribeFileOptions, } from './voice.js';
 //# sourceMappingURL=index.d.ts.map

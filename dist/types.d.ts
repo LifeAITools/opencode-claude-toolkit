@@ -71,6 +71,11 @@ export interface KeepaliveStats {
     durationMs: number;
     idleMs: number;
     model: string;
+    rateLimit?: {
+        status: string | null;
+        claim: string | null;
+        resetAt: number | null;
+    };
 }
 /** What we read from ~/.claude/.credentials.json */
 export interface CredentialsFile {
@@ -93,6 +98,13 @@ export type ContentBlockParam = TextBlockParam | {
     source: {
         type: 'base64';
         media_type: string;
+        data: string;
+    };
+} | {
+    type: 'document';
+    source: {
+        type: 'base64';
+        media_type: 'application/pdf';
         data: string;
     };
 } | {
@@ -223,6 +235,8 @@ export interface RateLimitInfo {
     resetAt: number | null;
     claim: string | null;
     retryAfter: number | null;
+    utilization5h: number | null;
+    utilization7d: number | null;
 }
 export interface GenerateResponse {
     content: ContentBlock[];

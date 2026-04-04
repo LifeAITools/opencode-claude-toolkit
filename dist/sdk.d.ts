@@ -22,6 +22,10 @@ export declare class ClaudeCodeSDK {
     private keepaliveTimer;
     private keepaliveAbortController;
     private keepaliveInFlight;
+    private keepaliveJitterMs;
+    private keepaliveCacheWrittenAt;
+    private keepaliveRetryTimer;
+    private keepaliveLastRealActivityAt;
     constructor(options?: ClaudeCodeSDKOptions);
     /** Non-streaming: send messages, get full response */
     generate(options: GenerateOptions): Promise<GenerateResponse>;
@@ -31,14 +35,49 @@ export declare class ClaudeCodeSDK {
     private doStreamRequest;
     private parseSSE;
     private onStreamComplete;
+    private static readonly SNAPSHOT_TTL_MS;
+    private static readonly DUMP_BODY;
+    private snapshotCallCount;
+    private writeSnapshotDebug;
     private startKeepaliveTimer;
+    private static readonly CACHE_TTL_MS;
     private keepaliveTick;
+    private static readonly KEEPALIVE_RETRY_DELAYS;
+    /**
+     * Dedicated retry chain for transient keepalive failures.
+     * Uses setTimeout with exact delays from a fixed timestamp — no drift, no timer reuse.
+     * Checks remaining cache TTL before each attempt to avoid wasting a request on expired cache.
+     */
+    private keepaliveRetryChain;
     stopKeepalive(): void;
     /** HTTP headers — mimics getAnthropicClient() + getAuthHeaders() */
     private buildHeaders;
     /** Request body — mirrors paramsFromContext() in claude.ts:1699 */
     private buildRequestBody;
-    /** Add cache_control markers to system + last message — mirrors addCacheBreakpoints() */
+    /** Add cache_control markers to system + messages — anchor-based strategy for keepalive compatibility.
+     *
+     * Anthropic prompt cache is PREFIX-based: each cache_control breakpoint creates a cached prefix entry.
+     * A new request reads cache only if it has a breakpoint at the SAME position (same content prefix).
+     *
+     * Follows Claude Code's proven strategy (from claude.ts):
+     *   BP1: system prompt — stable across sessions
+     *   BP2: last tool definition — stable within session
+     *   BP3: messages[-1] — ONE message marker only
+     *
+     * Why only 1 message marker (from Claude Code source):
+     *   "Exactly one message-level cache_control marker per request. Mycro's
+     *    turn-to-turn eviction frees local-attention KV pages at any cached prefix
+     *    position NOT in cache_store_int_token_boundaries. With two markers the
+     *    second-to-last position is protected and its locals survive an extra turn
+     *    even though nothing will ever resume from there — with one marker they're
+     *    freed immediately."
+     *
+     * Why no anchor persistence needed:
+     *   Anthropic's cache AUTOMATICALLY reads ANY matching prefix, regardless of
+     *   where the NEW marker is placed. Markers only control where NEW entries are WRITTEN.
+     *   So: keepalive writes cache at msg[K]. Next real request has marker at msg[K+2].
+     *   API finds cached prefix [sys..msg[K]] → reads it → only processes msg[K+1..K+2].
+     */
     private addCacheMarkers;
     /** Beta headers — mirrors getAllModelBetas() in betas.ts:234 */
     private buildBetas;
@@ -66,13 +105,13 @@ export declare class ClaudeCodeSDK {
      * Deduplicates concurrent 401 handlers for the same failed token.
      */
     handleAuth401(): Promise<void>;
-    /** POST to platform.claude.com/v1/oauth/token — from oauth/client.ts:146 */
+    /** POST to platform.claude.com/v1/oauth/token — from oauth/client.ts:146
+     *
+     * Retry with backoff on 429/5xx (mirrors Claude Code's lockfile + triple-check pattern).
+     * Multiple opencode sessions may try to refresh simultaneously — the first to succeed
+     * writes to the credential store, others detect the fresh token on retry.
+     */
     private doTokenRefresh;
-    computeFingerprint(messages: {
-        role: string;
-        content: string | unknown[];
-    }[]): string;
-    private hashFingerprint;
     private assembleResponse;
     private parseRateLimitHeaders;
     private getRetryDelay;

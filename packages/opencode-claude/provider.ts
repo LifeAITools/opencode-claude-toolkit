@@ -666,7 +666,9 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       // Override with CLAUDE_MAX_KEEPALIVE_INTERVAL env var (seconds).
       intervalMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '120') || 120) * 1000,
       // Stop keepalive after 30 min of no real user activity.
-      idleTimeoutMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE ?? '1800') || 1800) * 1000,
+      // Keep cache alive as long as the process runs. Keepalive costs are negligible
+      // (1 output token, cache reads only, no quota impact). Override with env var if needed.
+      idleTimeoutMs: process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity,
       onTick: (tick) => {
         dbg(`keepalive tick: idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
       },

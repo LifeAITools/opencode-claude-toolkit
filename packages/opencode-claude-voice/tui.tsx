@@ -563,26 +563,41 @@ function cleanupVoice() {
 // ─── Text Injection into Prompt ───────────────────────────
 
 async function injectText(api: any, text: string) {
-  // Primary: typed SDK client
+  // Method 1: typed SDK client (may not have appendPrompt method)
   try {
-    await api.client.tui.appendPrompt({ body: { text } })
-    return
-  } catch {
-    // Fallback below
-  }
+    if (api.client?.tui?.appendPrompt) {
+      await api.client.tui.appendPrompt({ body: { text } })
+      return
+    }
+  } catch {}
 
-  // Fallback: raw HTTP to opencode TUI server
+  // Method 2: scopedClient (may have different method shape)
   try {
-    const port = process.env.OPENCODE_PORT ?? "3000"
-    await fetch(`http://localhost:${port}/tui/prompt-append`, {
+    const client = api.scopedClient?.()
+    if (client?.tui?.appendPrompt) {
+      await client.tui.appendPrompt({ body: { text } })
+      return
+    }
+  } catch {}
+
+  // Method 3: raw HTTP — correct path is /tui/append-prompt (NOT /tui/prompt-append)
+  // Get server URL from client's baseUrl or fall back to environment
+  try {
+    const baseUrl = api.client?.baseUrl ?? `http://localhost:${process.env.OPENCODE_PORT ?? "3000"}`
+    const resp = await fetch(`${baseUrl}/tui/append-prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     })
-  } catch {
-    // Both methods failed — text is lost
-    setVoiceError("Failed to inject transcribed text into prompt")
-  }
+    if (resp.ok) return
+  } catch {}
+
+  // Method 4: try the Bus event directly if accessible
+  try {
+    api.event?.emit?.("tui.prompt.append", { text })
+  } catch {}
+
+  setVoiceError("Failed to inject text — check opencode server")
 }
 
 // ─── Voice Controller: Toggle Start/Stop ──────────────────
@@ -749,13 +764,21 @@ async function toggleVoice(api: any) {
 function VoiceOverlay() {
   return (
     <Show when={voiceState() !== "idle"}>
-      <box>
+      <box
+        position="absolute"
+        bottom={1}
+        right={2}
+        maxWidth={50}
+        paddingLeft={1}
+        paddingRight={1}
+        borderStyle="round"
+      >
         <text bold>
           {voiceState() === "recording"
-            ? "\u{1F534} Recording..."
-            : "\u23F3 Processing..."}
+            ? "Recording..."
+            : "Processing..."}
         </text>
-        <text>{interimText() || "Listening..."}</text>
+        <text wrap="truncate">{interimText() || "Listening..."}</text>
         <Show when={voiceError()}>
           <text bold>{voiceError()}</text>
         </Show>

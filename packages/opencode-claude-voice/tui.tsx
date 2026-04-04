@@ -789,7 +789,33 @@ async function toggleVoice(api: any) {
 
 // ─── VoiceOverlay Component ───────────────────────────────
 
-function VoiceOverlay() {
+function VoiceOverlay(props: { api: any }) {
+  // Import useKeyboard from @opentui/solid (available in TUI plugin runtime)
+  let useKeyboard: any
+  try {
+    useKeyboard = require("@opentui/solid").useKeyboard
+  } catch {
+    try {
+      useKeyboard = (globalThis as any).__opentui_useKeyboard
+    } catch {}
+  }
+
+  // Register global keyboard handler for voice hotkeys
+  if (useKeyboard) {
+    useKeyboard((evt: any) => {
+      // Ctrl+Shift+V — toggle voice (start or stop+submit)
+      if (evt.ctrl && evt.shift && evt.name === "v") {
+        toggleVoice(props.api)
+        return
+      }
+      // Escape while recording — cancel
+      if (evt.name === "escape" && voiceState() === "recording") {
+        stopAndCancel(props.api)
+        return
+      }
+    })
+  }
+
   return (
     <Show when={voiceState() !== "idle"}>
       <box
@@ -803,7 +829,7 @@ function VoiceOverlay() {
       >
         <text bold>
           {voiceState() === "recording"
-            ? "Recording..."
+            ? "Recording... (Ctrl+Shift+V to stop, Esc to cancel)"
             : "Processing..."}
         </text>
         <text wrap="truncate">{interimText() || "Listening..."}</text>
@@ -823,7 +849,7 @@ const tui = async (api: any) => {
     order: 200,
     slots: {
       app() {
-        return <VoiceOverlay />
+        return <VoiceOverlay api={api} />
       },
     },
   })

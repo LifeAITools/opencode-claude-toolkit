@@ -331,14 +331,48 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
 
 // ─── Tools conversion: V3 → SDK ──────────────────────────
 
+// Normalize tool schemas for cross-session cache reuse.
+// opencode injects the CWD path into the bash tool's workdir description
+// (e.g. "Defaults to /mnt/d/.../myproject"). This tiny path difference
+// breaks Anthropic's byte-exact prefix cache matching across sessions
+// in different project directories, forcing a full ~33K token cache rewrite.
+// Replacing with a stable placeholder makes the tool prefix identical
+// regardless of CWD, so all sessions share the same cached tools.
+const CWD_PATTERNS: [RegExp, string][] = [
+  [/Defaults to \/\S+\./g, 'Defaults to the current working directory.'],
+  [/All commands run in \/\S+ by default/g, 'All commands run in the current working directory by default'],
+]
+
+function normalizeCwd(text: string): string {
+  for (const [re, replacement] of CWD_PATTERNS) {
+    re.lastIndex = 0
+    text = text.replace(re, replacement)
+  }
+  return text
+}
+
+function normalizeToolSchema(schema: any): any {
+  if (!schema || typeof schema !== 'object') return schema
+  const result = { ...schema }
+  if (result.properties) {
+    result.properties = { ...result.properties }
+    for (const [key, val] of Object.entries(result.properties)) {
+      if (val && typeof val === 'object' && typeof (val as any).description === 'string') {
+        result.properties[key] = { ...(val as any), description: normalizeCwd((val as any).description) }
+      }
+    }
+  }
+  return result
+}
+
 function convertTools(tools?: any[]): any[] | undefined {
   if (!tools?.length) return undefined
   return tools
     .filter((t: any) => t.type === 'function')
     .map((t: any) => ({
       name: t.name,
-      description: t.description ?? '',
-      input_schema: t.inputSchema ?? { type: 'object', properties: {} },
+      description: normalizeCwd(t.description ?? ''),
+      input_schema: normalizeToolSchema(t.inputSchema ?? { type: 'object', properties: {} }),
     }))
 }
 

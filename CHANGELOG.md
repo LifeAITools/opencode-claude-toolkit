@@ -2,6 +2,11 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.3.2] - 2026-04-04
+
+### Fixed
+- **Keepalive snapshot protection** — subagent calls (Task tool spawns) could overwrite the main conversation's keepalive snapshot with a tiny context, causing the main conversation's cache to expire during idle periods. Fix: never downgrade snapshot — only overwrite if new call has more tokens than existing.
+
 ## [0.3.1] - 2026-04-04
 
 ### Added

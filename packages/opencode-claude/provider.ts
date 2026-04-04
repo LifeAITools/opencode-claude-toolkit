@@ -113,12 +113,32 @@ async function maybeResizeImage(
 
     img.resize({ w: nw, h: nh })
 
-    // Encode as JPEG (much smaller than PNG for photos)
-    const outBuf = await img.getBuffer('image/jpeg')
+    // Choose output format: keep PNG for screenshots/diagrams (sharp text, flat colors),
+    // use JPEG for photos (smaller file, imperceptible quality loss).
+    // Heuristic: PNG input = likely screenshot → keep PNG, try to fit within size limit.
+    // If PNG is still too large after resize, fall back to JPEG.
+    const isPng = mediaType === 'image/png'
+    let outBuf: Buffer
+    let outMediaType: string
+
+    if (isPng) {
+      outBuf = await img.getBuffer('image/png')
+      outMediaType = 'image/png'
+      // PNG too large after resize? Fall back to JPEG
+      if (outBuf.length > IMAGE_TARGET_RAW_BYTES) {
+        dbg(`PNG still ${(outBuf.length/1024).toFixed(0)}KB after resize, converting to JPEG`)
+        outBuf = await img.getBuffer('image/jpeg')
+        outMediaType = 'image/jpeg'
+      }
+    } else {
+      outBuf = await img.getBuffer('image/jpeg')
+      outMediaType = 'image/jpeg'
+    }
+
     const outBase64 = outBuf.toString('base64')
 
-    dbg(`Image resized: ${w}×${h} → ${nw}×${nh}, ${(rawBytes.length/1024).toFixed(0)}KB → ${(outBuf.length/1024).toFixed(0)}KB`)
-    return { data: outBase64, mediaType: 'image/jpeg', resized: true }
+    dbg(`Image resized: ${w}×${h} → ${nw}×${nh}, ${(rawBytes.length/1024).toFixed(0)}KB → ${(outBuf.length/1024).toFixed(0)}KB ${outMediaType}`)
+    return { data: outBase64, mediaType: outMediaType, resized: true }
   } catch (e: any) {
     dbg('Image resize failed, using original:', e.message)
     return { data: base64Data, mediaType, resized: false }

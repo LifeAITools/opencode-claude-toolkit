@@ -119,7 +119,7 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
             continue
           }
           // Inline data: base64 string, Uint8Array, or ArrayBuffer
-          const data = typeof p.data === 'string' ? p.data
+          let data = typeof p.data === 'string' ? p.data
             : p.data instanceof Uint8Array ? Buffer.from(p.data).toString('base64')
             : p.data instanceof ArrayBuffer ? Buffer.from(p.data).toString('base64')
             : null
@@ -127,16 +127,34 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
             dbg('Skipping file part: could not convert data to base64, type:', typeof p.data)
             continue
           }
+          // Safety: strip data URL prefix if AI SDK passed full data URL instead of pure base64
+          // (e.g. "data:image/png;base64,iVBOR..." → "iVBOR...")
+          if (typeof data === 'string' && data.startsWith('data:')) {
+            const commaIdx = data.indexOf(',')
+            if (commaIdx !== -1) {
+              data = data.slice(commaIdx + 1)
+              dbg('Stripped data URL prefix from file data')
+            }
+          }
+          // Anthropic API limit: 5MB base64 string (≈3.75MB raw image)
+          // Claude Code resizes to 2000×2000 / 3.75MB — we can't resize without sharp/canvas,
+          // but we can at least warn and skip oversized images instead of crashing
+          const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024
+          if (data.length > API_IMAGE_MAX_BASE64) {
+            dbg(`WARNING: image too large (${(data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) — skipping`)
+            content.push({ type: 'text', text: `[Image too large: ${(data.length / 1024 / 1024).toFixed(1)}MB, API limit is 5MB. Please resize before attaching.]` })
+            continue
+          }
           if (p.mediaType.startsWith('image/')) {
             // image/* → Anthropic image content block
             // Anthropic requires specific MIME type — "image/*" wildcard is invalid, default to jpeg
             const mediaType = p.mediaType === 'image/*' ? 'image/jpeg' : p.mediaType
             content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } })
-            dbg('Converted file part to image block:', mediaType, `${data.length} chars base64`)
+            dbg('Converted file part to image block:', mediaType, `${(data.length / 1024).toFixed(0)}KB base64`)
           } else if (p.mediaType === 'application/pdf') {
             // PDF → Anthropic document content block
             content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } })
-            dbg('Converted file part to document block:', `${data.length} chars base64`)
+            dbg('Converted file part to document block:', `${(data.length / 1024).toFixed(0)}KB base64`)
           } else {
             // Unsupported mediaType — skip silently (don't crash)
             dbg('Skipping file part with unsupported mediaType:', p.mediaType)

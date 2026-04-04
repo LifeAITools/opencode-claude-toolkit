@@ -2,6 +2,11 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.4.1] - 2026-04-04
+
+### Fixed
+- **Tool order non-deterministic** — MCP servers register tools in startup-race order, causing cache prefix to diverge at tool ~#11 across processes. All processes now sort tools by name before sending to API, producing identical prefixes regardless of MCP server startup timing.
+
 ## [0.4.0] - 2026-04-04
 
 ### Fixed

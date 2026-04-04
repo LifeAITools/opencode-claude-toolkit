@@ -61,11 +61,11 @@ fi
 # 3. Plugin files
 echo ""
 echo "3. Plugin Files"
-if [ -f "$PLUGIN_DIR/voice-tui.tsx" ]; then
-  LINES=$(wc -l < "$PLUGIN_DIR/voice-tui.tsx")
-  pass "voice-tui.tsx exists ($LINES lines)"
+if [ -f "$PLUGIN_DIR/opencode-claude-voice/tui.tsx" ]; then
+  LINES=$(wc -l < "$PLUGIN_DIR/opencode-claude-voice/tui.tsx")
+  pass "opencode-claude-voice/tui.tsx exists ($LINES lines)"
 else
-  fail "voice-tui.tsx not found at $PLUGIN_DIR"
+  fail "opencode-claude-voice/tui.tsx not found at $PLUGIN_DIR"
   ERRORS=$((ERRORS+1))
 fi
 
@@ -77,9 +77,9 @@ fi
 echo ""
 echo "4. Compile Check"
 if which bun >/dev/null 2>&1; then
-  RESULT=$(timeout 10 bun build --no-bundle "$PLUGIN_DIR/voice-tui.tsx" --outdir /tmp/voice-check 2>&1) || true
+  RESULT=$(timeout 10 bun build --no-bundle "$PLUGIN_DIR/opencode-claude-voice/tui.tsx" --outdir /tmp/voice-check 2>&1) || true
   if echo "$RESULT" | grep -qi "transpile\|success\|output"; then
-    pass "voice-tui.tsx compiles OK"
+    pass "opencode-claude-voice/tui.tsx compiles OK"
   elif [ -z "$RESULT" ]; then
     warn "Compile check timed out — skipping (file likely OK)"
   else
@@ -101,13 +101,13 @@ cat > "$PROJECT_DIR/.opencode/tui.json" << EOF
   "\$schema": "https://opencode.ai/tui.json",
   "plugin": [
     "$PLUGIN_DIR",
-    "$PLUGIN_DIR/voice-tui.tsx"
+    "$PLUGIN_DIR/opencode-claude-voice/tui.tsx"
   ]
 }
 EOF
 pass "Created $PROJECT_DIR/.opencode/tui.json"
 info "  Cache plugin: $PLUGIN_DIR (./tui export)"
-info "  Voice plugin: $PLUGIN_DIR/voice-tui.tsx"
+info "  Voice plugin: $PLUGIN_DIR/opencode-claude-voice/tui.tsx"
 
 # 6. Microphone test (try arecord first — more reliable on Linux)
 echo ""

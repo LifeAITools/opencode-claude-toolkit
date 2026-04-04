@@ -1,0 +1,11 @@
+{
+  "name": "@life-ai-tools/opencode-claude-voice",
+  "version": "0.1.0",
+  "description": "Voice input plugin for OpenCode — speak to type via Anthropic STT",
+  "type": "module",
+  "exports": {
+    "./tui": "./tui.tsx"
+  },
+  "files": ["tui.tsx"],
+  "license": "MIT"
+}

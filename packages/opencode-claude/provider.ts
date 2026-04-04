@@ -49,9 +49,85 @@ interface LanguageModelV3 {
   doStream(options: any): Promise<any>
 }
 
+// ─── Image resize (matches Claude Code limits) ───────────
+// Claude Code: 2000×2000 max, 3.75MB raw (5MB base64), resize with sharp/jimp
+// We try jimp (pure JS, works in Bun) — lazy-loaded, no hard dependency.
+
+const IMAGE_MAX_DIM = 2000
+const IMAGE_TARGET_RAW_BYTES = 3.75 * 1024 * 1024   // 3.75 MB raw → ≤5 MB base64
+
+let _jimp: any = undefined
+let _jimpChecked = false
+
+function getJimp(): any {
+  if (_jimpChecked) return _jimp
+  _jimpChecked = true
+  try {
+    _jimp = require('jimp')
+    dbg('Image resizer: jimp loaded')
+  } catch {
+    dbg('Image resizer: jimp not available — images will not be resized')
+  }
+  return _jimp
+}
+
+async function maybeResizeImage(
+  base64Data: string,
+  mediaType: string,
+): Promise<{ data: string; mediaType: string; resized: boolean }> {
+  const rawBytes = Buffer.from(base64Data, 'base64')
+  const needsSizeReduction = rawBytes.length > IMAGE_TARGET_RAW_BYTES
+
+  const jimpMod = getJimp()
+  if (!jimpMod) {
+    // No resize lib — pass through with warning if oversized
+    if (needsSizeReduction) {
+      dbg(`WARNING: image ${(rawBytes.length / 1024 / 1024).toFixed(1)}MB exceeds ${(IMAGE_TARGET_RAW_BYTES / 1024 / 1024).toFixed(1)}MB target but no resize lib available`)
+    }
+    return { data: base64Data, mediaType, resized: false }
+  }
+
+  try {
+    const { Jimp } = jimpMod
+    const img = await Jimp.fromBuffer(rawBytes)
+    const w = img.width, h = img.height
+    let needsResize = w > IMAGE_MAX_DIM || h > IMAGE_MAX_DIM || needsSizeReduction
+
+    if (!needsResize) {
+      return { data: base64Data, mediaType, resized: false }
+    }
+
+    // Calculate target dimensions
+    let scale = Math.min(IMAGE_MAX_DIM / w, IMAGE_MAX_DIM / h, 1)
+
+    // If still too large after dimension cap, reduce further
+    if (needsSizeReduction && scale === 1) {
+      // Estimate: JPEG at ~0.5 bytes/pixel after resize
+      const targetPixels = IMAGE_TARGET_RAW_BYTES / 0.5
+      const currentPixels = w * h
+      scale = Math.min(scale, Math.sqrt(targetPixels / currentPixels))
+    }
+
+    const nw = Math.max(1, Math.round(w * scale))
+    const nh = Math.max(1, Math.round(h * scale))
+
+    img.resize({ w: nw, h: nh })
+
+    // Encode as JPEG (much smaller than PNG for photos)
+    const outBuf = await img.getBuffer('image/jpeg')
+    const outBase64 = outBuf.toString('base64')
+
+    dbg(`Image resized: ${w}×${h} → ${nw}×${nh}, ${(rawBytes.length/1024).toFixed(0)}KB → ${(outBuf.length/1024).toFixed(0)}KB`)
+    return { data: outBase64, mediaType: 'image/jpeg', resized: true }
+  } catch (e: any) {
+    dbg('Image resize failed, using original:', e.message)
+    return { data: base64Data, mediaType, resized: false }
+  }
+}
+
 // ─── Prompt conversion: V3 → SDK ──────────────────────────
 
-function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
+async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages: any[] }> {
   let system: string | undefined
   const messages: any[] = []
 
@@ -136,21 +212,18 @@ function convertPrompt(prompt: any[]): { system?: string; messages: any[] } {
               dbg('Stripped data URL prefix from file data')
             }
           }
-          // Anthropic API limit: 5MB base64 string (≈3.75MB raw image)
-          // Claude Code resizes to 2000×2000 / 3.75MB — we can't resize without sharp/canvas,
-          // but we can at least warn and skip oversized images instead of crashing
-          const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024
-          if (data.length > API_IMAGE_MAX_BASE64) {
-            dbg(`WARNING: image too large (${(data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) — skipping`)
-            content.push({ type: 'text', text: `[Image too large: ${(data.length / 1024 / 1024).toFixed(1)}MB, API limit is 5MB. Please resize before attaching.]` })
-            continue
-          }
           if (p.mediaType.startsWith('image/')) {
-            // image/* → Anthropic image content block
-            // Anthropic requires specific MIME type — "image/*" wildcard is invalid, default to jpeg
-            const mediaType = p.mediaType === 'image/*' ? 'image/jpeg' : p.mediaType
-            content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } })
-            dbg('Converted file part to image block:', mediaType, `${(data.length / 1024).toFixed(0)}KB base64`)
+            // Resize if needed (2000×2000 max, 3.75MB raw — matches Claude Code limits)
+            const resized = await maybeResizeImage(data, p.mediaType === 'image/*' ? 'image/jpeg' : p.mediaType)
+            // Final safety check: reject if still over API limit after resize attempt
+            const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024
+            if (resized.data.length > API_IMAGE_MAX_BASE64) {
+              dbg(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) — skipping`)
+              content.push({ type: 'text', text: `[Image too large: ${(resized.data.length / 1024 / 1024).toFixed(1)}MB after resize, API limit is 5MB. Please use a smaller image.]` })
+              continue
+            }
+            content.push({ type: 'image', source: { type: 'base64', media_type: resized.mediaType, data: resized.data } })
+            dbg('Converted file part to image block:', resized.mediaType, `${(resized.data.length / 1024).toFixed(0)}KB base64`, resized.resized ? '(resized)' : '(original)')
           } else if (p.mediaType === 'application/pdf') {
             // PDF → Anthropic document content block
             content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } })
@@ -300,7 +373,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
 
     async doGenerate(options: any) {
       dbg('doGenerate', { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length })
-      const { system, messages } = convertPrompt(options.prompt)
+      const { system, messages } = await convertPrompt(options.prompt)
       const tools = convertTools(options.tools)
       const toolChoice = convertToolChoice(options.toolChoice)
 
@@ -379,7 +452,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
     async doStream(options: any) {
       const t0 = Date.now()
       dbg('doStream', { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length })
-      const { system, messages } = convertPrompt(options.prompt)
+      const { system, messages } = await convertPrompt(options.prompt)
       const tools = convertTools(options.tools)
       const toolChoice = convertToolChoice(options.toolChoice)
 

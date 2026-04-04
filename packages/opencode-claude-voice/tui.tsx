@@ -601,26 +601,46 @@ async function injectText(api: any, text: string) {
   setVoiceError("Failed to inject text — check opencode server")
 }
 
-// ─── Voice Controller: Toggle Start/Stop ──────────────────
+// ─── Voice Controller ─────────────────────────────────────
+
+// Cache dep check result (slow spawnSync — only check once)
+let cachedDeps: { tool: string } | null | undefined = undefined
+
+function stopAndSubmit(api: any) {
+  if (voiceState() !== "recording") return
+  setVoiceState("processing")
+
+  if (activeMic) { activeMic.stop(); activeMic = null }
+
+  // Send CloseStream to get final transcript
+  if (activeWS) activeWS.sendCloseStream()
+
+  // Fallback: if no final arrives in 3s, submit interim
+  setTimeout(() => {
+    if (voiceState() === "processing") {
+      const text = interimText().trim()
+      if (text) {
+        injectText(api, text).then(() => { setVoiceState("idle"); setInterimText("") })
+      } else {
+        setVoiceState("idle"); setInterimText("")
+      }
+      cleanupVoice()
+    }
+  }, 3000)
+}
+
+function stopAndCancel(_api: any) {
+  if (voiceState() === "idle") return
+  setVoiceState("idle")
+  setInterimText("")
+  setVoiceError(null)
+  if (activeMic) { activeMic.stop(); activeMic = null }
+  cleanupVoice()
+}
 
 async function toggleVoice(api: any) {
   if (voiceState() === "recording") {
-    // ── Stop recording ──
-    setVoiceState("processing")
-    setInterimText("")
-
-    if (activeMic) {
-      activeMic.stop()
-      activeMic = null
-    }
-
-    // Give WS a moment to deliver final transcript, then close
-    setTimeout(() => {
-      cleanupVoice()
-      if (voiceState() === "processing") {
-        setVoiceState("idle")
-      }
-    }, 2000)
+    stopAndSubmit(api)
     return
   }
 
@@ -628,8 +648,9 @@ async function toggleVoice(api: any) {
   setVoiceError(null)
   setInterimText("")
 
-  // 1. Check dependencies (auto-installs if possible)
-  const deps = checkVoiceDeps()
+  // 1. Check dependencies (cached — only runs spawnSync once)
+  if (cachedDeps === undefined) cachedDeps = checkVoiceDeps()
+  const deps = cachedDeps
   if (!deps) {
     setVoiceError(
       "Voice requires sox or alsa-utils. Auto-install failed. Try manually: sudo apt install sox"
@@ -812,19 +833,35 @@ const tui = async (api: any) => {
   if (api.kv.get("voiceSilenceMs") === undefined)
     api.kv.set("voiceSilenceMs", 3000)
 
-  // /voice slash command
-  api.command.register(() => [
-    {
-      title: voiceState() === "recording" ? "Stop Voice" : "Start Voice",
-      value: "voice.toggle",
-      slash: { name: "voice", aliases: ["v"] },
-      category: "Provider",
-      onSelect() {
-        toggleVoice(api)
-        api.ui.dialog.clear()
+  // Pre-cache deps on plugin load (async, doesn't block)
+  setTimeout(() => { if (cachedDeps === undefined) cachedDeps = checkVoiceDeps() }, 100)
+
+  // Voice commands
+  api.command.register(() => {
+    const recording = voiceState() === "recording"
+    const cmds: any[] = [
+      {
+        title: recording ? "Voice: Stop & Submit" : "Voice: Start Recording",
+        value: "voice.toggle",
+        slash: { name: "voice", aliases: ["v"] },
+        category: "Provider",
+        onSelect() { toggleVoice(api); api.ui.dialog.clear() },
       },
-    },
-  ])
+    ]
+
+    // Only show stop/cancel when recording
+    if (recording) {
+      cmds.push({
+        title: "Voice: Cancel (discard)",
+        value: "voice.cancel",
+        slash: { name: "vcancel", aliases: ["vc"] },
+        category: "Provider",
+        onSelect() { stopAndCancel(api); api.ui.dialog.clear() },
+      })
+    }
+
+    return cmds
+  })
 
   // Cleanup on plugin dispose
   api.lifecycle.onDispose(() => {

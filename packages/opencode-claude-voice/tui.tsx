@@ -76,15 +76,19 @@ function tryAutoInstall(): string | null {
 }
 
 function checkVoiceDeps(): { tool: string } | null {
-  // Test that tools actually capture audio, not just exist.
-  // SoX `rec` can be installed but produce 0 bytes if no audio backend is configured.
-  // Prefer whichever tool actually works.
-  if (hasCmd("rec") && testRecordingTool("rec")) return { tool: "rec" }
-  if (hasCmd("arecord") && testRecordingTool("arecord")) return { tool: "arecord" }
+  // On Linux, prefer arecord (ALSA) — works reliably with PipeWire/ALSA.
+  // SoX rec can be installed but produce 0 bytes if no audio backend configured.
+  // Skip the slow testRecordingTool probe (2s timeout per tool) — just check existence.
+  // If the chosen tool fails at runtime, we'll show an error then.
+  const isLinux = process.platform === "linux"
 
-  // Tools exist but don't capture? Try the other one without test
-  if (hasCmd("arecord")) return { tool: "arecord" }
-  if (hasCmd("rec")) return { tool: "rec" }
+  if (isLinux) {
+    if (hasCmd("arecord")) return { tool: "arecord" }
+    if (hasCmd("rec")) return { tool: "rec" }
+  } else {
+    if (hasCmd("rec")) return { tool: "rec" }
+    if (hasCmd("arecord")) return { tool: "arecord" }
+  }
 
   // Not found — try auto-install
   const installed = tryAutoInstall()
@@ -639,11 +643,19 @@ function stopAndCancel(_api: any) {
   cleanupVoice()
 }
 
+let lastToggleTs = 0
+
 async function toggleVoice(api: any) {
+  // Debounce: ignore rapid toggles within 500ms (Alt sends ESC+v as two events)
+  const now = Date.now()
+  if (now - lastToggleTs < 500) return
+  lastToggleTs = now
+
   if (voiceState() === "recording") {
     stopAndSubmit(api)
     return
   }
+  if (voiceState() === "processing") return  // Don't restart while processing
 
   // ── Start recording ──
   setVoiceError(null)
@@ -858,8 +870,12 @@ const tui = async (api: any) => {
   if (api.kv.get("voiceSilenceMs") === undefined)
     api.kv.set("voiceSilenceMs", 3000)
 
-  // Pre-cache deps on plugin load (async, doesn't block)
-  setTimeout(() => { if (cachedDeps === undefined) cachedDeps = checkVoiceDeps() }, 100)
+  // Pre-cache deps + token on plugin load (runs in background)
+  // This makes the first /voice near-instant instead of 2-3s
+  setTimeout(() => {
+    if (cachedDeps === undefined) cachedDeps = checkVoiceDeps()
+    getOAuthToken()  // warm the file read cache
+  }, 500)
 
   // Voice commands
   api.command.register(() => {

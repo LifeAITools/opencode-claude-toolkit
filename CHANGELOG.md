@@ -2,6 +2,21 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.4.0] - 2026-04-04
+
+### Fixed
+- **Token refresh stampede** — 6 concurrent sessions detecting expired token simultaneously caused 1064 simultaneous refresh requests, all getting 429, resulting in 40-minute outages. Root cause: no cross-process coordination.
+
+### Added
+- **Filesystem lock** (`mkdir`-based) for token refresh — only one process refreshes at a time, others wait and read from disk. Lock at `~/.claude/.token-refresh-lock/` with 30s stale timeout and PID file.
+- **Triple-check pattern** — Check 1 (cached), Check 2 (re-read store), acquire lock, Check 3 (post-lock re-read). Prevents double-refresh across processes.
+- **ensureAuth dedup** — concurrent calls within one process share a single pending promise instead of each triggering independent refresh.
+- **Race recovery** — after all refresh retries fail, re-reads credential store one final time in case another process succeeded. Logs `TOKEN_REFRESH_RACE_RECOVERY` on success.
+
+### Changed
+- Token refresh now coordinates across processes: ≤5 endpoint requests per cycle instead of 1064
+- Session recovery from token expiry: ~5 seconds instead of ~40 minutes
+
 ## [0.3.3] - 2026-04-04
 
 ### Fixed

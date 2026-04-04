@@ -31,13 +31,44 @@ let keepAliveTimer: ReturnType<typeof setInterval> | null = null
 
 // ─── Helper: Check Voice Dependencies ─────────────────────
 
+function hasCmd(cmd: string): boolean {
+  return spawnSync("which", [cmd], { encoding: "utf8" }).status === 0
+}
+
+function tryAutoInstall(): string | null {
+  // Detect package manager and try to install sox automatically
+  const installers: [string, string[]][] = [
+    ["apt", ["apt-get", "install", "-y", "sox", "alsa-utils"]],
+    ["brew", ["brew", "install", "sox"]],
+    ["pacman", ["pacman", "-S", "--noconfirm", "sox", "alsa-utils"]],
+    ["dnf", ["dnf", "install", "-y", "sox", "alsa-utils"]],
+  ]
+
+  for (const [pm, cmd] of installers) {
+    if (!hasCmd(pm)) continue
+    try {
+      // Try with sudo for apt/pacman/dnf, without for brew
+      const needsSudo = pm !== "brew"
+      const fullCmd = needsSudo ? ["sudo", ...cmd] : cmd
+      const result = spawnSync(fullCmd[0], fullCmd.slice(1), { encoding: "utf8", timeout: 60_000, stdio: "pipe" })
+      if (result.status === 0) {
+        // Verify installation
+        if (hasCmd("rec")) return "rec"
+        if (hasCmd("arecord")) return "arecord"
+      }
+    } catch {}
+  }
+  return null
+}
+
 function checkVoiceDeps(): { tool: string } | null {
   // Prefer SoX `rec` (cross-platform), fall back to `arecord` (ALSA/Linux)
-  const recResult = spawnSync("which", ["rec"], { encoding: "utf8" })
-  if (recResult.status === 0) return { tool: "rec" }
+  if (hasCmd("rec")) return { tool: "rec" }
+  if (hasCmd("arecord")) return { tool: "arecord" }
 
-  const arecordResult = spawnSync("which", ["arecord"], { encoding: "utf8" })
-  if (arecordResult.status === 0) return { tool: "arecord" }
+  // Not found — try auto-install
+  const installed = tryAutoInstall()
+  if (installed) return { tool: installed }
 
   return null
 }
@@ -563,11 +594,11 @@ async function toggleVoice(api: any) {
   setVoiceError(null)
   setInterimText("")
 
-  // 1. Check dependencies
+  // 1. Check dependencies (auto-installs if possible)
   const deps = checkVoiceDeps()
   if (!deps) {
     setVoiceError(
-      "Voice requires sox (rec) or alsa-utils (arecord). Install: apt install sox / brew install sox"
+      "Voice requires sox or alsa-utils. Auto-install failed. Try manually: sudo apt install sox"
     )
     return
   }

@@ -35,6 +35,18 @@ function hasCmd(cmd: string): boolean {
   return spawnSync("which", [cmd], { encoding: "utf8" }).status === 0
 }
 
+/** Test that a recording tool actually captures audio (not just installed) */
+function testRecordingTool(tool: string): boolean {
+  try {
+    const args = tool === "rec"
+      ? ["-q", "-r", "16000", "-c", "1", "-b", "16", "-e", "signed-integer", "-t", "raw", "-"]
+      : ["-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "raw", "-q", "-"]
+    const proc = spawnSync(tool, args, { timeout: 2000, maxBuffer: 64 * 1024, stdio: ["pipe", "pipe", "pipe"] })
+    // If we got any audio data, the tool works
+    return proc.stdout !== null && proc.stdout.length > 100
+  } catch { return false }
+}
+
 function tryAutoInstall(): string | null {
   // Detect package manager and try to install sox automatically
   const installers: [string, string[]][] = [
@@ -62,9 +74,15 @@ function tryAutoInstall(): string | null {
 }
 
 function checkVoiceDeps(): { tool: string } | null {
-  // Prefer SoX `rec` (cross-platform), fall back to `arecord` (ALSA/Linux)
-  if (hasCmd("rec")) return { tool: "rec" }
+  // Test that tools actually capture audio, not just exist.
+  // SoX `rec` can be installed but produce 0 bytes if no audio backend is configured.
+  // Prefer whichever tool actually works.
+  if (hasCmd("rec") && testRecordingTool("rec")) return { tool: "rec" }
+  if (hasCmd("arecord") && testRecordingTool("arecord")) return { tool: "arecord" }
+
+  // Tools exist but don't capture? Try the other one without test
   if (hasCmd("arecord")) return { tool: "arecord" }
+  if (hasCmd("rec")) return { tool: "rec" }
 
   // Not found — try auto-install
   const installed = tryAutoInstall()

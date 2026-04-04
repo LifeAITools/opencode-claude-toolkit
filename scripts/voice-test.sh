@@ -109,32 +109,41 @@ pass "Created $PROJECT_DIR/.opencode/tui.json"
 info "  Cache plugin: $PLUGIN_DIR (./tui export)"
 info "  Voice plugin: $PLUGIN_DIR/voice-tui.tsx"
 
-# 6. Microphone test
+# 6. Microphone test (try arecord first — more reliable on Linux)
 echo ""
 echo "6. Microphone Quick Test"
-if which rec >/dev/null 2>&1; then
-  # Record 1 second, check if we get data
-  TEMPFILE=$(mktemp /tmp/mic-test-XXXXXX.raw)
-  timeout 2 rec -q -r 16000 -c 1 -b 16 -e signed-integer -t raw "$TEMPFILE" trim 0 1 2>/dev/null || true
-  SIZE=$(stat -c%s "$TEMPFILE" 2>/dev/null || stat -f%z "$TEMPFILE" 2>/dev/null || echo "0")
-  rm -f "$TEMPFILE"
-  if [ "$SIZE" -gt 1000 ]; then
-    pass "Microphone working ($SIZE bytes captured in 1s)"
-  else
-    warn "Microphone may not be available (got $SIZE bytes). Voice will fail if no mic access."
-  fi
-elif which arecord >/dev/null 2>&1; then
-  TEMPFILE=$(mktemp /tmp/mic-test-XXXXXX.raw)
+MIC_OK=false
+TEMPFILE=$(mktemp /tmp/mic-test-XXXXXX.raw)
+
+# Try arecord first (works better on Linux with ALSA/PipeWire)
+if ! $MIC_OK && which arecord >/dev/null 2>&1; then
   timeout 2 arecord -f S16_LE -r 16000 -c 1 -t raw -q "$TEMPFILE" 2>/dev/null || true
   SIZE=$(stat -c%s "$TEMPFILE" 2>/dev/null || echo "0")
-  rm -f "$TEMPFILE"
   if [ "$SIZE" -gt 1000 ]; then
-    pass "Microphone working ($SIZE bytes captured)"
-  else
-    warn "Microphone may not be available. Check: arecord -l"
+    pass "Microphone working via arecord ($SIZE bytes)"
+    MIC_OK=true
   fi
-else
-  warn "Skipping mic test — no recording tool"
+fi
+
+# Try SoX rec
+if ! $MIC_OK && which rec >/dev/null 2>&1; then
+  > "$TEMPFILE"  # truncate
+  timeout 2 rec -q -r 16000 -c 1 -b 16 -e signed-integer -t raw "$TEMPFILE" trim 0 1 2>/dev/null || true
+  SIZE=$(stat -c%s "$TEMPFILE" 2>/dev/null || stat -f%z "$TEMPFILE" 2>/dev/null || echo "0")
+  if [ "$SIZE" -gt 1000 ]; then
+    pass "Microphone working via SoX ($SIZE bytes)"
+    MIC_OK=true
+  fi
+fi
+
+rm -f "$TEMPFILE"
+
+if ! $MIC_OK; then
+  if which arecord >/dev/null 2>&1 || which rec >/dev/null 2>&1; then
+    warn "Recording tools exist but captured 0 bytes. Check: arecord -l"
+  else
+    warn "No recording tool available"
+  fi
 fi
 
 # Summary

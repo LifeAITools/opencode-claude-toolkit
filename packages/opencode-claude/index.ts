@@ -46,10 +46,17 @@ const SCOPES = [
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000
 
 // Models available via Max/Pro subscription
-const MAX_MODELS: Record<string, { name: string; context: number; output: number }> = {
-  'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', context: 1000000, output: 16384 },
-  'claude-opus-4-6': { name: 'Claude Opus 4.6', context: 1000000, output: 16384 },
-  'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', context: 200000, output: 8192 },
+// Cost per million tokens — equivalent API pricing for savings display.
+// Max subscription doesn't bill per-token, but showing equivalent savings
+// helps users understand the value of caching.
+// Source: https://docs.anthropic.com/en/docs/about-claude/models#model-comparison
+const MAX_MODELS: Record<string, { name: string; context: number; output: number; cost: { input: number; output: number; cacheRead: number; cacheWrite: number } }> = {
+  'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', context: 1000000, output: 16384,
+    cost: { input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 } },
+  'claude-opus-4-6': { name: 'Claude Opus 4.6', context: 1000000, output: 16384,
+    cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } },
+  'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', context: 200000, output: 8192,
+    cost: { input: 0.80, output: 4, cacheRead: 0.08, cacheWrite: 1 } },
 }
 
 // ─── PKCE Helpers ──────────────────────────────────────────
@@ -271,7 +278,7 @@ export default {
               },
               interleaved: is46 ? { field: 'reasoning_content' as const } : false,
             },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+            cost: { input: info.cost.input, output: info.cost.output, cache: { read: info.cost.cacheRead, write: info.cost.cacheWrite } },
             limit: { context: info.context, output: info.output },
             status: 'active',
             options: {},

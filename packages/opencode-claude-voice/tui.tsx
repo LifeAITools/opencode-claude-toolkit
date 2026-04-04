@@ -801,27 +801,39 @@ function VoiceOverlay(props: { api: any }) {
   }
 
   // Register global keyboard handler for voice hotkeys
-  // Claude Code uses: hold Space (5 rapid presses) or modifier+key (instant)
   // We use: Alt+V to start/stop (modifier = instant, no conflict with typing)
   //         Escape to cancel while recording
   if (useKeyboard) {
     useKeyboard((evt: any) => {
-      // Alt+V — toggle voice (no conflict: Alt+V isn't used by opencode or terminals)
-      if (evt.meta && evt.name === "v" && !evt.ctrl && !evt.shift) {
+      const key = evt.name ?? evt.key ?? ""
+      const isMeta = evt.meta === true || evt.alt === true
+      const isCtrl = evt.ctrl === true
+
+      // Alt+V or Meta+V — toggle voice
+      if (isMeta && (key === "v" || key === "√") && !isCtrl && !evt.shift) {
         toggleVoice(props.api)
         return
       }
-      // Ctrl+Alt+V — same (fallback if Alt+V is intercepted by OS/terminal)
-      if (evt.ctrl && evt.meta && evt.name === "v") {
+      // Ctrl+Alt+V — fallback
+      if (isCtrl && isMeta && (key === "v" || key === "√")) {
         toggleVoice(props.api)
         return
       }
       // Escape while recording — cancel (discard)
-      if (evt.name === "escape" && voiceState() === "recording") {
+      if ((key === "escape" || key === "Escape") && voiceState() === "recording") {
         stopAndCancel(props.api)
         return
       }
     })
+  } else {
+    // useKeyboard not available — log for debugging
+    try {
+      const { appendFileSync } = require("fs")
+      const { join } = require("path")
+      const { homedir } = require("os")
+      appendFileSync(join(homedir(), ".claude", "claude-max-debug.log"),
+        `[${new Date().toISOString()}] VOICE_PLUGIN: useKeyboard not available (require @opentui/solid failed)\n`)
+    } catch {}
   }
 
   return (

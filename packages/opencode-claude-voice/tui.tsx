@@ -25,6 +25,7 @@ const [voiceError, setVoiceError] = createSignal<string | null>(null)
 // ─── Module-level state for active recording / WS ─────────
 
 let activeMic: { stop: () => void } | null = null
+let activeWS: { sendAudio: (b: Buffer) => void; sendCloseStream: () => void; close: () => void } | null = null
 let activeSocket: ReturnType<typeof import("net").Socket.prototype.on> | null =
   null
 let keepAliveTimer: ReturnType<typeof setInterval> | null = null
@@ -650,91 +651,62 @@ async function toggleVoice(api: any) {
   const silenceThreshold = 500
 
   // 4. Track silence for auto-stop
-  let lastVoiceTs = Date.now()
+  // DON'T set lastVoiceTs until mic actually starts producing audio
+  let lastVoiceTs = 0  // 0 = mic not started yet, silence detection disabled
+  let gotFirstChunk = false
   let finalTranscript = ""
   let gotFinal = false
 
-  // 5. Connect WebSocket
-  const ws = connectVoiceWS(token, {
-    onInterim(text: string) {
-      setInterimText(text)
-      lastVoiceTs = Date.now() // Speaking detected
-    },
-    onFinal(text: string) {
-      finalTranscript = text
-      gotFinal = true
-      setVoiceState("processing")
+  // Buffer audio chunks while WebSocket connects
+  const audioBuffer: Buffer[] = []
+  let wsReady = false
 
-      // Inject final text into prompt
-      injectText(api, finalTranscript).then(() => {
-        setVoiceState("idle")
-        setInterimText("")
-      })
-
-      // Stop mic
-      if (activeMic) {
-        activeMic.stop()
-        activeMic = null
-      }
-      cleanupVoice()
-    },
-    onError(err: string) {
-      setVoiceError(err)
-      setVoiceState("idle")
-      cleanupVoice()
-    },
-    onClose() {
-      if (!gotFinal && voiceState() !== "idle") {
-        setVoiceState("idle")
-      }
-    },
-  })
-
-  // 6. Start microphone
+  // 5. Start microphone FIRST (immediate — no network delay)
+  setVoiceState("recording")
   try {
-    setVoiceState("recording")
-
     activeMic = startMicRecording(
       (chunk: Buffer) => {
-        // Send audio to WebSocket
-        ws.sendAudio(chunk)
+        if (!gotFirstChunk) {
+          gotFirstChunk = true
+          lastVoiceTs = Date.now()  // Start silence timer only on first audio
+        }
 
-        // Silence detection: compute RMS
-        const rms = computeRMS(chunk)
-        if (rms >= silenceThreshold) {
-          lastVoiceTs = Date.now()
-        } else if (Date.now() - lastVoiceTs > silenceMs && !gotFinal) {
-          // Silence exceeded threshold — auto-stop
-          ws.sendCloseStream()
-          setVoiceState("processing")
-          if (activeMic) {
-            activeMic.stop()
-            activeMic = null
-          }
+        // Buffer or send audio
+        if (wsReady && activeWS) {
+          activeWS.sendAudio(chunk)
+        } else {
+          audioBuffer.push(chunk)
+        }
 
-          // Wait for final transcript with timeout
-          setTimeout(() => {
-            if (!gotFinal) {
-              // No final transcript arrived — inject interim if available
-              const interim = interimText()
-              if (interim.trim().length > 0) {
-                injectText(api, interim.trim()).then(() => {
-                  setVoiceState("idle")
-                  setInterimText("")
-                })
-              } else {
-                setVoiceState("idle")
-                setInterimText("")
+        // Silence detection: only after we've been recording for at least 1 second
+        if (gotFirstChunk && Date.now() - lastVoiceTs > 1000) {
+          const rms = computeRMS(chunk)
+          if (rms >= silenceThreshold) {
+            lastVoiceTs = Date.now()
+          } else if (Date.now() - lastVoiceTs > silenceMs && !gotFinal) {
+            // Silence exceeded threshold — auto-stop
+            if (activeWS) activeWS.sendCloseStream()
+            setVoiceState("processing")
+            if (activeMic) { activeMic.stop(); activeMic = null }
+            // Wait for final transcript with timeout
+            setTimeout(() => {
+              if (!gotFinal) {
+                const interim = interimText()
+                if (interim.trim().length > 0) {
+                  injectText(api, interim.trim()).then(() => { setVoiceState("idle"); setInterimText("") })
+                } else {
+                  setVoiceState("idle"); setInterimText("")
+                }
+                if (activeWS) activeWS.close()
               }
-              ws.close()
-            }
-          }, 3000)
+            }, 3000)
+          }
         }
       },
       () => {
         // Mic ended (process exited)
-        if (voiceState() === "recording") {
-          ws.sendCloseStream()
+        if (voiceState() === "recording" && activeWS) {
+          activeWS.sendCloseStream()
           setVoiceState("processing")
 
           // Fallback timeout
@@ -746,7 +718,7 @@ async function toggleVoice(api: any) {
               }
               setVoiceState("idle")
               setInterimText("")
-              ws.close()
+              if (activeWS) activeWS.close()
             }
           }, 3000)
         }
@@ -755,8 +727,43 @@ async function toggleVoice(api: any) {
   } catch (err: any) {
     setVoiceError(`Failed to start mic: ${err.message}`)
     setVoiceState("idle")
-    ws.close()
+    return
   }
+
+  // 6. Connect WebSocket AFTER mic starts (so audio buffers during connect)
+  const ws = connectVoiceWS(token, {
+    onInterim(text: string) {
+      setInterimText(text)
+      lastVoiceTs = Date.now()
+    },
+    onFinal(text: string) {
+      finalTranscript = text
+      gotFinal = true
+      setVoiceState("processing")
+      injectText(api, finalTranscript).then(() => {
+        setVoiceState("idle")
+        setInterimText("")
+      })
+      if (activeMic) { activeMic.stop(); activeMic = null }
+      cleanupVoice()
+    },
+    onError(err: string) {
+      setVoiceError(err)
+      setVoiceState("idle")
+      cleanupVoice()
+    },
+    onClose() {
+      if (!gotFinal && voiceState() !== "idle") setVoiceState("idle")
+    },
+  })
+  activeWS = ws
+  wsReady = true
+
+  // Flush buffered audio
+  for (const chunk of audioBuffer) {
+    ws.sendAudio(chunk)
+  }
+  audioBuffer.length = 0
 }
 
 // ─── VoiceOverlay Component ───────────────────────────────

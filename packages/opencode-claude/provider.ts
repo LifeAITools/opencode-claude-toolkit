@@ -374,6 +374,10 @@ function convertTools(tools?: any[]): any[] | undefined {
       description: normalizeCwd(t.description ?? ''),
       input_schema: normalizeToolSchema(t.inputSchema ?? { type: 'object', properties: {} }),
     }))
+    // Sort by name for deterministic prefix — MCP servers register tools in non-deterministic
+    // order (depends on which server responds first at startup). Without sorting, the cache
+    // prefix diverges at tool ~#11 and cross-process cache sharing fails entirely.
+    .sort((a: any, b: any) => a.name.localeCompare(b.name))
 }
 
 function convertToolChoice(tc?: any): any {

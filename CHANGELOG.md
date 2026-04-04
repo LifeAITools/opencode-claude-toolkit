@@ -2,6 +2,19 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.3.3] - 2026-04-04
+
+### Fixed
+- **Cost display bug** — auth.loader was zeroing out model costs after config hook set them, causing sidebar to show "N/A savings" instead of actual dollar savings
+
+### Added
+- **Keepalive config via opencode.json** — `options.keepalive` (bool), `options.keepaliveInterval` (seconds), `options.keepaliveIdle` (seconds) in provider config, with env var fallback
+- **Compaction hook** — `experimental.session.compacting` injects cache optimization context into compaction summaries; optional full prompt replacement via `options.customCompaction`
+- **Fine-grained tool streaming** — `fine-grained-tool-streaming-2025-05-14` beta header enables streaming partial tool arguments
+
+### Changed
+- Provider options from `opencode.json` now flow through to `createClaudeMax()` for runtime configuration
+
 ## [0.3.2] - 2026-04-04
 
 ### Fixed

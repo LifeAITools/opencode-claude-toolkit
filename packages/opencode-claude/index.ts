@@ -302,16 +302,16 @@ export default {
         // Called at startup — return SDK options with per-request fetch
         // Mirrors src/services/api/client.ts:88-315 (getAnthropicClient)
         loader: async (_getAuth: () => Promise<any>, provider: any) => {
-          dbg('auth.loader called', { providerModels: Object.keys(provider.models ?? {}) })
-          for (const m of Object.values(provider.models ?? {}) as any[]) {
-            if (m.cost) m.cost = { input: 0, output: 0, cache: { read: 0, write: 0 } }
-          }
+          dbg('auth.loader called', { providerModels: Object.keys(provider.models ?? {}), providerOptions: provider.options })
+          // NOTE: Do NOT zero out model costs here — we set equivalent API pricing
+          // in the config hook for the sidebar savings display to work.
 
-          // Only pass credentialsPath — let SDK's FileCredentialStore
-          // handle token reading AND auto-refresh (with triple-check)
+          // Pass provider options through so createClaudeMax can read keepalive/debug config
+          // from opencode.json → provider.claude-max.options
           dbg('auth.loader: credPath:', creds.credPath)
           return {
             credentialsPath: creds.credPath,
+            providerOptions: provider.options ?? {},
           }
         },
 
@@ -432,6 +432,21 @@ export default {
             },
           },
         ],
+      },
+
+      // ─── Compaction: inject cache context ────────────────
+      "experimental.session.compacting": async (_input: any, output: any) => {
+        output.context.push(`## Cache Optimization Notes
+- This session uses Anthropic prompt caching with keepalive
+- Cache prefix (system + tools ≈30K tokens) is shared across all sessions
+- When continuing, reuse exact tool names and file paths to maximize cache hits
+- Cache read is 10x cheaper than uncached input — preserving conversation structure matters`)
+
+        // If user configured a custom compaction prompt, use it
+        const customPrompt = (creds as any)._providerOptions?.customCompaction
+        if (typeof customPrompt === 'string' && customPrompt.length > 0) {
+          output.prompt = customPrompt
+        }
       },
     }
   },

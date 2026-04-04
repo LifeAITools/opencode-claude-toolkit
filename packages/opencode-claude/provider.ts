@@ -688,21 +688,30 @@ export interface ClaudeMaxProviderOptions {
 }
 
 export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
-  dbg('createClaudeMax called with:', { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, allKeys: Object.keys(options) })
+  // Provider options from opencode.json → provider.claude-max.options
+  // These override env vars for user-friendly configuration.
+  const providerOpts = (options as any).providerOptions ?? {}
+
+  const keepaliveEnabled = providerOpts.keepalive !== undefined
+    ? !!providerOpts.keepalive
+    : process.env.CLAUDE_MAX_KEEPALIVE !== '0'
+  const keepaliveInterval = providerOpts.keepaliveInterval
+    ? parseInt(providerOpts.keepaliveInterval) * 1000
+    : (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '120') || 120) * 1000
+  const keepaliveIdle = providerOpts.keepaliveIdle
+    ? parseInt(providerOpts.keepaliveIdle) * 1000
+    : process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity
+
+  dbg('createClaudeMax called with:', { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts) })
   const sdk = new ClaudeCodeSDK({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
     expiresAt: options.expiresAt,
     credentialsPath: options.credentialsPath,
     keepalive: {
-      enabled: process.env.CLAUDE_MAX_KEEPALIVE !== '0',
-      // Fire at ~120s (2 min), giving ~180s margin before 5-min cache TTL for retries.
-      // Override with CLAUDE_MAX_KEEPALIVE_INTERVAL env var (seconds).
-      intervalMs: (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '120') || 120) * 1000,
-      // Stop keepalive after 30 min of no real user activity.
-      // Keep cache alive as long as the process runs. Keepalive costs are negligible
-      // (1 output token, cache reads only, no quota impact). Override with env var if needed.
-      idleTimeoutMs: process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity,
+      enabled: keepaliveEnabled,
+      intervalMs: keepaliveInterval,
+      idleTimeoutMs: keepaliveIdle,
       onTick: (tick) => {
         dbg(`keepalive tick: idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
       },

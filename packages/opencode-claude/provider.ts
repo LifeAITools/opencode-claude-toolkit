@@ -53,7 +53,10 @@ interface LanguageModelV3 {
 // Claude Code: 2000×2000 max, 3.75MB raw (5MB base64), resize with sharp/jimp
 // We try jimp (pure JS, works in Bun) — lazy-loaded, no hard dependency.
 
-const IMAGE_MAX_DIM = 2000
+// Anthropic vision model processes at 1568px max on long edge — anything larger
+// gets server-side downscaled with no quality benefit. We resize client-side to
+// match exactly, saving upload bandwidth and tokens while preserving full quality.
+const IMAGE_MAX_LONG_EDGE = 1568
 const IMAGE_TARGET_RAW_BYTES = 3.75 * 1024 * 1024   // 3.75 MB raw → ≤5 MB base64
 
 let _jimp: any = undefined
@@ -91,14 +94,15 @@ async function maybeResizeImage(
     const { Jimp } = jimpMod
     const img = await Jimp.fromBuffer(rawBytes)
     const w = img.width, h = img.height
-    let needsResize = w > IMAGE_MAX_DIM || h > IMAGE_MAX_DIM || needsSizeReduction
+    const longEdge = Math.max(w, h)
+    let needsResize = longEdge > IMAGE_MAX_LONG_EDGE || needsSizeReduction
 
     if (!needsResize) {
       return { data: base64Data, mediaType, resized: false }
     }
 
-    // Calculate target dimensions
-    let scale = Math.min(IMAGE_MAX_DIM / w, IMAGE_MAX_DIM / h, 1)
+    // Scale so long edge = 1568px (model's native max), preserving aspect ratio
+    let scale = Math.min(IMAGE_MAX_LONG_EDGE / longEdge, 1)
 
     // If still too large after dimension cap, reduce further
     if (needsSizeReduction && scale === 1) {

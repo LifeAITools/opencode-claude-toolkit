@@ -242,6 +242,14 @@ export default {
             api: { id, url: 'https://api.anthropic.com', npm: providerPath },
             providerID: 'claude-max',
             reasoning: is46,
+            // modalities — opencode reads THIS (not capabilities.input/output) to decide
+            // whether to pass images/PDFs through or strip them with error text.
+            // See provider.ts unsupportedParts() → model.capabilities.input[modality]
+            // and provider.ts model building → model.modalities?.input?.includes("image")
+            modalities: {
+              input: ['text', 'image', 'pdf'],
+              output: ['text'],
+            },
             capabilities: {
               temperature: true,
               reasoning: is46,

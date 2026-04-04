@@ -2,6 +2,25 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.5.0] - 2026-04-04
+
+### Added
+- **Voice input** — `/voice` command (or `/v`) toggles voice-to-text recording in opencode TUI
+- **Voice STT** — streams mic audio to Anthropic's Deepgram-powered WebSocket endpoint (`wss://api.anthropic.com/api/ws/speech_to_text/voice_stream`)
+- **Recording indicator** — `app` slot overlay shows "🔴 Recording..." with live interim transcript
+- **Silence auto-stop** — recording stops after configurable silence period (default 3s, via `voiceSilenceMs` in api.kv)
+- **Voice dependency check** — detects SoX/arecord, shows install hint via toast if missing
+- **Voice config** — `voiceEnabled` and `voiceSilenceMs` persisted via opencode's `api.kv`
+- **Text injection** — transcribed text inserted into prompt via `api.client.tui.appendPrompt()` with HTTP fallback
+- **Lifecycle cleanup** — mic process killed and WebSocket closed on plugin dispose
+
+### Technical
+- All voice functions inlined in tui.tsx (avoids cross-process import issues)
+- Raw WebSocket implementation (RFC 6455 frame parsing, no ws dependency)
+- PCM 16kHz/16-bit/mono via SoX `rec` or ALSA `arecord`
+- RMS-based silence detection with configurable threshold
+- Toggle UX (not hold-to-talk — terminal key release detection too fragile)
+
 ## [0.4.1] - 2026-04-04
 
 ### Fixed

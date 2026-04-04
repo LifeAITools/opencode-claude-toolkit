@@ -801,14 +801,22 @@ function VoiceOverlay(props: { api: any }) {
   }
 
   // Register global keyboard handler for voice hotkeys
+  // Claude Code uses: hold Space (5 rapid presses) or modifier+key (instant)
+  // We use: Alt+V to start/stop (modifier = instant, no conflict with typing)
+  //         Escape to cancel while recording
   if (useKeyboard) {
     useKeyboard((evt: any) => {
-      // Ctrl+Shift+V — toggle voice (start or stop+submit)
-      if (evt.ctrl && evt.shift && evt.name === "v") {
+      // Alt+V — toggle voice (no conflict: Alt+V isn't used by opencode or terminals)
+      if (evt.meta && evt.name === "v" && !evt.ctrl && !evt.shift) {
         toggleVoice(props.api)
         return
       }
-      // Escape while recording — cancel
+      // Ctrl+Alt+V — same (fallback if Alt+V is intercepted by OS/terminal)
+      if (evt.ctrl && evt.meta && evt.name === "v") {
+        toggleVoice(props.api)
+        return
+      }
+      // Escape while recording — cancel (discard)
       if (evt.name === "escape" && voiceState() === "recording") {
         stopAndCancel(props.api)
         return
@@ -829,7 +837,7 @@ function VoiceOverlay(props: { api: any }) {
       >
         <text bold>
           {voiceState() === "recording"
-            ? "Recording... (Ctrl+Shift+V to stop, Esc to cancel)"
+            ? "Recording... (Alt+V to stop & submit, Esc to cancel)"
             : "Processing..."}
         </text>
         <text wrap="truncate">{interimText() || "Listening..."}</text>

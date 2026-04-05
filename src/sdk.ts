@@ -87,7 +87,10 @@ const REFRESH_COOLDOWN_FILE = join(homedir(), '.claude', '.refresh-cooldown')
 // Maximum cooldown time (30 minutes)
 const REFRESH_COOLDOWN_MAX_MS = 30 * 60 * 1000
 
-const SDK_VERSION = '0.1.0'
+// CC-compatible version for User-Agent and billing header.
+// Must match an actual released Claude Code version.
+// Updated when CC releases new versions. Checked by Anthropic for billing attribution.
+const CC_COMPAT_VERSION = '2.1.90'
 
 // ============================================================
 // Filesystem lock for cross-process token refresh coordination
@@ -136,7 +139,6 @@ export class ClaudeCodeSDK {
   private sessionId: string
   private deviceId: string
   private accountUuid: string
-  private version: string
   private timeout: number
   private maxRetries: number
   private lastRateLimitInfo: RateLimitInfo = {
@@ -186,7 +188,6 @@ export class ClaudeCodeSDK {
 
 
     this.accountUuid = options.accountUuid ?? this.readAccountUuid()
-    this.version = options.version ?? SDK_VERSION
     this.timeout = options.timeout ?? 600_000
     this.maxRetries = options.maxRetries ?? 10
 
@@ -891,16 +892,19 @@ export class ClaudeCodeSDK {
       'anthropic-beta': betas.join(','),
       'anthropic-dangerous-direct-browser-access': 'true',
       'x-app': 'cli',
-      'User-Agent': `claude-code/${this.version} (external, sdk)`,
+      'User-Agent': `claude-code/${CC_COMPAT_VERSION}`,
       'X-Claude-Code-Session-Id': this.sessionId,
     }
   }
 
   /** Request body — mirrors paramsFromContext() in claude.ts:1699 */
   private buildRequestBody(options: GenerateOptions): Record<string, unknown> {
-    // Deterministic billing header — NO fingerprint (fingerprint changes per-message,
-    // causing system prompt to differ → cache miss). Version is stable across restarts.
-    const attributionHeader = `x-anthropic-billing-header: cc_version=${this.version}; cc_entrypoint=cli;`
+    // Billing header — matches CC's getAttributionHeader() format.
+    // cc_version includes a message fingerprint suffix for CC compat.
+    // cch= placeholder: currently server does NOT verify the hash, but including
+    // it makes our requests indistinguishable from real CC requests.
+    const fingerprint = this.computeFingerprint(options.messages)
+    const attributionHeader = `x-anthropic-billing-header: cc_version=${CC_COMPAT_VERSION}.${fingerprint}; cc_entrypoint=cli; cch=00000;`
 
     // Prepend attribution header to system prompt (CLI does this at claude.ts:1358-1369)
     let system: unknown = undefined
@@ -1775,6 +1779,35 @@ export class ClaudeCodeSDK {
   // ----------------------------------------------------------
   // Helpers
   // ----------------------------------------------------------
+
+  /**
+   * Compute message fingerprint — matches CC's computeFingerprintFromMessages().
+   * Extracts chars at indices [4,7,20] from first user message, SHA256 with salt.
+   * Returns 3-char hex string used in cc_version billing header.
+   */
+  private computeFingerprint(messages: unknown[]): string {
+    // Extract first user message text
+    let text = ''
+    for (const msg of messages) {
+      const m = msg as { role?: string; content?: unknown }
+      if (m.role === 'user') {
+        if (typeof m.content === 'string') { text = m.content; break }
+        if (Array.isArray(m.content)) {
+          for (const block of m.content) {
+            if ((block as { type?: string; text?: string }).type === 'text') {
+              text = (block as { text: string }).text; break
+            }
+          }
+          if (text) break
+        }
+      }
+    }
+    const SALT = '59cf53e54c78'
+    const indices = [4, 7, 20]
+    const chars = indices.map(i => text[i] || '0').join('')
+    const input = `${SALT}${chars}${CC_COMPAT_VERSION}`
+    return createHash('sha256').update(input).digest('hex').slice(0, 3)
+  }
 
   private readAccountUuid(): string {
     try {

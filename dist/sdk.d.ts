@@ -7,7 +7,6 @@ export declare class ClaudeCodeSDK {
     private sessionId;
     private deviceId;
     private accountUuid;
-    private version;
     private timeout;
     private maxRetries;
     private lastRateLimitInfo;
@@ -176,6 +175,12 @@ export declare class ClaudeCodeSDK {
     private parseRateLimitHeaders;
     private getRetryDelay;
     private sleep;
+    /**
+     * Compute message fingerprint — matches CC's computeFingerprintFromMessages().
+     * Extracts chars at indices [4,7,20] from first user message, SHA256 with salt.
+     * Returns 3-char hex string used in cc_version billing header.
+     */
+    private computeFingerprint;
     private readAccountUuid;
 }
 /**

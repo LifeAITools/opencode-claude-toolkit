@@ -13,6 +13,14 @@ export declare class ClaudeCodeSDK {
     private lastRateLimitInfo;
     private pending401;
     private lastFailedToken;
+    private pendingAuth;
+    private initialLoad;
+    private tokenRotationTimer;
+    private lastRefreshAttemptAt;
+    private refreshConsecutive429s;
+    private proactiveRefreshFailures;
+    private tokenIssuedAt;
+    private onTokenStatus;
     private keepaliveConfig;
     private keepaliveRegistry;
     private _pendingSnapshotModel;
@@ -26,6 +34,7 @@ export declare class ClaudeCodeSDK {
     private keepaliveCacheWrittenAt;
     private keepaliveRetryTimer;
     private keepaliveLastRealActivityAt;
+    private cacheAnchorMessageCount;
     constructor(options?: ClaudeCodeSDKOptions);
     /** Non-streaming: send messages, get full response */
     generate(options: GenerateOptions): Promise<GenerateResponse>;
@@ -91,10 +100,61 @@ export declare class ClaudeCodeSDK {
      * 3. If still expired, do the refresh
      */
     private ensureAuth;
+    private _doEnsureAuth;
     /** Load credentials from the credential store */
     private loadFromStore;
     /** 5-minute buffer before actual expiry — from oauth/client.ts:344-353 */
     private isTokenExpired;
+    /**
+     * Force an immediate token refresh (like what happens automatically).
+     * Use when you know the token is stale or as a manual recovery.
+     * Returns true on success, false on failure.
+     */
+    forceRefreshToken(): Promise<boolean>;
+    /**
+     * Trigger a full browser-based OAuth re-login flow.
+     * Use as last resort when refresh_token itself is dead.
+     * Imports and calls oauthLogin() from auth.ts.
+     * Returns true on success (new tokens saved), false on failure/timeout.
+     */
+    forceReLogin(): Promise<boolean>;
+    /**
+     * Get current token health info — useful for UI status indicators.
+     * Note: if called immediately after construction, tokens may still be loading.
+     * Use the async version getTokenHealthAsync() for guaranteed data.
+     */
+    getTokenHealth(): {
+        expiresAt: number | null;
+        expiresInMs: number;
+        lifetimePct: number;
+        failedRefreshes: number;
+        status: 'healthy' | 'warning' | 'critical' | 'expired' | 'unknown';
+    };
+    /** Async version — awaits initial token load before returning health. */
+    getTokenHealthAsync(): Promise<{
+        expiresAt: number | null;
+        expiresInMs: number;
+        lifetimePct: number;
+        failedRefreshes: number;
+        status: 'healthy' | 'warning' | 'critical' | 'expired' | 'unknown';
+    }>;
+    /**
+     * Schedule a background refresh at ~50% of token lifetime.
+     * With ~11h tokens, fires at ~5.5h — leaving 5.5h for retries.
+     * Emits escalating warnings as token approaches expiry.
+     */
+    private scheduleProactiveRotation;
+    /**
+     * Background refresh — runs silently, never throws.
+     * Emits escalating status events on failure.
+     * On permanent failure: emits 'expired' so UI can trigger re-login.
+     */
+    private proactiveRefresh;
+    private emitTokenStatus;
+    private isRefreshOnCooldown;
+    private setRefreshCooldown;
+    private clearRefreshCooldown;
+    private dbg;
     /**
      * Triple-check refresh — mirrors auth.ts:1472-1556.
      * Check store again (race), then refresh, then check store on error.

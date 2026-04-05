@@ -712,6 +712,22 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     refreshToken: options.refreshToken,
     expiresAt: options.expiresAt,
     credentialsPath: options.credentialsPath,
+    onTokenStatus: (event) => {
+      const emoji = event.level === 'rotated' ? '✅' : event.level === 'warning' ? '⚠️' : event.level === 'critical' ? '🔴' : '💀'
+      const line = `${emoji} TOKEN ${event.level.toUpperCase()}: ${event.message} (expires in ${Math.round(event.expiresInMs / 60000)}min, failures=${event.failedAttempts})`
+      dbg(line)
+      logStats(`[${new Date().toISOString()}] type=token_${event.level} | expiresIn=${Math.round(event.expiresInMs / 60000)}min failures=${event.failedAttempts} needsReLogin=${event.needsReLogin}`, {
+        type: `token_${event.level}`,
+        expiresInMin: Math.round(event.expiresInMs / 60000),
+        failures: event.failedAttempts,
+        needsReLogin: event.needsReLogin,
+        message: event.message,
+      })
+      // On critical/expired — log to stderr so it's visible in terminal
+      if (event.level === 'critical' || event.level === 'expired') {
+        console.error(`[claude-max] ${line}`)
+      }
+    },
     keepalive: {
       enabled: keepaliveEnabled,
       intervalMs: keepaliveInterval,

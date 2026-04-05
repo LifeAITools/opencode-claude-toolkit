@@ -1,7 +1,7 @@
 {
   "name": "@life-ai-tools/opencode-claude",
-  "version": "0.3.0",
-  "description": "OpenCode plugin + AI SDK provider for Claude Max/Pro subscription — OAuth login, streaming, tool use via claude-code-sdk",
+  "version": "0.3.1",
+  "description": "OpenCode plugin + AI SDK provider for Claude Max/Pro subscription \u2014 OAuth login, streaming, tool use via claude-code-sdk",
   "type": "module",
   "exports": {
     ".": "./provider.ts",
@@ -9,13 +9,23 @@
     "./tui": "./tui.tsx"
   },
   "main": "./provider.ts",
-  "files": ["index.ts", "provider.ts", "tui.tsx"],
+  "files": [
+    "index.ts",
+    "provider.ts",
+    "tui.tsx"
+  ],
   "dependencies": {
-    "@life-ai-tools/claude-code-sdk": "^0.3.0"
+    "@life-ai-tools/claude-code-sdk": "^0.6.0"
   },
   "keywords": [
-    "opencode", "opencode-plugin", "claude", "anthropic",
-    "claude-max", "oauth", "ai-sdk", "provider"
+    "opencode",
+    "opencode-plugin",
+    "claude",
+    "anthropic",
+    "claude-max",
+    "oauth",
+    "ai-sdk",
+    "provider"
   ],
   "repository": {
     "type": "git",

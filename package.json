@@ -1,7 +1,7 @@
 {
   "name": "@life-ai-tools/claude-code-sdk",
-  "version": "0.5.0",
-  "description": "TypeScript SDK for Claude Code API — use your Claude Max/Pro subscription programmatically",
+  "version": "0.6.0",
+  "description": "TypeScript SDK for Claude Code API \u2014 use your Claude Max/Pro subscription programmatically",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -51,6 +51,26 @@ export interface ClaudeCodeSDKOptions {
     maxRetries?: number;
     /** Cache keepalive configuration. Keeps Claude's prompt cache warm between requests. */
     keepalive?: KeepaliveConfig;
+    /**
+     * Token rotation callback — fired when proactive refresh encounters issues.
+     * Levels escalate as token approaches expiry:
+     *   'rotated'  — silent success (informational)
+     *   'warning'  — first refresh failed, retrying (>25% lifetime left)
+     *   'critical' — multiple failures, token expiring soon (<10% lifetime left)
+     *   'expired'  — token expired, needs re-login
+     * Use this to show UI alerts or trigger re-login flows.
+     */
+    onTokenStatus?: (event: TokenStatusEvent) => void;
+}
+export interface TokenStatusEvent {
+    level: 'rotated' | 'warning' | 'critical' | 'expired';
+    message: string;
+    /** Milliseconds until token expires (negative if already expired) */
+    expiresInMs: number;
+    /** Number of consecutive failed refresh attempts */
+    failedAttempts: number;
+    /** Whether a browser re-login is recommended */
+    needsReLogin: boolean;
 }
 export interface KeepaliveConfig {
     enabled?: boolean;

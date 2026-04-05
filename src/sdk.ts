@@ -1190,7 +1190,7 @@ export class ClaudeCodeSDK {
     this.clearRefreshCooldown()
     this.lastRefreshAttemptAt = 0 // bypass rate-limit
     try {
-      await this.doTokenRefresh()
+      await this.doTokenRefresh(true)  // force=true: actually call token endpoint
       this.proactiveRefreshFailures = 0
       this.refreshConsecutive429s = 0
       this.emitTokenStatus('rotated', 'Token force-refreshed successfully')
@@ -1367,7 +1367,7 @@ export class ClaudeCodeSDK {
     this.dbg('proactive rotation: refreshing token silently...')
 
     try {
-      await this.doTokenRefresh()
+      await this.doTokenRefresh(true)  // force=true: actually call token endpoint, don't just re-read
       this.proactiveRefreshFailures = 0
       this.refreshConsecutive429s = 0
       this.clearRefreshCooldown()
@@ -1547,14 +1547,17 @@ export class ClaudeCodeSDK {
    * Retry with backoff on 429/5xx (mirrors Claude Code's lockfile + triple-check pattern).
    * Multiple opencode sessions may try to refresh simultaneously — the first to succeed
    * writes to the credential store, others detect the fresh token on retry.
+   *
+   * @param force — if true, skip "already fresh" checks and always call the token endpoint.
+   *   Used by proactive rotation to actually get a NEW token before the old one expires.
    */
-  private async doTokenRefresh(): Promise<void> {
+  private async doTokenRefresh(force = false): Promise<void> {
     if (!this.refreshToken) {
       throw new AuthError('Token expired and no refresh token available.')
     }
 
     // Respect global cooldown — another process may have just 429'd
-    if (this.isRefreshOnCooldown()) {
+    if (this.isRefreshOnCooldown() && !force) {
       // But still check if someone else succeeded
       const cooldownCreds = await this.credentialStore.read()
       if (cooldownCreds && !(Date.now() + EXPIRY_BUFFER_MS >= cooldownCreds.expiresAt)) {
@@ -1577,13 +1580,19 @@ export class ClaudeCodeSDK {
 
     for (let attempt = 0; attempt < MAX_REFRESH_RETRIES; attempt++) {
       // Before each attempt, check if another process already refreshed
+      // BUT: if force=true (proactive rotation), only skip if the token actually CHANGED
+      // (i.e., another process got a NEWER token), not just because the current one hasn't expired yet
       const freshCreds = await this.credentialStore.read()
       if (freshCreds && !(Date.now() + EXPIRY_BUFFER_MS >= freshCreds.expiresAt)) {
-        this.accessToken = freshCreds.accessToken
-        this.refreshToken = freshCreds.refreshToken
-        this.expiresAt = freshCreds.expiresAt
-        this.dbg(`refresh: another process already refreshed (attempt ${attempt})`)
-        return
+        if (!force || freshCreds.accessToken !== this.accessToken) {
+          this.accessToken = freshCreds.accessToken
+          this.refreshToken = freshCreds.refreshToken
+          this.expiresAt = freshCreds.expiresAt
+          this.dbg(`refresh: ${force ? 'another process got newer token' : 'another process already refreshed'} (attempt ${attempt})`)
+          return
+        }
+        // force=true but same token — proceed to actually call the token endpoint
+        this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${attempt})`)
       }
 
       const response = await fetch(TOKEN_URL, {

@@ -169,6 +169,9 @@ export declare class ClaudeCodeSDK {
      * Retry with backoff on 429/5xx (mirrors Claude Code's lockfile + triple-check pattern).
      * Multiple opencode sessions may try to refresh simultaneously — the first to succeed
      * writes to the credential store, others detect the fresh token on retry.
+     *
+     * @param force — if true, skip "already fresh" checks and always call the token endpoint.
+     *   Used by proactive rotation to actually get a NEW token before the old one expires.
      */
     private doTokenRefresh;
     private assembleResponse;

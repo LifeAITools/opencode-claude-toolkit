@@ -14,6 +14,7 @@ import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 
 import { appendFileSync } from 'fs'
+import { execSync } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -24,6 +25,9 @@ const STATS_JSONL = join(homedir(), '.claude', 'claude-max-stats.jsonl')
 
 const PID = process.pid
 const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? '?'
+
+const MAX_MEMORY_LINES = 200
+const MAX_MEMORY_BYTES = 25_000
 
 function logStats(line: string, structured?: Record<string, unknown>) {
   try { appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}\n`) } catch {}
@@ -149,6 +153,141 @@ async function maybeResizeImage(
   }
 }
 
+// ─── Context injection: CLAUDE.md + MEMORY.md ──────────────
+
+function sanitizePathForProjects(name: string): string {
+  return name.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+let _gitRoot: string | null | undefined = undefined  // undefined = not cached yet
+function getGitRoot(): string | null {
+  if (_gitRoot !== undefined) return _gitRoot
+  try {
+    _gitRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', timeout: 3000 }).trim()
+  } catch {
+    _gitRoot = null
+  }
+  return _gitRoot
+}
+
+const _fileCache = new Map<string, { content: string; mtimeMs: number }>()
+
+function readCachedFile(filePath: string): string | null {
+  try {
+    const { statSync, readFileSync } = require('fs')
+    const st = statSync(filePath)
+    const cached = _fileCache.get(filePath)
+    if (cached && cached.mtimeMs === st.mtimeMs) return cached.content
+    const content = readFileSync(filePath, 'utf8')
+    _fileCache.set(filePath, { content, mtimeMs: st.mtimeMs })
+    return content
+  } catch {
+    return null
+  }
+}
+
+function truncateMemory(raw: string): { text: string; truncated: boolean } {
+  const trimmed = raw.trim()
+  const lines = trimmed.split('\n')
+  const byteOver = trimmed.length > MAX_MEMORY_BYTES
+  const lineOver = lines.length > MAX_MEMORY_LINES
+
+  if (!byteOver && !lineOver) return { text: trimmed, truncated: false }
+
+  let result = lineOver ? lines.slice(0, MAX_MEMORY_LINES).join('\n') : trimmed
+  if (result.length > MAX_MEMORY_BYTES) {
+    // Truncate at last newline before byte limit
+    const cut = result.lastIndexOf('\n', MAX_MEMORY_BYTES)
+    result = cut > 0 ? result.slice(0, cut) : result.slice(0, MAX_MEMORY_BYTES)
+  }
+
+  const reasons: string[] = []
+  if (lineOver) reasons.push(`${lines.length} lines > ${MAX_MEMORY_LINES} limit`)
+  if (byteOver) reasons.push(`${trimmed.length} bytes > ${MAX_MEMORY_BYTES} limit`)
+  result += `\n\n<!-- TRUNCATED: ${reasons.join(', ')} -->`
+  return { text: result, truncated: true }
+}
+
+let _contextInjectionCache: { content: string; key: string } | null = null
+
+function buildContextInjection(): string | null {
+  const home = homedir()
+  const cwd = process.cwd()
+  const gitRoot = getGitRoot()
+  const projectBase = gitRoot || cwd
+  const sanitized = sanitizePathForProjects(projectBase)
+  const memoryPath = join(home, '.claude', 'projects', sanitized, 'memory', 'MEMORY.md')
+
+  // Source files to check
+  const sources: { path: string; tag: string; isMemory?: boolean }[] = [
+    { path: join(home, '.claude', 'CLAUDE.md'), tag: 'claude-rules' },
+  ]
+
+  // Project CLAUDE.md — only if CWD differs from home (avoid dupe with global)
+  if (cwd !== home) {
+    sources.push({ path: join(cwd, 'CLAUDE.md'), tag: 'claude-rules' })
+    const dotClaudePath = join(cwd, '.claude', 'CLAUDE.md')
+    // Only add .claude/CLAUDE.md if it's different from ~/.claude/CLAUDE.md
+    if (dotClaudePath !== join(home, '.claude', 'CLAUDE.md')) {
+      sources.push({ path: dotClaudePath, tag: 'claude-rules' })
+    }
+  }
+
+  sources.push({ path: memoryPath, tag: 'project-memory', isMemory: true })
+
+  // Build cache key from mtimes
+  const mtimes: string[] = []
+  for (const src of sources) {
+    try {
+      const { statSync } = require('fs')
+      mtimes.push(`${src.path}:${statSync(src.path).mtimeMs}`)
+    } catch {
+      mtimes.push(`${src.path}:0`)
+    }
+  }
+  const cacheKey = mtimes.join('|')
+
+  if (_contextInjectionCache && _contextInjectionCache.key === cacheKey) {
+    return _contextInjectionCache.content
+  }
+
+  // Build injection
+  const parts: string[] = []
+  let claudeMdBytes = 0
+  let memoryBytes = 0
+  let memoryTruncated = false
+
+  for (const src of sources) {
+    const raw = readCachedFile(src.path)
+    if (!raw || !raw.trim()) continue
+
+    if (src.isMemory) {
+      const { text, truncated } = truncateMemory(raw)
+      parts.push(`<${src.tag} source="${src.path}">\n${text}\n</${src.tag}>`)
+      memoryBytes = text.length
+      memoryTruncated = truncated
+    } else {
+      parts.push(`<${src.tag} source="${src.path}">\n${raw.trim()}\n</${src.tag}>`)
+      claudeMdBytes += raw.trim().length
+    }
+  }
+
+  if (parts.length === 0) return null
+
+  const content = parts.join('\n\n')
+
+  // Log on first build or when content changes
+  if (!_contextInjectionCache || _contextInjectionCache.key !== cacheKey) {
+    dbg(`context inject: ${parts.length} sources, ${content.length} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? ' TRUNCATED' : ''})`)
+    logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated}`, {
+      type: 'context_inject', sources: parts.length, claudeMdBytes, memoryBytes, truncated: memoryTruncated,
+    })
+  }
+
+  _contextInjectionCache = { content, key: cacheKey }
+  return content
+}
+
 // ─── Prompt conversion: V3 → SDK ──────────────────────────
 
 async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages: any[] }> {
@@ -194,6 +333,19 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
         // Remove empty text blocks
         system = (system as { type: string; text?: string }[]).filter(b => b.type !== 'text' || (b.text && b.text.length > 0))
         if ((system as unknown[]).length === 0) system = undefined
+      }
+      // Inject CLAUDE.md rules + MEMORY.md into system prompt
+      const injection = buildContextInjection()
+      if (injection) {
+        if (typeof system === 'string') {
+          system = injection + '\n\n' + (system || '')
+        } else if (Array.isArray(system)) {
+          // Prepend as new text block WITHOUT cache_control
+          // Existing blocks keep their cache markers at their positions
+          ;(system as any[]).unshift({ type: 'text', text: injection })
+        } else {
+          system = injection
+        }
       }
       continue
     }

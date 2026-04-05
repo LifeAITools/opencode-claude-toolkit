@@ -1617,10 +1617,19 @@ export class ClaudeCodeSDK {
         this.expiresAt = Date.now() + data.expires_in * 1000
         this.tokenIssuedAt = Date.now()
 
+        // Persist scopes from the previous token — the refresh response doesn't include them,
+        // but CC checks shouldUseClaudeAIAuth(scopes) which needs 'user:inference'.
+        // Without scopes, CC auth says "not logged in" and CC passthrough proxy fails.
+        const prevCreds = await this.credentialStore.read()
+        const scopes = prevCreds?.scopes?.length
+          ? prevCreds.scopes
+          : ['user:file_upload', 'user:inference', 'user:mcp_servers', 'user:profile', 'user:sessions:claude_code']
+
         await this.credentialStore.write({
           accessToken: this.accessToken,
           refreshToken: this.refreshToken!,
           expiresAt: this.expiresAt,
+          scopes,
         })
 
         this.dbg(`token refreshed OK — expires in ${Math.round(data.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`)

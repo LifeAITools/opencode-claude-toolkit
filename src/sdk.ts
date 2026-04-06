@@ -82,6 +82,10 @@ const TOKEN_WARNING_THRESHOLD = 0.25   // 25% left → WARNING
 const TOKEN_CRITICAL_THRESHOLD = 0.10  // 10% left → CRITICAL
 // Minimum time between proactive refresh attempts (prevents 429 storm)
 const PROACTIVE_REFRESH_MIN_INTERVAL_MS = 5 * 60 * 1000 // 5 min floor
+// When force=true (proactive rotation), only accept a disk token if it has at least
+// this much remaining life. Prevents all PIDs from endlessly picking up an aging
+// token without anyone actually refreshing it.
+const PROACTIVE_FRESH_MIN_REMAINING_MS = 2 * 60 * 60 * 1000 // 2 hours
 // Global cooldown after refresh 429 — exponential backoff across ALL processes
 const REFRESH_COOLDOWN_FILE = join(homedir(), '.claude', '.refresh-cooldown')
 // Maximum cooldown time (30 minutes)
@@ -1366,7 +1370,32 @@ export class ClaudeCodeSDK {
 
     this.dbg('proactive rotation: refreshing token silently...')
 
+    // Acquire cross-process lock — prevents multi-PID 429 stampede.
+    // Without this, all opencode PIDs hit the OAuth endpoint simultaneously
+    // when proactive rotation fires at similar times.
+    const release = await acquireTokenRefreshLock()
+
     try {
+      // Post-lock check: another process may have refreshed while we waited for lock
+      if (release) {
+        const postLockCreds = await this.credentialStore.read()
+        if (postLockCreds && !(Date.now() + EXPIRY_BUFFER_MS >= postLockCreds.expiresAt)) {
+          const diskRemaining = postLockCreds.expiresAt - Date.now()
+          if (diskRemaining >= PROACTIVE_FRESH_MIN_REMAINING_MS) {
+            // Fresh token appeared while waiting for lock — another process just refreshed
+            this.accessToken = postLockCreds.accessToken
+            this.refreshToken = postLockCreds.refreshToken
+            this.expiresAt = postLockCreds.expiresAt
+            this.tokenIssuedAt = Date.now()
+            this.proactiveRefreshFailures = 0
+            this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(diskRemaining / 60000)}min remaining)`)
+            this.emitTokenStatus('rotated', `Token refreshed by another process (${Math.round(diskRemaining / 60000)}min remaining)`)
+            this.scheduleProactiveRotation()
+            return
+          }
+        }
+      }
+
       await this.doTokenRefresh(true)  // force=true: actually call token endpoint, don't just re-read
       this.proactiveRefreshFailures = 0
       this.refreshConsecutive429s = 0
@@ -1411,6 +1440,8 @@ export class ClaudeCodeSDK {
         this.dbg('proactive rotation: token nearly expired — emitting expired status')
         this.emitTokenStatus('expired', `Token expired — refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`)
       }
+    } finally {
+      if (release) release()
     }
   }
 
@@ -1581,18 +1612,38 @@ export class ClaudeCodeSDK {
     for (let attempt = 0; attempt < MAX_REFRESH_RETRIES; attempt++) {
       // Before each attempt, check if another process already refreshed
       // BUT: if force=true (proactive rotation), only skip if the token actually CHANGED
-      // (i.e., another process got a NEWER token), not just because the current one hasn't expired yet
+      // AND has enough remaining life — prevents all PIDs from endlessly picking up an
+      // aging token without anyone actually hitting the OAuth endpoint.
       const freshCreds = await this.credentialStore.read()
       if (freshCreds && !(Date.now() + EXPIRY_BUFFER_MS >= freshCreds.expiresAt)) {
-        if (!force || freshCreds.accessToken !== this.accessToken) {
+        if (!force) {
+          // Not force — accept any non-expired token from disk
           this.accessToken = freshCreds.accessToken
           this.refreshToken = freshCreds.refreshToken
           this.expiresAt = freshCreds.expiresAt
-          this.dbg(`refresh: ${force ? 'another process got newer token' : 'another process already refreshed'} (attempt ${attempt})`)
+          this.dbg(`refresh: another process already refreshed (attempt ${attempt})`)
           return
         }
-        // force=true but same token — proceed to actually call the token endpoint
-        this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${attempt})`)
+        // force=true — only accept if the disk token is genuinely fresh
+        const diskRemaining = freshCreds.expiresAt - Date.now()
+        if (freshCreds.accessToken !== this.accessToken && diskRemaining >= PROACTIVE_FRESH_MIN_REMAINING_MS) {
+          // Different token with plenty of life — another process recently refreshed
+          this.accessToken = freshCreds.accessToken
+          this.refreshToken = freshCreds.refreshToken
+          this.expiresAt = freshCreds.expiresAt
+          this.dbg(`refresh: another process got fresh token (${Math.round(diskRemaining / 60000)}min remaining) (attempt ${attempt})`)
+          return
+        }
+        if (freshCreds.accessToken !== this.accessToken) {
+          // Different token but nearly expired — pick it up (for correct refreshToken) but CONTINUE to actual refresh
+          this.accessToken = freshCreds.accessToken
+          this.refreshToken = freshCreds.refreshToken
+          this.expiresAt = freshCreds.expiresAt
+          this.dbg(`refresh: force=true, disk token different but only ${Math.round(diskRemaining / 60000)}min left — proceeding to actual refresh (attempt ${attempt})`)
+        } else {
+          // Same token — proceed to actually call the token endpoint
+          this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${attempt})`)
+        }
       }
 
       const response = await fetch(TOKEN_URL, {

@@ -213,13 +213,13 @@ function dbg(...args: any[]) {
 export default {
   id: 'opencode-claude-max',
   server: async (input: any) => {
+    const t0 = Date.now()
     const cwd = input.directory ?? process.cwd()
     const sessionId = process.env.OPENCODE_SESSION_ID ?? process.env.OPENCODE_SESSION_SLUG ?? input.sessionID ?? 'unknown'
     const creds = new CredentialManager(cwd)
-    dbg(`plugin init pid=${process.pid} session=${sessionId}`, { cwd, inputKeys: Object.keys(input) })
     const providerPath = `file://${import.meta.dir}`
 
-    dbg('plugin init', { cwd, credPath: creds.credPath, hasCredentials: creds.hasCredentials, providerPath })
+    dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} providerPath=${providerPath} initTime=${Date.now() - t0}ms`)
 
     if (!creds.hasCredentials) {
       dbg('Not logged in — run: opencode providers login -p claude-max')
@@ -228,9 +228,10 @@ export default {
     return {
       // ─── Config: register Claude Max as a provider ───────
       config: async (config: any) => {
+        const tc = Date.now()
         if (!config.provider) config.provider = {}
 
-        dbg('config hook called')
+        dbg('STARTUP config hook called')
 
         config.provider['claude-max'] = {
           id: 'claude-max',
@@ -293,6 +294,7 @@ export default {
             } : {}),
           }
         }
+        dbg(`STARTUP config hook done in ${Date.now() - tc}ms — ${Object.keys(config.provider['claude-max'].models).length} models registered`)
       },
 
       // ─── Auth: OAuth login + loader ──────────────────────
@@ -302,13 +304,14 @@ export default {
         // Called at startup — return SDK options with per-request fetch
         // Mirrors src/services/api/client.ts:88-315 (getAnthropicClient)
         loader: async (_getAuth: () => Promise<any>, provider: any) => {
-          dbg('auth.loader called', { providerModels: Object.keys(provider.models ?? {}), providerOptions: provider.options })
+          const tl = Date.now()
+          dbg('STARTUP auth.loader called', { providerModels: Object.keys(provider.models ?? {}), providerOptions: provider.options })
           // NOTE: Do NOT zero out model costs here — we set equivalent API pricing
           // in the config hook for the sidebar savings display to work.
 
           // Pass provider options through so createClaudeMax can read keepalive/debug config
           // from opencode.json → provider.claude-max.options
-          dbg('auth.loader: credPath:', creds.credPath)
+          dbg(`STARTUP auth.loader done in ${Date.now() - tl}ms credPath=${creds.credPath}`)
           return {
             credentialsPath: creds.credPath,
             providerOptions: provider.options ?? {},

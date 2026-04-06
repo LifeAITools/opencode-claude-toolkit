@@ -163,7 +163,7 @@ let _gitRoot: string | null | undefined = undefined  // undefined = not cached y
 function getGitRoot(): string | null {
   if (_gitRoot !== undefined) return _gitRoot
   try {
-    _gitRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', timeout: 3000 }).trim()
+    _gitRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch {
     _gitRoot = null
   }
@@ -211,6 +211,7 @@ function truncateMemory(raw: string): { text: string; truncated: boolean } {
 let _contextInjectionCache: { content: string; key: string } | null = null
 
 function buildContextInjection(): string | null {
+  const tInject = Date.now()
   const home = homedir()
   const cwd = process.cwd()
   const gitRoot = getGitRoot()
@@ -278,9 +279,9 @@ function buildContextInjection(): string | null {
 
   // Log on first build or when content changes
   if (!_contextInjectionCache || _contextInjectionCache.key !== cacheKey) {
-    dbg(`context inject: ${parts.length} sources, ${content.length} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? ' TRUNCATED' : ''})`)
-    logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated}`, {
-      type: 'context_inject', sources: parts.length, claudeMdBytes, memoryBytes, truncated: memoryTruncated,
+    dbg(`context_inject: ${parts.length} sources, ${content.length} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? ' TRUNCATED' : ''}) built in ${Date.now() - tInject}ms`)
+    logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject}`, {
+      type: 'context_inject', sources: parts.length, claudeMdBytes, memoryBytes, truncated: memoryTruncated, buildMs: Date.now() - tInject,
     })
   }
 
@@ -291,6 +292,7 @@ function buildContextInjection(): string | null {
 // ─── Prompt conversion: V3 → SDK ──────────────────────────
 
 async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages: any[] }> {
+  const tConvert = Date.now()
   let system: string | undefined
   const messages: any[] = []
 
@@ -478,6 +480,7 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
     }
   }
 
+  dbg(`convertPrompt: ${messages.length} messages, system=${typeof system === 'string' ? system.length : Array.isArray(system) ? (system as any[]).length + ' blocks' : 'none'}, in ${Date.now() - tConvert}ms`)
   return { system, messages }
 }
 
@@ -517,19 +520,58 @@ function normalizeToolSchema(schema: any): any {
   return result
 }
 
+let _lastToolCount = 0
+let _lastToolHash = ''
+
+// MCP tools have names like "km_km_think", "synqtask_todo_tasks" — they contain
+// underscores from the sanitized server name prefix. Built-in tools are simple
+// names: "bash", "read", "glob", "edit", "write", "task", etc.
+// We use this heuristic to separate them for cache-optimal ordering.
+const MCP_TOOL_PATTERN = /^[a-z][\w-]+_[a-z]/  // e.g. "km_km_think", "telegram-mcp_tg_send"
+
 function convertTools(tools?: any[]): any[] | undefined {
   if (!tools?.length) return undefined
-  return tools
+
+  const all = tools
     .filter((t: any) => t.type === 'function')
     .map((t: any) => ({
       name: t.name,
       description: normalizeCwd(t.description ?? ''),
       input_schema: normalizeToolSchema(t.inputSchema ?? { type: 'object', properties: {} }),
     }))
-    // Sort by name for deterministic prefix — MCP servers register tools in non-deterministic
-    // order (depends on which server responds first at startup). Without sorting, the cache
-    // prefix diverges at tool ~#11 and cross-process cache sharing fails entirely.
-    .sort((a: any, b: any) => a.name.localeCompare(b.name))
+
+  // Split: keep built-in tools in opencode's original order (stable prefix),
+  // sort only MCP tools among themselves (deterministic regardless of connection race).
+  // This way missing MCPs only truncate the SUFFIX — the built-in prefix stays
+  // byte-identical for cache hits across sessions with different MCP availability.
+  const builtIn: typeof all = []
+  const mcp: typeof all = []
+  for (const t of all) {
+    if (MCP_TOOL_PATTERN.test(t.name)) {
+      mcp.push(t)
+    } else {
+      builtIn.push(t)
+    }
+  }
+  mcp.sort((a, b) => a.name.localeCompare(b.name))
+
+  const result = [...builtIn, ...mcp]
+
+  // Detect tool set changes (MCP server connected/disconnected mid-session)
+  const count = result.length
+  const hash = result.map((t: any) => t.name).join(',')
+  if (_lastToolCount > 0 && count !== _lastToolCount) {
+    dbg(`⚠ TOOL_DRIFT: tool count changed ${_lastToolCount} → ${count} mid-session (builtin=${builtIn.length} mcp=${mcp.length})`)
+    logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length}`, {
+      type: 'tool_drift', oldCount: _lastToolCount, newCount: count, builtIn: builtIn.length, mcpCount: mcp.length,
+    })
+  } else if (_lastToolCount === 0) {
+    dbg(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length})`)
+  }
+  _lastToolCount = count
+  _lastToolHash = hash
+
+  return result
 }
 
 function convertToolChoice(tc?: any): any {
@@ -844,6 +886,7 @@ export interface ClaudeMaxProviderOptions {
 }
 
 export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
+  const tCreate = Date.now()
   // Provider options from opencode.json → provider.claude-max.options
   // These override env vars for user-friendly configuration.
   const providerOpts = (options as any).providerOptions ?? {}
@@ -858,7 +901,7 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     ? parseInt(providerOpts.keepaliveIdle) * 1000
     : process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity
 
-  dbg('createClaudeMax called with:', { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts) })
+  dbg(`STARTUP createClaudeMax pid=${PID}`, { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts) })
   const sdk = new ClaudeCodeSDK({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
@@ -898,6 +941,8 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       },
     },
   })
+
+  dbg(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`)
 
   return {
     languageModel(modelId: string): LanguageModelV3 {

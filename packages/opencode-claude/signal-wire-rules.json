@@ -4,28 +4,72 @@
       "id": "session-start-checklist",
       "enabled": true,
       "description": "First prompt — bootstrap SynqTask + KM (once per session)",
-      "events": ["UserPromptSubmit"],
+      "events": [
+        "UserPromptSubmit"
+      ],
       "match": {},
       "action": {
         "hint": "<mandatory-checklist priority=\"critical\">\n<instruction>STOP. Execute BEFORE any implementation. Failure = wasted session.</instruction>\n<step order=\"1\">todo_spaces(list) — get all spaces</step>\n<step order=\"2\">todo_lists(list, space_id) — lists for relevant space</step>\n<step order=\"3\">todo_tasks(list, list_id, status=open) — open tasks</step>\n<step order=\"4\">km_think(mode=\"recall\", keywords=[...]) — check memory</step>\n<consequence>Skipping = duplicate work, lost context, broken tracking.</consequence>\n</mandatory-checklist>"
       },
-      "cooldown_tokens": 990000
+      "cooldown_tokens": 200000
     },
-
     {
       "id": "km-recall-on-prompt",
       "enabled": true,
       "description": "Work prompt — recall from KM every ~50k tokens",
-      "events": ["UserPromptSubmit"],
+      "events": [
+        "UserPromptSubmit"
+      ],
       "match": {
         "prompt_keywords": [
-          "implement", "create", "build", "fix", "debug", "refactor", "migrate", "deploy",
-          "add", "update", "change", "modify", "remove", "delete", "move", "rename",
-          "why", "how", "doesn't work", "not working", "broken", "error", "wrong", "still",
-          "реализовать", "создать", "починить", "рефакторинг", "добавить", "изменить",
-          "удалить", "сломано", "не работает", "ошибка", "почему", "деплой",
-          "plan", "design", "architect", "configure", "setup", "install", "test",
-          "commit", "push", "release", "ship", "launch"
+          "implement",
+          "create",
+          "build",
+          "fix",
+          "debug",
+          "refactor",
+          "migrate",
+          "deploy",
+          "add",
+          "update",
+          "change",
+          "modify",
+          "remove",
+          "delete",
+          "move",
+          "rename",
+          "why",
+          "how",
+          "doesn't work",
+          "not working",
+          "broken",
+          "error",
+          "wrong",
+          "still",
+          "реализовать",
+          "создать",
+          "починить",
+          "рефакторинг",
+          "добавить",
+          "изменить",
+          "удалить",
+          "сломано",
+          "не работает",
+          "ошибка",
+          "почему",
+          "деплой",
+          "plan",
+          "design",
+          "architect",
+          "configure",
+          "setup",
+          "install",
+          "test",
+          "commit",
+          "push",
+          "release",
+          "ship",
+          "launch"
         ]
       },
       "action": {
@@ -34,12 +78,13 @@
       "cooldown_namespace": "prompt-km",
       "cooldown_tokens": 50000
     },
-
     {
       "id": "deploy-verify",
       "enabled": true,
       "description": "After deploy — verify health",
-      "events": ["PostToolUse"],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
         "tool": "Bash",
         "input_regex": "deploy\\.sh|kbc.*deploy|systemctl restart|docker compose up"
@@ -49,14 +94,21 @@
       },
       "cooldown_tokens": 20000
     },
-
     {
       "id": "mcp-tool-error",
       "enabled": true,
       "description": "Tool error — investigate root cause",
-      "events": ["PostToolUse"],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
-        "exclude_tools": ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
+        "exclude_tools": [
+          "Read",
+          "Glob",
+          "Grep",
+          "WebFetch",
+          "WebSearch"
+        ],
         "response_regex": "(?i)\\b(traceback|exception|stacktrace|EACCES|ENOENT|EPERM|permission denied|connection refused|segfault|panic|fatal|unhandled)\\b"
       },
       "action": {
@@ -64,52 +116,81 @@
       },
       "cooldown_tokens": 5000
     },
-
     {
       "id": "anti-premature-handover-prompt",
       "enabled": true,
       "description": "Block premature wrap-up — catches user/agent mentioning handover in prompt",
-      "events": ["UserPromptSubmit"],
+      "events": [
+        "UserPromptSubmit"
+      ],
       "match": {
         "prompt_keywords": [
-          "handover", "hand over", "next session", "wrap up", "wrapping up",
-          "continue later", "pick up later", "future session", "separate session",
-          "new session", "fresh session", "another session",
-          "running low on context", "context is getting", "context limit",
-          "хэндовер", "следующая сессия", "следующей сессии", "новая сессия",
-          "продолжим позже", "заканчиваем", "завершаем сессию", "в другой сессии",
-          "контекст заканчивается", "мало контекста", "контекст на исходе",
-          "итог сессии", "итоги сессии", "итоги работы", "подведём итоги",
-          "сохраним прогресс", "сессия подходит к концу",
-          "свежий контекст", "свежая сессия", "в следующий раз",
-          "что сделано", "что осталось сделать"
+          "handover",
+          "hand over",
+          "next session",
+          "wrap up",
+          "wrapping up",
+          "continue later",
+          "pick up later",
+          "future session",
+          "separate session",
+          "new session",
+          "fresh session",
+          "another session",
+          "running low on context",
+          "context is getting",
+          "context limit",
+          "хэндовер",
+          "следующая сессия",
+          "следующей сессии",
+          "новая сессия",
+          "продолжим позже",
+          "заканчиваем",
+          "завершаем сессию",
+          "в другой сессии",
+          "контекст заканчивается",
+          "мало контекста",
+          "контекст на исходе",
+          "итог сессии",
+          "итоги сессии",
+          "итоги работы",
+          "подведём итоги",
+          "сохраним прогресс",
+          "сессия подходит к концу",
+          "свежий контекст",
+          "свежая сессия",
+          "в следующий раз",
+          "что сделано",
+          "что осталось сделать"
         ]
       },
       "action": {
         "hint": "<user-policy priority=\"critical\">\n<instruction>PROHIBITED from suggesting handover, wrap-up, or session termination while context-health >50k remaining.</instruction>\n<consequence>Wasted paid context. CONTINUE WORKING — ask user what's next.</consequence>\n</user-policy>"
       },
-      "cooldown_tokens": 20000
+      "cooldown_tokens": 40000
     },
-
     {
       "id": "anti-premature-handover-output",
       "enabled": true,
       "description": "Block premature wrap-up — catches agent output containing handover/wrap-up language",
-      "events": ["PostToolUse"],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
         "response_regex": "handover|hand.?over|next session|wrap.?up|continue.?later|running low|context.*(limit|low|getting)|итог.{0,3} сесси|итог.{0,3} работ|подвед.{0,5} итог|сохран.{0,5} прогресс|зафиксир.{0,5} прогресс|сесси.{0,5} подходит|контекст.{0,5} исход|свеж.{0,5} сесси|свеж.{0,5} контекст|следующ.{0,5} сесси|следующ.{0,5} раз|продолж.{0,5} позже|заканчива|заверша.{0,5} сесси|мало контекст|осталось.{0,10}контекст|что сделано|что осталось"
       },
       "action": {
         "hint": "<user-policy priority=\"critical\">\n<instruction>PROHIBITED from suggesting handover, wrap-up, or session termination while context-health >50k remaining.</instruction>\n<consequence>Wasted paid context. CONTINUE WORKING — ask user what's next.</consequence>\n</user-policy>"
       },
-      "cooldown_tokens": 20000
+      "cooldown_tokens": 40000
     },
-
     {
       "id": "synq-track-work",
       "enabled": true,
       "description": "After code changes — ensure tracking (every ~100k tokens)",
-      "events": ["PostToolUse"],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
         "tool": "Edit|Write"
       },
@@ -119,12 +200,13 @@
       "cooldown_namespace": "post-synq",
       "cooldown_tokens": 100000
     },
-
     {
       "id": "km-store-discoveries",
       "enabled": true,
       "description": "After research/edit — store insights (every ~50k tokens)",
-      "events": ["PostToolUse"],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
         "tool": "Agent|WebSearch|WebFetch"
       },
@@ -134,20 +216,38 @@
       "cooldown_namespace": "post-km",
       "cooldown_tokens": 50000
     },
-
     {
       "id": "plugin-update-reminder",
       "enabled": true,
       "description": "Hooks/skills/plugin changed — remind to use update-plugin skill",
-      "events": ["UserPromptSubmit"],
+      "events": [
+        "UserPromptSubmit"
+      ],
       "match": {
         "prompt_keywords": [
-          "update plugin", "update skill", "push plugin", "bump version",
-          "обновить плагин", "обновить скилл", "пушить плагин",
-          "обновить хук", "изменить хук", "изменить правило", "изменить скилл",
-          "хук", "плагин", "скилл", "навык", "правило",
-          "hook", "signal-wire", "rules.json", "hooks.json",
-          "lat-dev-kit", "plugin change", "skill change"
+          "update plugin",
+          "update skill",
+          "push plugin",
+          "bump version",
+          "обновить плагин",
+          "обновить скилл",
+          "пушить плагин",
+          "обновить хук",
+          "изменить хук",
+          "изменить правило",
+          "изменить скилл",
+          "хук",
+          "плагин",
+          "скилл",
+          "навык",
+          "правило",
+          "hook",
+          "signal-wire",
+          "rules.json",
+          "hooks.json",
+          "lat-dev-kit",
+          "plugin change",
+          "skill change"
         ]
       },
       "action": {
@@ -155,78 +255,92 @@
       },
       "cooldown_tokens": 50000
     },
-
     {
       "id": "agent-task-check",
       "enabled": true,
       "description": "Periodic reminder to check SynqTask for assigned tasks",
-      "events": ["UserPromptSubmit"],
+      "events": [
+        "UserPromptSubmit"
+      ],
       "match": {},
       "action": {
         "hint": "<synq-reminder priority=\"low\">\n<instruction>Check SynqTask for tasks assigned to you: todo_tasks(action='search', status='open')</instruction>\n</synq-reminder>"
       },
       "cooldown_tokens": 100000
     },
-
     {
       "id": "agent-comment-check",
       "enabled": true,
       "description": "Periodic reminder to check for new comments on your tasks",
-      "events": ["UserPromptSubmit"],
+      "events": [
+        "UserPromptSubmit"
+      ],
       "match": {},
       "action": {
         "hint": "<synq-reminder priority=\"low\">\n<instruction>Check for new comments on your tasks: todo_comments(action='list', task_id=currentTaskId)</instruction>\n</synq-reminder>"
       },
       "cooldown_tokens": 150000
     },
-
     {
       "id": "agent-stale-detection",
       "enabled": true,
       "description": "Hint CEO/leads to check for stale agents",
-      "events": ["UserPromptSubmit"],
+      "events": [
+        "UserPromptSubmit"
+      ],
       "match": {},
       "action": {
         "hint": "<synq-reminder priority=\"low\">\n<instruction>Check for stale agents: todo_teams(action='stale_agents', minutes=30). Reassign abandoned tasks if needed.</instruction>\n</synq-reminder>"
       },
       "cooldown_tokens": 200000
     },
-
     {
       "id": "session-stop-review",
       "enabled": true,
       "description": "Session stopping — optional sync (once per session)",
-      "platforms": ["claude-code"],
-      "events": ["Stop"],
+      "platforms": [
+        "claude-code"
+      ],
+      "events": [
+        "Stop"
+      ],
       "match": {},
       "action": {
         "hint": "<session-review priority=\"low\">\nUser stopped this task. If you made significant progress worth preserving:\n1) km_think(mode=\"store\") any key insights\nOtherwise just stop cleanly — no sync needed for short/interrupted tasks.\n</session-review>"
       },
       "cooldown_tokens": 990000
     },
-
     {
       "id": "synq-task-complete",
       "enabled": true,
       "description": "System task completed — sync to SynqTask",
-      "platforms": ["claude-code"],
-      "events": ["PostToolUse"],
+      "platforms": [
+        "claude-code"
+      ],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
         "tool": "TaskUpdate",
-        "input_contains": {"status": "completed"}
+        "input_contains": {
+          "status": "completed"
+        }
       },
       "action": {
         "exec": "/home/relishev/.local/bin/context todo sync --from-env",
         "timeout": 15
       }
     },
-
     {
       "id": "synq-task-create",
       "enabled": true,
       "description": "System task created — mirror in SynqTask",
-      "platforms": ["claude-code"],
-      "events": ["PostToolUse"],
+      "platforms": [
+        "claude-code"
+      ],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
         "tool": "TaskCreate"
       },
@@ -235,13 +349,16 @@
         "timeout": 15
       }
     },
-
     {
       "id": "synq-todowrite-sync",
       "enabled": true,
       "description": "TodoWrite — auto-sync items to SynqTask via context CLI",
-      "platforms": ["claude-code"],
-      "events": ["PostToolUse"],
+      "platforms": [
+        "claude-code"
+      ],
+      "events": [
+        "PostToolUse"
+      ],
       "match": {
         "tool": "TodoWrite"
       },

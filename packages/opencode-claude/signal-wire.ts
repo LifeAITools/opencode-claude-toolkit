@@ -99,7 +99,7 @@ export class SignalWire {
   private sessionId: string
   private sessionIdResolved = false
   private readonly cooldownMap: Map<string, number> = new Map()
-  private cumulativeTokens: number = 0
+  private contextPosition: number = 0
 
   constructor(config: SignalWireConfig) {
     this.serverUrl = config.serverUrl
@@ -146,30 +146,50 @@ export class SignalWire {
   // ─── Token tracking ─────────────────────────────────────
 
   /**
-   * Track tokens for cooldown bucket calculations.
-   * Only counts input (uncached) + output + cache_write — NOT cache reads.
-   * Cache reads are "free" replays of the same content and inflate cumulative
-   * tokens by 150K-370K per call, causing cooldown buckets to advance every
-   * few minutes instead of every 50K-990K tokens of actual work.
+   * Track context position for cooldown bucket calculations.
+   *
+   * Uses the CURRENT PROMPT SIZE (input + cacheRead + cacheCreation) as the
+   * context position — this represents where the agent is in its ~200K context
+   * window. Unlike cumulative counting, this maps to something real:
+   *
+   *   Session start:  ~33K  (system + tools prefix)
+   *   Mid-session:    ~100K (growing conversation)
+   *   Near limit:     ~180K (approaching compaction)
+   *   After compact:  ~50K  (context reset → rules can re-fire)
+   *
+   * Cooldown buckets divide the context window into zones. A rule with
+   * cooldown_tokens=50K fires at 0-50K, 50-100K, 100-150K, 150-200K —
+   * roughly 4 times per context lifecycle. After compaction, zone 0-50K
+   * is re-entered and rules fire again (correct: agent lost memory).
    */
   trackTokens(usage: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }): void {
     try {
-      const added =
+      // Context position = total prompt size for this API call
+      const promptSize =
         (usage.inputTokens ?? 0) +
-        (usage.outputTokens ?? 0) +
+        (usage.cacheReadInputTokens ?? 0) +
         (usage.cacheCreationInputTokens ?? 0)
-      // NOTE: cacheReadInputTokens intentionally excluded — they inflate
-      // cumulative count and defeat cooldown buckets (990K session-start
-      // cooldown was firing every ~5 calls due to 150K cache reads per call)
-      this.cumulativeTokens += added
-      dbg(`trackTokens: +${added} = ${this.cumulativeTokens} cumulative (excl cache reads)`)
+
+      const prev = this.contextPosition
+
+      // Detect compaction: context drops by >40% → agent lost memory → reset cooldowns
+      // so rules re-fire to re-prime the agent after compaction.
+      if (prev > 0 && promptSize > 0 && promptSize < prev * 0.6) {
+        this.cooldownMap.clear()
+        dbg(`compaction detected: ${prev}→${promptSize} (${((1 - promptSize/prev) * 100).toFixed(0)}% drop) — all cooldowns reset`)
+      }
+
+      if (promptSize > 0) {
+        this.contextPosition = promptSize
+      }
+      dbg(`trackTokens: promptSize=${promptSize} contextPosition=${prev}→${this.contextPosition}`)
     } catch (e: any) {
       dbg('trackTokens error:', e.message)
     }
   }
 
-  getCumulativeTokens(): number {
-    return this.cumulativeTokens
+  getContextPosition(): number {
+    return this.contextPosition
   }
 
   // ─── Evaluation ─────────────────────────────────────────
@@ -356,13 +376,16 @@ export class SignalWire {
       if (cooldownTokens <= 0 && cooldownMinutes <= 0) return true
 
       if (cooldownTokens > 0) {
-        // Token-based: bucket = floor(cumulative / cooldown_tokens)
-        const currentBucket = Math.floor(this.cumulativeTokens / cooldownTokens)
-        const key = this.cooldownKey(rule, currentBucket)
-        const lastBucket = this.cooldownMap.get(key)
+        // Context-position based: bucket = floor(contextPosition / cooldown_tokens)
+        // contextPosition = current prompt size (~33K start, grows to ~200K, drops on compaction)
+        // This divides the context window into zones. A rule with cooldown_tokens=50K
+        // fires in zones: [0-50K], [50-100K], [100-150K], [150-200K] — roughly 4 times.
+        const currentBucket = Math.floor(this.contextPosition / cooldownTokens)
+        const ns = rule.cooldown_namespace ?? rule.id
+        const lastBucket = this.cooldownMap.get(ns)
 
         if (lastBucket !== undefined && currentBucket <= lastBucket) {
-          dbg(`cooldown active: ${rule.id} (ns:${rule.cooldown_namespace ?? 'solo'}, cd:${Math.floor(cooldownTokens / 1000)}k, bucket:${currentBucket})`)
+          dbg(`cooldown active: ${rule.id} (ns:${ns}, pos:${this.contextPosition}, cd:${Math.floor(cooldownTokens / 1000)}k, bucket:${currentBucket})`)
           return false
         }
         return true
@@ -370,12 +393,13 @@ export class SignalWire {
 
       if (cooldownMinutes > 0) {
         // Time-based: store timestamp of last fire
-        const key = this.cooldownKeyTime(rule)
+        const ns = rule.cooldown_namespace ?? rule.id
+        const key = `${ns}_time`
         const lastFired = this.cooldownMap.get(key)
         const now = Date.now()
 
         if (lastFired !== undefined && (now - lastFired) < cooldownMinutes * 60 * 1000) {
-          dbg(`cooldown active (time): ${rule.id} (ns:${rule.cooldown_namespace ?? 'solo'}, cd:${cooldownMinutes}m)`)
+          dbg(`cooldown active (time): ${rule.id} (ns:${ns}, cd:${cooldownMinutes}m)`)
           return false
         }
         return true
@@ -394,29 +418,17 @@ export class SignalWire {
       const cooldownMinutes = rule.cooldown_minutes ?? 0
 
       if (cooldownTokens > 0) {
-        const currentBucket = Math.floor(this.cumulativeTokens / cooldownTokens)
-        const key = this.cooldownKey(rule, currentBucket)
-        this.cooldownMap.set(key, currentBucket)
+        const currentBucket = Math.floor(this.contextPosition / cooldownTokens)
+        const ns = rule.cooldown_namespace ?? rule.id
+        this.cooldownMap.set(ns, currentBucket)
+        dbg(`cooldown marked: ${rule.id} (ns:${ns}, bucket:${currentBucket}, pos:${this.contextPosition})`)
       } else if (cooldownMinutes > 0) {
-        const key = this.cooldownKeyTime(rule)
-        this.cooldownMap.set(key, Date.now())
+        const ns = rule.cooldown_namespace ?? rule.id
+        this.cooldownMap.set(`${ns}_time`, Date.now())
       }
     } catch (e: any) {
       dbg('markCooldown error:', e.message)
     }
-  }
-
-  private cooldownKey(rule: Rule, bucket: number): string {
-    const base = rule.cooldown_namespace
-      ? `sw_ns_${rule.cooldown_namespace}`
-      : `sw_${rule.id}`
-    return `${base}_${bucket}`
-  }
-
-  private cooldownKeyTime(rule: Rule): string {
-    return rule.cooldown_namespace
-      ? `sw_ns_${rule.cooldown_namespace}`
-      : `sw_${rule.id}`
   }
 
   // ─── Variable substitution ──────────────────────────────

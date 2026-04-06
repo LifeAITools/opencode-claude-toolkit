@@ -145,15 +145,24 @@ export class SignalWire {
 
   // ─── Token tracking ─────────────────────────────────────
 
+  /**
+   * Track tokens for cooldown bucket calculations.
+   * Only counts input (uncached) + output + cache_write — NOT cache reads.
+   * Cache reads are "free" replays of the same content and inflate cumulative
+   * tokens by 150K-370K per call, causing cooldown buckets to advance every
+   * few minutes instead of every 50K-990K tokens of actual work.
+   */
   trackTokens(usage: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }): void {
     try {
       const added =
         (usage.inputTokens ?? 0) +
         (usage.outputTokens ?? 0) +
-        (usage.cacheReadInputTokens ?? 0) +
         (usage.cacheCreationInputTokens ?? 0)
+      // NOTE: cacheReadInputTokens intentionally excluded — they inflate
+      // cumulative count and defeat cooldown buckets (990K session-start
+      // cooldown was firing every ~5 calls due to 150K cache reads per call)
       this.cumulativeTokens += added
-      dbg(`trackTokens: +${added} = ${this.cumulativeTokens} cumulative`)
+      dbg(`trackTokens: +${added} = ${this.cumulativeTokens} cumulative (excl cache reads)`)
     } catch (e: any) {
       dbg('trackTokens error:', e.message)
     }

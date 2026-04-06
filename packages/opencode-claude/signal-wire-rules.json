@@ -45,7 +45,7 @@
         "input_regex": "deploy\\.sh|kbc.*deploy|systemctl restart|docker compose up"
       },
       "action": {
-        "hint": "<deploy-gate priority=\"critical\">\nDeploy detected. Verify: 1) service status 2) tail logs 3) test endpoint\n</deploy-gate>"
+        "hint": "<deploy-gate priority=\"critical\">\n<instruction>Deploy detected. Verify BEFORE continuing.</instruction>\n<step order=\"1\">Check service status</step>\n<step order=\"2\">Tail logs for errors</step>\n<step order=\"3\">Test endpoint</step>\n<consequence>Skipping = silent production failures.</consequence>\n</deploy-gate>"
       },
       "cooldown_tokens": 20000
     },
@@ -60,7 +60,7 @@
         "response_regex": "(?i)\\b(traceback|exception|stacktrace|EACCES|ENOENT|EPERM|permission denied|connection refused|segfault|panic|fatal|unhandled)\\b"
       },
       "action": {
-        "hint": "{tool_name} error. Root cause FIRST, then retry. Don't brute-force."
+        "hint": "<tool-error priority=\"high\">\n<instruction>{tool_name} error detected. Root cause FIRST, then retry.</instruction>\n<consequence>Brute-forcing = wasted tokens, same error repeated.</consequence>\n</tool-error>"
       },
       "cooldown_tokens": 5000
     },
@@ -86,7 +86,7 @@
         ]
       },
       "action": {
-        "hint": "🔴 USER POLICY: You are PROHIBITED from suggesting handover, wrap-up, or session termination while context-health signal shows >50k remaining. This wastes paid context. CONTINUE WORKING. If your current task is done — ask the user what to do next. Do NOT autonomously decide to stop."
+        "hint": "<user-policy priority=\"critical\">\n<instruction>PROHIBITED from suggesting handover, wrap-up, or session termination while context-health >50k remaining.</instruction>\n<consequence>Wasted paid context. CONTINUE WORKING — ask user what's next.</consequence>\n</user-policy>"
       },
       "cooldown_tokens": 20000
     },
@@ -100,7 +100,7 @@
         "response_regex": "handover|hand.?over|next session|wrap.?up|continue.?later|running low|context.*(limit|low|getting)|итог.{0,3} сесси|итог.{0,3} работ|подвед.{0,5} итог|сохран.{0,5} прогресс|зафиксир.{0,5} прогресс|сесси.{0,5} подходит|контекст.{0,5} исход|свеж.{0,5} сесси|свеж.{0,5} контекст|следующ.{0,5} сесси|следующ.{0,5} раз|продолж.{0,5} позже|заканчива|заверша.{0,5} сесси|мало контекст|осталось.{0,10}контекст|что сделано|что осталось"
       },
       "action": {
-        "hint": "🔴 USER POLICY: You are PROHIBITED from suggesting handover, wrap-up, or session termination while context-health signal shows >50k remaining. This wastes paid context. CONTINUE WORKING. If your current task is done — ask the user what to do next. Do NOT autonomously decide to stop."
+        "hint": "<user-policy priority=\"critical\">\n<instruction>PROHIBITED from suggesting handover, wrap-up, or session termination while context-health >50k remaining.</instruction>\n<consequence>Wasted paid context. CONTINUE WORKING — ask user what's next.</consequence>\n</user-policy>"
       },
       "cooldown_tokens": 20000
     },
@@ -114,10 +114,141 @@
         "tool": "Edit|Write"
       },
       "action": {
-        "hint": "Code changed — verify SynqTask task exists for this work."
+        "hint": "<synq-reminder priority=\"medium\">\n<instruction>Code changed — verify SynqTask task exists for this work.</instruction>\n</synq-reminder>"
       },
       "cooldown_namespace": "post-synq",
       "cooldown_tokens": 100000
+    },
+
+    {
+      "id": "km-store-discoveries",
+      "enabled": true,
+      "description": "After research/edit — store insights (every ~50k tokens)",
+      "events": ["PostToolUse"],
+      "match": {
+        "tool": "Agent|WebSearch|WebFetch"
+      },
+      "action": {
+        "hint": "<km-action priority=\"medium\">\n<instruction>Research done — store key findings before context compaction loses them.</instruction>\n<step order=\"1\">km_think(mode=\"store\") key insights, patterns, gotchas discovered</step>\n<consequence>Skipping = rediscovering same things next session.</consequence>\n</km-action>"
+      },
+      "cooldown_namespace": "post-km",
+      "cooldown_tokens": 50000
+    },
+
+    {
+      "id": "plugin-update-reminder",
+      "enabled": true,
+      "description": "Hooks/skills/plugin changed — remind to use update-plugin skill",
+      "events": ["UserPromptSubmit"],
+      "match": {
+        "prompt_keywords": [
+          "update plugin", "update skill", "push plugin", "bump version",
+          "обновить плагин", "обновить скилл", "пушить плагин",
+          "обновить хук", "изменить хук", "изменить правило", "изменить скилл",
+          "хук", "плагин", "скилл", "навык", "правило",
+          "hook", "signal-wire", "rules.json", "hooks.json",
+          "lat-dev-kit", "plugin change", "skill change"
+        ]
+      },
+      "action": {
+        "hint": "<plugin-reminder priority=\"medium\">\n<instruction>Plugin/hook changes detected. Use /lat-dev-kit:update-plugin skill to version bump, push, and sync.</instruction>\n<consequence>Manual cache edits get overwritten on next plugin sync.</consequence>\n</plugin-reminder>"
+      },
+      "cooldown_tokens": 50000
+    },
+
+    {
+      "id": "agent-task-check",
+      "enabled": true,
+      "description": "Periodic reminder to check SynqTask for assigned tasks",
+      "events": ["UserPromptSubmit"],
+      "match": {},
+      "action": {
+        "hint": "<synq-reminder priority=\"low\">\n<instruction>Check SynqTask for tasks assigned to you: todo_tasks(action='search', status='open')</instruction>\n</synq-reminder>"
+      },
+      "cooldown_tokens": 100000
+    },
+
+    {
+      "id": "agent-comment-check",
+      "enabled": true,
+      "description": "Periodic reminder to check for new comments on your tasks",
+      "events": ["UserPromptSubmit"],
+      "match": {},
+      "action": {
+        "hint": "<synq-reminder priority=\"low\">\n<instruction>Check for new comments on your tasks: todo_comments(action='list', task_id=currentTaskId)</instruction>\n</synq-reminder>"
+      },
+      "cooldown_tokens": 150000
+    },
+
+    {
+      "id": "agent-stale-detection",
+      "enabled": true,
+      "description": "Hint CEO/leads to check for stale agents",
+      "events": ["UserPromptSubmit"],
+      "match": {},
+      "action": {
+        "hint": "<synq-reminder priority=\"low\">\n<instruction>Check for stale agents: todo_teams(action='stale_agents', minutes=30). Reassign abandoned tasks if needed.</instruction>\n</synq-reminder>"
+      },
+      "cooldown_tokens": 200000
+    },
+
+    {
+      "id": "session-stop-review",
+      "enabled": true,
+      "description": "Session stopping — optional sync (once per session)",
+      "platforms": ["claude-code"],
+      "events": ["Stop"],
+      "match": {},
+      "action": {
+        "hint": "<session-review priority=\"low\">\nUser stopped this task. If you made significant progress worth preserving:\n1) km_think(mode=\"store\") any key insights\nOtherwise just stop cleanly — no sync needed for short/interrupted tasks.\n</session-review>"
+      },
+      "cooldown_tokens": 990000
+    },
+
+    {
+      "id": "synq-task-complete",
+      "enabled": true,
+      "description": "System task completed — sync to SynqTask",
+      "platforms": ["claude-code"],
+      "events": ["PostToolUse"],
+      "match": {
+        "tool": "TaskUpdate",
+        "input_contains": {"status": "completed"}
+      },
+      "action": {
+        "exec": "/home/relishev/.local/bin/context todo sync --from-env",
+        "timeout": 15
+      }
+    },
+
+    {
+      "id": "synq-task-create",
+      "enabled": true,
+      "description": "System task created — mirror in SynqTask",
+      "platforms": ["claude-code"],
+      "events": ["PostToolUse"],
+      "match": {
+        "tool": "TaskCreate"
+      },
+      "action": {
+        "exec": "/home/relishev/.local/bin/context todo sync --from-env",
+        "timeout": 15
+      }
+    },
+
+    {
+      "id": "synq-todowrite-sync",
+      "enabled": true,
+      "description": "TodoWrite — auto-sync items to SynqTask via context CLI",
+      "platforms": ["claude-code"],
+      "events": ["PostToolUse"],
+      "match": {
+        "tool": "TodoWrite"
+      },
+      "action": {
+        "exec": "/home/relishev/.local/bin/context todo sync --from-env",
+        "timeout": 15
+      }
     }
   ]
 }

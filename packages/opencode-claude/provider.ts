@@ -1014,6 +1014,7 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       serverUrl: _swServerUrl || process.env.OPENCODE_SERVER_URL || '',
       sessionId: process.env.OPENCODE_SESSION_ID ?? '?',
       rulesPath: join(import.meta.dir, 'signal-wire-rules.json'),
+      platform: 'opencode',
     })
     dbg(`signal-wire: instance created (${_signalWire ? 'ok' : 'null'})`)
   } catch (e: any) {

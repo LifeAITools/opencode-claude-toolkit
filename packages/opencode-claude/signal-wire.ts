@@ -64,6 +64,7 @@ export interface Rule {
   cooldown_tokens?: number
   cooldown_minutes?: number
   cooldown_namespace?: string
+  platforms?: string[]  // e.g. ["claude-code"] — skip on other platforms
 }
 
 export interface SignalWireContext {
@@ -84,6 +85,8 @@ export interface SignalWireConfig {
   serverUrl: string
   sessionId: string
   rulesPath?: string
+  platform?: string  // 'opencode' | 'claude-code' — filters rules by platforms field
+  maxRulesPerFire?: number  // max rules to fire per evaluate (default: 3)
 }
 
 // ─── SignalWire class ─────────────────────────────────────
@@ -91,6 +94,8 @@ export interface SignalWireConfig {
 export class SignalWire {
   private readonly rules: readonly Rule[]
   private readonly serverUrl: string
+  private readonly platform: string
+  private readonly maxRulesPerFire: number
   private sessionId: string
   private sessionIdResolved = false
   private readonly cooldownMap: Map<string, number> = new Map()
@@ -99,6 +104,8 @@ export class SignalWire {
   constructor(config: SignalWireConfig) {
     this.serverUrl = config.serverUrl
     this.sessionId = config.sessionId
+    this.platform = config.platform ?? 'opencode'
+    this.maxRulesPerFire = config.maxRulesPerFire ?? 3
     // If sessionId is unknown, try to resolve from server on first TUI POST
     this.sessionIdResolved = !!config.sessionId && config.sessionId !== '?' && config.sessionId !== 'unknown'
 
@@ -106,13 +113,15 @@ export class SignalWire {
     if (config.rulesPath) {
       rules = this.loadRules(config.rulesPath)
     }
+    // Filter out rules for other platforms
+    rules = rules.filter(r => !r.platforms || r.platforms.includes(this.platform))
     // Freeze — rules never change after construction
     this.rules = Object.freeze(rules)
 
     // Resolve session ID early — gives async fetch time to complete before first fire
     if (!this.sessionIdResolved) this.resolveSessionId()
 
-    dbg(`init: ${this.rules.length} rules loaded, server=${this.serverUrl}, session=${this.sessionId}`)
+    dbg(`init: ${this.rules.length} rules loaded (platform=${this.platform}), server=${this.serverUrl}, session=${this.sessionId}`)
   }
 
   // ─── Rule loading ───────────────────────────────────────
@@ -156,9 +165,14 @@ export class SignalWire {
 
   // ─── Evaluation ─────────────────────────────────────────
 
+  /** Evaluate all matching rules (up to maxRulesPerFire). Returns combined result or null. */
   evaluate(context: SignalWireContext): SignalWireResult | null {
     try {
+      const results: SignalWireResult[] = []
+
       for (const rule of this.rules) {
+        if (results.length >= this.maxRulesPerFire) break
+
         // Skip disabled
         if (rule.enabled === false) continue
 
@@ -173,30 +187,43 @@ export class SignalWire {
 
         // Rule fires — build result
         const hint = this.substituteVars(rule.action.hint ?? '', rule, context)
-        const taggedHint = `[signal-wire:${rule.id}] ${hint}`
 
         // Mark cooldown
         this.markCooldown(rule)
 
-        // Fire-and-forget TUI notification
-        this.notifyTui(rule.id, hint)
-
-        // Fire-and-forget exec
+        // Fire-and-forget exec (no hint for exec-only rules)
         if (rule.action.exec) {
           const cmd = this.substituteVars(rule.action.exec, rule, context)
           this.execFireAndForget(cmd, rule)
         }
 
-        dbg(`rule fired: ${rule.id} → ${hint.replace(/\n/g, ' ').slice(0, 120)}`)
-
-        return {
-          ruleId: rule.id,
-          hint: taggedHint,
-          execCmd: rule.action.exec ? this.substituteVars(rule.action.exec, rule, context) : undefined,
+        // Only collect hint-bearing rules for injection
+        if (hint) {
+          results.push({
+            ruleId: rule.id,
+            hint,
+            execCmd: rule.action.exec ? this.substituteVars(rule.action.exec, rule, context) : undefined,
+          })
         }
+
+        dbg(`rule fired: ${rule.id} → ${hint.replace(/\n/g, ' ').slice(0, 120)}`)
       }
 
-      return null
+      if (results.length === 0) return null
+
+      // Combine all fired hints with signal-wire tags
+      const ids = results.map(r => r.ruleId)
+      const combined = results
+        .map(r => `⚡ signal-wire: ${r.ruleId}\n${r.hint}`)
+        .join('\n\n')
+
+      // Fire-and-forget TUI notification (combined)
+      this.notifyTui(ids, combined)
+
+      return {
+        ruleId: ids.join('+'),
+        hint: combined,
+      }
     } catch (e: any) {
       dbg('evaluate error:', e.message)
       return null
@@ -417,33 +444,46 @@ export class SignalWire {
       .catch(() => {}) // Silent — non-critical
   }
 
-  private notifyTui(ruleId: string, hint: string): void {
+  /** Format TUI message with flashlight box for visual distinction */
+  private formatTuiMessage(ids: string[], hint: string): string {
+    const header = ids.length === 1
+      ? `⚡ signal-wire: ${ids[0]}`
+      : `⚡ signal-wire: ${ids.join(' + ')}`
+    const width = Math.max(header.length + 2, 40)
+    const bar = '━'.repeat(width)
+    return `${bar}\n${header}\n${bar}\n${hint}\n${bar}`
+  }
+
+  private notifyTui(ids: string | string[], hint: string): void {
+    const idArr = Array.isArray(ids) ? ids : [ids]
     try {
       if (!this.sessionId || this.sessionId === '?' || this.sessionId === 'unknown') {
         // Session ID not resolved yet — retry after 2s (resolution is in-flight from constructor)
-        setTimeout(() => this.doTuiPost(ruleId, hint), 2000)
+        setTimeout(() => this.doTuiPost(idArr, hint), 2000)
         return
       }
-      this.doTuiPost(ruleId, hint)
+      this.doTuiPost(idArr, hint)
     } catch (e: any) {
       dbg('notifyTui error:', e.message)
     }
   }
 
-  private doTuiPost(ruleId: string, hint: string): void {
+  private doTuiPost(ids: string[], hint: string): void {
     try {
       if (!this.sessionId || this.sessionId === '?' || this.sessionId === 'unknown') {
         dbg(`TUI POST skipped: no sessionId after retry`)
         return
       }
 
+      const label = ids.join('+')
+      const formatted = this.formatTuiMessage(ids, hint)
       const url = `${this.serverUrl}/session/${this.sessionId}/message`
       const body = JSON.stringify({
         noReply: true,
         parts: [
           {
             type: 'text',
-            text: `⚡ signal-wire: ${ruleId}\n${hint}`,
+            text: formatted,
             synthetic: true,
           },
         ],
@@ -456,10 +496,10 @@ export class SignalWire {
         body,
       })
         .then(res => {
-          dbg(`TUI POST ${ruleId}: ${res.status}`)
+          dbg(`TUI POST ${label}: ${res.status}`)
         })
         .catch((e: any) => {
-          dbg(`TUI POST ${ruleId} failed:`, e.message)
+          dbg(`TUI POST ${label} failed:`, e.message)
         })
     } catch (e: any) {
       dbg('notifyTui error:', e.message)

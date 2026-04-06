@@ -109,6 +109,9 @@ export class SignalWire {
     // Freeze — rules never change after construction
     this.rules = Object.freeze(rules)
 
+    // Resolve session ID early — gives async fetch time to complete before first fire
+    if (!this.sessionIdResolved) this.resolveSessionId()
+
     dbg(`init: ${this.rules.length} rules loaded, server=${this.serverUrl}, session=${this.sessionId}`)
   }
 
@@ -416,11 +419,21 @@ export class SignalWire {
 
   private notifyTui(ruleId: string, hint: string): void {
     try {
-      // Lazy-resolve session ID on first notification
-      if (!this.sessionIdResolved) this.resolveSessionId()
-
       if (!this.sessionId || this.sessionId === '?' || this.sessionId === 'unknown') {
-        dbg(`TUI POST skipped: no sessionId`)
+        // Session ID not resolved yet — retry after 2s (resolution is in-flight from constructor)
+        setTimeout(() => this.doTuiPost(ruleId, hint), 2000)
+        return
+      }
+      this.doTuiPost(ruleId, hint)
+    } catch (e: any) {
+      dbg('notifyTui error:', e.message)
+    }
+  }
+
+  private doTuiPost(ruleId: string, hint: string): void {
+    try {
+      if (!this.sessionId || this.sessionId === '?' || this.sessionId === 'unknown') {
+        dbg(`TUI POST skipped: no sessionId after retry`)
         return
       }
 

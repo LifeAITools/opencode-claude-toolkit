@@ -1,0 +1,123 @@
+{
+  "rules": [
+    {
+      "id": "session-start-checklist",
+      "enabled": true,
+      "description": "First prompt — bootstrap SynqTask + KM (once per session)",
+      "events": ["UserPromptSubmit"],
+      "match": {},
+      "action": {
+        "hint": "<mandatory-checklist priority=\"critical\">\n<instruction>STOP. Execute BEFORE any implementation. Failure = wasted session.</instruction>\n<step order=\"1\">todo_spaces(list) — get all spaces</step>\n<step order=\"2\">todo_lists(list, space_id) — lists for relevant space</step>\n<step order=\"3\">todo_tasks(list, list_id, status=open) — open tasks</step>\n<step order=\"4\">km_think(mode=\"recall\", keywords=[...]) — check memory</step>\n<consequence>Skipping = duplicate work, lost context, broken tracking.</consequence>\n</mandatory-checklist>"
+      },
+      "cooldown_tokens": 990000
+    },
+
+    {
+      "id": "km-recall-on-prompt",
+      "enabled": true,
+      "description": "Work prompt — recall from KM every ~50k tokens",
+      "events": ["UserPromptSubmit"],
+      "match": {
+        "prompt_keywords": [
+          "implement", "create", "build", "fix", "debug", "refactor", "migrate", "deploy",
+          "add", "update", "change", "modify", "remove", "delete", "move", "rename",
+          "why", "how", "doesn't work", "not working", "broken", "error", "wrong", "still",
+          "реализовать", "создать", "починить", "рефакторинг", "добавить", "изменить",
+          "удалить", "сломано", "не работает", "ошибка", "почему", "деплой",
+          "plan", "design", "architect", "configure", "setup", "install", "test",
+          "commit", "push", "release", "ship", "launch"
+        ]
+      },
+      "action": {
+        "hint": "<km-action priority=\"high\">\n<instruction>RECALL before starting. Don't reinvent — check what you already know.</instruction>\n<step order=\"1\">km_think(mode=\"recall\", keywords=[relevant terms]) — prior solutions, patterns, gotchas?</step>\n<consequence>Skipping recall = solving already-solved problems from scratch.</consequence>\n</km-action>"
+      },
+      "cooldown_namespace": "prompt-km",
+      "cooldown_tokens": 50000
+    },
+
+    {
+      "id": "deploy-verify",
+      "enabled": true,
+      "description": "After deploy — verify health",
+      "events": ["PostToolUse"],
+      "match": {
+        "tool": "Bash",
+        "input_regex": "deploy\\.sh|kbc.*deploy|systemctl restart|docker compose up"
+      },
+      "action": {
+        "hint": "<deploy-gate priority=\"critical\">\nDeploy detected. Verify: 1) service status 2) tail logs 3) test endpoint\n</deploy-gate>"
+      },
+      "cooldown_tokens": 20000
+    },
+
+    {
+      "id": "mcp-tool-error",
+      "enabled": true,
+      "description": "Tool error — investigate root cause",
+      "events": ["PostToolUse"],
+      "match": {
+        "exclude_tools": ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
+        "response_regex": "(?i)\\b(traceback|exception|stacktrace|EACCES|ENOENT|EPERM|permission denied|connection refused|segfault|panic|fatal|unhandled)\\b"
+      },
+      "action": {
+        "hint": "{tool_name} error. Root cause FIRST, then retry. Don't brute-force."
+      },
+      "cooldown_tokens": 5000
+    },
+
+    {
+      "id": "anti-premature-handover-prompt",
+      "enabled": true,
+      "description": "Block premature wrap-up — catches user/agent mentioning handover in prompt",
+      "events": ["UserPromptSubmit"],
+      "match": {
+        "prompt_keywords": [
+          "handover", "hand over", "next session", "wrap up", "wrapping up",
+          "continue later", "pick up later", "future session", "separate session",
+          "new session", "fresh session", "another session",
+          "running low on context", "context is getting", "context limit",
+          "хэндовер", "следующая сессия", "следующей сессии", "новая сессия",
+          "продолжим позже", "заканчиваем", "завершаем сессию", "в другой сессии",
+          "контекст заканчивается", "мало контекста", "контекст на исходе",
+          "итог сессии", "итоги сессии", "итоги работы", "подведём итоги",
+          "сохраним прогресс", "сессия подходит к концу",
+          "свежий контекст", "свежая сессия", "в следующий раз",
+          "что сделано", "что осталось сделать"
+        ]
+      },
+      "action": {
+        "hint": "🔴 USER POLICY: You are PROHIBITED from suggesting handover, wrap-up, or session termination while context-health signal shows >50k remaining. This wastes paid context. CONTINUE WORKING. If your current task is done — ask the user what to do next. Do NOT autonomously decide to stop."
+      },
+      "cooldown_tokens": 20000
+    },
+
+    {
+      "id": "anti-premature-handover-output",
+      "enabled": true,
+      "description": "Block premature wrap-up — catches agent output containing handover/wrap-up language",
+      "events": ["PostToolUse"],
+      "match": {
+        "response_regex": "handover|hand.?over|next session|wrap.?up|continue.?later|running low|context.*(limit|low|getting)|итог.{0,3} сесси|итог.{0,3} работ|подвед.{0,5} итог|сохран.{0,5} прогресс|зафиксир.{0,5} прогресс|сесси.{0,5} подходит|контекст.{0,5} исход|свеж.{0,5} сесси|свеж.{0,5} контекст|следующ.{0,5} сесси|следующ.{0,5} раз|продолж.{0,5} позже|заканчива|заверша.{0,5} сесси|мало контекст|осталось.{0,10}контекст|что сделано|что осталось"
+      },
+      "action": {
+        "hint": "🔴 USER POLICY: You are PROHIBITED from suggesting handover, wrap-up, or session termination while context-health signal shows >50k remaining. This wastes paid context. CONTINUE WORKING. If your current task is done — ask the user what to do next. Do NOT autonomously decide to stop."
+      },
+      "cooldown_tokens": 20000
+    },
+
+    {
+      "id": "synq-track-work",
+      "enabled": true,
+      "description": "After code changes — ensure tracking (every ~100k tokens)",
+      "events": ["PostToolUse"],
+      "match": {
+        "tool": "Edit|Write"
+      },
+      "action": {
+        "hint": "Code changed — verify SynqTask task exists for this work."
+      },
+      "cooldown_namespace": "post-synq",
+      "cooldown_tokens": 100000
+    }
+  ]
+}

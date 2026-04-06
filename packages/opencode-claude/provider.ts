@@ -17,6 +17,7 @@ import { appendFileSync } from 'fs'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
+import { SignalWire } from './signal-wire.ts'
 
 const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
@@ -28,6 +29,12 @@ const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSIO
 
 const MAX_MEMORY_LINES = 500
 const MAX_MEMORY_BYTES = 50_000
+
+// ─── Signal-wire: module-level state ──────────────────────
+let _swServerUrl = ''
+export function setSignalWireServerUrl(url: string) { _swServerUrl = url }
+
+let _signalWire: SignalWire | null = null
 
 function logStats(line: string, structured?: Record<string, unknown>) {
   try { appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}\n`) } catch {}
@@ -277,6 +284,48 @@ export function buildContextInjection(): string | null {
   return content
 }
 
+// ─── Signal-wire: extract context from converted messages ─
+
+function extractSignalWireContext(messages: any[]): { event: 'UserPromptSubmit' | 'PostToolUse'; lastUserText: string; lastToolName: string; lastToolInput: string; lastToolOutput: string } {
+  let lastUserText = ''
+  let lastToolName = ''
+  let lastToolInput = ''
+  let lastToolOutput = ''
+
+  // Walk backwards through messages to find last user text and last tool result
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role === 'user' && !lastUserText) {
+      // Check for text content (not tool_result)
+      const content = Array.isArray(msg.content) ? msg.content : [msg.content]
+      for (const part of content) {
+        if (part.type === 'text' && part.text) {
+          lastUserText = part.text
+          break
+        }
+        if (part.type === 'tool_result' && !lastToolOutput) {
+          lastToolOutput = typeof part.content === 'string' ? part.content : JSON.stringify(part.content)
+        }
+      }
+    }
+    if (msg.role === 'assistant' && !lastToolName) {
+      const content = Array.isArray(msg.content) ? msg.content : [msg.content]
+      for (const part of content) {
+        if (part.type === 'tool_use' && part.name) {
+          lastToolName = part.name
+          lastToolInput = typeof part.input === 'string' ? part.input : JSON.stringify(part.input ?? {})
+          break
+        }
+      }
+    }
+    if (lastUserText && lastToolName) break
+  }
+
+  // Determine event type: if we found tool result → PostToolUse, else UserPromptSubmit
+  const event = lastToolOutput ? 'PostToolUse' : 'UserPromptSubmit'
+  return { event, lastUserText, lastToolName, lastToolInput, lastToolOutput }
+}
+
 // ─── Prompt conversion: V3 → SDK ──────────────────────────
 
 async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages: any[] }> {
@@ -469,6 +518,24 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
       }
       continue
     }
+  }
+
+  // ─── Signal-wire: evaluate rules and inject if triggered ──────
+  try {
+    if (_signalWire) {
+      const swContext = extractSignalWireContext(messages)
+      const swResult = _signalWire.evaluate(swContext)
+      if (swResult) {
+        // Append as user message with <system-reminder> — becomes cached on next call
+        messages.push({
+          role: 'user',
+          content: [{ type: 'text', text: `<system-reminder>\n${swResult.hint}\n</system-reminder>` }],
+        })
+        dbg(`signal-wire fired: ${swResult.ruleId} (${swResult.hint.length} chars)`)
+      }
+    }
+  } catch (e: any) {
+    dbg(`signal-wire error (non-blocking): ${e.message}`)
   }
 
   dbg(`convertPrompt: ${messages.length} messages, system=${typeof system === 'string' ? system.length : Array.isArray(system) ? (system as any[]).length + ' blocks' : 'none'}, in ${Date.now() - tConvert}ms`)
@@ -676,6 +743,8 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
         usage: { in: u?.inputTokens ?? 0, out: u?.outputTokens ?? 0, cacheRead: u?.cacheReadInputTokens ?? 0, cacheWrite: u?.cacheCreationInputTokens ?? 0 },
         rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
       })
+      // Signal-wire: track generate tokens
+      try { _signalWire?.trackTokens({ inputTokens: u?.inputTokens ?? 0, outputTokens: u?.outputTokens ?? 0, cacheReadInputTokens: u?.cacheReadInputTokens ?? 0, cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0 }) } catch {}
 
       return {
         content,
@@ -830,6 +899,8 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                     rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
                   })
                   dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
+                  // Signal-wire: track stream tokens
+                  try { _signalWire?.trackTokens({ inputTokens: u?.inputTokens ?? 0, outputTokens: u?.outputTokens ?? 0, cacheReadInputTokens: u?.cacheReadInputTokens ?? 0, cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0 }) } catch {}
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }
 
@@ -929,11 +1000,26 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
           rateLimit: stats.rateLimit ?? undefined,
         })
         dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit })
+        // Signal-wire: track keepalive tokens
+        try { _signalWire?.trackTokens({ inputTokens: stats.usage.inputTokens, cacheReadInputTokens: stats.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: stats.usage.cacheCreationInputTokens ?? 0 }) } catch {}
       },
     },
   })
 
   dbg(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`)
+
+  // ─── Signal-wire: create instance for rule evaluation ───
+  try {
+    _signalWire = new SignalWire({
+      serverUrl: _swServerUrl || process.env.OPENCODE_SERVER_URL || '',
+      sessionId: process.env.OPENCODE_SESSION_ID ?? '?',
+      rulesPath: join(import.meta.dir, 'signal-wire-rules.json'),
+    })
+    dbg(`signal-wire: instance created (${_signalWire ? 'ok' : 'null'})`)
+  } catch (e: any) {
+    dbg(`signal-wire: failed to create instance: ${e.message}`)
+    _signalWire = null
+  }
 
   return {
     languageModel(modelId: string): LanguageModelV3 {

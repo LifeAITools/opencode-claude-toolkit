@@ -22,6 +22,7 @@ import { createHash, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, statSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
+import { setSignalWireServerUrl } from './provider.ts'
 
 // ─── OAuth Constants (matching Claude CLI exactly) ─────────
 // Source: src/constants/oauth.ts (PROD_OAUTH_CONFIG)
@@ -220,6 +221,16 @@ export default {
     const providerPath = `file://${import.meta.dir}`
 
     dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} providerPath=${providerPath} initTime=${Date.now() - t0}ms`)
+
+    // Signal-wire: capture serverUrl for TUI notifications
+    const _serverUrl = typeof input.serverUrl === 'object' && input.serverUrl?.href
+      ? input.serverUrl.href.replace(/\/$/, '')  // URL object → string, strip trailing slash
+      : (typeof input.serverUrl === 'string' ? input.serverUrl.replace(/\/$/, '') : '')
+    const _sessionId = process.env.OPENCODE_SESSION_ID ?? sessionId
+    dbg(`STARTUP signal-wire: serverUrl=${_serverUrl} sessionId=${_sessionId}`)
+
+    // Pass serverUrl to provider.ts for SignalWire instance construction
+    setSignalWireServerUrl(_serverUrl)
 
     if (!creds.hasCredentials) {
       dbg('Not logged in — run: opencode providers login -p claude-max')

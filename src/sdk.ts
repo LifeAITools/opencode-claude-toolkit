@@ -1302,8 +1302,20 @@ export class ClaudeCodeSDK {
     const delay = Math.min(refreshIn + jitter, remaining - EXPIRY_BUFFER_MS)
 
     if (delay <= 0) {
-      // Less than buffer left — refresh NOW
-      void this.proactiveRefresh()
+      // Less than buffer left — refresh soon, but not synchronously.
+      // Minimum 30s delay prevents tight-loop scheduling when delay computes to 0
+      // (which happens when tokenIssuedAt=now after accepting a stale token).
+      const emergencyDelay = 30_000
+      this.dbg(`proactive rotation: delay=${delay}ms <= 0, scheduling emergency refresh in ${emergencyDelay / 1000}s`)
+      if (!this.tokenRotationTimer) {
+        this.tokenRotationTimer = setTimeout(() => {
+          this.tokenRotationTimer = null
+          void this.proactiveRefresh()
+        }, emergencyDelay)
+        if (this.tokenRotationTimer && typeof this.tokenRotationTimer === 'object' && 'unref' in this.tokenRotationTimer) {
+          (this.tokenRotationTimer as any).unref()
+        }
+      }
       return
     }
 
@@ -1344,19 +1356,39 @@ export class ClaudeCodeSDK {
       try {
         const creds = await this.credentialStore.read()
         if (creds && !(Date.now() + EXPIRY_BUFFER_MS >= creds.expiresAt)) {
-          this.accessToken = creds.accessToken
-          this.refreshToken = creds.refreshToken
-          this.expiresAt = creds.expiresAt
-          this.tokenIssuedAt = Date.now()
-          this.proactiveRefreshFailures = 0
-          this.dbg('proactive refresh: picked up fresh token from another process during cooldown')
-          this.emitTokenStatus('rotated', 'Token refreshed by another process')
-          this.scheduleProactiveRotation()
-          return
+          const diskRemaining = creds.expiresAt - Date.now()
+          // Only accept if the token is genuinely fresh — same 2h threshold as doTokenRefresh.
+          // Without this, we endlessly accept aging tokens (24min, 12min, 6min...) from disk
+          // without anyone actually calling the OAuth endpoint.
+          if (diskRemaining >= PROACTIVE_FRESH_MIN_REMAINING_MS) {
+            this.accessToken = creds.accessToken
+            this.refreshToken = creds.refreshToken
+            this.expiresAt = creds.expiresAt
+            this.tokenIssuedAt = Date.now()
+            this.proactiveRefreshFailures = 0
+            this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(diskRemaining / 60000)}min remaining)`)
+            this.emitTokenStatus('rotated', `Token refreshed by another process (${Math.round(diskRemaining / 60000)}min remaining)`)
+            this.scheduleProactiveRotation()
+            return
+          }
+          // Token on disk but too close to expiry — don't accept, let cooldown expire then actually refresh
+          this.dbg(`proactive refresh: disk token has only ${Math.round(diskRemaining / 60000)}min left (need ${Math.round(PROACTIVE_FRESH_MIN_REMAINING_MS / 60000)}min) — waiting for cooldown`)
         }
       } catch {}
       this.dbg('proactive refresh skipped: global cooldown active, no fresh token found')
-      this.scheduleProactiveRotation()
+      // Schedule retry — but DON'T call scheduleProactiveRotation() here because
+      // it can compute a 0ms delay and call us right back in a tight loop.
+      // Instead, schedule a fixed retry after cooldown expires.
+      if (!this.tokenRotationTimer) {
+        const retryIn = Math.max(PROACTIVE_REFRESH_MIN_INTERVAL_MS, 60_000)
+        this.tokenRotationTimer = setTimeout(() => {
+          this.tokenRotationTimer = null
+          void this.proactiveRefresh()
+        }, retryIn)
+        if (this.tokenRotationTimer && typeof this.tokenRotationTimer === 'object' && 'unref' in this.tokenRotationTimer) {
+          (this.tokenRotationTimer as any).unref()
+        }
+      }
       return
     }
 

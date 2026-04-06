@@ -26,8 +26,8 @@ const STATS_JSONL = join(homedir(), '.claude', 'claude-max-stats.jsonl')
 const PID = process.pid
 const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? '?'
 
-const MAX_MEMORY_LINES = 200
-const MAX_MEMORY_BYTES = 25_000
+const MAX_MEMORY_LINES = 500
+const MAX_MEMORY_BYTES = 50_000
 
 function logStats(line: string, structured?: Record<string, unknown>) {
   try { appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}\n`) } catch {}
@@ -940,7 +940,7 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
           usage: { in: stats.usage.inputTokens, out: stats.usage.outputTokens, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0 },
           rateLimit: stats.rateLimit ?? undefined,
         })
-        dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, rateLimit: stats.rateLimit })
+        dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit })
       },
     },
   })

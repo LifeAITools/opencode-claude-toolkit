@@ -446,8 +446,10 @@ export default {
         const { buildContextInjection } = await import('./provider.ts')
         const injection = buildContextInjection()
         if (injection) {
-          // Prepend before opencode's system prompt — rules appear first in context
-          output.system.unshift(injection)
+          // Prepend to the existing system string — each system[] element becomes
+          // a separate {role:"system"} message (llm.ts:153), and our convertPrompt
+          // only keeps the LAST one. So we must inject INTO system[0], not add a new element.
+          output.system[0] = injection + '\n\n' + (output.system[0] || '')
         }
       },
 

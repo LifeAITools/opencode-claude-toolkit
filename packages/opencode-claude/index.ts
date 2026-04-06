@@ -437,6 +437,27 @@ export default {
         ],
       },
 
+      // ─── Context injection: CLAUDE.md + MEMORY.md ───────
+      // Fires before each LLM call (including subagent calls).
+      // Prepends project rules and memory to the system prompt.
+      // This is the proper plugin-layer hook — keeps the provider
+      // focused on V3→SDK conversion only.
+      "experimental.chat.system.transform": async (_input: any, output: any) => {
+        const { buildContextInjection } = await import('./provider.ts')
+        const injection = buildContextInjection()
+        if (injection) {
+          // Prepend before opencode's system prompt — rules appear first in context
+          output.system.unshift(injection)
+        }
+      },
+
+      // ─── Event bus: diagnostics ─────────────────────────
+      event: async ({ event }: { event: any }) => {
+        if (event?.type === 'mcp.tools.changed') {
+          dbg(`MCP_EVENT: tools changed on server=${event.properties?.server}`)
+        }
+      },
+
       // ─── Compaction: inject cache context ────────────────
       "experimental.session.compacting": async (_input: any, output: any) => {
         output.context.push(`## Cache Optimization Notes

@@ -210,7 +210,7 @@ function truncateMemory(raw: string): { text: string; truncated: boolean } {
 
 let _contextInjectionCache: { content: string; key: string } | null = null
 
-function buildContextInjection(): string | null {
+export function buildContextInjection(): string | null {
   const tInject = Date.now()
   const home = homedir()
   const cwd = process.cwd()
@@ -336,19 +336,10 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
         system = (system as { type: string; text?: string }[]).filter(b => b.type !== 'text' || (b.text && b.text.length > 0))
         if ((system as unknown[]).length === 0) system = undefined
       }
-      // Inject CLAUDE.md rules + MEMORY.md into system prompt
-      const injection = buildContextInjection()
-      if (injection) {
-        if (typeof system === 'string') {
-          system = injection + '\n\n' + (system || '')
-        } else if (Array.isArray(system)) {
-          // Prepend as new text block WITHOUT cache_control
-          // Existing blocks keep their cache markers at their positions
-          ;(system as any[]).unshift({ type: 'text', text: injection })
-        } else {
-          system = injection
-        }
-      }
+      // Context injection (CLAUDE.md + MEMORY.md) is handled by the
+      // "experimental.chat.system.transform" plugin hook in index.ts.
+      // This keeps injection at the plugin layer (where it belongs) and
+      // the provider focused on V3→SDK format conversion only.
       continue
     }
 

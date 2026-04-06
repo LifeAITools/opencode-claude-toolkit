@@ -437,23 +437,13 @@ export default {
         ],
       },
 
-      // ─── Context injection: CLAUDE.md + MEMORY.md ───────
-      // Fires before each LLM call (including subagent calls).
-      // Prepends project rules and memory to the system prompt.
-      // This is the proper plugin-layer hook — keeps the provider
-      // focused on V3→SDK conversion only.
-      "experimental.chat.system.transform": async (_input: any, output: any) => {
-        const { buildContextInjection } = await import('./provider.ts')
-        const injection = buildContextInjection()
-        if (injection) {
-          // Prepend to the existing system string — each system[] element becomes
-          // a separate {role:"system"} message (llm.ts:153), and our convertPrompt
-          // only keeps the LAST one. So we must inject INTO system[0], not add a new element.
-          output.system[0] = injection + '\n\n' + (output.system[0] || '')
-        }
-      },
+      // NOTE: experimental.chat.system.transform does NOT fire for external plugins
+      // (only config/auth hooks are dispatched to npm-installed plugins).
+      // Context injection stays in provider.ts convertPrompt() — see buildContextInjection().
 
       // ─── Event bus: diagnostics ─────────────────────────
+      // NOTE: event hook also may not fire for external plugins (same Plugin.trigger limitation).
+      // Keeping as no-op for now — will activate if opencode adds external plugin hook support.
       event: async ({ event }: { event: any }) => {
         if (event?.type === 'mcp.tools.changed') {
           dbg(`MCP_EVENT: tools changed on server=${event.properties?.server}`)

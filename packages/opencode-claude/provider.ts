@@ -208,9 +208,17 @@ function truncateMemory(raw: string): { text: string; truncated: boolean } {
   return { text: result, truncated: true }
 }
 
-let _contextInjectionCache: { content: string; key: string } | null = null
+// Frozen after first build — never re-read within the same process.
+// Why: mid-session changes (agent writes MEMORY.md) would alter the system prompt,
+// invalidating the entire Anthropic cache prefix (36K+ tokens). The agent already
+// has any new knowledge in conversation history — re-injecting it into the prefix
+// wastes cache and money. New sessions pick up fresh content on startup.
+let _contextInjectionFrozen: string | null | undefined = undefined  // undefined = not built yet
 
 export function buildContextInjection(): string | null {
+  // Fast path: return frozen injection for all calls after the first
+  if (_contextInjectionFrozen !== undefined) return _contextInjectionFrozen
+
   const tInject = Date.now()
   const home = homedir()
   const cwd = process.cwd()
@@ -236,23 +244,7 @@ export function buildContextInjection(): string | null {
 
   sources.push({ path: memoryPath, tag: 'project-memory', isMemory: true })
 
-  // Build cache key from mtimes
-  const mtimes: string[] = []
-  for (const src of sources) {
-    try {
-      const { statSync } = require('fs')
-      mtimes.push(`${src.path}:${statSync(src.path).mtimeMs}`)
-    } catch {
-      mtimes.push(`${src.path}:0`)
-    }
-  }
-  const cacheKey = mtimes.join('|')
-
-  if (_contextInjectionCache && _contextInjectionCache.key === cacheKey) {
-    return _contextInjectionCache.content
-  }
-
-  // Build injection
+  // Build injection — read files once, freeze forever
   const parts: string[] = []
   let claudeMdBytes = 0
   let memoryBytes = 0
@@ -273,19 +265,15 @@ export function buildContextInjection(): string | null {
     }
   }
 
-  if (parts.length === 0) return null
+  const content = parts.length > 0 ? parts.join('\n\n') : null
 
-  const content = parts.join('\n\n')
+  dbg(`context_inject: ${parts.length} sources, ${content?.length ?? 0} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? ' TRUNCATED' : ''}) built in ${Date.now() - tInject}ms [FROZEN for session]`)
+  logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject}`, {
+    type: 'context_inject', sources: parts.length, claudeMdBytes, memoryBytes, truncated: memoryTruncated, buildMs: Date.now() - tInject,
+  })
 
-  // Log on first build or when content changes
-  if (!_contextInjectionCache || _contextInjectionCache.key !== cacheKey) {
-    dbg(`context_inject: ${parts.length} sources, ${content.length} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? ' TRUNCATED' : ''}) built in ${Date.now() - tInject}ms`)
-    logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject}`, {
-      type: 'context_inject', sources: parts.length, claudeMdBytes, memoryBytes, truncated: memoryTruncated, buildMs: Date.now() - tInject,
-    })
-  }
-
-  _contextInjectionCache = { content, key: cacheKey }
+  // Freeze — this value is returned for ALL subsequent calls in this process
+  _contextInjectionFrozen = content
   return content
 }
 

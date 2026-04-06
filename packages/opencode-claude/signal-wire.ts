@@ -91,13 +91,16 @@ export interface SignalWireConfig {
 export class SignalWire {
   private readonly rules: readonly Rule[]
   private readonly serverUrl: string
-  private readonly sessionId: string
+  private sessionId: string
+  private sessionIdResolved = false
   private readonly cooldownMap: Map<string, number> = new Map()
   private cumulativeTokens: number = 0
 
   constructor(config: SignalWireConfig) {
     this.serverUrl = config.serverUrl
     this.sessionId = config.sessionId
+    // If sessionId is unknown, try to resolve from server on first TUI POST
+    this.sessionIdResolved = !!config.sessionId && config.sessionId !== '?' && config.sessionId !== 'unknown'
 
     let rules: Rule[] = []
     if (config.rulesPath) {
@@ -390,8 +393,32 @@ export class SignalWire {
 
   // ─── TUI notification (fire-and-forget) ─────────────────
 
+  private resolveSessionId(): void {
+    if (this.sessionIdResolved || !this.serverUrl) return
+    this.sessionIdResolved = true // Only try once
+    // Query server for most recent session — fire-and-forget
+    fetch(`${this.serverUrl}/session`)
+      .then(res => res.json())
+      .then((sessions: any[]) => {
+        if (sessions?.length) {
+          // Last session in list is most recent
+          this.sessionId = sessions[sessions.length - 1]?.id ?? this.sessionId
+          dbg(`signal-wire: resolved sessionId=${this.sessionId}`)
+        }
+      })
+      .catch(() => {}) // Silent — non-critical
+  }
+
   private notifyTui(ruleId: string, hint: string): void {
     try {
+      // Lazy-resolve session ID on first notification
+      if (!this.sessionIdResolved) this.resolveSessionId()
+
+      if (!this.sessionId || this.sessionId === '?' || this.sessionId === 'unknown') {
+        dbg(`TUI POST skipped: no sessionId`)
+        return
+      }
+
       const url = `${this.serverUrl}/session/${this.sessionId}/message`
       const body = JSON.stringify({
         noReply: true,

@@ -396,14 +396,19 @@ export class SignalWire {
   private resolveSessionId(): void {
     if (this.sessionIdResolved || !this.serverUrl) return
     this.sessionIdResolved = true // Only try once
-    // Query server for most recent session — fire-and-forget
+    // Query server for most recent session matching our CWD — fire-and-forget
+    const cwd = process.cwd()
     fetch(`${this.serverUrl}/session`)
       .then(res => res.json())
       .then((sessions: any[]) => {
-        if (sessions?.length) {
-          // Last session in list is most recent
-          this.sessionId = sessions[sessions.length - 1]?.id ?? this.sessionId
-          dbg(`signal-wire: resolved sessionId=${this.sessionId}`)
+        if (!sessions?.length) return
+        // Filter by directory (CWD) and sort by most recently updated
+        const matching = sessions
+          .filter((s: any) => s.directory === cwd && !s.parentID) // exclude subagent sessions
+          .sort((a: any, b: any) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
+        if (matching.length) {
+          this.sessionId = matching[0].id
+          dbg(`signal-wire: resolved sessionId=${this.sessionId} (cwd=${cwd}, matched ${matching.length} sessions)`)
         }
       })
       .catch(() => {}) // Silent — non-critical

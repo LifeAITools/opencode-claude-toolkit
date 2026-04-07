@@ -291,8 +291,9 @@ function extractSignalWireContext(messages: any[]): { event: 'UserPromptSubmit' 
   let lastToolName = ''
   let lastToolInput = ''
   let lastToolOutput = ''
+  let lastAssistantText = ''
 
-  // Walk backwards through messages to find last user text and last tool result
+  // Walk backwards through messages to find last user text, tool result, and assistant text
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role === 'user' && !lastUserText) {
@@ -308,17 +309,31 @@ function extractSignalWireContext(messages: any[]): { event: 'UserPromptSubmit' 
         }
       }
     }
-    if (msg.role === 'assistant' && !lastToolName) {
+    if (msg.role === 'assistant') {
       const content = Array.isArray(msg.content) ? msg.content : [msg.content]
       for (const part of content) {
-        if (part.type === 'tool_use' && part.name) {
+        if (part.type === 'tool_use' && part.name && !lastToolName) {
           lastToolName = part.name
           lastToolInput = typeof part.input === 'string' ? part.input : JSON.stringify(part.input ?? {})
-          break
+        }
+        // Also capture assistant plain text — enables response_regex to match
+        // against text responses (not just tool output). Critical for rules like
+        // anti-premature-handover-output which need to catch "wrap up" in plain text.
+        if (part.type === 'text' && part.text && !lastAssistantText) {
+          lastAssistantText = part.text
         }
       }
     }
-    if (lastUserText && lastToolName) break
+    if (lastUserText && (lastToolName || lastAssistantText)) break
+  }
+
+  // Merge assistant text into lastToolOutput so response_regex matches BOTH
+  // tool output AND plain text responses. Dedup: if tool output exists, append
+  // assistant text (separated by newline) so regex searches both.
+  if (lastAssistantText) {
+    lastToolOutput = lastToolOutput
+      ? `${lastToolOutput}\n${lastAssistantText}`
+      : lastAssistantText
   }
 
   // Determine event type: if we found tool result → PostToolUse, else UserPromptSubmit

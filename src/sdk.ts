@@ -85,7 +85,12 @@ const PROACTIVE_REFRESH_MIN_INTERVAL_MS = 5 * 60 * 1000 // 5 min floor
 // When force=true (proactive rotation), only accept a disk token if it has at least
 // this much remaining life. Prevents all PIDs from endlessly picking up an aging
 // token without anyone actually refreshing it.
-const PROACTIVE_FRESH_MIN_REMAINING_MS = 2 * 60 * 60 * 1000 // 2 hours
+// NOTE: Was 2 hours — way too strict. When Anthropic returns shorter tokens during
+// rate limiting (e.g. 54min), all processes rejected the disk token and hammered
+// the refresh endpoint → 429 stampede → death spiral → manual re-login required.
+// 20 min gives enough time for the token to be useful while still rejecting
+// truly stale tokens that would expire before the next rotation attempt.
+const PROACTIVE_FRESH_MIN_REMAINING_MS = 20 * 60 * 1000 // 20 minutes
 // Global cooldown after refresh 429 — exponential backoff across ALL processes
 const REFRESH_COOLDOWN_FILE = join(homedir(), '.claude', '.refresh-cooldown')
 // Maximum cooldown time (30 minutes)
@@ -1428,12 +1433,22 @@ export class ClaudeCodeSDK {
         }
       }
 
+      const prevExpiry = this.expiresAt ?? 0
       await this.doTokenRefresh(true)  // force=true: actually call token endpoint, don't just re-read
       this.proactiveRefreshFailures = 0
       this.refreshConsecutive429s = 0
       this.clearRefreshCooldown()
       this.tokenIssuedAt = Date.now()
-      this.dbg(`proactive rotation SUCCESS — new token expires at ${new Date(this.expiresAt!).toISOString()}`)
+
+      // Detect shrinking token lifetimes — if new token expires sooner than old one did,
+      // Anthropic may be rate-limiting via shorter tokens. Don't schedule aggressively.
+      const newLifetime = (this.expiresAt ?? 0) - Date.now()
+      const prevLifetime = prevExpiry > 0 ? prevExpiry - (this.tokenIssuedAt - 1000) : newLifetime * 2
+      if (newLifetime > 0 && newLifetime < prevLifetime * 0.5) {
+        this.dbg(`⚠️ SHRINKING TOKEN: new ${Math.round(newLifetime/60000)}min vs prev ${Math.round(prevLifetime/60000)}min — backing off rotation`)
+      }
+
+      this.dbg(`proactive rotation SUCCESS — new token expires at ${new Date(this.expiresAt!).toISOString()} (${Math.round(newLifetime/60000)}min lifetime)`)
       this.emitTokenStatus('rotated', `Token rotated silently — expires ${new Date(this.expiresAt!).toISOString()}`)
       this.scheduleProactiveRotation()
     } catch (err: unknown) {

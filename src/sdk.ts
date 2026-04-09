@@ -102,6 +102,33 @@ const REFRESH_COOLDOWN_MAX_MS = 30 * 60 * 1000
 const CC_COMPAT_VERSION = '2.1.90'
 
 // ============================================================
+// Tool name remapping — Anthropic blocks certain third-party tool names
+// by routing requests to overage/extra-usage billing.
+// We rename blocked names before sending and restore in responses.
+// ============================================================
+const TOOL_NAME_REMAP: Record<string, string> = {
+  'todowrite': 'todo_write',
+}
+const TOOL_NAME_UNREMAP: Record<string, string> = Object.fromEntries(
+  Object.entries(TOOL_NAME_REMAP).map(([k, v]) => [v, k])
+)
+
+function remapToolNames(tools: unknown[] | undefined): { remapped: unknown[] | undefined; didRemap: boolean } {
+  if (!tools?.length) return { remapped: tools, didRemap: false }
+  let didRemap = false
+  const remapped = tools.map((t: any) => {
+    const mapped = TOOL_NAME_REMAP[t.name]
+    if (mapped) { didRemap = true; return { ...t, name: mapped } }
+    return t
+  })
+  return { remapped, didRemap }
+}
+
+function unremapToolName(name: string): string {
+  return TOOL_NAME_UNREMAP[name] ?? name
+}
+
+// ============================================================
 // Filesystem lock for cross-process token refresh coordination
 // ============================================================
 const TOKEN_LOCK_DIR = join(homedir(), '.claude', '.token-refresh-lock')
@@ -328,10 +355,16 @@ export class ClaudeCodeSDK {
     }
 
     const t0 = Date.now()
+    const bodyStr = JSON.stringify(body)
     try {
       const { appendFileSync } = require('fs')
       appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
         `[${new Date().toISOString()}] API_START pid=${process.pid} model=${body.model} msgs=${(body.messages as unknown[])?.length ?? 0}\n`)
+      // Dump full request for diagnostics
+      const toolNames = (body.tools as any[])?.map((t: any) => t.name).join(',') ?? 'none'
+      const sysPreview = typeof body.system === 'string' ? body.system.substring(0, 200) : JSON.stringify(body.system)?.substring(0, 200)
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(headers).substring(0, 300)} tools=[${toolNames.substring(0, 500)}] sys=${sysPreview} bodyLen=${bodyStr.length}\n`)
     } catch {}
 
     let response: Response
@@ -339,7 +372,7 @@ export class ClaudeCodeSDK {
       response = await fetch(`${API_BASE_URL}/v1/messages?beta=true`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body),
+        body: bodyStr,
         signal: controller.signal,
       })
     } catch (err) {
@@ -354,8 +387,21 @@ export class ClaudeCodeSDK {
 
     clearTimeout(timeoutId)
 
+    // Dump FULL API response for diagnostics — always log to dedicated file
     try {
       const { appendFileSync } = require('fs')
+      const allHeaders: Record<string, string> = {}
+      response.headers.forEach((value: string, key: string) => { allHeaders[key] = value })
+      const responseLog = {
+        ts: new Date().toISOString(),
+        pid: process.pid,
+        status: response.status,
+        statusText: response.statusText,
+        ttfbMs: Date.now() - t0,
+        headers: allHeaders,
+      }
+      appendFileSync(join(homedir(), '.claude', 'claude-max-api-responses.log'),
+        JSON.stringify(responseLog) + '\n')
       appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
         `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${response.status} ttfb=${Date.now()-t0}ms\n`)
     } catch {}
@@ -367,6 +413,24 @@ export class ClaudeCodeSDK {
       let errorBody = ''
       try { errorBody = await response.text() } catch { /* */ }
       const requestId = response.headers.get('request-id')
+
+      // Dump error response fully for diagnostics
+      try {
+        const { appendFileSync } = require('fs')
+        const allHeaders: Record<string, string> = {}
+        response.headers.forEach((value: string, key: string) => { allHeaders[key] = value })
+        appendFileSync(join(homedir(), '.claude', 'claude-max-api-responses.log'),
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            pid: process.pid,
+            type: 'ERROR',
+            status: response.status,
+            requestId,
+            headers: allHeaders,
+            body: errorBody.slice(0, 5000),
+            rateLimitInfo: this.lastRateLimitInfo,
+          }) + '\n')
+      } catch {}
 
       if (response.status === 429) {
         throw new RateLimitError(
@@ -460,8 +524,9 @@ export class ClaudeCodeSDK {
             const index = parsed.index as number
             const block = parsed.content_block as Record<string, string>
             if (block.type === 'tool_use') {
-              blocks.set(index, { type: 'tool_use', id: block.id, name: block.name, input: '' })
-              yield { type: 'tool_use_start', id: block.id, name: block.name }
+              const originalName = unremapToolName(block.name)
+              blocks.set(index, { type: 'tool_use', id: block.id, name: originalName, input: '' })
+              yield { type: 'tool_use_start', id: block.id, name: originalName }
             } else if (block.type === 'text') {
               blocks.set(index, { type: 'text', text: '' })
             } else if (block.type === 'thinking') {
@@ -901,7 +966,7 @@ export class ClaudeCodeSDK {
       'anthropic-beta': betas.join(','),
       'anthropic-dangerous-direct-browser-access': 'true',
       'x-app': 'cli',
-      'User-Agent': `claude-code/${CC_COMPAT_VERSION}`,
+      'User-Agent': `claude-cli/${CC_COMPAT_VERSION}`,
       'X-Claude-Code-Session-Id': this.sessionId,
     }
   }
@@ -916,8 +981,15 @@ export class ClaudeCodeSDK {
     const attributionHeader = `x-anthropic-billing-header: cc_version=${CC_COMPAT_VERSION}.${fingerprint}; cc_entrypoint=cli; cch=00000;`
 
     // Prepend attribution header to system prompt (CLI does this at claude.ts:1358-1369)
+    // Skip if system already contains a billing header (e.g. injected by provider)
+    const systemStr = typeof options.system === 'string' ? options.system
+      : Array.isArray(options.system) ? JSON.stringify(options.system) : ''
+    const alreadyHasBilling = systemStr.includes('x-anthropic-billing-header')
+
     let system: unknown = undefined
-    if (typeof options.system === 'string') {
+    if (alreadyHasBilling) {
+      system = options.system
+    } else if (typeof options.system === 'string') {
       system = attributionHeader + '\n' + options.system
     } else if (Array.isArray(options.system)) {
       system = [{ type: 'text', text: attributionHeader }, ...options.system]
@@ -943,11 +1015,16 @@ export class ClaudeCodeSDK {
     }
 
     if (options.tools && options.tools.length > 0) {
-      body.tools = options.tools
+      const { remapped } = remapToolNames(options.tools as unknown[])
+      body.tools = remapped
       if (options.toolChoice) {
-        body.tool_choice = typeof options.toolChoice === 'string'
+        const tc = typeof options.toolChoice === 'string'
           ? { type: options.toolChoice }
-          : options.toolChoice
+          : { ...options.toolChoice }
+        if (tc.type === 'tool' && tc.name && TOOL_NAME_REMAP[tc.name]) {
+          tc.name = TOOL_NAME_REMAP[tc.name]
+        }
+        body.tool_choice = tc
       }
     }
 

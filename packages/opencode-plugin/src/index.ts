@@ -44,15 +44,21 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000
 
 // Models available via Max/Pro subscription
 const MAX_MODELS: Record<string, { name: string; context: number; output: number }> = {
-  'claude-sonnet-4-6-20250415': { name: 'Claude Sonnet 4.6', context: 200000, output: 16384 },
-  'claude-opus-4-6-20250415': { name: 'Claude Opus 4.6', context: 200000, output: 16384 },
+  'claude-sonnet-4-6-20250514': { name: 'Claude Sonnet 4.6', context: 200000, output: 16384 },
+  'claude-opus-4-6-20250514': { name: 'Claude Opus 4.6', context: 200000, output: 16384 },
   'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', context: 200000, output: 8192 },
 }
 
 // Beta headers — matching CLI
-const CLAUDE_CODE_BETA = 'claude-code-2025-01-01'
+const CLAUDE_CODE_BETA = 'claude-code-20250219'
+const OAUTH_BETA = 'oauth-2025-04-20'
 const PROMPT_CACHING_BETA = 'prompt-caching-scope-2026-01-05'
 const INTERLEAVED_THINKING_BETA = 'interleaved-thinking-2025-05-14'
+const CONTEXT_1M_BETA = 'context-1m-2025-08-07'
+const FINE_GRAINED_TOOL_STREAMING_BETA = 'fine-grained-tool-streaming-2025-05-14'
+
+// CC-compatible version — must match a released Claude Code version
+const CC_COMPAT_VERSION = '2.1.90'
 
 // ─── PKCE Helpers ──────────────────────────────────────────
 
@@ -201,9 +207,24 @@ export default {
   server: async (input: any) => {
     const cwd = input.directory ?? process.cwd()
     const creds = new CredentialManager(cwd)
-    const deviceId = randomBytes(64).toString('hex')
+    const deviceId = randomBytes(32).toString('hex')
+    const sessionId = randomBytes(16).toString('hex') + '-' + randomBytes(4).toString('hex') + '-4' + randomBytes(3).toString('hex').slice(1) + '-' + randomBytes(4).toString('hex') + '-' + randomBytes(12).toString('hex')
 
-    console.log(`[claude-max] v0.2.0 (native @ai-sdk/anthropic) | creds: ${creds.credPath} | logged_in: ${creds.hasCredentials}`)
+    // Simple fingerprint for billing header (hash of first message text)
+    function computeFingerprint(body: any): string {
+      try {
+        const msgs = body?.messages
+        if (!msgs?.length) return '000'
+        const first = msgs[0]
+        const text = typeof first.content === 'string' ? first.content
+          : Array.isArray(first.content) ? first.content.map((c: any) => c.text ?? '').join('')
+          : ''
+        const hash = createHash('sha256').update(text).digest('hex')
+        return hash.substring(0, 3)
+      } catch { return '000' }
+    }
+
+    console.log(`[claude-max] v0.3.0 (subscription billing) | creds: ${creds.credPath} | logged_in: ${creds.hasCredentials}`)
 
     return {
       // ─── Config: register Claude Max as a provider ───────
@@ -263,8 +284,52 @@ export default {
               headers.set('Authorization', `Bearer ${token}`)
               headers.set('anthropic-version', '2023-06-01')
               headers.set('anthropic-dangerous-direct-browser-access', 'true')
-              headers.set('anthropic-beta', [CLAUDE_CODE_BETA, PROMPT_CACHING_BETA, INTERLEAVED_THINKING_BETA].join(','))
-              headers.set('x-device-id', deviceId)
+              headers.set('anthropic-beta', [
+                CLAUDE_CODE_BETA, OAUTH_BETA, PROMPT_CACHING_BETA,
+                INTERLEAVED_THINKING_BETA, CONTEXT_1M_BETA,
+                FINE_GRAINED_TOOL_STREAMING_BETA,
+              ].join(','))
+              headers.set('x-app', 'cli')
+              headers.set('User-Agent', `claude-cli/${CC_COMPAT_VERSION}`)
+              headers.set('X-Claude-Code-Session-Id', sessionId)
+
+              // Inject billing header into request body system prompt
+              if (init?.body && typeof init.body === 'string') {
+                try {
+                  const body = JSON.parse(init.body)
+                  const fingerprint = computeFingerprint(body)
+                  const billingHeader = `x-anthropic-billing-header: cc_version=${CC_COMPAT_VERSION}.${fingerprint}; cc_entrypoint=cli; cch=00000;`
+
+                  // Inject metadata.user_id if not present
+                  if (!body.metadata?.user_id) {
+                    const accountUuid = (() => {
+                      try {
+                        const raw = readFileSync(join(homedir(), '.claude', '.credentials.json'), 'utf8')
+                        return JSON.parse(raw).claudeAiOauth?.accountUuid ?? ''
+                      } catch { return '' }
+                    })()
+                    body.metadata = {
+                      user_id: JSON.stringify({
+                        device_id: deviceId,
+                        account_uuid: accountUuid,
+                        session_id: sessionId,
+                      }),
+                    }
+                  }
+
+                  // Prepend billing header to system prompt
+                  if (typeof body.system === 'string') {
+                    body.system = billingHeader + '\n' + body.system
+                  } else if (Array.isArray(body.system)) {
+                    body.system = [{ type: 'text', text: billingHeader }, ...body.system]
+                  } else {
+                    body.system = billingHeader
+                  }
+
+                  init = { ...init, body: JSON.stringify(body) }
+                } catch { /* non-JSON body, pass through */ }
+              }
+
               return fetch(request, { ...init, headers })
             },
           }

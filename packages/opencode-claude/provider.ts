@@ -1,3 +1,5 @@
+import { appendFileSync as _traceWrite } from 'fs'
+try { _traceWrite('/tmp/opencode-claude-trace.log', `PROVIDER.TS pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()}\n`) } catch {}
 /**
  * @life-ai-tools/claude-max-provider
  *

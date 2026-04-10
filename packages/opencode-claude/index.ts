@@ -1,3 +1,6 @@
+// TRACE: Plugin file loaded
+try { require('fs').appendFileSync('/tmp/opencode-claude-trace.log', `LOADED pid=${process.pid} cwd=${process.cwd()} time=${new Date().toISOString()}\n`) } catch {}
+
 /**
  * OpenCode Plugin — Claude Max/Pro Provider
  *

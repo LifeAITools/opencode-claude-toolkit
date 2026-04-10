@@ -206,13 +206,6 @@ export function checkSpawnAllowed(
   }
 }
 
-  return {
-    allowed: true,
-    depth: currentDepth, maxDepth: budget.maxSpawnDepth,
-    spawned: spawnCount, maxSpawns: budget.maxSubagents,
-  }
-}
-
 /**
  * Fetch agent identity from SynqTask via MCP `get_role_prompt`.
  * Falls back to parseAgentsMd() on any failure (CN-01: never blocks startup).

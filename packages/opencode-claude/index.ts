@@ -22,7 +22,9 @@ import { createHash, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, statSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
-import { setSignalWireServerUrl } from './provider.ts'
+import { setSignalWireServerUrl, getSignalWireInstance, handlePreToolUseSpawnCheck } from './provider.ts'
+import { startWakeListener, stopWakeListener } from './wake-listener'
+import type { WakeListenerHandle } from './wake-listener'
 
 // ─── OAuth Constants (matching Claude CLI exactly) ─────────
 // Source: src/constants/oauth.ts (PROD_OAUTH_CONFIG)
@@ -231,6 +233,48 @@ export default {
 
     // Pass serverUrl to provider.ts for SignalWire instance construction
     setSignalWireServerUrl(_serverUrl)
+
+    // Proactive wake: start plugin wake listener (L4)
+    // Bun.serve on random port — writes discovery file for Event Router
+    let wakeHandle: WakeListenerHandle | null = null
+
+    // Resolve agent member ID — UUID from config is authoritative.
+    // Priority: opencode.json MCP headers (UUID) → env SYNQTASK_MEMBER_ID (fallback)
+    let _memberId = process.env.SYNQTASK_MEMBER_ID
+    try {
+      const configPath = require('path').join(cwd, 'opencode.json')
+      if (require('fs').existsSync(configPath)) {
+        const projConfig = JSON.parse(require('fs').readFileSync(configPath, 'utf-8'))
+        const synqHeaders = projConfig?.mcp?.synqtask?.headers
+        if (synqHeaders?.['X-Agent-Id']) {
+          _memberId = synqHeaders['X-Agent-Id']
+          dbg(`WAKE memberId from opencode.json: ${_memberId}`)
+        }
+      }
+    } catch (e: any) { dbg(`WAKE config read failed: ${e?.message}`) }
+
+    // Start wake listener if serverUrl available
+    if (_serverUrl) {
+      try {
+        wakeHandle = await startWakeListener({
+          serverUrl: _serverUrl,
+          sessionId: _sessionId,
+          memberId: _memberId,
+          synqtaskUrl: process.env.SYNQTASK_API_URL,
+          // SignalWire instance is constructed lazily in provider.ts config hook,
+          // not available at wake-listener startup — use resolver for request-time lookup
+          signalWireResolver: () => getSignalWireInstance() as any,
+          // SDK client for in-process injection (TUI mode — no HTTP server)
+          sdkClient: input.client,
+        })
+        dbg(`WAKE listener started on port ${wakeHandle.port} token=${wakeHandle.token.slice(0, 8)}...`)
+      } catch (e: any) {
+        // CN-02: wake failure must NOT crash plugin startup
+        dbg(`WAKE listener failed to start: ${e?.message ?? e}`)
+      }
+    } else {
+      dbg(`WAKE listener skipped: serverUrl=${_serverUrl} sessionId=${_sessionId}`)
+    }
 
     if (!creds.hasCredentials) {
       dbg('Not logged in — run: opencode providers login -p claude-max')
@@ -459,6 +503,22 @@ export default {
         if (event?.type === 'mcp.tools.changed') {
           dbg(`MCP_EVENT: tools changed on server=${event.properties?.server}`)
         }
+      },
+
+      // ─── Stage 2: Spawn budget enforcement (CR-06, CN-06, CN-07) ──
+      // Intercepts `task` tool to enforce depth/subagent limits.
+      // Non-task tools pass through unaffected (CN-06).
+      // Errors in budget tracking never block the agent (CN-07).
+      "pre_tool_use": async ({ toolName, input }: { toolName: string; input?: any }) => {
+        try {
+          const result = await handlePreToolUseSpawnCheck(toolName, _serverUrl, _sessionId, input)
+          if (result) return result  // { decision: 'block', message: '...' }
+        } catch (e: any) {
+          // CN-07: fail-open — never crash on hook errors
+          dbg(`pre_tool_use hook error (allowing): ${e?.message}`)
+        }
+        // Allow: return undefined (no block)
+        return undefined
       },
 
       // ─── Compaction: inject cache context ────────────────

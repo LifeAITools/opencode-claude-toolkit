@@ -18,6 +18,7 @@ import { execSync } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
 import { SignalWire } from './signal-wire.ts'
+import { getAgentIdentity, getSpawnCount, incrementSpawnCount, resolveCurrentDepth, checkSpawnAllowed } from './wake-listener'
 
 const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
@@ -35,6 +36,7 @@ let _swServerUrl = ''
 export function setSignalWireServerUrl(url: string) { _swServerUrl = url }
 
 let _signalWire: SignalWire | null = null
+export function getSignalWireInstance(): SignalWire | null { return _signalWire }
 
 function logStats(line: string, structured?: Record<string, unknown>) {
   try { appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}\n`) } catch {}
@@ -1037,10 +1039,127 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     _signalWire = null
   }
 
-  return {
+   return {
     languageModel(modelId: string): LanguageModelV3 {
       dbg('languageModel requested:', modelId)
       return createLanguageModel(sdk, modelId, 'claude-max')
     },
+  }
+}
+
+// ─── Stage 2: PreToolUse Spawn Budget Enforcement ─────────────────
+// CR-06: Block `task` tool when depth/count exceeded
+// CN-06: ONLY checks `task` tool — all other tools pass through
+// CN-07: Fail-open on any tracking error
+
+/**
+ * PreToolUse hook handler for spawn budget enforcement.
+ * Called from index.ts plugin hook. Returns block decision or undefined (allow).
+ *
+ * @param toolName - Name of the tool being invoked
+ * @param serverUrl - OpenCode internal server URL (for depth resolution)
+ * @param sessionId - Current session ID (for parent_id chain walk)
+ */
+export async function handlePreToolUseSpawnCheck(
+  toolName: string,
+  serverUrl: string,
+  sessionId: string,
+  input?: Record<string, any>,
+): Promise<{ decision: 'block'; message: string } | undefined> {
+  // CN-06: Only check agent-spawning tools — let all other tools pass through
+  // Tool names from oh-my-opencode: ["task", "Task", "task_tool", "call_omo_agent"]
+  const SPAWN_TOOLS = ['task', 'Task', 'task_tool', 'call_omo_agent']
+  if (!SPAWN_TOOLS.includes(toolName)) return undefined
+
+  try {
+    const identity = getAgentIdentity()
+    const depth = await resolveCurrentDepth(serverUrl, sessionId)
+    
+    // ─── Case 1: No org role = HELPER (explore, plan, oracle) ───
+    // Helper depth is controlled by parent's maxHelperDepth (from role).
+    // Parent passes __MAX_HELPER_DEPTH via env. If current depth >= max → block.
+    if (!identity || !identity.roleName) {
+      const maxDepth = parseInt(process.env.__MAX_HELPER_DEPTH ?? '1', 10)
+      if (depth >= maxDepth) {
+        return {
+          decision: 'block',
+          message: [
+            `⚠️ Хелпер заблокирован: глубина ${depth}/${maxDepth}.`,
+            `Допустимая вложенность хелперов определяется ролью вызвавшего агента.`,
+            `На этом уровне порождение запрещено.`,
+            ``,
+            `Выполни задание сам и верни результат.`,
+            `Используй bash, read, grep, webfetch — но не task/call_omo_agent.`,
+          ].join('\n')
+        }
+      }
+      // Allowed — count and propagate depth
+      incrementSpawnCount()
+      dbg(`helper spawn OK (depth=${depth}/${maxDepth} count=${getSpawnCount()})`)
+      return undefined
+    }
+
+    // ─── Case 2: Agent with org role and budget ───
+    const check = checkSpawnAllowed(identity, depth, getSpawnCount())
+    if (!check.allowed) {
+      // Verbose error with role context and actionable options
+      const roleName = identity.roleName ?? 'unknown'
+      const teammates = identity.teammates?.length > 0
+        ? identity.teammates.map(t => `${t.name} (${t.roleName ?? '?'})`).join(', ')
+        : 'нет'
+      const reason = check.depth >= check.maxDepth
+        ? `Глубина ${check.depth}/${check.maxDepth} для роли '${roleName}'.`
+        : `Порождено ${check.spawned}/${check.maxSpawns} субагентов для роли '${roleName}'.`
+      
+      dbg(`spawn budget BLOCKED: ${reason}`)
+      return {
+        decision: 'block',
+        message: [
+          `⚠️ Spawn blocked: ${reason}`,
+          ``,
+          `Варианты:`,
+          `1. Выполни работу сам — ты ${roleName}`,
+          `2. Попроси teammate помочь: todo_channels({action:"send", channel_id:"333fec34-5604-447e-ac5d-4046d856ee5a", text:"Нужна помощь с [задача]"})`,
+          `   Teammates: ${teammates}`,
+          `3. Запроси специалиста: todo_members({action:"find_available", capability:"[нужная]"})`,
+          `4. Эскалируй owner'у: todo_channels({action:"send", ..., text:"@relishjev нужен специалист с [capability]"})`,
+        ].join('\n')
+      }
+    }
+
+    // CR-10: Validate delegation has substantive description BEFORE counting (Stage 3)
+    const description = String(input?.description ?? input?.prompt ?? input?.message ?? '')
+    if (description.length < 200) {
+      return {
+        decision: 'block',
+        message: [
+          `⚠️ Делегирование заблокировано: описание слишком короткое (${description.length} символов, нужно 200+).`,
+          ``,
+          `Включи в описание:`,
+          `- Что конкретно сделать`,
+          `- Что НЕ делать`,  
+          `- ID родительской задачи для контекста`,
+          `- Какие файлы/результаты прочитать`,
+        ].join('\n')
+      }
+    }
+
+    // All checks passed — increment counter NOW (after all validations)
+    incrementSpawnCount()
+
+    // Stage 2.1 (REQ-16b): Set env vars for child to inherit spawn context
+    // Child's wake-listener reads these at startup for O(1) depth resolution
+    process.env.__PARENT_MEMBER_ID = identity.memberId
+    process.env.__PARENT_SESSION_ID = sessionId
+    process.env.__SPAWN_DEPTH = String(check.depth + 1)
+    // Pass parent's maxHelperDepth so helpers know their ceiling
+    process.env.__MAX_HELPER_DEPTH = String(identity.budget?.maxSpawnDepth ?? 2)
+    dbg(`spawn budget OK: depth=${check.depth}/${check.maxDepth} spawned=${check.spawned + 1}/${check.maxSpawns} → child will be depth=${check.depth + 1}`)
+
+    return undefined
+  } catch (e: any) {
+    // CN-07: fail-open on tracking errors — never block due to internal error
+    dbg(`spawn budget check failed (allowing): ${e?.message}`)
+    return undefined
   }
 }

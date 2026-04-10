@@ -91,7 +91,8 @@ function isChannelWarm(channelId: string): boolean {
 export let _agentIdentity: AgentIdentity | null = null
 
 // ─── Spawn Budget Tracking (Stage 2 + 2.1) ──────────────────────────
-let _spawnCount = 0
+let _spawnTotal = 0        // total helpers spawned (lifetime, informational)
+let _spawnActive = 0       // currently active helpers (for concurrent limit)
 let _currentDepth: number | null = null  // cached, resolved lazily
 
 // Stage 2.1: Read inherited spawn depth from parent (REQ-16c)
@@ -106,11 +107,32 @@ if (!isNaN(_inheritedDepth) && _inheritedDepth >= 0) {
 export const _parentMemberId = process.env.__PARENT_MEMBER_ID ?? null
 export const _parentSessionId = process.env.__PARENT_SESSION_ID ?? null
 
-/** Get current spawn count for this session */
-export function getSpawnCount(): number { return _spawnCount }
+/** Get total helpers spawned (lifetime) */
+export function getSpawnTotal(): number { return _spawnTotal }
 
-/** Increment spawn count (called by provider.ts after successful spawn) */
-export function incrementSpawnCount(): void { _spawnCount++ }
+/** Get currently active helpers (estimated via timeout decay) */
+export function getSpawnActive(): number {
+  const now = Date.now()
+  // Expire helpers older than HELPER_TIMEOUT_MS (they're done or stuck)
+  while (_activeHelperTimestamps.length > 0 && now - _activeHelperTimestamps[0] > HELPER_TIMEOUT_MS) {
+    _activeHelperTimestamps.shift()
+  }
+  return _activeHelperTimestamps.length
+}
+
+const HELPER_TIMEOUT_MS = 60_000  // 60s — generous timeout for explore/plan helpers
+const _activeHelperTimestamps: number[] = []
+
+/** Helper started — track timestamp for concurrent counting */
+export function helperStarted(): void {
+  _spawnTotal++
+  _activeHelperTimestamps.push(Date.now())
+}
+
+/** Helper finished — remove oldest timestamp */
+export function helperFinished(): void {
+  _activeHelperTimestamps.shift()
+}
 
 /** Get agent identity (for provider.ts budget checks) */
 export function getAgentIdentity(): AgentIdentity | null { return _agentIdentity }
@@ -157,33 +179,32 @@ export async function resolveCurrentDepth(serverUrl: string, sessionId: string):
 export function checkSpawnAllowed(
   identity: AgentIdentity,
   currentDepth: number,
-  spawnCount: number,
-): { allowed: boolean; reason?: string; depth: number; maxDepth: number; spawned: number; maxSpawns: number } {
+  activeHelpers: number,
+): { allowed: boolean; reason?: string; depth: number; maxDepth: number; active: number; maxConcurrent: number } {
   const budget = identity.budget ?? { maxSpawnDepth: 2, maxSubagents: 5 }
+  // Read concurrent limit from metadata (maxConcurrentHelpers), fallback to maxSubagents
+  const maxConcurrent = (identity as any)._maxConcurrent ?? budget.maxSubagents
 
-  // Depth check: helpers are always 1 level deep (star topology, not tree)
-  // Agent with role at depth 0 can call helpers. Helper at depth 1 = leaf (blocked in Case 1).
-  // maxSpawnDepth from role is how many levels of work delegation via SynqTask, not helper depth.
-  if (currentDepth > 0) {
-    // Agent at depth > 0 calling another helper — this means a helper is trying to spawn.
-    // But Case 1 (no role) already blocks this. If we got here, agent HAS a role but is nested.
-    // This is a delegated sub-agent, not a helper. Allow within their role budget.
-  }
-
-  if (spawnCount >= budget.maxSubagents) {
+  if (activeHelpers >= maxConcurrent) {
     return {
       allowed: false,
       reason: [
-        `⚠️ Лимит хелперов: вызвано ${spawnCount}/${budget.maxSubagents} за сессию.`,
-        `Хелперы (explore, plan, oracle) — инструменты, не коллеги.`,
-        `Используй результаты уже полученных хелперов.`,
-        `Для передачи работы коллегам — делегируй через SynqTask:`,
+        `⚠️ Лимит одновременных хелперов: ${activeHelpers}/${maxConcurrent} активны.`,
+        `Дождись завершения текущих хелперов, потом вызывай новых.`,
+        `Для делегирования работы коллегам используй SynqTask:`,
         `  todo_tasks({action:"delegate", task_id:"...", to_member_id:"..."})`,
       ].join('\n'),
       depth: currentDepth, maxDepth: budget.maxSpawnDepth,
-      spawned: spawnCount, maxSpawns: budget.maxSubagents,
+      active: activeHelpers, maxConcurrent,
     }
   }
+
+  return {
+    allowed: true,
+    depth: currentDepth, maxDepth: budget.maxSpawnDepth,
+    active: activeHelpers, maxConcurrent,
+  }
+}
 
   return {
     allowed: true,
@@ -332,15 +353,17 @@ async function fetchIdentity(
     }
 
     // Extract helper budget from role metadata (Stage 2 + 2.1)
-    // maxHelperDepth = how deep helper chains can go (explore→plan→explore)
-    // maxHelpers = how many helper calls per session
-    // Fallback to old names (maxSpawnDepth/maxSubagents) for backward compat
+    // maxHelperDepth = max nesting depth for helpers (explore→plan)
+    // maxConcurrentHelpers = max simultaneous helpers
     if (result.role?.metadata) {
       const md = result.role.metadata as Record<string, string>
+      const maxConcurrent = parseInt(md.maxConcurrentHelpers ?? md.maxHelpers ?? md.maxSubagents ?? '5', 10) || 5
       identity.budget = {
         maxSpawnDepth: parseInt(md.maxHelperDepth ?? md.maxSpawnDepth ?? '2', 10) || 2,
-        maxSubagents: parseInt(md.maxHelpers ?? md.maxSubagents ?? '5', 10) || 5,
+        maxSubagents: maxConcurrent,
       }
+      // Store concurrent limit separately for checkSpawnAllowed
+      ;(identity as any)._maxConcurrent = maxConcurrent
     }
 
     dbg(`fetchIdentity: OK name=${identity.name} role=${identity.roleName} team=${identity.teamName} teammates=${identity.teammates.length} budget=${identity.budget ? `depth=${identity.budget.maxSpawnDepth},subs=${identity.budget.maxSubagents}` : 'none'} playbook=${identity.teamPlaybook ? 'yes' : 'no'}`)
@@ -422,7 +445,7 @@ function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | null): s
     ]
     if (identity.budget) {
       // Budget line only shown when budget fields exist (Stage 2)
-      identityLines.push(`Helpers: max depth ${identity.budget.maxSpawnDepth}, max calls ${identity.budget.maxSubagents}. Для делегирования коллегам используй SynqTask delegate.`)
+      identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. Делегирование коллегам: SynqTask todo_tasks delegate.`)
     }
     identityLines.push(`</agent-identity>`)
     identityBlock = identityLines.join('\n')

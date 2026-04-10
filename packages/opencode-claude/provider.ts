@@ -18,7 +18,7 @@ import { execSync } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
 import { SignalWire } from './signal-wire.ts'
-import { getAgentIdentity, getSpawnCount, incrementSpawnCount, resolveCurrentDepth, checkSpawnAllowed } from './wake-listener'
+import { getAgentIdentity, getSpawnActive, getSpawnTotal, helperStarted, helperFinished, resolveCurrentDepth, checkSpawnAllowed } from './wake-listener'
 
 const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
@@ -1093,14 +1093,14 @@ export async function handlePreToolUseSpawnCheck(
           ].join('\n')
         }
       }
-      // Allowed — count and propagate depth
-      incrementSpawnCount()
-      dbg(`helper spawn OK (depth=${depth}/${maxDepth} count=${getSpawnCount()})`)
+      // Allowed — track active helper
+      helperStarted()
+      dbg(`helper spawn OK (depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()})`)
       return undefined
     }
 
     // ─── Case 2: Agent with org role and budget ───
-    const check = checkSpawnAllowed(identity, depth, getSpawnCount())
+    const check = checkSpawnAllowed(identity, depth, getSpawnActive())
     if (!check.allowed) {
       // Verbose error with role context and actionable options
       const roleName = identity.roleName ?? 'unknown'
@@ -1144,8 +1144,8 @@ export async function handlePreToolUseSpawnCheck(
       }
     }
 
-    // All checks passed — increment counter NOW (after all validations)
-    incrementSpawnCount()
+    // All checks passed — track active helper (concurrent limit)
+    helperStarted()
 
     // Stage 2.1 (REQ-16b): Set env vars for child to inherit spawn context
     // Child's wake-listener reads these at startup for O(1) depth resolution

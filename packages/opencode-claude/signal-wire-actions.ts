@@ -176,7 +176,7 @@ async function executeWake(action: ActionV2, ctx: ActionContext): Promise<Action
         `Team: ${identity.teamName ?? 'none'}. Teammates: ${teammates}.`,
       ]
       if (identity.budget) {
-        identityLines.push(`Helpers: max depth ${identity.budget.maxSpawnDepth}, max calls ${identity.budget.maxSubagents}. Для делегирования коллегам используй SynqTask delegate.`)
+        identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. Делегирование коллегам: SynqTask todo_tasks delegate.`)
       }
       identityLines.push(`</agent-identity>`)
       identityBlock = identityLines.join('\n') + '\n'

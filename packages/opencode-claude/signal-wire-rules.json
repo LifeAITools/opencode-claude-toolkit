@@ -393,6 +393,21 @@
       "trust_level": "plugin_only"
     },
     {
+      "id": "v2-block-batch-kill",
+      "description": "Block batch/broadcast process killing — require explicit PID (carried over from deprecated opencode-signal-wire 2026-04-20)",
+      "events": ["PreToolUse"],
+      "severity": "critical",
+      "match": {
+        "tool": "Bash",
+        "input_regex": "\\b(pkill|killall)\\b|kill\\s+.*\\$\\(|pgrep.*\\|.*kill|kill\\s+.*`|\\bkill\\b.*\\$\\{|xargs\\s+kill"
+      },
+      "actions": [
+        {"type": "block", "reason": "Batch kill blocked — use 'kill <EXACT_PID>' or 'tmux kill-session -t <name>' instead. Never pkill/killall/kill $(pgrep ...) — this kills all instances including other active sessions."},
+        {"type": "audit"}
+      ],
+      "trust_level": "plugin_only"
+    },
+    {
       "id": "v2-wake-task-assigned",
       "description": "Wake agent when SynqTask assigns a task",
       "events": ["ExternalEvent"],

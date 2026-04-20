@@ -15,11 +15,20 @@ try { _traceWrite('/tmp/opencode-claude-trace.log', `PROVIDER.TS pid=${process.p
 import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 
-import { appendFileSync } from 'fs'
+import { appendFileSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
-import { SignalWire } from './signal-wire.ts'
+// Signal-wire engine selection (feature flag — Stage 1 Phase 2.1 / Этап 2):
+//   SIGNAL_WIRE_ENGINE=core    → use @kiberos/signal-wire-core via adapter (canonical, SPEC-conformant)
+//   SIGNAL_WIRE_ENGINE=legacy  → use local signal-wire.ts (v0.9 — pre-migration)
+//   unset                       → defaults to 'core' (opt-out via 'legacy' for rollback)
+// Rollback: SIGNAL_WIRE_ENGINE=legacy and restart opencode.
+// See SIGNAL-WIRE-CORE-MIGRATION.md for full migration notes.
+import { SignalWire as _LegacySignalWire } from './signal-wire.ts'
+import { SignalWire as _CoreSignalWire } from './signal-wire-core-adapter.ts'
+const _SW_ENGINE = (process.env.SIGNAL_WIRE_ENGINE ?? 'core').toLowerCase()
+const SignalWire = (_SW_ENGINE === 'legacy' ? _LegacySignalWire : _CoreSignalWire) as unknown as typeof _LegacySignalWire
 import { getAgentIdentity, getSpawnActive, getSpawnTotal, helperStarted, helperFinished, resolveCurrentDepth, checkSpawnAllowed } from './wake-listener'
 
 const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
@@ -29,6 +38,14 @@ const STATS_JSONL = join(homedir(), '.claude', 'claude-max-stats.jsonl')
 
 const PID = process.pid
 const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? '?'
+const PACKAGE_ROOT = join(import.meta.dir, '..')
+
+const REQUIRED_PLUGIN_FILES = [
+  'tui.tsx',
+  'wake-preferences.ts',
+  'wake-listener.ts',
+  'wake-types.ts',
+] as const
 
 const MAX_MEMORY_LINES = 500
 const MAX_MEMORY_BYTES = 50_000
@@ -36,6 +53,7 @@ const MAX_MEMORY_BYTES = 50_000
 // ─── Signal-wire: module-level state ──────────────────────
 let _swServerUrl = ''
 export function setSignalWireServerUrl(url: string) { _swServerUrl = url }
+export function setSignalWireSdkClient(client: any) { _signalWire?.setSdkClient(client) }
 
 let _signalWire: SignalWire | null = null
 export function getSignalWireInstance(): SignalWire | null { return _signalWire }
@@ -50,6 +68,22 @@ function logStats(line: string, structured?: Record<string, unknown>) {
 function dbg(...args: any[]) {
   if (!DEBUG) return
   try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
+}
+
+function assertPluginBundleIntegrity() {
+  const missing = REQUIRED_PLUGIN_FILES.filter((file) => !existsSync(join(PACKAGE_ROOT, file)))
+  if (missing.length === 0) return
+
+  const message = [
+    '[claude-max] FATAL: opencode-claude package is incomplete.',
+    `Missing bundled files: ${missing.join(', ')}`,
+    'Refusing to start because keepalive/TUI safety features are not fully loaded.',
+    'Rebuild or republish @life-ai-tools/opencode-claude with the missing files included.',
+  ].join(' ')
+
+  dbg(message)
+  console.error(message)
+  throw new Error(message)
 }
 
 // ─── Types (subset of @ai-sdk/provider v3) ────────────────
@@ -73,6 +107,125 @@ interface LanguageModelV3 {
 // match exactly, saving upload bandwidth and tokens while preserving full quality.
 const IMAGE_MAX_LONG_EDGE = 1568
 const IMAGE_TARGET_RAW_BYTES = 3.75 * 1024 * 1024   // 3.75 MB raw → ≤5 MB base64
+
+// Anthropic vision API constraints (from API error messages observed in the wild):
+// - supported formats: JPEG, PNG, GIF, WEBP (plus animated GIF but we don't try to resize those)
+// - minimum dimensions ≥ 8×8 px (smaller → "Could not process image")
+// - maximum base64 size 5 MB per image
+// - must be a decodable image matching its claimed media_type
+const IMAGE_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+const IMAGE_MIN_DIMENSION = 8
+const IMAGE_MIN_BASE64_BYTES = 32            // anything smaller can't be a real image header
+
+// Magic-byte detection so we catch mislabeled images (e.g. PNG bytes with media_type=image/jpeg)
+// and malformed/truncated data before shipping to the API.
+function sniffImageMime(raw: Buffer): string | null {
+  if (raw.length < 12) return null
+  // JPEG: FF D8 FF
+  if (raw[0] === 0xff && raw[1] === 0xd8 && raw[2] === 0xff) return 'image/jpeg'
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (raw[0] === 0x89 && raw[1] === 0x50 && raw[2] === 0x4e && raw[3] === 0x47) return 'image/png'
+  // GIF: 47 49 46 38 (GIF8)
+  if (raw[0] === 0x47 && raw[1] === 0x49 && raw[2] === 0x46 && raw[3] === 0x38) return 'image/gif'
+  // WEBP: 'RIFF'....'WEBP'
+  if (raw[0] === 0x52 && raw[1] === 0x49 && raw[2] === 0x46 && raw[3] === 0x46 &&
+      raw[8] === 0x57 && raw[9] === 0x45 && raw[10] === 0x42 && raw[11] === 0x50) return 'image/webp'
+  // BMP: 42 4D
+  if (raw[0] === 0x42 && raw[1] === 0x4d) return 'image/bmp'
+  // TIFF: 49 49 2A 00 or 4D 4D 00 2A
+  if ((raw[0] === 0x49 && raw[1] === 0x49 && raw[2] === 0x2a && raw[3] === 0x00) ||
+      (raw[0] === 0x4d && raw[1] === 0x4d && raw[2] === 0x00 && raw[3] === 0x2a)) return 'image/tiff'
+  return null
+}
+
+// Validate an inline image payload. Returns normalized data on success, or a failure
+// reason the caller should surface as a text placeholder instead of an image block.
+// Handles: empty/truncated payload, unsupported MIME, MIME/content mismatch,
+// too-small dimensions, and transcoding BMP/TIFF → PNG via jimp if available.
+export async function validateAndNormalizeImage(
+  base64Data: string,
+  claimedMediaType: string,
+): Promise<
+  | { ok: true; data: string; mediaType: string; reason?: string }
+  | { ok: false; reason: string }
+> {
+  // 1. Basic string sanity
+  if (!base64Data || typeof base64Data !== 'string') {
+    return { ok: false, reason: 'empty or non-string image data' }
+  }
+  if (base64Data.length < IMAGE_MIN_BASE64_BYTES) {
+    return { ok: false, reason: `image base64 too short (${base64Data.length} bytes, min ${IMAGE_MIN_BASE64_BYTES})` }
+  }
+
+  // 2. Base64 must actually decode
+  let raw: Buffer
+  try {
+    raw = Buffer.from(base64Data, 'base64')
+    // Detect "silent" base64 failures: invalid chars get dropped, yielding zero-length
+    if (raw.length === 0) {
+      return { ok: false, reason: 'base64 decoded to zero bytes (invalid encoding)' }
+    }
+    // If re-encoding doesn't match original length (ignoring padding), data was corrupted
+    // We don't do full round-trip check (expensive) but catch grossly short decodes
+    if (raw.length < 32) {
+      return { ok: false, reason: `decoded image too small (${raw.length} bytes, likely truncated)` }
+    }
+  } catch (e: any) {
+    return { ok: false, reason: `base64 decode failed: ${e.message}` }
+  }
+
+  // 3. Sniff actual format from magic bytes
+  const sniffedMime = sniffImageMime(raw)
+  if (!sniffedMime) {
+    return { ok: false, reason: `unrecognized image format (first bytes: ${raw.slice(0, 8).toString('hex')})` }
+  }
+
+  // 4. MIME/content mismatch → trust the sniff, log the discrepancy
+  let mediaType = claimedMediaType
+  if (sniffedMime !== claimedMediaType && claimedMediaType !== 'image/*') {
+    dbg(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} — using actual`)
+    mediaType = sniffedMime
+  } else if (claimedMediaType === 'image/*') {
+    mediaType = sniffedMime
+  }
+
+  // 5. If format is not API-supported, transcode if jimp available, else reject
+  if (!IMAGE_ALLOWED_MIME.has(mediaType)) {
+    const jimpMod = getJimp()
+    if (!jimpMod) {
+      return { ok: false, reason: `unsupported image format ${mediaType} and no transcoder available (allowed: jpeg/png/gif/webp)` }
+    }
+    try {
+      const { Jimp } = jimpMod
+      const img = await Jimp.fromBuffer(raw)
+      if (img.width < IMAGE_MIN_DIMENSION || img.height < IMAGE_MIN_DIMENSION) {
+        return { ok: false, reason: `image too small ${img.width}×${img.height} (min ${IMAGE_MIN_DIMENSION}×${IMAGE_MIN_DIMENSION})` }
+      }
+      const outBuf = await img.getBuffer('image/png')
+      dbg(`image transcoded ${mediaType} → image/png (${img.width}×${img.height}, ${(outBuf.length/1024).toFixed(0)}KB)`)
+      return { ok: true, data: outBuf.toString('base64'), mediaType: 'image/png', reason: `transcoded from ${mediaType}` }
+    } catch (e: any) {
+      return { ok: false, reason: `failed to transcode ${mediaType}: ${e.message}` }
+    }
+  }
+
+  // 6. For supported formats, verify decodability + minimum dimensions when possible
+  const jimpMod = getJimp()
+  if (jimpMod) {
+    try {
+      const { Jimp } = jimpMod
+      const img = await Jimp.fromBuffer(raw)
+      if (img.width < IMAGE_MIN_DIMENSION || img.height < IMAGE_MIN_DIMENSION) {
+        return { ok: false, reason: `image too small ${img.width}×${img.height} (min ${IMAGE_MIN_DIMENSION}×${IMAGE_MIN_DIMENSION})` }
+      }
+    } catch (e: any) {
+      // Decode failed → image is corrupt even though magic bytes looked right
+      return { ok: false, reason: `image appears corrupted (${mediaType} decode failed: ${e.message})` }
+    }
+  }
+
+  return { ok: true, data: base64Data, mediaType }
+}
 
 let _jimp: any = undefined
 let _jimpChecked = false
@@ -450,8 +603,21 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
             }
           }
           if (p.mediaType.startsWith('image/')) {
-            // Resize if needed (2000×2000 max, 3.75MB raw — matches Claude Code limits)
-            const resized = await maybeResizeImage(data, p.mediaType === 'image/*' ? 'image/jpeg' : p.mediaType)
+            // Step 1: Validate + normalize before resize. Catches empty/truncated/corrupt
+            // images, MIME mismatches, unsupported formats (transcodes BMP/TIFF → PNG),
+            // and tiny dimensions (<8×8). Returns text placeholder on failure so the
+            // conversation stays sendable instead of hitting API 400 "Could not process image".
+            const validated = await validateAndNormalizeImage(data, p.mediaType)
+            if (!validated.ok) {
+              dbg(`image validation failed: ${validated.reason} — replacing with text placeholder`)
+              content.push({ type: 'text', text: `[Image could not be processed: ${validated.reason}]` })
+              continue
+            }
+            if (validated.reason) {
+              dbg(`image normalized: ${validated.reason}`)
+            }
+            // Step 2: Resize if oversized (2000×2000 max, 3.75MB raw — matches Claude Code limits)
+            const resized = await maybeResizeImage(validated.data, validated.mediaType)
             // Final safety check: reject if still over API limit after resize attempt
             const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024
             if (resized.data.length > API_IMAGE_MAX_BASE64) {
@@ -539,6 +705,70 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
     }
   }
 
+  // ─── Orphan tool_use sanitizer ──────
+  // Heals conversations where an assistant turn streamed a `tool_use` block
+  // but opencode never persisted the matching `tool_result` (e.g. stream
+  // aborted by stuck TCP mid-reply). Anthropic API rejects such histories
+  // with 400 "tool_use ids were found without tool_result blocks immediately
+  // after". Root cause is opencode's save-as-you-stream — not fixable here,
+  // but we can neutralize the damage at send time.
+  //
+  // CACHE-SAFETY RULES (do not break):
+  //   1. Only touches messages where orphan is DETECTED. Healthy conversations
+  //      pass through byte-identical.
+  //   2. Synthetic tool_result uses a CONSTANT string (no timestamps, no IDs).
+  //      Same corrupted history → same sanitized output every time →
+  //      cache stabilizes on the new prefix after one rebuild.
+  //   3. Idempotent: running twice produces the same result as once.
+  //   4. Every activation is logged for observability.
+  const SANITIZER_CONSTANT_TEXT = '[Tool execution interrupted before completion. Please retry if needed.]'
+  let sanitizerHits = 0
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue
+    // Collect tool_use IDs in this assistant turn
+    const toolUseIds: string[] = []
+    for (const block of msg.content as any[]) {
+      if (block?.type === 'tool_use' && typeof block.id === 'string') {
+        toolUseIds.push(block.id)
+      }
+    }
+    if (toolUseIds.length === 0) continue
+    // Next message must be user with tool_result blocks covering all tool_use IDs
+    const next = messages[i + 1]
+    const coveredIds = new Set<string>()
+    if (next && next.role === 'user' && Array.isArray(next.content)) {
+      for (const block of next.content as any[]) {
+        if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+          coveredIds.add(block.tool_use_id)
+        }
+      }
+    }
+    const orphanIds = toolUseIds.filter(id => !coveredIds.has(id))
+    if (orphanIds.length === 0) continue
+    // Build synthetic tool_result blocks for each orphan.
+    // KEY: constant text ensures byte-identical output on every resend →
+    // cache rebuilds ONCE at message i+1 and then stably hits from there.
+    const syntheticResults = orphanIds.map(id => ({
+      type: 'tool_result',
+      tool_use_id: id,
+      content: SANITIZER_CONSTANT_TEXT,
+      is_error: true,
+    }))
+    if (next && next.role === 'user' && Array.isArray(next.content)) {
+      // Inject into existing user message (preserve any real tool_results already there)
+      (next.content as any[]).push(...syntheticResults)
+    } else {
+      // No next message yet — insert a new user turn
+      messages.splice(i + 1, 0, { role: 'user', content: syntheticResults })
+    }
+    sanitizerHits += orphanIds.length
+    dbg(`tool_use_sanitizer: healed ${orphanIds.length} orphan(s) at assistant msg[${i}] ids=[${orphanIds.join(',')}]`)
+  }
+  if (sanitizerHits > 0) {
+    dbg(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`)
+  }
+
   // ─── Signal-wire: evaluate rules and inject if triggered ──────
   try {
     if (_signalWire) {
@@ -600,6 +830,16 @@ function normalizeToolSchema(schema: any): any {
 let _lastToolCount = 0
 let _lastToolHash = ''
 
+// Tool name remapping — Anthropic blocks certain third-party tool names
+// by routing requests to overage/extra-usage billing with misleading error.
+// We rename blocked names before sending and restore in responses.
+const TOOL_NAME_REMAP: Record<string, string> = {
+  'todowrite': 'todo_write',
+}
+const TOOL_NAME_UNREMAP: Record<string, string> = Object.fromEntries(
+  Object.entries(TOOL_NAME_REMAP).map(([k, v]) => [v, k])
+)
+
 // MCP tools have names like "km_km_think", "synqtask_todo_tasks" — they contain
 // underscores from the sanitized server name prefix. Built-in tools are simple
 // names: "bash", "read", "glob", "edit", "write", "task", etc.
@@ -612,7 +852,7 @@ function convertTools(tools?: any[]): any[] | undefined {
   const all = tools
     .filter((t: any) => t.type === 'function')
     .map((t: any) => ({
-      name: t.name,
+      name: TOOL_NAME_REMAP[t.name] ?? t.name,
       description: normalizeCwd(t.description ?? ''),
       input_schema: normalizeToolSchema(t.inputSchema ?? { type: 'object', properties: {} }),
     }))
@@ -655,7 +895,7 @@ function convertToolChoice(tc?: any): any {
   if (!tc) return undefined
   if (tc.type === 'auto') return 'auto'
   if (tc.type === 'required') return 'any'
-  if (tc.type === 'tool') return { type: 'tool', name: tc.toolName }
+  if (tc.type === 'tool') return { type: 'tool', name: TOOL_NAME_REMAP[tc.toolName] ?? tc.toolName }
   return undefined
 }
 
@@ -722,17 +962,16 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       if (options.temperature !== undefined) sdkOpts.temperature = options.temperature
       if (options.stopSequences?.length) sdkOpts.stopSequences = options.stopSequences
 
-      // Thinking config from providerOptions (effort variant) or default
-      const po = options.providerOptions?.['claude-max'] ?? options.providerOptions ?? {}
-      const thinking = po.thinking ?? po
-      if (thinking?.type === 'enabled' && thinking?.budgetTokens) {
-        sdkOpts.thinking = { type: 'enabled', budgetTokens: thinking.budgetTokens }
-      } else {
-        const is46 = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
-        if (is46) sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
-      }
+       // Thinking config from providerOptions (effort variant) or default
+       // 4.6+ models use adaptive thinking — SDK handles it in buildRequestBody
+       const po = options.providerOptions?.['claude-max'] ?? options.providerOptions ?? {}
+       const thinking = po.thinking ?? po
+       if (thinking?.type === 'enabled' && thinking?.budgetTokens) {
+         sdkOpts.thinking = { type: 'enabled', budgetTokens: thinking.budgetTokens }
+       }
+       // For adaptive models (4.6+), don't set thinking here — SDK sets { type: 'adaptive' }
 
-      const response = await sdk.generate(sdkOpts)
+       const response = await sdk.generate(sdkOpts)
 
       // Convert content blocks to V3 format
       const content: any[] = []
@@ -748,7 +987,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
           content.push({
             type: 'tool-call',
             toolCallId: (block as any).id,
-            toolName: (block as any).name,
+            toolName: TOOL_NAME_UNREMAP[(block as any).name] ?? (block as any).name,
             input: JSON.stringify((block as any).input ?? {}),
           })
         }
@@ -804,14 +1043,18 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       if (options.stopSequences?.length) sdkOpts.stopSequences = options.stopSequences
 
       // Thinking config from providerOptions (effort variant) or default
+      // 4.6+ models (opus-4-6, sonnet-4-6, opus-4-7, etc.) use adaptive thinking
+      // SDK's buildRequestBody will convert to { type: 'adaptive' } for these models
       const po = options.providerOptions?.['claude-max'] ?? options.providerOptions ?? {}
       const thinking = po.thinking ?? po
+      const isAdaptive = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
+        || modelId.includes('opus-4-7') || modelId.includes('sonnet-4-7')
       if (thinking?.type === 'enabled' && thinking?.budgetTokens) {
         sdkOpts.thinking = { type: 'enabled', budgetTokens: thinking.budgetTokens }
         dbg('doStream thinking from variant:', sdkOpts.thinking)
-      } else {
-        const is46 = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
-        if (is46) sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
+      } else if (isAdaptive) {
+        // Don't set thinking here — SDK will set { type: 'adaptive' } in buildRequestBody
+        dbg('doStream: adaptive model, SDK will handle thinking')
       }
 
       const sdkStream = sdk.stream(sdkOpts)
@@ -878,7 +1121,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   controller.enqueue({
                     type: 'tool-input-start',
                     id: toolId,
-                    toolName: event.name,
+                    toolName: TOOL_NAME_UNREMAP[event.name] ?? event.name,
                   })
                   break
                 }
@@ -899,7 +1142,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   controller.enqueue({
                     type: 'tool-call',
                     toolCallId: event.id,
-                    toolName: event.name,
+                    toolName: TOOL_NAME_UNREMAP[event.name] ?? event.name,
                     input: inputStr,
                   })
                   toolId = ''
@@ -968,6 +1211,7 @@ export interface ClaudeMaxProviderOptions {
 
 export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
   const tCreate = Date.now()
+  assertPluginBundleIntegrity()
   // Provider options from opencode.json → provider.claude-max.options
   // These override env vars for user-friendly configuration.
   const providerOpts = (options as any).providerOptions ?? {}
@@ -982,7 +1226,18 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     ? parseInt(providerOpts.keepaliveIdle) * 1000
     : process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity
 
-  dbg(`STARTUP createClaudeMax pid=${PID}`, { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts) })
+  // ─── Rewrite-burst protection (Layer 3) ───────────────────────────
+  // Env flags (seconds for humans):
+  //   CLAUDE_MAX_REWRITE_WARN_IDLE_SEC   — warn if next stream fires after this idle. Default 300 (5 min).
+  //   CLAUDE_MAX_REWRITE_WARN_TOKENS     — warn threshold for estimated rewrite cost. Default 50000.
+  //   CLAUDE_MAX_REWRITE_BLOCK=1         — enable hard block (opt-in).
+  //   CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC  — idle threshold for block. Default 1800 (30 min).
+  const rewriteWarnIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC ?? '300', 10) || 300) * 1000
+  const rewriteWarnTokens = parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS ?? '50000', 10) || 50_000
+  const rewriteBlockEnabled = process.env.CLAUDE_MAX_REWRITE_BLOCK === '1'
+  const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? '1800', 10) || 1800) * 1000
+
+  dbg(`STARTUP createClaudeMax pid=${PID}`, { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts), rewriteWarnIdleMs, rewriteBlockEnabled })
   const sdk = new ClaudeCodeSDK({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
@@ -1008,6 +1263,10 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       enabled: keepaliveEnabled,
       intervalMs: keepaliveInterval,
       idleTimeoutMs: keepaliveIdle,
+      rewriteWarnIdleMs,
+      rewriteWarnTokens,
+      rewriteBlockEnabled,
+      rewriteBlockIdleMs,
       onTick: (tick) => {
         dbg(`keepalive tick: idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
       },
@@ -1021,6 +1280,32 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
         dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit })
         // Signal-wire: track keepalive tokens
         try { _signalWire?.trackTokens({ inputTokens: stats.usage.inputTokens, cacheReadInputTokens: stats.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: stats.usage.cacheCreationInputTokens ?? 0 }) } catch {}
+      },
+      onDisarmed: (info) => {
+        // KA stopped firing (cache/network issue) but timer stays alive for auto-resume.
+        // Stream this to stats.jsonl so audits can see why KA went quiet for a PID.
+        logStats(`[${new Date().toISOString()}] type=keepalive_disarmed reason=${info.reason} | timer stays alive, will auto-resume on next real stream`, {
+          type: 'keepalive_disarmed', reason: info.reason,
+        })
+        dbg(`keepalive DISARMED reason=${info.reason} (timer alive, auto-resume on next real stream)`)
+      },
+      onRewriteWarning: (info) => {
+        // Real stream() about to run after long idle — cache likely dead, will pay cacheWrite.
+        // Log for quota observability; also stderr so orchestrators catch it.
+        const tag = info.blocked ? 'cache_rewrite_blocked' : 'cache_rewrite_warn'
+        logStats(`[${new Date().toISOString()}] type=${tag} model=${info.model} idle=${Math.round(info.idleMs/1000)}s estimatedTokens=${info.estimatedTokens}${info.blocked ? ' BLOCKED' : ''}`, {
+          type: tag, model: info.model, idleSec: Math.round(info.idleMs / 1000), estimatedTokens: info.estimatedTokens, blocked: info.blocked,
+        })
+        const banner = info.blocked
+          ? `🚫 [claude-max] CACHE REWRITE BLOCKED — idle=${Math.round(info.idleMs/1000)}s, would cost ~${info.estimatedTokens} tokens. Unset CLAUDE_MAX_REWRITE_BLOCK to allow.`
+          : `⚠️  [claude-max] Cache likely dead — idle=${Math.round(info.idleMs/1000)}s, next request will cost ~${info.estimatedTokens} cache_write tokens`
+        console.error(banner)
+      },
+      onNetworkStateChange: (info) => {
+        logStats(`[${new Date().toISOString()}] type=network_${info.to} from=${info.from}`, {
+          type: `network_${info.to}`, from: info.from, to: info.to,
+        })
+        dbg(`network state: ${info.from} → ${info.to}`)
       },
     },
   })
@@ -1075,7 +1360,7 @@ export async function handlePreToolUseSpawnCheck(
 
   try {
     const identity = getAgentIdentity()
-    const depth = await resolveCurrentDepth(serverUrl, sessionId)
+    const depth = await resolveCurrentDepth(sessionId)
     
     // ─── Case 1: No org role = HELPER (explore, plan, oracle) ───
     // Helper depth is controlled by parent's maxHelperDepth (from role).

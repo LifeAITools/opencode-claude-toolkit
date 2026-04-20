@@ -8,12 +8,17 @@
  * Translation helpers live in signal-wire-translate.ts (ADR-0007 LOC budget).
  */
 
-import { existsSync, readFileSync } from 'fs'
+import { appendFileSync, existsSync, readFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import {
   Pipeline,
   MemoryBackend,
   EmitterRegistry,
   validateRuleSet,
+  CORE_VERSION,
+  CORE_SOURCE_HASH,
+  coreIdentityTag,
   type Rule as CoreRule,
   type SignalWireEvent,
   type EmitResult,
@@ -26,6 +31,24 @@ import {
   type SignalWireContext,
   type HookEvent,
 } from './signal-wire-translate'
+
+// ─── Adapter identity SSOT ────────────────────────────────
+// Bumped when this file's behavior changes, independent of Core version.
+const ADAPTER_VERSION = '1.0.0' as const
+const ADAPTER_MTIME: string = new Date().toISOString()
+const ADAPTER_ID = `sw-adapter-opencode-claude v${ADAPTER_VERSION}@${ADAPTER_MTIME.slice(11, 19)}`
+
+const LOG_FILE = join(homedir(), '.claude', 'signal-wire-debug.log')
+
+/** Emit adapter identity line ONCE per process on first construction. */
+let adapterBannerEmitted = false
+function emitAdapterBanner(rulesLoaded: number, rulesPath: string | undefined): void {
+  if (adapterBannerEmitted) return
+  adapterBannerEmitted = true
+  const ts = new Date().toISOString()
+  const line = `[${ts}] ${coreIdentityTag()} [${ADAPTER_ID}] ADAPTER_BANNER pid=${process.pid} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? '(unset)'}\n`
+  try { appendFileSync(LOG_FILE, line) } catch {}
+}
 
 // ─── Legacy-surface types (unchanged contract) ─────────────
 
@@ -67,6 +90,9 @@ export class SignalWire {
     this.registry = new EmitterRegistry()
     this.rules = this.loadAndTranslate(config.rulesPath)
 
+    // Adapter identity banner (before Pipeline — so the line appears early)
+    emitAdapterBanner(this.rules.length, config.rulesPath)
+
     this.pipeline = new Pipeline({
       rules: this.rules,
       registry: this.registry,
@@ -74,6 +100,14 @@ export class SignalWire {
       sessionId: this.sessionId || 'opencode-claude',
       serverUrl: config.serverUrl,
     })
+  }
+
+  /** Static identity — exported for introspection/TUI. */
+  static readonly identity = {
+    adapterVersion: ADAPTER_VERSION,
+    adapterId: ADAPTER_ID,
+    coreVersion: CORE_VERSION,
+    coreHash: CORE_SOURCE_HASH,
   }
 
   private loadAndTranslate(path: string | undefined): CoreRule[] {

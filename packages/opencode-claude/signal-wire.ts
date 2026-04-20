@@ -25,14 +25,34 @@ const DEBUG = process.env.SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'signal-wire-debug.log')
 const DEFAULT_EXEC_TIMEOUT_S = 15
 
+// ─── Identity SSOT (so shared log file is greppable per-engine) ──
+// Version is the "vLegacy" — deliberately not semver to mark it as the
+// old in-package engine being phased out. See SIGNAL-WIRE-CORE-MIGRATION.md.
+const LEGACY_VERSION = 'legacy-v1.x' as const
+const LEGACY_BOOT_TIME: string = new Date().toISOString()
+const LEGACY_ID = `sw-legacy ${LEGACY_VERSION}@${LEGACY_BOOT_TIME.slice(11, 19)} pid=${process.pid}`
+
+let legacyBannerEmitted = false
+function emitLegacyBanner(rulesCount: number, platform: string) {
+  if (legacyBannerEmitted) return
+  legacyBannerEmitted = true
+  try {
+    appendFileSync(
+      LOG_FILE,
+      `[${new Date().toISOString()}] [${LEGACY_ID}] LEGACY_BANNER online platform=${platform} rules=${rulesCount}\n`,
+    )
+  } catch {}
+}
+
 // ─── Logging (standalone — mirrors provider.ts dbg() pattern) ─
 
 function dbg(...args: any[]) {
   if (!DEBUG) return
   try {
+    // Every log line tagged with identity — matches [sw-legacy legacy-v1.x@...] prefix
     appendFileSync(
       LOG_FILE,
-      `[${new Date().toISOString()}] [signal-wire] ${args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}\n`,
+      `[${new Date().toISOString()}] [${LEGACY_ID}] [signal-wire] ${args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}\n`,
     )
   } catch {}
 }
@@ -145,6 +165,9 @@ export class SignalWire {
   private sessionIdResolved = false
   private readonly cooldownMap: Map<string, number> = new Map()
   private contextPosition: number = 0
+  private sdkClient: any = null
+  /** Runtime-disabled rule IDs (session-local, DB-05: never modifies rules file) */
+  private disabledRules = new Set<string>()
 
   constructor(config: SignalWireConfig) {
     this.serverUrl = config.serverUrl
@@ -168,7 +191,45 @@ export class SignalWire {
     // Resolve session ID early — gives async fetch time to complete before first fire
     if (!this.sessionIdResolved) this.resolveSessionId()
 
+    // Emit identity banner so shared log file clearly shows this Legacy engine is the writer
+    emitLegacyBanner(this.rules.length, this.platform)
     dbg(`init: ${this.rules.length} rules loaded (platform=${this.platform}), server=${this.serverUrl}, session=${this.sessionId}`)
+  }
+
+  setSdkClient(client: any): void {
+    this.sdkClient = client
+    // Retry resolution if it was skipped due to missing sdkClient (validation F5 fix)
+    if (!this.sessionIdResolved) this.resolveSessionId()
+  }
+
+  // ─── Runtime rule toggle (REQ-06, AC-20-24) ───────────
+
+  /** Toggle a rule's enabled state for this session. Returns true if rule exists. */
+  toggleRule(ruleId: string, enabled: boolean): boolean {
+    const exists = this.rules.some(r => r.id === ruleId)
+    if (!exists) return false
+    if (enabled) {
+      this.disabledRules.delete(ruleId)
+    } else {
+      this.disabledRules.add(ruleId)
+    }
+    dbg(`toggleRule: ${ruleId} → ${enabled ? 'enabled' : 'disabled'}`)
+    return true
+  }
+
+  /** List all rules with their enabled/disabled status */
+  listRules(): Array<{ id: string; description: string; enabled: boolean; events: string[] }> {
+    return this.rules.map(r => ({
+      id: r.id,
+      description: r.description ?? '',
+      enabled: !this.disabledRules.has(r.id) && r.enabled !== false,
+      events: r.events,
+    }))
+  }
+
+  /** Check if a rule is enabled (both file-level and runtime toggle) */
+  isRuleEnabled(ruleId: string): boolean {
+    return !this.disabledRules.has(ruleId)
   }
 
   // ─── Rule loading ───────────────────────────────────────
@@ -249,8 +310,9 @@ export class SignalWire {
       for (const rule of this.rules) {
         if (results.length >= this.maxRulesPerFire) break
 
-        // Skip disabled
+        // Skip disabled (file-level or runtime toggle — REQ-06)
         if (rule.enabled === false) continue
+        if (this.disabledRules.has(rule.id)) continue
 
         // Event filter
         if (!rule.events.includes(context.event)) continue
@@ -492,24 +554,22 @@ export class SignalWire {
   // ─── TUI notification (fire-and-forget) ─────────────────
 
   private resolveSessionId(): void {
-    if (this.sessionIdResolved || !this.serverUrl) return
-    this.sessionIdResolved = true // Only try once
-    // Query server for most recent session matching our CWD — fire-and-forget
+    if (this.sessionIdResolved) return
+    if (!this.sdkClient) return  // Do NOT set sessionIdResolved — allow retry via setSdkClient()
+    this.sessionIdResolved = true  // Only set AFTER confirming we CAN attempt resolution
     const cwd = process.cwd()
-    fetch(`${this.serverUrl}/session`)
-      .then(res => res.json())
-      .then((sessions: any[]) => {
-        if (!sessions?.length) return
-        // Filter by directory (CWD) and sort by most recently updated
+    this.sdkClient.session.list()
+      .then(({ data: sessions }: any) => {
+        if (!Array.isArray(sessions)) return
         const matching = sessions
-          .filter((s: any) => s.directory === cwd && !s.parentID) // exclude subagent sessions
+          .filter((s: any) => s.directory === cwd && !s.parentID)
           .sort((a: any, b: any) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
         if (matching.length) {
           this.sessionId = matching[0].id
           dbg(`signal-wire: resolved sessionId=${this.sessionId} (cwd=${cwd}, matched ${matching.length} sessions)`)
         }
       })
-      .catch(() => {}) // Silent — non-critical
+      .catch((e: any) => dbg('resolveSessionId error:', e?.message))
   }
 
   /** Format TUI message with flashlight box for visual distinction */
@@ -539,38 +599,26 @@ export class SignalWire {
   private doTuiPost(ids: string[], hint: string): void {
     try {
       if (!this.sessionId || this.sessionId === '?' || this.sessionId === 'unknown') {
-        dbg(`TUI POST skipped: no sessionId after retry`)
+        dbg('TUI POST skipped: no sessionId after retry')
         return
       }
+      if (!this.sdkClient) { dbg('TUI POST skipped: no sdkClient'); return }
 
       const label = ids.join('+')
       const formatted = this.formatTuiMessage(ids, hint)
-      const url = `${this.serverUrl}/session/${this.sessionId}/message`
-      const body = JSON.stringify({
-        noReply: true,
-        parts: [
-          {
-            type: 'text',
-            text: formatted,
-            synthetic: true,
-          },
-        ],
-      })
 
-      // Fire-and-forget — never await, never block
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
+      // Fire-and-forget via sdkClient — never await, never block
+      this.sdkClient.session.prompt({
+        path: { id: this.sessionId },
+        body: {
+          noReply: true,
+          parts: [{ type: 'text', text: formatted, synthetic: true }],
+        },
       })
-        .then(res => {
-          dbg(`TUI POST ${label}: ${res.status}`)
-        })
-        .catch((e: any) => {
-          dbg(`TUI POST ${label} failed:`, e.message)
-        })
+        .then(() => dbg(`TUI POST ${label}: ok`))
+        .catch((e: any) => dbg(`TUI POST ${label} failed:`, e?.message))
     } catch (e: any) {
-      dbg('notifyTui error:', e.message)
+      dbg('notifyTui error:', e?.message)
     }
   }
 
@@ -703,6 +751,7 @@ export class SignalWire {
           event: context.event,
           variables: this.buildVariables(context, rule),
           auditWriter: createAuditWriter(this.sessionId),
+          sdkClient: this.sdkClient,
         }
 
         const actionResults = await dispatchActions(actions, ctx)
@@ -776,6 +825,7 @@ export class SignalWire {
           variables: this.buildExternalVariables(event, rule),
           wakeEvent: event,
           auditWriter: createAuditWriter(this.sessionId),
+          sdkClient: this.sdkClient,
         }
 
         const actionResults = await dispatchActions(actions, ctx)

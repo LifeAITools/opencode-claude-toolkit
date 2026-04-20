@@ -1,6 +1,6 @@
 {
   "name": "@life-ai-tools/opencode-claude",
-  "version": "0.7.0",
+  "version": "0.9.0",
   "description": "OpenCode plugin + AI SDK provider for Claude Max/Pro subscription \u2014 OAuth login, streaming, tool use via claude-code-sdk",
   "type": "module",
   "exports": {
@@ -12,10 +12,14 @@
   "files": [
     "dist/",
     "tui.tsx",
+    "wake-preferences.ts",
+    "wake-listener.ts",
+    "wake-types.ts",
     "signal-wire-rules.json"
   ],
   "dependencies": {
-    "@life-ai-tools/claude-code-sdk": "^0.6.0"
+    "@life-ai-tools/claude-code-sdk": "^0.6.0",
+    "@kiberos/signal-wire-core": "file:/home/relishev/packages/signal-wire-core"
   },
   "keywords": [
     "opencode",

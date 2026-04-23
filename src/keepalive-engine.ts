@@ -29,7 +29,7 @@
  *   - intervalMs clamped to [60s, 240s] at construction
  */
 
-import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import { homedir } from 'os'
 import { join } from 'path'

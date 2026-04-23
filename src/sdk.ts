@@ -1,31 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { readFileSync, writeFileSync, chmodSync, mkdirSync, rmdirSync, statSync, readdirSync, unlinkSync, appendFileSync } from 'fs'
+import { readFileSync, writeFileSync, chmodSync, mkdirSync, rmdirSync, statSync, unlinkSync, appendFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-// ============================================================
-// Live-reload keepalive config — ~/.claude/keepalive.json
-// ============================================================
-// Read on each tick. Allows runtime tuning without restart.
-// File is optional — missing file = use SDK defaults.
-// Example: {"enabled":true,"intervalSec":120,"idleTimeoutSec":null}
-//   null or absent = SDK default (Infinity for idleTimeout)
+// NOTE: Live-reload keepalive config (~/.claude/keepalive.json) is now owned
+// by src/keepalive-engine.ts — moved out of SDK during KA extraction.
 
-const KEEPALIVE_CONFIG_PATH = join(homedir(), '.claude', 'keepalive.json')
-let _kaConfigMtimeMs = 0
-let _kaConfigCache: Record<string, unknown> | null = null
-
-function readKeepaliveConfig(): Record<string, unknown> | null {
-  try {
-    const st = statSync(KEEPALIVE_CONFIG_PATH)
-    if (st.mtimeMs === _kaConfigMtimeMs && _kaConfigCache) return _kaConfigCache
-    _kaConfigMtimeMs = st.mtimeMs
-    _kaConfigCache = JSON.parse(readFileSync(KEEPALIVE_CONFIG_PATH, 'utf8'))
-    return _kaConfigCache
-  } catch {
-    return null  // file doesn't exist or parse error — use defaults
-  }
-}
 import type {
   ClaudeCodeSDKOptions,
   CredentialsFile,
@@ -39,13 +19,11 @@ import type {
   ContentBlock,
   ThinkingBlock,
   ToolUseBlock,
-  KeepaliveConfig,
-  KeepaliveStats,
-  KeepaliveTick,
   TokenStatusEvent,
 } from './types.js'
-import { AuthError, APIError, RateLimitError, ClaudeCodeSDKError, CacheRewriteBlockedError } from './types.js'
+import { AuthError, APIError, RateLimitError, ClaudeCodeSDKError } from './types.js'
 import { resolveMaxTokens } from './models.js'
+import { KeepaliveEngine } from './keepalive-engine.js'
 
 // ============================================================
 // Constants — cherry-picked from Claude Code CLI source
@@ -200,41 +178,17 @@ export class ClaudeCodeSDK {
   private tokenIssuedAt = 0             // when current token was obtained
   private onTokenStatus: ((event: TokenStatusEvent) => void) | undefined
 
-  // Cache keepalive
-  private keepaliveConfig: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens' | 'rewriteWarnIdleMs' | 'rewriteWarnTokens' | 'rewriteBlockIdleMs' | 'rewriteBlockEnabled'>> & {
-    onHeartbeat?: (stats: KeepaliveStats) => void
-    onTick?: (tick: KeepaliveTick) => void
-    onDisarmed?: (info: { reason: string; at: number }) => void
-    onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
-    onNetworkStateChange?: (info: { from: string; to: string; at: number }) => void
-  }
-  // Largest observed cache size per model (used for rewrite cost estimation)
-  private lastKnownCacheTokensByModel = new Map<string, number>()
-  // ── Layer 2: network health probe state ──
-  // 'healthy' → no probe running
-  // 'degraded' → retry chain failed or transient error; probe checking every 30s while cache alive
-  // We never enter 'down' formally; it maps to 'degraded' with no successful probes yet.
-  private networkState: 'healthy' | 'degraded' = 'healthy'
-  private healthProbeTimer: ReturnType<typeof setInterval> | null = null
-  private keepaliveRegistry = new Map<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number }>()
-  private _pendingSnapshotModel = ''
-  private _pendingSnapshotBody: Record<string, unknown> | null = null
-  private _pendingSnapshotHeaders: Record<string, string> | null = null
-  private keepaliveLastActivityAt = 0
-  private keepaliveTimer: ReturnType<typeof setInterval> | null = null
-  private keepaliveAbortController: AbortController | null = null
-  private keepaliveInFlight = false
-  private keepaliveJitterMs = 0 // random offset to stagger keepalives across sessions
-  // Timestamp of last successful cache write (real request or keepalive).
-  // Used to compute exact remaining TTL for retry scheduling.
-  private keepaliveCacheWrittenAt = 0
-  private keepaliveRetryTimer: ReturnType<typeof setTimeout> | null = null
-  // Track REAL activity (user requests) separately from keepalive fires.
-  // Keepalive must NOT reset this — otherwise idle timeout never triggers.
-  private keepaliveLastRealActivityAt = 0
-  // No anchor persistence needed — Anthropic's cache automatically reads any matching prefix.
-  // See addCacheMarkers() comment for details.
-  private cacheAnchorMessageCount = 0
+  // Cache keepalive — delegated to KeepaliveEngine (src/keepalive-engine.ts).
+  // Engine owns all KA state (timers, registry, health probe, rewrite guard).
+  // SDK uses DI callbacks (getToken, doFetch, getRateLimitInfo) to expose its
+  // internal auth/transport/rate-limit state to the engine.
+  private keepalive!: KeepaliveEngine
+
+  // Last TokenUsage captured by parseSSE on message_stop. Harvested by stream()
+  // after yield* completes and passed to keepalive.notifyRealRequestComplete().
+  // Avoids invoking completion callback inside parseSSE (which also services
+  // engine's KA fires — those must not touch realActivityAt).
+  private _lastStreamUsage: TokenUsage | null = null
 
   constructor(options: ClaudeCodeSDKOptions = {}) {
     this.sessionId = randomUUID()
@@ -247,39 +201,17 @@ export class ClaudeCodeSDK {
 
     this.onTokenStatus = options.onTokenStatus
 
-    const ka = options.keepalive ?? {}
-
-    // Layer 4: Clamp interval to safe bounds.
-    // - < 60s: quota burn risk (1 req every 60s = 60/hr = 1440/day × N sessions)
-    // - > 240s: leaves <60s margin to 5-min cache TTL → likely cache loss
-    let intervalMs = ka.intervalMs ?? 120_000
-    if (intervalMs < 60_000) {
-      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} below safe min (60000); clamped`)
-      intervalMs = 60_000
-    }
-    if (intervalMs > 240_000) {
-      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} above safe max (240000, cache TTL - 60s); clamped`)
-      intervalMs = 240_000
-    }
-
-    this.keepaliveConfig = {
-      enabled: ka.enabled ?? true,
-      // Fire keepalive at ~120s (2 min), giving ~180s margin before 5-min cache TTL.
-      // With tick every 20s, that's up to 9 retry opportunities if API is temporarily busy.
-      intervalMs,
-      idleTimeoutMs: ka.idleTimeoutMs ?? Infinity,  // keep alive as long as process runs
-      minTokens: ka.minTokens ?? 2000,
-      // Rewrite guard defaults: warn after 5 min idle if cache would be >50k tokens
-      rewriteWarnIdleMs: ka.rewriteWarnIdleMs ?? 300_000,
-      rewriteWarnTokens: ka.rewriteWarnTokens ?? 50_000,
-      rewriteBlockIdleMs: ka.rewriteBlockIdleMs ?? Infinity,
-      rewriteBlockEnabled: ka.rewriteBlockEnabled ?? false,
-      onHeartbeat: ka.onHeartbeat,
-      onTick: ka.onTick,
-      onDisarmed: ka.onDisarmed,
-      onRewriteWarning: ka.onRewriteWarning,
-      onNetworkStateChange: ka.onNetworkStateChange,
-    }
+    // Wire KeepaliveEngine with DI callbacks — engine never touches SDK internals.
+    // Engine handles its own intervalMs clamp ([60s, 240s]) and config defaults.
+    this.keepalive = new KeepaliveEngine({
+      config: options.keepalive,
+      getToken: async () => {
+        await this.ensureAuth()
+        return this.accessToken ?? ''
+      },
+      doFetch: (body, headers, signal) => this.doStreamRequest(body, headers, signal),
+      getRateLimitInfo: () => this.lastRateLimitInfo,
+    })
 
     // Credential store priority:
     // 1. Custom store (DB, Redis, etc.)
@@ -324,23 +256,19 @@ export class ClaudeCodeSDK {
 
   /** Streaming: yields events as they arrive from SSE */
   async *stream(options: GenerateOptions): AsyncGenerator<StreamEvent> {
-    // ─── Rewrite-burst guard (Layer 3) ─────────────────────────────────
-    // If cache is presumed dead (long idle since last REAL stream), the incoming
-    // request will pay cacheWrite — potentially 100k+ tokens. Warn (or block)
-    // so 20 dormant sessions waking up at once can't silently burn the quota.
-    this.checkRewriteGuard(options.model)
+    // Layer 3: Rewrite-burst guard — delegated to KeepaliveEngine.
+    // Throws CacheRewriteBlockedError if long idle + blockEnabled.
+    this.keepalive.checkRewriteGuard(options.model)
 
     await this.ensureAuth()
     const body = this.buildRequestBody(options)
     const headers = this.buildHeaders(options)
 
-    // Snapshot for keepalive registry (deep clone to avoid mutation)
-    this._pendingSnapshotModel = options.model
-    this._pendingSnapshotBody = JSON.parse(JSON.stringify(body))
-    this._pendingSnapshotHeaders = { ...headers }
-    // Abort any in-flight keepalive before real request
-    this.keepaliveAbortController?.abort()
-    this.keepaliveInFlight = false
+    // KA snapshot & in-flight abort — delegated to engine.
+    this.keepalive.notifyRealRequestStart(options.model, body, headers)
+
+    // Reset per-request usage capture slot (populated by parseSSE on message_stop)
+    this._lastStreamUsage = null
 
     let lastError: unknown
     for (let attempt = 1; attempt <= this.maxRetries + 1; attempt++) {
@@ -348,6 +276,13 @@ export class ClaudeCodeSDK {
 
       try {
         yield* this.doStreamRequest(body, headers, options.signal)
+        // Successful completion — notify engine of real request completion.
+        // Engine registers snapshot (heaviest-wins), updates real-activity
+        // timestamps, starts KA timer. Safe no-op if usage absent (defensive).
+        if (this._lastStreamUsage) {
+          this.keepalive.notifyRealRequestComplete(this._lastStreamUsage)
+          this._lastStreamUsage = null
+        }
         return
       } catch (error) {
         lastError = error
@@ -636,9 +571,13 @@ export class ClaudeCodeSDK {
           }
 
           // message_stop — yield final event
+          // NOTE: completion notification moved to stream() wrapper so KA fires
+          // (which also flow through parseSSE via engine's doFetch) don't trigger
+          // real-request bookkeeping on lastRealActivityAt. stream() calls
+          // this.keepalive.notifyRealRequestComplete(usage) after yield* completes.
           if (type === 'message_stop') {
+            this._lastStreamUsage = usage
             yield { type: 'message_stop', usage, stopReason }
-            this.onStreamComplete(usage)
           }
         }
       }
@@ -652,537 +591,19 @@ export class ClaudeCodeSDK {
   // ----------------------------------------------------------
 
   // ----------------------------------------------------------
-  // Cache keepalive — keeps prompt cache warm between real requests
+  // Cache keepalive — delegated to KeepaliveEngine
   // ----------------------------------------------------------
 
-  private onStreamComplete(usage: TokenUsage): void {
-    const now = Date.now()
-    this.keepaliveLastActivityAt = now
-    this.keepaliveLastRealActivityAt = now  // only REAL requests set this
-    this.keepaliveCacheWrittenAt = now      // cache is fresh right now
-    // Layer 2: real stream succeeded → network is definitively healthy.
-    // Stop any lingering health probe and notify.
-    if (this.healthProbeTimer || this.networkState !== 'healthy') {
-      this.stopHealthProbe()
-      if (this.networkState !== 'healthy') {
-        const prev = this.networkState
-        this.networkState = 'healthy'
-        try { this.keepaliveConfig.onNetworkStateChange?.({ from: prev, to: 'healthy', at: now }) } catch {}
-      }
-    }
-    if (!this.keepaliveConfig.enabled) return
-
-    // Register snapshot for this model — ONLY if it's the heaviest context seen.
-    // Multiple conversations share one SDK instance (main chat + subagents).
-    // Subagent calls have tiny contexts (1-5 msgs) that would overwrite the main
-    // conversation's large context (hundreds of msgs), causing keepalive to fire
-    // with the wrong (small) prefix and letting the main conversation's cache expire.
-    // Fix: never downgrade — only overwrite if new snapshot has MORE tokens.
-    const model = this._pendingSnapshotModel
-    const body = this._pendingSnapshotBody
-    const headers = this._pendingSnapshotHeaders
-    if (model && body && headers) {
-      const totalTokens = (usage.inputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0)
-      const existing = this.keepaliveRegistry.get(model)
-      if (totalTokens >= this.keepaliveConfig.minTokens && (!existing || totalTokens >= existing.inputTokens)) {
-        this.keepaliveRegistry.set(model, { body, headers, model, inputTokens: totalTokens })
-      }
-      // Track largest observed cache size per model for rewrite cost estimation.
-      // Never downgrades — preserves upper bound estimate for warn/block decisions.
-      const prevMax = this.lastKnownCacheTokensByModel.get(model) ?? 0
-      if (totalTokens > prevMax) {
-        this.lastKnownCacheTokensByModel.set(model, totalTokens)
-      }
-
-
-      // Write snapshot metadata for debugging (rotate: keep last 24h)
-      this.writeSnapshotDebug(model, body, usage)
-
-      this._pendingSnapshotBody = null
-      this._pendingSnapshotHeaders = null
-    }
-
-    if (this.keepaliveRegistry.size > 0) this.startKeepaliveTimer()
-  }
-
-  // Snapshot TTL in minutes. Set via CLAUDE_SDK_SNAPSHOT_TTL_MIN env var. Default: 1440 (24h).
-  private static readonly SNAPSHOT_TTL_MS = (parseInt(process.env.CLAUDE_SDK_SNAPSHOT_TTL_MIN ?? '1440', 10) || 1440) * 60 * 1000
-  // Full body dump for debugging. Set CLAUDE_SDK_DUMP_BODY=1 to enable.
-  private static readonly DUMP_BODY = process.env.CLAUDE_SDK_DUMP_BODY === '1'
-  private snapshotCallCount = 0
-
-  private writeSnapshotDebug(model: string, body: Record<string, unknown>, usage: TokenUsage): void {
-    try {
-      const snapshotDir = join(homedir(), '.claude', 'snapshots')
-      mkdirSync(snapshotDir, { recursive: true })
-
-      // Rotate: delete files older than configured TTL
-      try {
-        const cutoff = Date.now() - ClaudeCodeSDK.SNAPSHOT_TTL_MS
-        for (const f of readdirSync(snapshotDir)) {
-          const fpath = join(snapshotDir, f)
-          const st = statSync(fpath)
-          if (st.mtimeMs < cutoff) unlinkSync(fpath)
-        }
-      } catch { /* rotation best-effort */ }
-
-      this.snapshotCallCount++
-      const msgs = body.messages as { role: string; content: unknown }[]
-      const sys = body.system
-      const tools = body.tools as unknown[] | undefined
-
-      const sysStr = typeof sys === 'string' ? sys : JSON.stringify(sys)
-      const sysHash = createHash('md5').update(sysStr).digest('hex').slice(0, 8)
-
-      const meta: Record<string, unknown> = {
-        ts: new Date().toISOString(),
-        pid: process.pid,
-        callNum: this.snapshotCallCount,
-        model,
-        anchor: this.cacheAnchorMessageCount,
-        messages: msgs?.length ?? 0,
-        tools: tools?.length ?? 0,
-        sysHash,
-        sysLen: sysStr.length,
-        usage: {
-          input: usage.inputTokens ?? 0,
-          cacheRead: usage.cacheReadInputTokens ?? 0,
-          cacheWrite: usage.cacheCreationInputTokens ?? 0,
-        },
-        firstMsg: msgs?.[0] ? {
-          role: msgs[0].role,
-          contentLen: JSON.stringify(msgs[0].content).length,
-          contentHash: createHash('md5').update(JSON.stringify(msgs[0].content)).digest('hex').slice(0, 8),
-        } : null,
-        lastMsg: msgs?.length ? {
-          role: msgs[msgs.length - 1].role,
-          contentLen: JSON.stringify(msgs[msgs.length - 1].content).length,
-        } : null,
-        anchorMsg: this.cacheAnchorMessageCount > 0 && msgs?.[this.cacheAnchorMessageCount - 1]
-          ? { role: msgs[this.cacheAnchorMessageCount - 1].role, contentLen: JSON.stringify(msgs[this.cacheAnchorMessageCount - 1].content).length }
-          : null,
-        toolsHash: tools?.length ? createHash('md5').update(
-          JSON.stringify((tools as { name?: string }[]).map(t => t.name ?? '').join(','))
-        ).digest('hex').slice(0, 8) : null,
-      }
-
-      const filename = `${process.pid}-${Date.now()}.json`
-      writeFileSync(join(snapshotDir, filename), JSON.stringify(meta, null, 2) + '\n')
-
-      // Full raw body dump — the EXACT payload sent to Anthropic API.
-      // First 3 calls of each process + whenever DUMP_BODY env is set.
-      if (ClaudeCodeSDK.DUMP_BODY || this.snapshotCallCount <= 3) {
-        const dumpDir = join(snapshotDir, 'bodies')
-        mkdirSync(dumpDir, { recursive: true })
-        const dumpFile = `${process.pid}-call${this.snapshotCallCount}-${Date.now()}.json`
-        writeFileSync(join(dumpDir, dumpFile), JSON.stringify(body, null, 2) + '\n')
-      }
-    } catch { /* debug logging must never crash */ }
-  }
-
-  private startKeepaliveTimer(): void {
-    if (this.keepaliveTimer) return
-    const TICK_MS = Math.min(30_000, Math.max(5_000, Math.floor(this.keepaliveConfig.intervalMs / 6)))
-    this.keepaliveTimer = setInterval(() => this.keepaliveTick(), TICK_MS)
-    if (this.keepaliveTimer && typeof this.keepaliveTimer === 'object' && 'unref' in this.keepaliveTimer) {
-      (this.keepaliveTimer as any).unref()
-    }
-  }
-
-  // Anthropic cache TTL — API silently downgrades our ttl:'1h' to 5 minutes
-  // (ephemeral_1h_input_tokens=0 in response). We're not on the 1h allowlist.
-  // Keep sending ttl:'1h' in case they enable it later — no harm, falls back to 5min.
-  private static readonly CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes (server-enforced)
-
-  private async keepaliveTick(): Promise<void> {
-    if (this.keepaliveRegistry.size === 0 || this.keepaliveInFlight) return
-
-    // Live-reload config from ~/.claude/keepalive.json (mtime-cached, cheap)
-    const liveConfig = readKeepaliveConfig()
-    if (liveConfig) {
-      if (liveConfig.enabled === false) {
-        this.keepaliveRegistry.clear()
-        this.stopKeepalive()
-        return
-      }
-      if (typeof liveConfig.intervalSec === 'number' && liveConfig.intervalSec > 0)
-        this.keepaliveConfig.intervalMs = liveConfig.intervalSec * 1000
-      if (typeof liveConfig.idleTimeoutSec === 'number' && liveConfig.idleTimeoutSec > 0)
-        this.keepaliveConfig.idleTimeoutMs = liveConfig.idleTimeoutSec * 1000
-      else if (liveConfig.idleTimeoutSec === null || liveConfig.idleTimeoutSec === 0)
-        this.keepaliveConfig.idleTimeoutMs = Infinity
-      if (typeof liveConfig.minTokens === 'number')
-        this.keepaliveConfig.minTokens = liveConfig.minTokens
-    }
-
-    // Idle timeout (from config or live override). Default: Infinity = never stop.
-    const realIdle = Date.now() - this.keepaliveLastRealActivityAt
-    if (this.keepaliveConfig.idleTimeoutMs !== Infinity && realIdle > this.keepaliveConfig.idleTimeoutMs) {
-      this.keepaliveRegistry.clear()
-      this.stopKeepalive()
-      return
-    }
-
-    // Pick heaviest model from registry
-    let best: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number } | null = null
-    for (const entry of this.keepaliveRegistry.values()) {
-      if (!best || entry.inputTokens > best.inputTokens) best = entry
-    }
-    if (!best) return
-
-    // Use keepaliveLastActivityAt (updated by both real and KA) for fire timing
-    const idle = Date.now() - this.keepaliveLastActivityAt
-
-    // Add jitter to prevent multiple sessions from firing keepalives simultaneously.
-    // Without jitter, all sessions that go idle together (lunch break) fire at the
-    // exact same moment, causing API bursts and OAuth token refresh 429s.
-    if (!this.keepaliveJitterMs) {
-      this.keepaliveJitterMs = Math.floor(Math.random() * 30_000) // 0-30s random offset
-    }
-    if (idle < this.keepaliveConfig.intervalMs * 0.9 + this.keepaliveJitterMs) {
-      this.keepaliveConfig.onTick?.({
-        idleMs: idle,
-        nextFireMs: Math.max(0, this.keepaliveConfig.intervalMs - idle),
-        model: best.model,
-        tokens: best.inputTokens,
-      })
-      return
-    }
-
-    // Fire keepalive for heaviest model
-    this.keepaliveInFlight = true
-
-    try {
-      await this.ensureAuth()
-
-      const body = JSON.parse(JSON.stringify(best.body))
-      const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
-      body.max_tokens = budgetTokens > 0 ? budgetTokens + 1 : 1
-
-      const headers = { ...best.headers, Authorization: `Bearer ${this.accessToken}` }
-
-      const controller = new AbortController()
-      this.keepaliveAbortController = controller
-
-      const t0 = Date.now()
-      let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 }
-
-      for await (const event of this.doStreamRequest(body, headers, controller.signal)) {
-        if (event.type === 'message_stop') usage = event.usage
-      }
-
-      const durationMs = Date.now() - t0
-      // Update fire timer (for spacing keepalives) but NOT realActivityAt
-      this.keepaliveLastActivityAt = Date.now()
-      this.keepaliveCacheWrittenAt = Date.now() // cache refreshed
-
-
-
-      this.keepaliveConfig.onHeartbeat?.({
-        usage,
-        durationMs,
-        idleMs: idle,
-        model: best.model,
-        rateLimit: {
-          status: this.lastRateLimitInfo.status,
-          claim: this.lastRateLimitInfo.claim,
-          resetAt: this.lastRateLimitInfo.resetAt,
-        },
-      })
-    } catch (err: unknown) {
-      // Distinguish transient errors (retry) from permanent ones (give up).
-      const status = (err as { status?: number })?.status
-      const isTransient = !status || status === 503 || status === 529 || status >= 500
-
-      if (isTransient) {
-        // Start dedicated retry chain with exact timing from cache write timestamp.
-        this.keepaliveRetryChain(best)
-      } else {
-        // Permanent: 429 rate limit, 401 auth — clear snapshot, but keep timer alive.
-        // Timer is a cheap unref'd interval; it becomes a no-op with an empty registry.
-        // Next real stream() will rebuild the snapshot and KA resumes automatically.
-        this.keepaliveRegistry.clear()
-        this.onKeepaliveDisarmed('permanent_error')
-      }
-    } finally {
-      this.keepaliveInFlight = false
-      this.keepaliveAbortController = null
-    }
-  }
-
-  // Retry backoff: start fast (2s), ramp to 20s max. 13 attempts fit in ~180s margin.
-  // Fire at ~120s, cache expires at 300s → 180s window for retries.
-  private static readonly KEEPALIVE_RETRY_DELAYS = [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20]
-
   /**
-   * Dedicated retry chain for transient keepalive failures.
-   * Uses setTimeout with exact delays from a fixed timestamp — no drift, no timer reuse.
-   * Checks remaining cache TTL before each attempt to avoid wasting a request on expired cache.
+   * Full KA shutdown — stops engine timers, registry, health probe.
+   * Also clears SDK-owned tokenRotationTimer (auth concern, not KA).
    */
-  private keepaliveRetryChain(
-    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number },
-    attemptIndex = 0,
-  ): void {
-    if (attemptIndex >= ClaudeCodeSDK.KEEPALIVE_RETRY_DELAYS.length) {
-      // Exhausted all retries — disarm KA but leave timer running.
-      // Rationale: registry.clear() makes keepaliveTick() a no-op; next real stream()
-      // will repopulate registry and KA resumes automatically. Killing the timer here
-      // is a bug — it makes KA "die permanently" on any transient network blip.
-      this.keepaliveRegistry.clear()
-      this.onKeepaliveDisarmed('retry_exhausted')
-      return
-    }
-
-    // Check remaining TTL from exact cache write timestamp — not from interval timer
-    const cacheAge = Date.now() - this.keepaliveCacheWrittenAt
-    const ttlRemaining = ClaudeCodeSDK.CACHE_TTL_MS - cacheAge
-    const nextDelay = ClaudeCodeSDK.KEEPALIVE_RETRY_DELAYS[attemptIndex]! * 1000
-
-    // Need at least the delay + 5s safety for the request itself
-    if (ttlRemaining < nextDelay + 5000) {
-      // Not enough time — cache will expire before we can retry.
-      // CRITICAL INVARIANT: KA must NEVER cache_write. Cache is presumed dead;
-      // next real stream will pay cache_write (user-initiated, expected cost).
-      // Clear registry so no fire can happen; leave timer running for auto-resume.
-      this.keepaliveRegistry.clear()
-      this.onKeepaliveDisarmed('cache_ttl_exhausted')
-      return
-    }
-
-    // Schedule retry with exact delay
-    this.keepaliveRetryTimer = setTimeout(async () => {
-      this.keepaliveRetryTimer = null
-
-      // Re-check: if a real request happened since we started retrying, stop.
-      if (this.keepaliveLastRealActivityAt > this.keepaliveCacheWrittenAt) {
-        // Real request wrote fresh cache — no need for keepalive retry
-        return
-      }
-
-      // Re-check remaining TTL right before firing (time passed during delay)
-      const ageNow = Date.now() - this.keepaliveCacheWrittenAt
-      if (ageNow > ClaudeCodeSDK.CACHE_TTL_MS - 5000) {
-        // Cache presumed dead mid-retry. NEVER cache_write from KA — disarm cleanly.
-        this.keepaliveRegistry.clear()
-        this.onKeepaliveDisarmed('cache_ttl_expired_mid_retry')
-        return
-      }
-
-      // Fire the retry
-      this.keepaliveInFlight = true
-      try {
-        await this.ensureAuth()
-        const body = JSON.parse(JSON.stringify(entry.body))
-        const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
-        body.max_tokens = budgetTokens > 0 ? budgetTokens + 1 : 1
-        const headers = { ...entry.headers, Authorization: `Bearer ${this.accessToken}` }
-
-        const controller = new AbortController()
-        this.keepaliveAbortController = controller
-
-        for await (const event of this.doStreamRequest(body, headers, controller.signal)) {
-          // Drain stream — we only care about cache refresh, not response content
-          void event
-        }
-
-        // Success! Cache refreshed.
-        this.keepaliveLastActivityAt = Date.now()
-        this.keepaliveCacheWrittenAt = Date.now()
-      } catch (err: unknown) {
-        const status = (err as { status?: number })?.status
-        const isTransient = !status || status === 503 || status === 529 || status >= 500
-
-        if (isTransient) {
-          // Try next delay in the sequence
-          this.keepaliveInFlight = false
-          this.keepaliveAbortController = null
-          this.keepaliveRetryChain(entry, attemptIndex + 1)
-          return
-        } else {
-          // Permanent failure (401/429/etc) — disarm but keep timer alive.
-          this.keepaliveRegistry.clear()
-          this.onKeepaliveDisarmed('permanent_error_mid_retry')
-        }
-      } finally {
-        this.keepaliveInFlight = false
-        this.keepaliveAbortController = null
-      }
-    }, nextDelay)
-  }
-
-  /**
-   * Layer 3 — Cache rewrite burst protection.
-   * Called at the top of every real stream() before the request goes out.
-   *
-   * Logic:
-   *   - Compute idle gap = now - last REAL activity (keepaliveLastRealActivityAt).
-   *   - If gap > warnIdleMs AND estimated cache size > warnTokens → log warn event
-   *     (stats.jsonl + stderr via callback) so quota burn is observable.
-   *   - If gap > blockIdleMs AND blockEnabled → throw CacheRewriteBlockedError.
-   *
-   * No side effects on network/KA state. Pure signal + optional block.
-   */
-  private checkRewriteGuard(model: string): void {
-    const lastReal = this.keepaliveLastRealActivityAt
-    if (lastReal === 0) return  // First-ever request; no baseline yet.
-    const idleMs = Date.now() - lastReal
-    const warnIdle = this.keepaliveConfig.rewriteWarnIdleMs
-    const blockIdle = this.keepaliveConfig.rewriteBlockIdleMs
-    if (idleMs < warnIdle) return  // Normal working cadence.
-
-    const estimatedTokens = this.lastKnownCacheTokensByModel.get(model) ?? 0
-    const blocked = this.keepaliveConfig.rewriteBlockEnabled && idleMs >= blockIdle
-
-    if (estimatedTokens >= this.keepaliveConfig.rewriteWarnTokens || blocked) {
-      try { this.keepaliveConfig.onRewriteWarning?.({ idleMs, estimatedTokens, blocked, model }) } catch {}
-    }
-
-    if (blocked) {
-      throw new CacheRewriteBlockedError(idleMs, estimatedTokens, model)
-    }
-  }
-
-  /**
-   * Called whenever KA fire logic decides to "disarm" (stop firing) without
-   * killing the interval timer. Timer remains cheap+unref'd, becomes no-op with
-   * empty registry, and auto-resumes on next real stream() when snapshot rebuilds.
-   *
-   * reason ∈ {
-   *   'permanent_error',         // 401/429/etc on main fire
-   *   'permanent_error_mid_retry',
-   *   'retry_exhausted',         // 13 transient retries all failed
-   *   'cache_ttl_exhausted',     // not enough TTL left to even schedule next retry
-   *   'cache_ttl_expired_mid_retry',
-   * }
-   */
-  private onKeepaliveDisarmed(reason: string): void {
-    // Abort any in-flight fire (cleanup)
-    this.keepaliveAbortController?.abort()
-    this.keepaliveAbortController = null
-    this.keepaliveInFlight = false
-    // Clear retry timer if any
-    if (this.keepaliveRetryTimer) {
-      clearTimeout(this.keepaliveRetryTimer)
-      this.keepaliveRetryTimer = null
-    }
-    // NOTE: intentionally NOT calling clearInterval(keepaliveTimer).
-    // Interval is unref'd (line 729) → negligible CPU, keepaliveTick() returns
-    // immediately when registry is empty (line 739). Keeps SDK in "ready to resume"
-    // state: next stream() → onStreamComplete() → startKeepaliveTimer() (no-op if
-    // already running) → KA fires on fresh snapshot. Zero recovery latency.
-    try { this.keepaliveConfig.onDisarmed?.({ reason, at: Date.now() }) } catch {}
-    // Layer 2: start health probe ONLY if cache is still worth saving.
-    // Reason matters: on permanent errors (401/429) probe won't help; only on network-ish reasons.
-    const networkReasons = new Set(['retry_exhausted', 'cache_ttl_exhausted', 'cache_ttl_expired_mid_retry'])
-    if (networkReasons.has(reason)) {
-      const cacheAge = Date.now() - this.keepaliveCacheWrittenAt
-      const ttlRemaining = ClaudeCodeSDK.CACHE_TTL_MS - cacheAge
-      // Only probe if there's meaningful cache left to rescue (>30s)
-      if (ttlRemaining > 30_000) {
-        this.startHealthProbe()
-      }
-    }
-  }
-
-  // Layer 2 — Network health probe.
-  // Activated only when KA retry chain failed AND cache still has useful TTL.
-  // Uses TCP connect (no HTTP, not billable, not counted against quota).
-  // When network heals before cache dies → immediate KA fire rescues the cache.
-  private static readonly HEALTH_PROBE_INTERVAL_MS = 30_000
-  private static readonly HEALTH_PROBE_TIMEOUT_MS = 3_000
-
-  private startHealthProbe(): void {
-    if (this.healthProbeTimer) return  // already probing
-    const prevState = this.networkState
-    this.networkState = 'degraded'
-    if (prevState !== 'degraded') {
-      try { this.keepaliveConfig.onNetworkStateChange?.({ from: prevState, to: 'degraded', at: Date.now() }) } catch {}
-    }
-
-    const probe = async () => {
-      // Stop probing if cache died during the outage — no more work to do.
-      const cacheAge = Date.now() - this.keepaliveCacheWrittenAt
-      if (cacheAge >= ClaudeCodeSDK.CACHE_TTL_MS) {
-        this.stopHealthProbe()
-        return
-      }
-      // Stop if something already restored real activity (e.g. user sent a prompt that succeeded).
-      // keepaliveCacheWrittenAt would be refreshed; this check stays cheap.
-
-      let ok = false
-      try {
-        // Dynamic import avoids cost at module load time
-        const { connect } = await import('node:net')
-        await new Promise<void>((resolve, reject) => {
-          const sock = connect({ host: 'api.anthropic.com', port: 443 })
-          const t = setTimeout(() => {
-            sock.destroy()
-            reject(new Error('timeout'))
-          }, ClaudeCodeSDK.HEALTH_PROBE_TIMEOUT_MS)
-          sock.once('connect', () => {
-            clearTimeout(t)
-            sock.end()
-            resolve()
-          })
-          sock.once('error', (e) => {
-            clearTimeout(t)
-            reject(e)
-          })
-        })
-        ok = true
-      } catch {
-        ok = false
-      }
-
-      if (ok) {
-        // Network is back. Stop probing, transition state, try to rescue cache.
-        this.stopHealthProbe()
-        const prev = this.networkState
-        this.networkState = 'healthy'
-        try { this.keepaliveConfig.onNetworkStateChange?.({ from: prev, to: 'healthy', at: Date.now() }) } catch {}
-        // If registry still has a snapshot AND cache has meaningful TTL left → fire immediately.
-        // If registry was cleared during disarm, we cannot reconstruct a snapshot;
-        // the cache effectively died (we lost the prefix). Do nothing — next real stream
-        // will repopulate the registry, and KA resumes normally.
-        const ttlLeft = ClaudeCodeSDK.CACHE_TTL_MS - (Date.now() - this.keepaliveCacheWrittenAt)
-        if (this.keepaliveRegistry.size > 0 && ttlLeft > 10_000) {
-          void this.keepaliveTick()  // force immediate attempt
-        }
-      }
-    }
-
-    // Fire first probe immediately, then on interval.
-    void probe()
-    this.healthProbeTimer = setInterval(probe, ClaudeCodeSDK.HEALTH_PROBE_INTERVAL_MS)
-    if (this.healthProbeTimer && typeof this.healthProbeTimer === 'object' && 'unref' in this.healthProbeTimer) {
-      (this.healthProbeTimer as any).unref()
-    }
-  }
-
-  private stopHealthProbe(): void {
-    if (this.healthProbeTimer) {
-      clearInterval(this.healthProbeTimer)
-      this.healthProbeTimer = null
-    }
-  }
-
   public stopKeepalive(): void {
-    if (this.keepaliveTimer) {
-      clearInterval(this.keepaliveTimer)
-      this.keepaliveTimer = null
-    }
-    if (this.keepaliveRetryTimer) {
-      clearTimeout(this.keepaliveRetryTimer)
-      this.keepaliveRetryTimer = null
-    }
+    this.keepalive.stop()
     if (this.tokenRotationTimer) {
       clearTimeout(this.tokenRotationTimer)
       this.tokenRotationTimer = null
     }
-    this.keepaliveAbortController?.abort()
-    this.keepaliveRegistry.clear()
-    this.keepaliveInFlight = false
-    this.stopHealthProbe()
   }
 
   // ── Anchor persistence: one number per cwd, survives process restart ──
@@ -2167,8 +1588,8 @@ export class ClaudeCodeSDK {
         allRLHeaders[key] = value
       }
     })
-    if (Object.keys(allRLHeaders).length > 0 && this.keepaliveConfig?.onTick) {
-      // Log via onTick as a side-channel for header discovery
+    if (Object.keys(allRLHeaders).length > 0) {
+      // Side-channel for rate-limit header discovery
       try {
         const { appendFileSync } = require('fs')
         const { join } = require('path')

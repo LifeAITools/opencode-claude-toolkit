@@ -179,9 +179,10 @@ async function cmdWatch(): Promise<void> {
   const here = import.meta.dir
   const tuiPath = join(here, '..', 'src', 'tui.ts')
   if (!existsSync(tuiPath)) {
-    console.error('[claude-max] TUI not available yet — use `claude-max status` instead')
+    console.error('[claude-max] TUI file not found at ' + tuiPath)
     process.exit(1)
   }
+  // blessed needs a real TTY — inherit all stdio
   const p = spawn({ cmd: ['bun', 'run', tuiPath], stdio: ['inherit', 'inherit', 'inherit'] })
   await p.exited
 }

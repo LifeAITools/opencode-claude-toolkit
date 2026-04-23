@@ -185,13 +185,19 @@ async function handleMessages(req: Request, server: { requestIP(r: Request): { a
   const model = parsedBody.model ?? 'unknown'
   session.model = model
 
-  // Copy headers (passthrough as-is, EXCEPT Authorization — replaced with OAuth)
+  // Copy headers (passthrough as-is, EXCEPT Authorization + compression headers).
+  // We strip accept-encoding because upstream may return gzip'd SSE which conflicts
+  // with stream tee() / Response() re-encoding in Bun. Let Anthropic send plain text.
   const headers: Record<string, string> = {}
   req.headers.forEach((v, k) => {
     const lk = k.toLowerCase()
-    if (['host', 'content-length', 'connection', 'authorization'].includes(lk)) return
+    if ([
+      'host', 'content-length', 'connection', 'authorization',
+      'accept-encoding',   // force uncompressed SSE
+    ].includes(lk)) return
     headers[k] = v
   })
+  headers['accept-encoding'] = 'identity'  // explicit: no gzip/br/deflate
 
   // Replace with real OAuth token from ~/.claude/.credentials.json.
   // CC sends its own ANTHROPIC_AUTH_TOKEN (placeholder when using our wrapper),
@@ -365,10 +371,15 @@ async function handleMessages(req: Request, server: { requestIP(r: Request): { a
   // Attach catch so unhandled rejection never crashes server
   parsePromise.catch(e => emit({ level: 'error', kind: 'REAL_REQUEST_ERROR', sessionId, msg: `parse promise rejected: ${e?.message}` }))
 
-  // Return the other tee — CC gets raw SSE bytes
+  // Return the other tee — CC gets raw SSE bytes.
+  // Strip content-encoding/content-length — Bun auto-computes content-length,
+  // and we asked upstream for identity encoding.
+  const responseHeaders = new Headers(upstream.headers)
+  responseHeaders.delete('content-encoding')
+  responseHeaders.delete('content-length')
   return new Response(toClient, {
     status: upstream.status,
-    headers: upstream.headers,
+    headers: responseHeaders,
   })
 }
 

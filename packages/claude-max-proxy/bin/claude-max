@@ -163,8 +163,14 @@ async function doctor(): Promise<DocReport & { endpoint?: string; fromDiscovery?
     service = 'launchd'
     serviceInstalled = existsSync(LAUNCHD_PLIST)
     if (serviceInstalled) {
-      const r = run(['launchctl', 'list', LAUNCHD_LABEL], { quiet: true })
-      serviceActive = r.ok
+      // Try modern `print` first (macOS 11+), fall back to `list`
+      const uid = process.getuid?.() ?? 0
+      const modern = run(['launchctl', 'print', `gui/${uid}/${LAUNCHD_LABEL}`], { quiet: true })
+      if (modern.ok) serviceActive = true
+      else {
+        const legacy = run(['launchctl', 'list', LAUNCHD_LABEL], { quiet: true })
+        serviceActive = legacy.ok
+      }
     }
   } else if (IS_LINUX && which('systemctl')) {
     service = 'systemd'
@@ -385,11 +391,19 @@ function installLaunchdPlist(bunBin: string): void {
   writeFileSync(LAUNCHD_PLIST, plist)
   ok(`Wrote ${LAUNCHD_PLIST}`)
 
-  // unload-then-load to refresh if it was already there
-  run(['launchctl', 'unload', LAUNCHD_PLIST], { quiet: true })
-  const r = run(['launchctl', 'load', LAUNCHD_PLIST])
+  // Use modern bootstrap/bootout (launchctl load/unload deprecated since macOS 11).
+  // bootout may fail if not loaded — that's OK.
+  const uid = process.getuid?.() ?? 0
+  const domain = `gui/${uid}`
+  run(['launchctl', 'bootout', `${domain}/${LAUNCHD_LABEL}`], { quiet: true })
+  const r = run(['launchctl', 'bootstrap', domain, LAUNCHD_PLIST])
   if (r.ok) ok('launchd agent loaded (will auto-start on login)')
-  else warn(`launchctl load returned: ${r.stderr.slice(0, 200)}`)
+  else {
+    // Fallback to legacy load for older macOS (10.9 and earlier)
+    const r2 = run(['launchctl', 'load', LAUNCHD_PLIST])
+    if (r2.ok) ok('launchd agent loaded via legacy `load` (ok on older macOS)')
+    else warn(`launchctl bootstrap failed: ${r.stderr.slice(0, 200)}`)
+  }
 }
 
 // ═══ Proxy lifecycle — CONNECT-DON'T-KILL semantics ════════════════
@@ -646,7 +660,12 @@ async function cmdStop(args: string[] = []): Promise<void> {
   }
 
   if (d.serviceInstalled) {
-    if (d.service === 'launchd') run(['launchctl', 'unload', LAUNCHD_PLIST])
+    if (d.service === 'launchd') {
+      const uid = process.getuid?.() ?? 0
+      // Modern bootout (+ legacy unload fallback)
+      const r = run(['launchctl', 'bootout', `gui/${uid}/${LAUNCHD_LABEL}`], { quiet: true })
+      if (!r.ok) run(['launchctl', 'unload', LAUNCHD_PLIST], { quiet: true })
+    }
     if (d.service === 'systemd') run(['systemctl', '--user', 'stop', 'claude-max-proxy.service'])
     ok(`${d.service} service stopped`)
     return
@@ -734,7 +753,9 @@ async function cmdUninstall(): Promise<void> {
 
   // Stop + unload service
   if (IS_DARWIN && existsSync(LAUNCHD_PLIST)) {
-    run(['launchctl', 'unload', LAUNCHD_PLIST])
+    const uid = process.getuid?.() ?? 0
+    const r = run(['launchctl', 'bootout', `gui/${uid}/${LAUNCHD_LABEL}`], { quiet: true })
+    if (!r.ok) run(['launchctl', 'unload', LAUNCHD_PLIST], { quiet: true })
     run(['rm', '-f', LAUNCHD_PLIST])
     ok('launchd plist removed')
   }

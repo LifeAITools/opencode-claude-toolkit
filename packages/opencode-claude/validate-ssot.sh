@@ -50,19 +50,35 @@ ic=$(grep -aE "pid=$PID" "$LOG_FILE" | grep -cE "ENGINE_SELECT|ADAPTER_BANNER|BA
 grep -aE "pid=$PID" "$LOG_FILE" | grep -q "ENGINE_SELECT=CORE"
 check "engine=CORE" $? "ENGINE_SELECT=CORE present"
 
-# 3. Rules count matches SSOT
+# 3. Rules count matches SSOT (with platform filter applied)
+# A rule applies to a platform if `platforms` is absent/null (= all), or
+# contains the platform name. For opencode adapter: expected = count of
+# rules where platforms is null OR includes "opencode".
 RULES_IN_LOG=$(grep -aE "pid=$PID" "$LOG_FILE" | grep -oE "rules_loaded=[0-9]+" | head -1 | cut -d= -f2)
-RULES_IN_SSOT=$(jq '.rules | length' "$SSOT")
-[[ "$RULES_IN_LOG" == "$RULES_IN_SSOT" ]]; check "rules count SSOT" $? "log=$RULES_IN_LOG ssot=$RULES_IN_SSOT"
+RULES_IN_SSOT_TOTAL=$(jq '.rules | length' "$SSOT")
+RULES_FOR_OPENCODE=$(jq '[.rules[] | select(.platforms == null or (.platforms | index("opencode")))] | length' "$SSOT")
+[[ "$RULES_IN_LOG" == "$RULES_FOR_OPENCODE" ]]; check "rules count SSOT" $? "log=$RULES_IN_LOG expected=$RULES_FOR_OPENCODE (ssot_total=$RULES_IN_SSOT_TOTAL, opencode-applicable)"
 
 # 4. No duplicate rules.json in opencode-claude
 DUP1="/home/relishev/projects/vibe/claude-code-sdk/packages/opencode-claude/signal-wire-rules.json"
 DUP2="/home/relishev/projects/vibe/claude-code-sdk/packages/opencode-claude/dist/signal-wire-rules.json"
 [[ ! -f "$DUP1" && ! -f "$DUP2" ]]; check "no duplicates" $? "duplicate rules.json files absent"
 
-# 5. At least one rule fired
-FIRED=$(grep -aE "pid=$PID" "$LOG_FILE" | grep -ac "rule fired:")
-[[ "$FIRED" -ge 1 ]]; check "rule fired" $? "$FIRED rule(s) fired"
+# 5. Rule evaluation works — probe by invoking sw-cli directly via the
+# bundled hook wrapper. This is a deterministic check: if SSOT loads and
+# the engine evaluates, a UserPromptSubmit event will fire the
+# session-start-checklist rule (which has no match filter).
+# (Historical note: a pid-scoped grep of "rule fired:" was misleading
+# because only Consumer-1 logs fires; Consumer-2/sw-cli doesn't write
+# into the shared debug log.)
+HOOK_SH="/home/relishev/.claude-local/plugins/marketplaces/lifeaitools/hooks/signal-wire-hook.sh"
+if [[ -x "$HOOK_SH" ]]; then
+  PROBE_OUT=$(echo '{"session_id":"validator-probe","prompt":"probe"}' | "$HOOK_SH" --event UserPromptSubmit 2>&1 | head -c 500)
+  echo "$PROBE_OUT" | grep -q "mandatory-checklist"
+  check "rule fires (via sw-cli probe)" $? "engine evaluates, session-start-checklist returned"
+else
+  echo "  [SKIP] rule fires — $HOOK_SH not executable"
+fi
 
 # 6. No unclean stream stops
 STOPS=$(grep -aE "pid=$PID" "$STATS_FILE" | grep -oE "stop=[a-z_]+" | sort -u)

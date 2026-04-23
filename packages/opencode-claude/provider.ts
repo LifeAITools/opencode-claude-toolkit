@@ -19,30 +19,24 @@ import { appendFileSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
-// ── Signal-wire engine selection (Stage 1 Phase 2.5, with identity telemetry) ──
-//   SIGNAL_WIRE_ENGINE=core (DEFAULT) → @kiberos/signal-wire-core via adapter
-//   SIGNAL_WIRE_ENGINE=legacy         → local signal-wire.ts (rollback path)
-// On module load: writes one line to ~/.claude/signal-wire-debug.log identifying
-// the chosen engine + version + pid. Lets operators `tail -f signal-wire-debug.log`
-// and see exactly which engine is running.
-import { SignalWire as _LegacySignalWire } from './signal-wire.ts'
-import { SignalWire as _CoreSignalWire } from './signal-wire-core-adapter.ts'
-const _SW_ENGINE = (process.env.SIGNAL_WIRE_ENGINE ?? 'core').toLowerCase()
-const SignalWire = (_SW_ENGINE === 'legacy' ? _LegacySignalWire : _CoreSignalWire) as unknown as typeof _LegacySignalWire
+// ── Signal-wire engine ──────────────────────────────────────────────
+// TS-only: @kiberos/signal-wire-core via signal-wire.ts adapter.
+// Legacy fallback (SIGNAL_WIRE_ENGINE=legacy) was removed 2026-04-23 after
+// the core engine reached full parity (150+ golden vectors, 20+ adapter
+// tests, live validation via validate-ssot.sh) — see SIGNAL-WIRE-CORE-MIGRATION.md.
+import { SignalWire } from './signal-wire.ts'
 
-// Provider-level startup banner — proves to logs which engine was selected
-// BEFORE any engine method is called.
+// Provider-level startup banner — writes one line to signal-wire-debug.log
+// so operators can `tail -f` and confirm which engine build is loaded.
 ;(() => {
   try {
     const { appendFileSync } = require('fs')
     const { join } = require('path')
     const { homedir } = require('os')
     const logFile = join(homedir(), '.claude', 'signal-wire-debug.log')
-    const engineChoice = _SW_ENGINE === 'legacy' ? 'LEGACY' : 'CORE'
-    const adapterIdentity = _SW_ENGINE === 'legacy' ? 'legacy-v1.x' : 'sw-adapter-opencode-claude v1.0.0'
     appendFileSync(
       logFile,
-      `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=${engineChoice} implementation=${adapterIdentity} env=${process.env.SIGNAL_WIRE_ENGINE ?? '(unset→core)'}\n`,
+      `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=CORE implementation=sw-adapter-opencode-claude v1.0.0 env=(ts-only)\n`,
     )
   } catch {}
 })()

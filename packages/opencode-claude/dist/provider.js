@@ -44,1906 +44,7 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
-var __require = import.meta.require;
-
-// wake-types.ts
-import { homedir } from "os";
-import { join } from "path";
-var DISCOVERY_DIR, WARM_CHANNEL_TTL_MS, WAKE_EVENT_TYPES, EVENT_TYPES;
-var init_wake_types = __esm(() => {
-  DISCOVERY_DIR = join(homedir(), ".opencode", "wake");
-  WARM_CHANNEL_TTL_MS = 5 * 60 * 1000;
-  WAKE_EVENT_TYPES = {
-    TASK_ASSIGNED: "task_assigned",
-    CHANNEL_MESSAGE: "channel_message",
-    COMMENT_ADDED: "comment_added",
-    DELEGATION_RECEIVED: "delegation_received",
-    STATUS_CHANGED: "status_changed",
-    MENTION: "mention",
-    TASK_COMPLETED: "task_completed",
-    TASK_FAILED: "task_failed",
-    AGENT_STALE: "agent_stale"
-  };
-  EVENT_TYPES = {
-    PRE_TOOL_USE: "PreToolUse",
-    POST_TOOL_USE: "PostToolUse",
-    USER_PROMPT_SUBMIT: "UserPromptSubmit",
-    STOP: "Stop",
-    SUBAGENT_START: "SubagentStart",
-    SUBAGENT_STOP: "SubagentStop",
-    SESSION_START: "SessionStart",
-    SESSION_END: "SessionEnd",
-    PERMISSION_REQUEST: "PermissionRequest",
-    EXTERNAL_EVENT: "ExternalEvent",
-    WEBHOOK_EVENT: "WebhookEvent",
-    TIMER_EVENT: "TimerEvent"
-  };
-});
-
-// wake-listener.ts
-var exports_wake_listener = {};
-__export(exports_wake_listener, {
-  updateDiscovery: () => updateDiscovery,
-  stopWakeListener: () => stopWakeListener,
-  startWakeListener: () => startWakeListener,
-  resolveCurrentDepth: () => resolveCurrentDepth,
-  helperStarted: () => helperStarted,
-  helperFinished: () => helperFinished,
-  getSubscriptionState: () => getSubscriptionState,
-  getSpawnTotal: () => getSpawnTotal,
-  getSpawnActive: () => getSpawnActive,
-  getCurrentDepth: () => getCurrentDepth,
-  getAgentIdentity: () => getAgentIdentity,
-  checkSpawnAllowed: () => checkSpawnAllowed,
-  _parentSessionId: () => _parentSessionId,
-  _parentMemberId: () => _parentMemberId,
-  _agentIdentity: () => _agentIdentity
-});
-import { mkdirSync, writeFileSync, readFileSync, unlinkSync, appendFileSync, renameSync } from "fs";
-import { join as join2 } from "path";
-import { homedir as homedir2 } from "os";
-function dbg(...args) {
-  if (!DEBUG)
-    return;
-  try {
-    appendFileSync(LOG_FILE, `[${new Date().toISOString()}] [wake-listener] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
-`);
-  } catch {}
-}
-function markChannelWarm(channelId) {
-  const existing = warmChannels.get(channelId);
-  warmChannels.set(channelId, {
-    lastReply: Date.now(),
-    messageCount: (existing?.messageCount ?? 0) + 1
-  });
-}
-function isChannelWarm(channelId) {
-  const entry = warmChannels.get(channelId);
-  if (!entry)
-    return false;
-  if (Date.now() - entry.lastReply > WARM_CHANNEL_TTL_MS) {
-    warmChannels.delete(channelId);
-    return false;
-  }
-  return true;
-}
-function getSpawnTotal() {
-  return _spawnTotal;
-}
-function getSpawnActive() {
-  const now = Date.now();
-  while (_activeHelperTimestamps.length > 0 && now - _activeHelperTimestamps[0] > HELPER_TIMEOUT_MS) {
-    _activeHelperTimestamps.shift();
-  }
-  return _activeHelperTimestamps.length;
-}
-function helperStarted() {
-  _spawnTotal++;
-  _activeHelperTimestamps.push(Date.now());
-}
-function helperFinished() {
-  _activeHelperTimestamps.shift();
-}
-function getAgentIdentity() {
-  return _agentIdentity;
-}
-function getCurrentDepth() {
-  return _currentDepth;
-}
-async function resolveCurrentDepth(sessionId) {
-  if (_currentDepth !== null)
-    return _currentDepth;
-  let depth = 0;
-  let currentId = sessionId;
-  try {
-    for (let i2 = 0;i2 < 10; i2++) {
-      if (!_sdkClient) {
-        dbg("resolveCurrentDepth: no sdkClient");
-        break;
-      }
-      const { data: session } = await _sdkClient.session.get({ path: { id: currentId } });
-      if (!session)
-        break;
-      if (!session.parent_id && !session.parentId)
-        break;
-      depth++;
-      currentId = session.parent_id ?? session.parentId;
-    }
-  } catch {
-    dbg("resolveCurrentDepth: failed, assuming 0");
-  }
-  _currentDepth = depth;
-  dbg(`resolveCurrentDepth: depth=${depth}`);
-  return depth;
-}
-function checkSpawnAllowed(identity, currentDepth, activeHelpers) {
-  const budget = identity.budget ?? { maxSpawnDepth: 2, maxSubagents: 5 };
-  const maxConcurrent = identity._maxConcurrent ?? budget.maxSubagents;
-  if (activeHelpers >= maxConcurrent) {
-    return {
-      allowed: false,
-      reason: [
-        `\u26A0\uFE0F \u041B\u0438\u043C\u0438\u0442 \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432: ${activeHelpers}/${maxConcurrent} \u0430\u043A\u0442\u0438\u0432\u043D\u044B.`,
-        `\u0414\u043E\u0436\u0434\u0438\u0441\u044C \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0438\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432, \u043F\u043E\u0442\u043E\u043C \u0432\u044B\u0437\u044B\u0432\u0430\u0439 \u043D\u043E\u0432\u044B\u0445.`,
-        `\u0414\u043B\u044F \u0434\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0440\u0430\u0431\u043E\u0442\u044B \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 SynqTask:`,
-        `  todo_tasks({action:"delegate", task_id:"...", to_member_id:"..."})`
-      ].join(`
-`),
-      depth: currentDepth,
-      maxDepth: budget.maxSpawnDepth,
-      active: activeHelpers,
-      maxConcurrent
-    };
-  }
-  return {
-    allowed: true,
-    depth: currentDepth,
-    maxDepth: budget.maxSpawnDepth,
-    active: activeHelpers,
-    maxConcurrent
-  };
-}
-async function fetchIdentity(memberId, synqtaskUrl, timeoutMs) {
-  const url = synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? "http://localhost:3747";
-  let bearerToken = process.env.SYNQTASK_BEARER_TOKEN ?? "";
-  if (!bearerToken) {
-    try {
-      const authPath = join2(homedir2(), ".local", "share", "opencode", "mcp-auth.json");
-      const authData = JSON.parse(readFileSync(authPath, "utf-8"));
-      bearerToken = authData?.synqtask?.tokens?.accessToken ?? "";
-    } catch {}
-  }
-  try {
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream"
-    };
-    if (bearerToken)
-      headers["Authorization"] = `Bearer ${bearerToken}`;
-    const res = await fetch(`${url}/mcp`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "todo_members",
-          arguments: { operations: { action: "get_role_prompt", member_id: memberId } }
-        }
-      }),
-      signal: AbortSignal.timeout(timeoutMs ?? 3000)
-    });
-    if (!res.ok) {
-      dbg(`fetchIdentity: HTTP ${res.status}`);
-      return parseAgentsMd();
-    }
-    const text = await res.text();
-    const dataLine = text.split(`
-`).find((l2) => l2.startsWith("data: "));
-    if (!dataLine) {
-      dbg("fetchIdentity: no data line in response");
-      return parseAgentsMd();
-    }
-    const rpcResult = JSON.parse(dataLine.substring(6));
-    const content = rpcResult?.result?.content?.[0]?.text;
-    if (!content) {
-      dbg("fetchIdentity: empty content");
-      return parseAgentsMd();
-    }
-    const parsed = JSON.parse(content);
-    const result = parsed?.results?.[0]?.result ?? parsed;
-    const identity = {
-      memberId,
-      name: result.displayName ?? result.memberName ?? memberId,
-      displayName: result.displayName,
-      roleName: result.role?.name ?? null,
-      rolePrompt: result.role?.systemPrompt ?? null,
-      teamName: result.team?.name ?? null,
-      teamPlaybook: result.team?.purpose ?? null,
-      teammates: [],
-      fetchedAt: Date.now()
-    };
-    if (result.team?.id) {
-      try {
-        const teamRes = await fetch(`${url}/mcp`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 2,
-            method: "tools/call",
-            params: { name: "todo_teams", arguments: { operations: { action: "members", team_id: result.team.id } } }
-          }),
-          signal: AbortSignal.timeout(timeoutMs ?? 3000)
-        });
-        if (teamRes.ok) {
-          const teamText = await teamRes.text();
-          const teamDataLine = teamText.split(`
-`).find((l2) => l2.startsWith("data: "));
-          if (teamDataLine) {
-            const teamRpc = JSON.parse(teamDataLine.substring(6));
-            const teamContent = teamRpc?.result?.content?.[0]?.text;
-            if (teamContent) {
-              const teamParsed = JSON.parse(teamContent);
-              const members = teamParsed?.results?.[0]?.result ?? [];
-              const teammateIds = members.map((m2) => m2.memberId ?? m2.id).filter((id) => id && id !== memberId);
-              for (const tid of teammateIds) {
-                try {
-                  const mRes = await fetch(`${url}/mcp`, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify({
-                      jsonrpc: "2.0",
-                      id: 3,
-                      method: "tools/call",
-                      params: { name: "todo_members", arguments: { operations: { action: "get_role_prompt", member_id: tid } } }
-                    }),
-                    signal: AbortSignal.timeout(timeoutMs ?? 3000)
-                  });
-                  if (mRes.ok) {
-                    const mText = await mRes.text();
-                    const mLine = mText.split(`
-`).find((l2) => l2.startsWith("data: "));
-                    if (mLine) {
-                      const mRpc = JSON.parse(mLine.substring(6));
-                      const mContent = mRpc?.result?.content?.[0]?.text;
-                      if (mContent) {
-                        const mData = JSON.parse(mContent);
-                        const member = mData?.results?.[0]?.result ?? mData;
-                        identity.teammates.push({
-                          name: member.displayName ?? member.name ?? tid.slice(0, 8),
-                          roleName: member.role?.name ?? null
-                        });
-                      }
-                    }
-                  }
-                } catch {}
-              }
-            }
-          }
-        }
-      } catch (e2) {
-        dbg(`fetchIdentity: team fetch failed: ${e2?.message}`);
-      }
-    }
-    if (result.role?.metadata) {
-      const md = result.role.metadata;
-      const maxConcurrent = parseInt(md.maxConcurrentHelpers ?? md.maxHelpers ?? md.maxSubagents ?? "5", 10) || 5;
-      identity.budget = {
-        maxSpawnDepth: parseInt(md.maxHelperDepth ?? md.maxSpawnDepth ?? "2", 10) || 2,
-        maxSubagents: maxConcurrent
-      };
-      identity._maxConcurrent = maxConcurrent;
-    }
-    dbg(`fetchIdentity: OK name=${identity.name} role=${identity.roleName} team=${identity.teamName} teammates=${identity.teammates.length} budget=${identity.budget ? `depth=${identity.budget.maxSpawnDepth},subs=${identity.budget.maxSubagents}` : "none"} playbook=${identity.teamPlaybook ? "yes" : "no"}`);
-    return identity;
-  } catch (e2) {
-    dbg(`fetchIdentity: failed: ${e2?.message}`);
-    return parseAgentsMd();
-  }
-}
-function parseAgentsMd() {
-  try {
-    const agentsMdPath = join2(process.cwd(), "AGENTS.md");
-    const content = readFileSync(agentsMdPath, "utf-8");
-    const nameMatch = content.match(/^#\s+(?:Agent\s+)?(.+)/im);
-    const name = nameMatch?.[1]?.trim() ?? null;
-    const roleMatch = content.match(/##\s+(?:\u0420\u043E\u043B\u044C|Role)[^\n]*\n([\s\S]*?)(?=\n##|\n$)/i);
-    const rolePrompt = roleMatch?.[1]?.trim() ?? null;
-    const idMatch = content.match(/Member ID.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-    const memberId = idMatch?.[1] ?? null;
-    if (!name) {
-      dbg("parseAgentsMd: no name found");
-      return null;
-    }
-    dbg(`parseAgentsMd: fallback OK name=${name}`);
-    return {
-      memberId: memberId ?? "unknown",
-      name,
-      roleName: null,
-      rolePrompt,
-      teamName: null,
-      teamPlaybook: null,
-      teammates: [],
-      fetchedAt: Date.now()
-    };
-  } catch {
-    dbg("parseAgentsMd: file not found or parse error");
-    return null;
-  }
-}
-function formatWakeMessage(event, identity) {
-  const p2 = event.payload;
-  const esc = (s2) => s2.replace(/"/g, "&quot;");
-  const tag = `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}">`;
-  const end = `</system-reminder>`;
-  let identityBlock = "";
-  if (identity) {
-    const teammatesList = identity.teammates.length > 0 ? identity.teammates.map((t2) => `${t2.name} (${t2.roleName ?? "?"})`).join(", ") : "none";
-    const identityLines = [
-      `<agent-identity name="${identity.name}" role="${identity.roleName ?? "unassigned"}" team="${identity.teamName ?? "none"}">`,
-      `You are ${identity.name}. ${identity.rolePrompt ?? "No role assigned."}`,
-      `Team: ${identity.teamName ?? "none"}. Teammates: ${teammatesList}.`
-    ];
-    if (identity.budget) {
-      identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. \u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C: SynqTask todo_tasks delegate.`);
-    }
-    identityLines.push(`</agent-identity>`);
-    identityBlock = identityLines.join(`
-`);
-  }
-  let body;
-  switch (event.type) {
-    case WAKE_EVENT_TYPES.CHANNEL_MESSAGE: {
-      const chId = p2.channel_id ?? p2.channelId ?? "";
-      const sendName = p2.sender_name ?? p2.senderName ?? p2.senderId ?? "unknown";
-      const text = p2.text ?? "(no text)";
-      const warm = isChannelWarm(chId);
-      if (warm) {
-        const preview = text.length > 120 ? text.slice(0, 120) + "\u2026" : text;
-        body = `**${sendName}** in channel \`${chId}\`:
-> ${preview}
-Reply: \`todo_channels({action:"send", channel_id:"${chId}", text:"..."})\``;
-      } else {
-        body = [
-          `## Channel Message from ${sendName}`,
-          `> ${text}`,
-          `**Channel:** \`${chId}\``,
-          `Reply: \`todo_channels({action:"send", channel_id:"${chId}", text:"YOUR REPLY"})\``,
-          `Read history: \`todo_channels({action:"read", channel_id:"${chId}", limit:5})\``
-        ].join(`
-`);
-      }
-      markChannelWarm(chId);
-      break;
-    }
-    case WAKE_EVENT_TYPES.TASK_ASSIGNED: {
-      const taskId = p2.task_id ?? p2.taskId ?? p2.entityId ?? "";
-      body = [
-        `## Task Assigned: ${p2.title ?? "Unknown"}`,
-        taskId ? `Task: \`${taskId}\`` : "",
-        p2.description ? `> ${p2.description}` : "",
-        `Accept: \`todo_tasks({action:"set_status", task_id:"${taskId}", status:"started"})\``,
-        `Details: \`todo_tasks({action:"show", task_id:"${taskId}"})\``
-      ].filter(Boolean).join(`
-`);
-      break;
-    }
-    case WAKE_EVENT_TYPES.COMMENT_ADDED: {
-      const entityId = p2.entity_id ?? p2.entityId ?? "";
-      body = [
-        `## Comment on ${p2.title ?? entityId}`,
-        `From: ${p2.actor_name ?? p2.actorId ?? "unknown"}`,
-        `Read: \`todo_comments({action:"list", task_id:"${entityId}"})\``
-      ].join(`
-`);
-      break;
-    }
-    case WAKE_EVENT_TYPES.DELEGATION_RECEIVED: {
-      const taskId = p2.task_id ?? p2.taskId ?? p2.entityId ?? "";
-      body = [
-        `## Delegation: ${p2.title ?? "Unknown"}`,
-        `From: ${p2.delegator ?? p2.delegated_by ?? p2.fromId ?? "unknown"}`,
-        `Accept: \`todo_tasks({action:"accept_delegation", task_id:"${taskId}"})\``,
-        `Details: \`todo_tasks({action:"show", task_id:"${taskId}"})\``
-      ].join(`
-`);
-      break;
-    }
-    case WAKE_EVENT_TYPES.STATUS_CHANGED: {
-      const taskId = p2.task_id ?? p2.taskId ?? p2.entityId ?? "";
-      const status = p2.status ?? p2.changes?.status?.to ?? "?";
-      const title = p2.title ?? taskId;
-      body = [
-        `## Task Status: ${title} \u2192 ${status}`,
-        `View: \`todo_tasks({action:"show", task_id:"${taskId}"})\``
-      ].join(`
-`);
-      break;
-    }
-    default:
-      body = `Event: ${event.type}
-${JSON.stringify(p2, null, 2)}`;
-  }
-  return identityBlock ? `${identityBlock}
-${tag}
-${body}
-${end}` : `${tag}
-${body}
-${end}`;
-}
-async function isAgentBusy() {
-  try {
-    if (!_sdkClient)
-      return false;
-    const { data } = await _sdkClient.session.status();
-    return data?.sessions?.some?.((s2) => s2.status === "streaming" || s2.status === "busy") ?? false;
-  } catch {
-    return false;
-  }
-}
-async function resolveSessionId(sessionId) {
-  if (_cachedSessionId && _cachedSessionId !== "unknown")
-    return _cachedSessionId;
-  if (sessionId && sessionId !== "unknown") {
-    _cachedSessionId = sessionId;
-    return sessionId;
-  }
-  if (_discoveryPath) {
-    try {
-      const disc = JSON.parse(readFileSync(_discoveryPath, "utf-8"));
-      if (disc.sessionId && disc.sessionId !== "unknown") {
-        _cachedSessionId = disc.sessionId;
-        dbg(`resolveSessionId from discovery file: ${_cachedSessionId}`);
-        return _cachedSessionId;
-      }
-    } catch {}
-  }
-  if (_agentDirectory) {
-    try {
-      if (!_sdkClient) {
-        dbg("resolveSessionId: no sdkClient");
-        return null;
-      }
-      const { data: sessions } = await _sdkClient.session.list();
-      if (!Array.isArray(sessions))
-        return null;
-      const match = sessions.find((s2) => s2.directory === _agentDirectory);
-      if (match) {
-        _cachedSessionId = match.id;
-        dbg(`resolveSessionId by directory ${_agentDirectory}: ${_cachedSessionId}`);
-        if (_discoveryPath) {
-          try {
-            const disc = JSON.parse(readFileSync(_discoveryPath, "utf-8"));
-            disc.sessionId = _cachedSessionId;
-            const tmpPath = _discoveryPath + ".tmp";
-            writeFileSync(tmpPath, JSON.stringify(disc));
-            renameSync(tmpPath, _discoveryPath);
-          } catch {}
-        }
-        return _cachedSessionId;
-      }
-    } catch (e2) {
-      dbg(`resolveSessionId by directory failed: ${e2?.message}`);
-    }
-  }
-  dbg("resolveSessionId: no session ID yet, events will queue");
-  return null;
-}
-async function injectWakeEvent(event, sessionId) {
-  const resolvedSessionId = await resolveSessionId(sessionId);
-  if (!resolvedSessionId) {
-    dbg("inject: no valid sessionId");
-    return false;
-  }
-  if (!_sdkClient) {
-    dbg("inject: no sdkClient");
-    return false;
-  }
-  const text = formatWakeMessage(event, _agentIdentity);
-  try {
-    const { error } = await _sdkClient.session.promptAsync({
-      path: { id: resolvedSessionId },
-      body: { noReply: false, parts: [{ type: "text", text }] }
-    });
-    if (!error) {
-      dbg(`inject OK: session=${resolvedSessionId}`);
-      return true;
-    }
-    dbg(`inject failed: ${error}`);
-    return false;
-  } catch (e2) {
-    dbg(`inject error: ${e2?.message}`);
-    return false;
-  }
-}
-async function startWakeListener(config) {
-  _agentDirectory = process.cwd();
-  _sdkClient = config.sdkClient ?? null;
-  if (config.memberId) {
-    try {
-      _agentIdentity = await fetchIdentity(config.memberId, config.synqtaskUrl, config.identityFetchTimeoutMs);
-      dbg(`identity: ${_agentIdentity?.name ?? "null"} role=${_agentIdentity?.roleName ?? "none"} team=${_agentIdentity?.teamName ?? "none"} teammates=${_agentIdentity?.teammates?.length ?? 0}`);
-    } catch (e2) {
-      dbg(`identity fetch failed (non-fatal): ${e2?.message}`);
-    }
-  }
-  if (_agentIdentity?.teamPlaybook) {
-    try {
-      const playbookSessionId = await resolveSessionId(config.sessionId);
-      if (playbookSessionId) {
-        const playbookText = `<team-playbook team="${_agentIdentity.teamName ?? "unknown"}">
-${_agentIdentity.teamPlaybook}
-</team-playbook>`;
-        if (!_sdkClient) {
-          dbg("playbook: no sdkClient");
-        } else {
-          await _sdkClient.session.prompt({
-            path: { id: playbookSessionId },
-            body: { noReply: true, parts: [{ type: "text", text: playbookText }] }
-          });
-          dbg("playbook injected at session start");
-        }
-      }
-    } catch (e2) {
-      dbg(`playbook injection failed (non-fatal): ${e2?.message}`);
-    }
-  }
-  const token = crypto.randomUUID();
-  const queue = [];
-  const maxQueue = config.maxQueueSize ?? MAX_QUEUE_DEFAULT;
-  const retryInterval = config.busyRetryInterval ?? BUSY_RETRY_INTERVAL_DEFAULT;
-  async function handleRequest(req) {
-    try {
-      const url = new URL(req.url);
-      if (req.method === "GET" && url.pathname === "/health") {
-        return Response.json({
-          alive: true,
-          sessionId: config.sessionId,
-          uptime: Math.floor((Date.now() - STARTUP_TS) / 1000),
-          queueSize: queue.length
-        });
-      }
-      if (req.method === "POST" && url.pathname === "/wake") {
-        return await handleWake(req);
-      }
-      return new Response("Not found", { status: 404 });
-    } catch (e2) {
-      dbg("request handler error:", e2?.message);
-      return Response.json({ accepted: false, error: "internal error" }, { status: 500 });
-    }
-  }
-  async function handleWake(req) {
-    const reqToken = req.headers.get("X-Wake-Token");
-    if (reqToken !== token) {
-      dbg("wake: auth failed");
-      return Response.json({ accepted: false, error: "unauthorized" }, { status: 401 });
-    }
-    let event;
-    try {
-      event = await req.json();
-    } catch {
-      return Response.json({ accepted: false, error: "invalid JSON" }, { status: 400 });
-    }
-    if (!event.eventId || !event.type || !event.source) {
-      return Response.json({ accepted: false, error: "missing required fields" }, { status: 400 });
-    }
-    dbg(`wake: received ${event.type} from ${event.source} [${event.priority}]`);
-    const signalWireInstance = config.signalWire ?? config.signalWireResolver?.() ?? null;
-    if (signalWireInstance) {
-      try {
-        const result = await signalWireInstance.evaluateExternal(event);
-        if (result.matched) {
-          dbg(`wake: engine handled event ${event.eventId} (wake=${result.wakeTriggered}, actions=${result.actionsExecuted.length})`);
-          return Response.json({
-            accepted: true,
-            engineHandled: true,
-            wakeTriggered: result.wakeTriggered,
-            actionsExecuted: result.actionsExecuted.length
-          });
-        }
-        dbg("no matching rule for event, falling back to direct injection");
-      } catch (e2) {
-        dbg("engine evaluateExternal error, falling back:", e2?.message);
-      }
-    }
-    const busy = await isAgentBusy();
-    if (busy) {
-      if (queue.length >= maxQueue) {
-        const dropped = queue.shift();
-        dbg(`wake: queue full, dropped oldest event ${dropped?.eventId}`);
-      }
-      queue.push(event);
-      const pos = queue.length;
-      dbg(`wake: agent busy, queued at position ${pos}`);
-      return Response.json({ accepted: true, queued: true, queuePosition: pos });
-    }
-    const injected = await injectWakeEvent(event, config.sessionId);
-    if (injected) {
-      dbg(`wake: injected ${event.eventId}`);
-      return Response.json({ accepted: true, queued: false });
-    }
-    if (queue.length >= maxQueue) {
-      queue.shift();
-    }
-    queue.push(event);
-    dbg(`wake: inject failed, queued at position ${queue.length}`);
-    return Response.json({ accepted: true, queued: true, queuePosition: queue.length });
-  }
-  const server = Bun.serve({
-    port: config.port ?? 0,
-    fetch: handleRequest
-  });
-  const actualPort = server.port;
-  dbg(`started on port ${actualPort} for session ${config.sessionId}`);
-  if (config.memberId) {
-    const discoveryPath = join2(DISCOVERY_DIR, `${process.pid}-${config.sessionId}.json`);
-    try {
-      mkdirSync(DISCOVERY_DIR, { recursive: true });
-      _currentSubscribe = config.subscribe ?? null;
-      _currentSubscribePreset = config.subscribePreset ?? null;
-      _currentMemberType = config.memberType ?? "unknown";
-      const discoveryData = {
-        port: actualPort,
-        token,
-        sessionId: config.sessionId,
-        memberId: config.memberId,
-        memberName: _agentIdentity?.name ?? config.memberId,
-        pid: process.pid,
-        startedAt: new Date().toISOString(),
-        transport: "http",
-        parentMemberId: _parentMemberId,
-        parentSessionId: _parentSessionId,
-        spawnDepth: _currentDepth ?? 0,
-        maxSpawnDepth: _agentIdentity?.budget?.maxSpawnDepth ?? 2,
-        maxSubagents: _agentIdentity?.budget?.maxSubagents ?? 5,
-        subscribe: _currentSubscribe,
-        subscribePreset: _currentSubscribePreset,
-        memberType: _currentMemberType
-      };
-      const tmpPath = discoveryPath + ".tmp";
-      writeFileSync(tmpPath, JSON.stringify(discoveryData));
-      renameSync(tmpPath, discoveryPath);
-      _discoveryPath = discoveryPath;
-      dbg(`discovery file written: ${discoveryPath} depth=${discoveryData.spawnDepth} parent=${discoveryData.parentMemberId ?? "ROOT"}`);
-    } catch (e2) {
-      dbg("discovery file write failed:", e2?.message);
-    }
-  } else {
-    dbg("skipping discovery file: no memberId configured (non-agent session)");
-  }
-  const drainInterval = setInterval(async () => {
-    if (queue.length === 0)
-      return;
-    try {
-      if (await isAgentBusy())
-        return;
-      const event = queue.shift();
-      const ok = await injectWakeEvent(event, config.sessionId);
-      dbg(`drain: ${event.eventId} ${ok ? "injected" : "failed"}`);
-    } catch (e2) {
-      dbg("drain error:", e2?.message);
-    }
-  }, retryInterval * 1000);
-  let cleaned = false;
-  const cleanup = () => {
-    if (cleaned)
-      return;
-    cleaned = true;
-    clearInterval(drainInterval);
-    try {
-      if (_discoveryPath)
-        unlinkSync(_discoveryPath);
-    } catch {}
-    try {
-      server.stop();
-    } catch {}
-    dbg("cleanup complete");
-  };
-  process.on("exit", cleanup);
-  process.on("SIGTERM", cleanup);
-  process.on("SIGINT", cleanup);
-  return {
-    port: actualPort,
-    token,
-    server,
-    stop: cleanup
-  };
-}
-function stopWakeListener(handle) {
-  try {
-    handle.stop();
-  } catch (e2) {
-    dbg("stopWakeListener error:", e2?.message);
-  }
-}
-function updateDiscovery(update) {
-  if (!_discoveryPath) {
-    dbg("updateDiscovery: no discovery path (listener not started or no memberId)");
-    return false;
-  }
-  try {
-    const raw = readFileSync(_discoveryPath, "utf-8");
-    const current = JSON.parse(raw);
-    if (update.subscribe !== undefined) {
-      current.subscribe = update.subscribe;
-      _currentSubscribe = update.subscribe;
-    }
-    if (update.subscribePreset !== undefined) {
-      current.subscribePreset = update.subscribePreset;
-      _currentSubscribePreset = update.subscribePreset;
-    }
-    if (update.memberType !== undefined) {
-      current.memberType = update.memberType;
-      _currentMemberType = update.memberType;
-    }
-    const tmpPath = _discoveryPath + ".tmp";
-    writeFileSync(tmpPath, JSON.stringify(current));
-    renameSync(tmpPath, _discoveryPath);
-    dbg(`updateDiscovery: subscribe=${JSON.stringify(current.subscribe)} preset=${current.subscribePreset}`);
-    return true;
-  } catch (e2) {
-    dbg(`updateDiscovery failed: ${e2?.message}`);
-    return false;
-  }
-}
-function getSubscriptionState() {
-  return {
-    subscribe: _currentSubscribe,
-    subscribePreset: _currentSubscribePreset,
-    memberType: _currentMemberType,
-    discoveryPath: _discoveryPath,
-    memberId: _agentIdentity?.memberId ?? null,
-    memberName: _agentIdentity?.name ?? null
-  };
-}
-var DEBUG, LOG_FILE, MAX_QUEUE_DEFAULT = 50, BUSY_RETRY_INTERVAL_DEFAULT = 5, STARTUP_TS, warmChannels, _agentIdentity = null, _sdkClient = null, _currentSubscribe = null, _currentSubscribePreset = null, _currentMemberType = "unknown", _spawnTotal = 0, _currentDepth = null, _inheritedDepth, _parentMemberId, _parentSessionId, HELPER_TIMEOUT_MS = 60000, _activeHelperTimestamps, _cachedSessionId = null, _discoveryPath = null, _agentDirectory = null;
-var init_wake_listener = __esm(() => {
-  init_wake_types();
-  DEBUG = process.env.WAKE_LISTENER_DEBUG !== "0";
-  LOG_FILE = join2(homedir2(), ".claude", "wake-listener-debug.log");
-  STARTUP_TS = Date.now();
-  warmChannels = new Map;
-  _inheritedDepth = parseInt(process.env.__SPAWN_DEPTH ?? "", 10);
-  if (!isNaN(_inheritedDepth) && _inheritedDepth >= 0) {
-    _currentDepth = _inheritedDepth;
-    dbg(`spawn depth inherited from parent: ${_inheritedDepth}`);
-  }
-  _parentMemberId = process.env.__PARENT_MEMBER_ID ?? null;
-  _parentSessionId = process.env.__PARENT_SESSION_ID ?? null;
-  _activeHelperTimestamps = [];
-});
-
-// signal-wire-actions.ts
-async function dispatchActions(actions, ctx) {
-  if (process.env.SIGNAL_WIRE_ACTIVE === "1") {
-    dbg2("Re-entrancy detected \u2014 skipping all actions");
-    return [];
-  }
-  const sorted = [...actions].sort((a2, b2) => {
-    const ai = ACTION_ORDER.indexOf(a2.type);
-    const bi = ACTION_ORDER.indexOf(b2.type);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-  const results = [];
-  process.env.SIGNAL_WIRE_ACTIVE = "1";
-  try {
-    for (const action of sorted) {
-      try {
-        const result = await executeAction(action, ctx);
-        results.push(result);
-      } catch (e2) {
-        dbg2(`action ${action.type} error:`, e2?.message);
-        results.push({ type: action.type, success: false, error: e2?.message ?? "unknown" });
-      }
-    }
-  } finally {
-    delete process.env.SIGNAL_WIRE_ACTIVE;
-  }
-  return results;
-}
-async function executeAction(action, ctx) {
-  switch (action.type) {
-    case "block":
-      return executeBlock(action, ctx);
-    case "hint":
-      return executeHint(action, ctx);
-    case "exec":
-      return executeExec(action, ctx);
-    case "wake":
-      return executeWake(action, ctx);
-    case "respond":
-      return executeRespond(action, ctx);
-    case "notify":
-      return executeNotify(action, ctx);
-    case "audit":
-      return executeAudit(action, ctx);
-    default:
-      dbg2(`unknown action type: ${action.type}`);
-      return { type: action.type, success: false, error: "unknown_action_type" };
-  }
-}
-function executeBlock(action, ctx) {
-  const reason = interpolate(action.reason ?? `Blocked by rule ${ctx.ruleId}`, ctx.variables);
-  dbg2(`BLOCK: ${reason}`);
-  return {
-    type: "block",
-    success: true,
-    blockResponse: {
-      permissionDecision: "deny",
-      permissionDecisionReason: reason
-    }
-  };
-}
-function executeHint(action, ctx) {
-  const text = interpolate(action.text ?? "", ctx.variables);
-  dbg2(`HINT: ${text.slice(0, 80)}...`);
-  return { type: "hint", success: true, hintText: text };
-}
-async function executeExec(action, ctx) {
-  const command = interpolate(action.command ?? "", ctx.variables);
-  if (!command)
-    return { type: "exec", success: false, error: "no command" };
-  dbg2(`EXEC: ${command.slice(0, 80)}...`);
-  try {
-    const proc = Bun.spawn(["sh", "-c", command], {
-      env: { ...process.env, ...ctx.variables, SIGNAL_WIRE_ACTIVE: "1" },
-      timeout: action.timeout ?? 1e4
-    });
-    const output = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    return {
-      type: "exec",
-      success: exitCode === 0,
-      execOutput: output.slice(0, 2000),
-      error: exitCode !== 0 ? `exit ${exitCode}` : undefined
-    };
-  } catch (e2) {
-    dbg2(`exec error:`, e2?.message);
-    return { type: "exec", success: false, error: e2?.message };
-  }
-}
-async function executeWake(action, ctx) {
-  if (!ctx.wakeEvent) {
-    return { type: "wake", success: false, error: "no wakeEvent in context" };
-  }
-  const { formatWakeEvent } = await Promise.resolve().then(() => (init_signal_wire(), exports_signal_wire));
-  let identityBlock = "";
-  try {
-    const wl = await Promise.resolve().then(() => (init_wake_listener(), exports_wake_listener));
-    const identity = wl._agentIdentity ?? null;
-    if (identity) {
-      const teammates = identity.teammates?.length > 0 ? identity.teammates.map((t2) => `${t2.name} (${t2.roleName ?? "?"})`).join(", ") : "none";
-      const identityLines = [
-        `<agent-identity name="${identity.name}" role="${identity.roleName ?? "unassigned"}" team="${identity.teamName ?? "none"}">`,
-        `You are ${identity.name}. ${identity.rolePrompt ?? "No role assigned."}`,
-        `Team: ${identity.teamName ?? "none"}. Teammates: ${teammates}.`
-      ];
-      if (identity.budget) {
-        identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. \u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C: SynqTask todo_tasks delegate.`);
-      }
-      identityLines.push(`</agent-identity>`);
-      identityBlock = identityLines.join(`
-`) + `
-`;
-    }
-  } catch {}
-  const text = identityBlock + formatWakeEvent(ctx.wakeEvent);
-  if (!ctx.sdkClient) {
-    dbg2("wake: no sdkClient in ActionContext");
-    return { type: "wake", success: false, error: "no sdkClient" };
-  }
-  try {
-    const { error } = await ctx.sdkClient.session.promptAsync({
-      path: { id: ctx.sessionId },
-      body: { noReply: false, parts: [{ type: "text", text }] }
-    });
-    if (!error) {
-      dbg2("WAKE: injected via sdkClient.promptAsync");
-      return { type: "wake", success: true, wakeTriggered: true };
-    }
-    const { error: err2 } = await ctx.sdkClient.session.prompt({
-      path: { id: ctx.sessionId },
-      body: { noReply: false, parts: [{ type: "text", text }] }
-    });
-    if (!err2) {
-      dbg2("WAKE: injected via sdkClient.prompt");
-      return { type: "wake", success: true, wakeTriggered: true };
-    }
-    return { type: "wake", success: false, error: `SDK error: ${err2}` };
-  } catch (e2) {
-    dbg2("wake SDK error:", e2?.message);
-    return { type: "wake", success: false, error: e2?.message };
-  }
-}
-async function executeRespond(action, ctx) {
-  const template = interpolate(action.template ?? "", ctx.variables);
-  const target = action.target ?? ctx.wakeEvent?.payload?.channel_id;
-  if (!target) {
-    dbg2("respond: no target channel");
-    return { type: "respond", success: false, error: "no target channel" };
-  }
-  try {
-    dbg2(`RESPOND: to channel ${target}: ${template.slice(0, 80)}...`);
-    return { type: "respond", success: true };
-  } catch (e2) {
-    dbg2(`respond error:`, e2?.message);
-    return { type: "respond", success: false, error: e2?.message };
-  }
-}
-async function executeNotify(action, ctx) {
-  const template = interpolate(action.template ?? `Rule ${ctx.ruleId} fired (${ctx.severity})`, ctx.variables);
-  const channel = action.channel ?? "telegram";
-  dbg2(`NOTIFY: ${channel}: ${template.slice(0, 80)}...`);
-  if (channel === "telegram") {
-    const token = process.env.SIGNAL_WIRE_TG_TOKEN;
-    const chatId = process.env.SIGNAL_WIRE_TG_CHAT_ID;
-    if (token && chatId) {
-      fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text: template, parse_mode: "HTML" })
-      }).catch((e2) => dbg2("telegram notify error:", e2?.message));
-    } else {
-      dbg2("notify: telegram not configured (SIGNAL_WIRE_TG_TOKEN / SIGNAL_WIRE_TG_CHAT_ID)");
-    }
-  } else if (channel === "webhook" && action.target) {
-    fetch(action.target, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rule: ctx.ruleId, severity: ctx.severity, message: template, event: ctx.event })
-    }).catch((e2) => dbg2("webhook notify error:", e2?.message));
-  }
-  return { type: "notify", success: true };
-}
-function executeAudit(action, ctx) {
-  const entry = {
-    ts: new Date().toISOString(),
-    ruleId: ctx.ruleId,
-    event: ctx.event,
-    eventSource: ctx.eventSource,
-    eventType: ctx.eventType,
-    severity: ctx.severity,
-    sessionId: ctx.sessionId,
-    variables: ctx.variables
-  };
-  if (ctx.auditWriter) {
-    ctx.auditWriter(entry);
-  } else {
-    dbg2("audit: no writer configured, logging to debug");
-    dbg2("AUDIT:", JSON.stringify(entry));
-  }
-  return { type: "audit", success: true };
-}
-function interpolate(template, variables) {
-  return template.replace(/\{(\w+)\}/g, (match, key) => {
-    return variables[key] ?? match;
-  });
-}
-var DEBUG2, dbg2 = (...args) => {
-  if (DEBUG2)
-    console.error("[sw-actions]", ...args);
-}, ACTION_ORDER;
-var init_signal_wire_actions = __esm(() => {
-  DEBUG2 = process.env.SIGNAL_WIRE_DEBUG === "1" || process.env.DEBUG?.includes("signal-wire");
-  ACTION_ORDER = ["block", "hint", "exec", "wake", "respond", "notify", "audit"];
-});
-
-// signal-wire-audit.ts
-import { appendFileSync as appendFileSync2, statSync, renameSync as renameSync2, mkdirSync as mkdirSync2, existsSync } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir3 } from "os";
-function ensureDir() {
-  if (initialized)
-    return;
-  try {
-    if (!existsSync(AUDIT_DIR)) {
-      mkdirSync2(AUDIT_DIR, { recursive: true });
-    }
-    initialized = true;
-  } catch (e2) {
-    dbg3("ensureDir error:", e2?.message);
-  }
-}
-function writeAuditEntry(entry) {
-  try {
-    ensureDir();
-    rotateIfNeeded();
-    appendFileSync2(AUDIT_FILE, JSON.stringify(entry) + `
-`);
-  } catch (e2) {
-    dbg3("writeAuditEntry error:", e2?.message);
-  }
-}
-function createAuditWriter(sessionId) {
-  return (entry) => {
-    writeAuditEntry({
-      ts: new Date().toISOString(),
-      sessionId,
-      outcome: "success",
-      actionsTaken: ["audit"],
-      severity: "info",
-      ruleId: "unknown",
-      event: "unknown",
-      ...entry
-    });
-  };
-}
-function rotateIfNeeded() {
-  try {
-    const stats = statSync(AUDIT_FILE);
-    if (stats.size > MAX_SIZE_BYTES) {
-      const rotated = AUDIT_FILE + ".1";
-      renameSync2(AUDIT_FILE, rotated);
-      dbg3(`rotated audit log (${Math.round(stats.size / 1024 / 1024)}MB)`);
-    }
-  } catch {}
-}
-var DEBUG3, dbg3 = (...args) => {
-  if (DEBUG3)
-    console.error("[sw-audit]", ...args);
-}, AUDIT_DIR, AUDIT_FILE, MAX_SIZE_BYTES, initialized = false;
-var init_signal_wire_audit = __esm(() => {
-  DEBUG3 = process.env.SIGNAL_WIRE_DEBUG === "1" || process.env.DEBUG?.includes("signal-wire");
-  AUDIT_DIR = join3(homedir3(), ".opencode", "hooks", "logs");
-  AUDIT_FILE = join3(AUDIT_DIR, "signal-wire-audit.jsonl");
-  MAX_SIZE_BYTES = 50 * 1024 * 1024;
-});
-
-// signal-wire.ts
-var exports_signal_wire = {};
-__export(exports_signal_wire, {
-  migrateRule: () => migrateRule,
-  formatWakeEvent: () => formatWakeEvent,
-  SignalWire: () => SignalWire
-});
-import { appendFileSync as appendFileSync3, readFileSync as readFileSync2, existsSync as existsSync2 } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir4 } from "os";
-function emitLegacyBanner(rulesCount, platform) {
-  if (legacyBannerEmitted)
-    return;
-  legacyBannerEmitted = true;
-  try {
-    appendFileSync3(LOG_FILE2, `[${new Date().toISOString()}] [${LEGACY_ID}] LEGACY_BANNER online platform=${platform} rules=${rulesCount}
-`);
-  } catch {}
-}
-function dbg4(...args) {
-  if (!DEBUG4)
-    return;
-  try {
-    appendFileSync3(LOG_FILE2, `[${new Date().toISOString()}] [${LEGACY_ID}] [signal-wire] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
-`);
-  } catch {}
-}
-function migrateRule(rule) {
-  const v2 = { ...rule };
-  if (v2.actions && v2.actions.length > 0) {
-    return v2;
-  }
-  if (rule.action) {
-    const actions = [];
-    if (rule.action.hint) {
-      actions.push({ type: "hint", text: rule.action.hint });
-    }
-    if (rule.action.bash) {
-      actions.push({ type: "exec", command: rule.action.bash });
-    }
-    if (actions.length > 0) {
-      v2.actions = actions;
-    }
-  }
-  if (!v2.severity)
-    v2.severity = "info";
-  if (!v2.trust_level)
-    v2.trust_level = "any";
-  return v2;
-}
-
-class SignalWire {
-  rules;
-  rulesV2 = [];
-  serverUrl;
-  platform;
-  maxRulesPerFire;
-  sessionId;
-  sessionIdResolved = false;
-  cooldownMap = new Map;
-  contextPosition = 0;
-  sdkClient = null;
-  disabledRules = new Set;
-  constructor(config) {
-    this.serverUrl = config.serverUrl;
-    this.sessionId = config.sessionId;
-    this.platform = config.platform ?? "opencode";
-    this.maxRulesPerFire = config.maxRulesPerFire ?? 3;
-    this.sessionIdResolved = !!config.sessionId && config.sessionId !== "?" && config.sessionId !== "unknown";
-    let rules = [];
-    if (config.rulesPath) {
-      rules = this.loadRules(config.rulesPath);
-    }
-    rules = rules.filter((r2) => !r2.platforms || r2.platforms.includes(this.platform));
-    this.rules = Object.freeze(rules);
-    this.rulesV2 = Object.freeze(this.rules.map((r2) => migrateRule(r2)));
-    if (!this.sessionIdResolved)
-      this.resolveSessionId();
-    emitLegacyBanner(this.rules.length, this.platform);
-    dbg4(`init: ${this.rules.length} rules loaded (platform=${this.platform}), server=${this.serverUrl}, session=${this.sessionId}`);
-  }
-  setSdkClient(client) {
-    this.sdkClient = client;
-    if (!this.sessionIdResolved)
-      this.resolveSessionId();
-  }
-  toggleRule(ruleId, enabled) {
-    const exists = this.rules.some((r2) => r2.id === ruleId);
-    if (!exists)
-      return false;
-    if (enabled) {
-      this.disabledRules.delete(ruleId);
-    } else {
-      this.disabledRules.add(ruleId);
-    }
-    dbg4(`toggleRule: ${ruleId} \u2192 ${enabled ? "enabled" : "disabled"}`);
-    return true;
-  }
-  listRules() {
-    return this.rules.map((r2) => ({
-      id: r2.id,
-      description: r2.description ?? "",
-      enabled: !this.disabledRules.has(r2.id) && r2.enabled !== false,
-      events: r2.events
-    }));
-  }
-  isRuleEnabled(ruleId) {
-    return !this.disabledRules.has(ruleId);
-  }
-  loadRules(path) {
-    try {
-      if (!existsSync2(path)) {
-        dbg4(`rules file not found: ${path}`);
-        return [];
-      }
-      const raw = readFileSync2(path, "utf8");
-      const parsed = JSON.parse(raw);
-      const rules = parsed.rules ?? [];
-      dbg4(`loaded ${rules.length} rules from ${path}`);
-      return rules;
-    } catch (e2) {
-      dbg4(`failed to load rules from ${path}:`, e2.message);
-      return [];
-    }
-  }
-  trackTokens(usage) {
-    try {
-      const promptSize = (usage.inputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0);
-      const prev = this.contextPosition;
-      if (prev > 0 && promptSize > 0 && promptSize < prev * 0.6) {
-        this.cooldownMap.clear();
-        dbg4(`compaction detected: ${prev}\u2192${promptSize} (${((1 - promptSize / prev) * 100).toFixed(0)}% drop) \u2014 all cooldowns reset`);
-      }
-      if (promptSize > 0) {
-        this.contextPosition = promptSize;
-      }
-      dbg4(`trackTokens: promptSize=${promptSize} contextPosition=${prev}\u2192${this.contextPosition}`);
-    } catch (e2) {
-      dbg4("trackTokens error:", e2.message);
-    }
-  }
-  getContextPosition() {
-    return this.contextPosition;
-  }
-  evaluate(context) {
-    try {
-      const results = [];
-      for (const rule of this.rules) {
-        if (results.length >= this.maxRulesPerFire)
-          break;
-        if (rule.enabled === false)
-          continue;
-        if (this.disabledRules.has(rule.id))
-          continue;
-        if (!rule.events.includes(context.event))
-          continue;
-        if (!this.matchRule(rule, context))
-          continue;
-        if (!this.checkCooldown(rule))
-          continue;
-        const hint = this.substituteVars(rule.action.hint ?? "", rule, context);
-        this.markCooldown(rule);
-        if (rule.action.exec) {
-          const cmd = this.substituteVars(rule.action.exec, rule, context);
-          this.execFireAndForget(cmd, rule);
-        }
-        if (hint) {
-          results.push({
-            ruleId: rule.id,
-            hint,
-            execCmd: rule.action.exec ? this.substituteVars(rule.action.exec, rule, context) : undefined
-          });
-        }
-        dbg4(`rule fired: ${rule.id} \u2192 ${hint.replace(/\n/g, " ").slice(0, 120)}`);
-      }
-      if (results.length === 0)
-        return null;
-      const ids = results.map((r2) => r2.ruleId);
-      const combined = results.map((r2) => `\u26A1 signal-wire: ${r2.ruleId}
-${r2.hint}`).join(`
-
-`);
-      this.notifyTui(ids, combined);
-      return {
-        ruleId: ids.join("+"),
-        hint: combined
-      };
-    } catch (e2) {
-      dbg4("evaluate error:", e2.message);
-      return null;
-    }
-  }
-  matchRule(rule, ctx) {
-    try {
-      const match = rule.match;
-      if (!match || Object.keys(match).length === 0)
-        return true;
-      if (match.exclude_tools && match.exclude_tools.length > 0) {
-        if (match.exclude_tools.includes(ctx.lastToolName))
-          return false;
-      }
-      if (match.tool) {
-        try {
-          if (!new RegExp(match.tool).test(ctx.lastToolName))
-            return false;
-        } catch (e2) {
-          dbg4(`invalid regex in rule ${rule.id}.tool:`, e2.message);
-          return false;
-        }
-      }
-      if (match.input_contains) {
-        try {
-          const inputObj = ctx.lastToolInput ? JSON.parse(ctx.lastToolInput) : {};
-          if (!this.deepMatch(inputObj, match.input_contains))
-            return false;
-        } catch {
-          if (!this.deepMatch(ctx.lastToolInput, match.input_contains))
-            return false;
-        }
-      }
-      if (match.input_regex) {
-        try {
-          if (!new RegExp(match.input_regex).test(ctx.lastToolInput))
-            return false;
-        } catch (e2) {
-          dbg4(`invalid regex in rule ${rule.id}.input_regex:`, e2.message);
-          return false;
-        }
-      }
-      if (match.input_keywords && match.input_keywords.length > 0) {
-        const inputLower = ctx.lastToolInput.toLowerCase();
-        if (!match.input_keywords.some((kw) => inputLower.includes(kw.toLowerCase())))
-          return false;
-      }
-      if (match.response_keywords && match.response_keywords.length > 0) {
-        const outputLower = ctx.lastToolOutput.toLowerCase();
-        if (!match.response_keywords.some((kw) => outputLower.includes(kw.toLowerCase())))
-          return false;
-      }
-      if (match.response_regex) {
-        try {
-          if (!new RegExp(match.response_regex).test(ctx.lastToolOutput))
-            return false;
-        } catch (e2) {
-          dbg4(`invalid regex in rule ${rule.id}.response_regex:`, e2.message);
-          return false;
-        }
-      }
-      if (match.prompt_keywords && match.prompt_keywords.length > 0) {
-        const promptLower = ctx.lastUserText.toLowerCase();
-        if (!match.prompt_keywords.some((kw) => promptLower.includes(kw.toLowerCase())))
-          return false;
-      }
-      if (match.prompt_regex) {
-        try {
-          if (!new RegExp(match.prompt_regex).test(ctx.lastUserText))
-            return false;
-        } catch (e2) {
-          dbg4(`invalid regex in rule ${rule.id}.prompt_regex:`, e2.message);
-          return false;
-        }
-      }
-      return true;
-    } catch (e2) {
-      dbg4(`matchRule error for ${rule.id}:`, e2.message);
-      return false;
-    }
-  }
-  deepMatch(data, pattern) {
-    if (pattern === null || pattern === undefined)
-      return data === pattern;
-    if (typeof pattern === "object" && !Array.isArray(pattern)) {
-      if (typeof data !== "object" || data === null || Array.isArray(data))
-        return false;
-      return Object.entries(pattern).every(([k2, v2]) => (k2 in data) && this.deepMatch(data[k2], v2));
-    }
-    if (typeof pattern === "string" && typeof data === "string") {
-      return data.toLowerCase().includes(pattern.toLowerCase());
-    }
-    return data === pattern;
-  }
-  checkCooldown(rule) {
-    try {
-      const cooldownTokens = rule.cooldown_tokens ?? 0;
-      const cooldownMinutes = rule.cooldown_minutes ?? 0;
-      if (cooldownTokens <= 0 && cooldownMinutes <= 0)
-        return true;
-      if (cooldownTokens > 0) {
-        const currentBucket = Math.floor(this.contextPosition / cooldownTokens);
-        const ns = rule.cooldown_namespace ?? rule.id;
-        const lastBucket = this.cooldownMap.get(ns);
-        if (lastBucket !== undefined && currentBucket <= lastBucket) {
-          dbg4(`cooldown active: ${rule.id} (ns:${ns}, pos:${this.contextPosition}, cd:${Math.floor(cooldownTokens / 1000)}k, bucket:${currentBucket})`);
-          return false;
-        }
-        return true;
-      }
-      if (cooldownMinutes > 0) {
-        const ns = rule.cooldown_namespace ?? rule.id;
-        const key = `${ns}_time`;
-        const lastFired = this.cooldownMap.get(key);
-        const now = Date.now();
-        if (lastFired !== undefined && now - lastFired < cooldownMinutes * 60 * 1000) {
-          dbg4(`cooldown active (time): ${rule.id} (ns:${ns}, cd:${cooldownMinutes}m)`);
-          return false;
-        }
-        return true;
-      }
-      return true;
-    } catch (e2) {
-      dbg4("checkCooldown error:", e2.message);
-      return true;
-    }
-  }
-  markCooldown(rule) {
-    try {
-      const cooldownTokens = rule.cooldown_tokens ?? 0;
-      const cooldownMinutes = rule.cooldown_minutes ?? 0;
-      if (cooldownTokens > 0) {
-        const currentBucket = Math.floor(this.contextPosition / cooldownTokens);
-        const ns = rule.cooldown_namespace ?? rule.id;
-        this.cooldownMap.set(ns, currentBucket);
-        dbg4(`cooldown marked: ${rule.id} (ns:${ns}, bucket:${currentBucket}, pos:${this.contextPosition})`);
-      } else if (cooldownMinutes > 0) {
-        const ns = rule.cooldown_namespace ?? rule.id;
-        this.cooldownMap.set(`${ns}_time`, Date.now());
-      }
-    } catch (e2) {
-      dbg4("markCooldown error:", e2.message);
-    }
-  }
-  substituteVars(template, rule, ctx) {
-    if (!template)
-      return template;
-    return template.replace(/\{tool_name\}/g, ctx.lastToolName).replace(/\{session_id\}/g, this.sessionId).replace(/\{cwd\}/g, process.cwd()).replace(/\{rule_id\}/g, rule.id);
-  }
-  resolveSessionId() {
-    if (this.sessionIdResolved)
-      return;
-    if (!this.sdkClient)
-      return;
-    this.sessionIdResolved = true;
-    const cwd = process.cwd();
-    this.sdkClient.session.list().then(({ data: sessions }) => {
-      if (!Array.isArray(sessions))
-        return;
-      const matching = sessions.filter((s2) => s2.directory === cwd && !s2.parentID).sort((a2, b2) => (b2.time?.updated ?? 0) - (a2.time?.updated ?? 0));
-      if (matching.length) {
-        this.sessionId = matching[0].id;
-        dbg4(`signal-wire: resolved sessionId=${this.sessionId} (cwd=${cwd}, matched ${matching.length} sessions)`);
-      }
-    }).catch((e2) => dbg4("resolveSessionId error:", e2?.message));
-  }
-  formatTuiMessage(ids, hint) {
-    const header = ids.length === 1 ? `\u26A1 signal-wire: ${ids[0]}` : `\u26A1 signal-wire: ${ids.join(" + ")}`;
-    const width = Math.max(header.length + 2, 40);
-    const bar = "\u2501".repeat(width);
-    return `${bar}
-${header}
-${bar}
-${hint}
-${bar}`;
-  }
-  notifyTui(ids, hint) {
-    const idArr = Array.isArray(ids) ? ids : [ids];
-    try {
-      if (!this.sessionId || this.sessionId === "?" || this.sessionId === "unknown") {
-        setTimeout(() => this.doTuiPost(idArr, hint), 2000);
-        return;
-      }
-      this.doTuiPost(idArr, hint);
-    } catch (e2) {
-      dbg4("notifyTui error:", e2.message);
-    }
-  }
-  doTuiPost(ids, hint) {
-    try {
-      if (!this.sessionId || this.sessionId === "?" || this.sessionId === "unknown") {
-        dbg4("TUI POST skipped: no sessionId after retry");
-        return;
-      }
-      if (!this.sdkClient) {
-        dbg4("TUI POST skipped: no sdkClient");
-        return;
-      }
-      const label = ids.join("+");
-      const formatted = this.formatTuiMessage(ids, hint);
-      this.sdkClient.session.prompt({
-        path: { id: this.sessionId },
-        body: {
-          noReply: true,
-          parts: [{ type: "text", text: formatted, synthetic: true }]
-        }
-      }).then(() => dbg4(`TUI POST ${label}: ok`)).catch((e2) => dbg4(`TUI POST ${label} failed:`, e2?.message));
-    } catch (e2) {
-      dbg4("notifyTui error:", e2?.message);
-    }
-  }
-  execFireAndForget(cmd, rule) {
-    try {
-      const timeout = (rule.action.timeout ?? DEFAULT_EXEC_TIMEOUT_S) * 1000;
-      if (typeof Bun !== "undefined" && Bun.spawn) {
-        const proc = Bun.spawn(["bash", "-c", cmd], {
-          env: {
-            ...process.env,
-            SIGNAL_WIRE_ACTIVE: "1",
-            SIGNAL_WIRE_SESSION_ID: this.sessionId,
-            SIGNAL_WIRE_CWD: process.cwd(),
-            SIGNAL_WIRE_RULE_ID: rule.id
-          },
-          stdout: "ignore",
-          stderr: "pipe"
-        });
-        const timer = setTimeout(() => {
-          try {
-            proc.kill();
-            dbg4(`exec timeout (${rule.action.timeout ?? DEFAULT_EXEC_TIMEOUT_S}s) for rule ${rule.id}`);
-          } catch {}
-        }, timeout);
-        proc.exited.then((code) => {
-          clearTimeout(timer);
-          if (code !== 0) {
-            dbg4(`exec failed (${code}) for rule ${rule.id}`);
-          } else {
-            dbg4(`exec ok for rule ${rule.id}`);
-          }
-        }).catch((e2) => {
-          clearTimeout(timer);
-          dbg4(`exec error for rule ${rule.id}:`, e2.message);
-        });
-      } else {
-        const { spawn } = __require("child_process");
-        const proc = spawn("bash", ["-c", cmd], {
-          env: {
-            ...process.env,
-            SIGNAL_WIRE_ACTIVE: "1",
-            SIGNAL_WIRE_SESSION_ID: this.sessionId,
-            SIGNAL_WIRE_CWD: process.cwd(),
-            SIGNAL_WIRE_RULE_ID: rule.id
-          },
-          stdio: ["ignore", "ignore", "pipe"],
-          detached: false
-        });
-        const timer = setTimeout(() => {
-          try {
-            proc.kill();
-            dbg4(`exec timeout (${rule.action.timeout ?? DEFAULT_EXEC_TIMEOUT_S}s) for rule ${rule.id}`);
-          } catch {}
-        }, timeout);
-        proc.on("close", (code) => {
-          clearTimeout(timer);
-          if (code !== 0) {
-            dbg4(`exec failed (${code}) for rule ${rule.id}`);
-          } else {
-            dbg4(`exec ok for rule ${rule.id}`);
-          }
-        });
-        proc.on("error", (e2) => {
-          clearTimeout(timer);
-          dbg4(`exec error for rule ${rule.id}:`, e2.message);
-        });
-      }
-      dbg4(`exec spawned for rule ${rule.id}: ${cmd.slice(0, 120)}`);
-    } catch (e2) {
-      dbg4(`execFireAndForget error for rule ${rule.id}:`, e2.message);
-    }
-  }
-  async evaluateHookV2(context) {
-    try {
-      const matched = this.matchRulesV2(context);
-      if (matched.length === 0)
-        return { v1Result: null, v2Results: [], blocked: false };
-      const results = [];
-      let blocked = false;
-      let hintText = "";
-      for (const rule of matched) {
-        if (rule.trust_level === "plugin_only" && this.isProjectRule(rule)) {
-          dbg4(`trust: skipping ${rule.id} (plugin_only but from project)`);
-          continue;
-        }
-        if (!this.checkCooldownV2(rule))
-          continue;
-        const actions = rule.actions ?? [];
-        if (actions.length === 0)
-          continue;
-        this.markCooldownV2(rule);
-        const ctx = {
-          serverUrl: this.serverUrl,
-          sessionId: this.sessionId,
-          ruleId: rule.id,
-          severity: rule.severity ?? "info",
-          event: context.event,
-          variables: this.buildVariables(context, rule),
-          auditWriter: createAuditWriter(this.sessionId),
-          sdkClient: this.sdkClient
-        };
-        const actionResults = await dispatchActions(actions, ctx);
-        results.push(...actionResults);
-        const blockResult = actionResults.find((r2) => r2.type === "block" && r2.success);
-        if (blockResult)
-          blocked = true;
-        const hintResults = actionResults.filter((r2) => r2.type === "hint" && r2.hintText);
-        if (hintResults.length > 0) {
-          hintText += (hintText ? `
-` : "") + hintResults.map((r2) => r2.hintText).join(`
-`);
-        }
-      }
-      const v1Result = hintText ? { ruleId: matched[0].id, hint: hintText } : null;
-      return { v1Result, v2Results: results, blocked };
-    } catch (e2) {
-      dbg4("evaluateHookV2 error:", e2?.message);
-      return { v1Result: null, v2Results: [], blocked: false };
-    }
-  }
-  async evaluateHook(context) {
-    const { v1Result } = await this.evaluateHookV2(context);
-    return v1Result;
-  }
-  async evaluateExternal(event) {
-    try {
-      const matched = this.matchExternalRules(event);
-      if (matched.length === 0) {
-        dbg4(`evaluateExternal: no rules match event ${event.type} from ${event.source}`);
-        return { matched: false, actionsExecuted: [], wakeTriggered: false };
-      }
-      const allResults = [];
-      let wakeTriggered = false;
-      for (const rule of matched) {
-        if (rule.trust_level === "plugin_only" && this.isProjectRule(rule))
-          continue;
-        const actions = rule.actions ?? [];
-        if (actions.length === 0)
-          continue;
-        const ctx = {
-          serverUrl: this.serverUrl,
-          sessionId: this.sessionId,
-          ruleId: rule.id,
-          severity: rule.severity ?? "info",
-          event: EVENT_TYPES.EXTERNAL_EVENT,
-          eventSource: event.source,
-          eventType: event.type,
-          variables: this.buildExternalVariables(event, rule),
-          wakeEvent: event,
-          auditWriter: createAuditWriter(this.sessionId),
-          sdkClient: this.sdkClient
-        };
-        const actionResults = await dispatchActions(actions, ctx);
-        allResults.push(...actionResults);
-        if (actionResults.some((r2) => r2.type === "wake" && r2.wakeTriggered)) {
-          wakeTriggered = true;
-        }
-      }
-      return { matched: true, actionsExecuted: allResults, wakeTriggered };
-    } catch (e2) {
-      dbg4("evaluateExternal error:", e2?.message);
-      return { matched: false, actionsExecuted: [], wakeTriggered: false };
-    }
-  }
-  matchRulesV2(context) {
-    return this.rulesV2.filter((rule) => {
-      if (rule.enabled === false)
-        return false;
-      if (!rule.events.includes(context.event))
-        return false;
-      if (rule.platforms && !rule.platforms.includes(this.platform))
-        return false;
-      if (rule.match) {
-        if (rule.match.tool && context.lastToolName) {
-          try {
-            if (!new RegExp(rule.match.tool, "i").test(context.lastToolName))
-              return false;
-          } catch {
-            return false;
-          }
-        }
-        if (rule.match.input_regex && context.lastToolInput) {
-          try {
-            if (!new RegExp(rule.match.input_regex, "i").test(context.lastToolInput))
-              return false;
-          } catch {
-            return false;
-          }
-        }
-        if (rule.match.response_regex && context.lastToolOutput) {
-          try {
-            if (!new RegExp(rule.match.response_regex, "i").test(context.lastToolOutput))
-              return false;
-          } catch {
-            return false;
-          }
-        }
-        if (rule.match.keywords) {
-          const combined = `${context.lastUserText} ${context.lastToolInput} ${context.lastToolOutput}`.toLowerCase();
-          if (!rule.match.keywords.some((kw) => combined.includes(kw.toLowerCase())))
-            return false;
-        }
-      }
-      return true;
-    });
-  }
-  matchExternalRules(event) {
-    return this.rulesV2.filter((rule) => {
-      if (rule.enabled === false)
-        return false;
-      const externalEvents = [EVENT_TYPES.EXTERNAL_EVENT, EVENT_TYPES.WEBHOOK_EVENT, EVENT_TYPES.TIMER_EVENT];
-      if (!rule.events.some((e2) => externalEvents.includes(e2)))
-        return false;
-      if (rule.platforms && !rule.platforms.includes(this.platform))
-        return false;
-      if (rule.event_source_match) {
-        if (rule.event_source_match.source && !event.source.includes(rule.event_source_match.source))
-          return false;
-        if (rule.event_source_match.type && event.type !== rule.event_source_match.type)
-          return false;
-      }
-      return true;
-    });
-  }
-  buildVariables(context, rule) {
-    return {
-      tool_name: context.lastToolName ?? "",
-      tool_input: context.lastToolInput?.slice(0, 500) ?? "",
-      tool_output: context.lastToolOutput?.slice(0, 500) ?? "",
-      user_text: context.lastUserText?.slice(0, 500) ?? "",
-      session_id: this.sessionId,
-      rule_id: rule.id,
-      severity: rule.severity ?? "info",
-      event: context.event,
-      cwd: process.cwd(),
-      agent_id: process.env.AGENT_ID ?? "",
-      agent_type: process.env.AGENT_TYPE ?? ""
-    };
-  }
-  buildExternalVariables(event, rule) {
-    return {
-      event_source: event.source,
-      event_type: event.type,
-      event_id: event.eventId,
-      target_member: event.targetMemberId,
-      session_id: this.sessionId,
-      rule_id: rule.id,
-      severity: rule.severity ?? "info",
-      priority: event.priority,
-      cwd: process.cwd()
-    };
-  }
-  checkCooldownV2(rule) {
-    try {
-      const cooldownTokens = rule.cooldown_tokens ?? 0;
-      const cooldownMinutes = rule.cooldown_minutes ?? 0;
-      if (cooldownTokens <= 0 && cooldownMinutes <= 0)
-        return true;
-      if (cooldownTokens > 0) {
-        const currentBucket = Math.floor(this.contextPosition / cooldownTokens);
-        const ns = `v2:${rule.cooldown_namespace ?? rule.id}`;
-        const lastBucket = this.cooldownMap.get(ns);
-        if (lastBucket !== undefined && currentBucket <= lastBucket) {
-          dbg4(`cooldown v2 active: ${rule.id} (ns:${ns}, pos:${this.contextPosition}, bucket:${currentBucket})`);
-          return false;
-        }
-        return true;
-      }
-      if (cooldownMinutes > 0) {
-        const ns = `v2:${rule.cooldown_namespace ?? rule.id}`;
-        const key = `${ns}_time`;
-        const lastFired = this.cooldownMap.get(key);
-        const now = Date.now();
-        if (lastFired !== undefined && now - lastFired < cooldownMinutes * 60 * 1000) {
-          dbg4(`cooldown v2 active (time): ${rule.id} (ns:${ns}, cd:${cooldownMinutes}m)`);
-          return false;
-        }
-        return true;
-      }
-      return true;
-    } catch (e2) {
-      dbg4("checkCooldownV2 error:", e2?.message);
-      return true;
-    }
-  }
-  markCooldownV2(rule) {
-    try {
-      const cooldownTokens = rule.cooldown_tokens ?? 0;
-      const cooldownMinutes = rule.cooldown_minutes ?? 0;
-      if (cooldownTokens > 0) {
-        const currentBucket = Math.floor(this.contextPosition / cooldownTokens);
-        const ns = `v2:${rule.cooldown_namespace ?? rule.id}`;
-        this.cooldownMap.set(ns, currentBucket);
-        dbg4(`cooldown v2 marked: ${rule.id} (ns:${ns}, bucket:${currentBucket})`);
-      } else if (cooldownMinutes > 0) {
-        const ns = `v2:${rule.cooldown_namespace ?? rule.id}`;
-        this.cooldownMap.set(`${ns}_time`, Date.now());
-      }
-    } catch (e2) {
-      dbg4("markCooldownV2 error:", e2?.message);
-    }
-  }
-  isProjectRule(_rule) {
-    return false;
-  }
-}
-function formatWakeEvent(event) {
-  const header = `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}">`;
-  const footer = `</system-reminder>`;
-  const body = getEventTemplate(event);
-  return `${header}
-${body}
-${footer}`;
-}
-function getEventTemplate(event) {
-  const p2 = event.payload;
-  switch (event.type) {
-    case "task_assigned":
-      return [
-        `## Wake: New Task Assigned`,
-        ``,
-        `### Task Details`,
-        p2.task_id || p2.entityId ? `- **Task ID:** \`${p2.task_id ?? p2.entityId}\`` : "",
-        `- **Title:** ${p2.title ?? "Unknown"}`,
-        p2.description ? `- **Description:** ${p2.description}` : "",
-        p2.list || p2.listName ? `- **List:** ${p2.list ?? p2.listName}` : "",
-        p2.priority ? `- **Priority:** ${p2.priority}` : "",
-        p2.assigned_by || p2.actorId ? `- **Assigned by:** ${p2.assigned_by ?? p2.actorId}` : "",
-        p2.due || p2.dueDate ? `- **Due:** ${p2.due ?? p2.dueDate}` : "",
-        ``,
-        `### How to Work on This`,
-        `1. Accept: \`synqtask_todo_tasks({action: "set_status", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}", status: "started"})\``,
-        `2. Read full task: \`synqtask_todo_tasks({action: "show", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}"})\``,
-        `3. Do the work described above`,
-        `4. When done: \`synqtask_todo_tasks({action: "set_status", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}", status: "done"})\``,
-        `5. Add result: \`synqtask_todo_comments({action: "add_result", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}", text: "Done: <summary>"})\``
-      ].filter(Boolean).join(`
-`);
-    case "channel_message": {
-      const chId = p2.channel_id ?? p2.channelId ?? "";
-      const sendId = p2.sender_id ?? p2.senderId ?? "";
-      const sendName = p2.sender_name ?? p2.senderName ?? "";
-      const isDirect = p2.is_direct ?? p2.isDirect ?? false;
-      return [
-        `## Wake: New Channel Message`,
-        ``,
-        `### Message Details`,
-        chId ? `- **Channel ID:** \`${chId}\`` : "",
-        p2.channel_name ?? p2.channelName ? `- **Channel:** ${p2.channel_name ?? p2.channelName}` : "",
-        sendName ? `- **From:** ${sendName}` : "",
-        isDirect ? `- **Type:** Direct message to you` : `- **Type:** Channel broadcast`,
-        ``,
-        `### Message`,
-        p2.text ? `> ${p2.text}` : "> (no text)",
-        ``,
-        `### \u26A1 ACTION REQUIRED: Reply in channel`,
-        `You MUST reply using this exact tool call:`,
-        `\`\`\``,
-        `synqtask_todo_channels({action: "send", channel_id: "${chId}", text: "YOUR REPLY HERE"})`,
-        `\`\`\``,
-        sendId ? `Or DM sender: \`synqtask_todo_channels({action: "create_dm", member_b: "${sendId}"})\` then send` : ""
-      ].filter(Boolean).join(`
-`);
-    }
-    case "delegation_received":
-      return [
-        `## Wake: Task Delegated to You`,
-        ``,
-        `### Delegation Details`,
-        p2.task_id || p2.entityId ? `- **Task ID:** \`${p2.task_id ?? p2.entityId}\`` : "",
-        `- **Title:** ${p2.title ?? "Unknown"}`,
-        p2.delegator || p2.delegated_by ? `- **Delegated by:** ${p2.delegator ?? p2.delegated_by}` : "",
-        p2.delegator_id ? `- **Delegator ID:** \`${p2.delegator_id}\`` : "",
-        p2.notes ? `- **Notes:** ${p2.notes}` : "",
-        ``,
-        `### How to Handle`,
-        `1. Accept: \`synqtask_todo_tasks({action: "accept_delegation", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}"})\``,
-        `2. Read task: \`synqtask_todo_tasks({action: "show", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}"})\``,
-        `3. Do the work`,
-        `4. Complete: \`synqtask_todo_tasks({action: "set_status", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}", status: "done"})\``
-      ].filter(Boolean).join(`
-`);
-    case "comment_added":
-      return [
-        `## Wake: New Comment on Task`,
-        ``,
-        `### Comment Details`,
-        p2.task_id || p2.entityId ? `- **Task ID:** \`${p2.task_id ?? p2.entityId}\`` : "",
-        p2.task_title ? `- **Task:** ${p2.task_title}` : "",
-        p2.commenter || p2.actorId ? `- **From:** ${p2.commenter ?? p2.actorId}` : "",
-        p2.commenter_id ? `- **Commenter ID:** \`${p2.commenter_id}\`` : "",
-        ``,
-        `### Comment`,
-        p2.text ? `> ${p2.text}` : "> (no text)",
-        ``,
-        `### How to Reply`,
-        `Reply: \`synqtask_todo_comments({action: "add", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}", text: "YOUR REPLY"})\``,
-        `View all: \`synqtask_todo_comments({action: "list", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}"})\``
-      ].filter(Boolean).join(`
-`);
-    case "status_changed":
-      return [
-        `## Wake: Task Status Changed`,
-        ``,
-        p2.task_id || p2.entityId ? `- **Task ID:** \`${p2.task_id ?? p2.entityId}\`` : "",
-        p2.title ? `- **Task:** ${p2.title}` : "",
-        p2.changes?.status ? `- **Status:** ${p2.changes.status.from ?? "?"} \u2192 ${p2.changes.status.to ?? "?"}` : "",
-        p2.actorId ? `- **Changed by:** ${p2.actorId}` : "",
-        ``,
-        `View task: \`synqtask_todo_tasks({action: "show", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}"})\``
-      ].filter(Boolean).join(`
-`);
-    case "webhook_event":
-      return [
-        `## Wake: External Event`,
-        ``,
-        `- **Source:** ${event.source}`,
-        p2.webhook_type ? `- **Type:** ${p2.webhook_type}` : "",
-        ``,
-        `### Payload`,
-        "```json",
-        JSON.stringify(p2, null, 2),
-        "```",
-        ``,
-        `Review and take appropriate action.`
-      ].join(`
-`);
-    default:
-      return [
-        `## Wake: ${event.type}`,
-        ``,
-        `- **Source:** ${event.source}`,
-        `- **Priority:** ${event.priority}`,
-        `- **Event ID:** ${event.eventId}`,
-        ``,
-        `### Payload`,
-        "```json",
-        JSON.stringify(p2, null, 2),
-        "```",
-        ``,
-        `Review and respond as appropriate.`
-      ].join(`
-`);
-  }
-}
-function esc(s2) {
-  return s2.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-var DEBUG4, LOG_FILE2, DEFAULT_EXEC_TIMEOUT_S = 15, LEGACY_VERSION = "legacy-v1.x", LEGACY_BOOT_TIME, LEGACY_ID, legacyBannerEmitted = false;
-var init_signal_wire = __esm(() => {
-  init_wake_types();
-  init_signal_wire_actions();
-  init_signal_wire_audit();
-  DEBUG4 = process.env.SIGNAL_WIRE_DEBUG !== "0";
-  LOG_FILE2 = join4(homedir4(), ".claude", "signal-wire-debug.log");
-  LEGACY_BOOT_TIME = new Date().toISOString();
-  LEGACY_ID = `sw-legacy ${LEGACY_VERSION}@${LEGACY_BOOT_TIME.slice(11, 19)} pid=${process.pid}`;
-});
+var __require_gv7hsff9 = import.meta.require;
 
 // node_modules/bmp-ts/dist/commonjs/header-types.js
 var require_header_types = __commonJS((exports) => {
@@ -7304,7 +5405,7 @@ var require_gifframe = __commonJS((exports) => {
 
 // node_modules/gifwrap/src/gifutil.js
 var require_gifutil = __commonJS((exports) => {
-  var fs = __require("fs");
+  var fs = __require_gv7hsff9("fs");
   var ImageQ = require_image_q();
   var BitmapImage = require_bitmapimage();
   var { GifFrame } = require_gifframe();
@@ -10007,8 +8108,8 @@ var require_commonjs5 = __commonJS((exports) => {
 
 // node_modules/pngjs/lib/chunkstream.js
 var require_chunkstream = __commonJS((exports, module) => {
-  var util = __require("util");
-  var Stream = __require("stream");
+  var util = __require_gv7hsff9("util");
+  var Stream = __require_gv7hsff9("stream");
   var ChunkStream = module.exports = function() {
     Stream.call(this);
     this._buffers = [];
@@ -10364,7 +8465,7 @@ var require_filter_parse = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/filter-parse-async.js
 var require_filter_parse_async = __commonJS((exports, module) => {
-  var util = __require("util");
+  var util = __require_gv7hsff9("util");
   var ChunkStream = require_chunkstream();
   var Filter = require_filter_parse();
   var FilterAsync = module.exports = function(bitmapInfo) {
@@ -10955,8 +9056,8 @@ var require_format_normaliser = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/parser-async.js
 var require_parser_async = __commonJS((exports, module) => {
-  var util = __require("util");
-  var zlib = __require("zlib");
+  var util = __require_gv7hsff9("util");
+  var zlib = __require_gv7hsff9("zlib");
   var ChunkStream = require_chunkstream();
   var FilterAsync = require_filter_parse_async();
   var Parser = require_parser();
@@ -11349,7 +9450,7 @@ var require_packer = __commonJS((exports, module) => {
   var CrcStream = require_crc();
   var bitPacker = require_bitpacker();
   var filter = require_filter_pack();
-  var zlib = __require("zlib");
+  var zlib = __require_gv7hsff9("zlib");
   var Packer = module.exports = function(options) {
     this._options = options;
     options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
@@ -11433,8 +9534,8 @@ var require_packer = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/packer-async.js
 var require_packer_async = __commonJS((exports, module) => {
-  var util = __require("util");
-  var Stream = __require("stream");
+  var util = __require_gv7hsff9("util");
+  var Stream = __require_gv7hsff9("stream");
   var constants2 = require_constants();
   var Packer = require_packer();
   var PackerAsync = module.exports = function(opt) {
@@ -11466,10 +9567,10 @@ var require_packer_async = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/sync-inflate.js
 var require_sync_inflate = __commonJS((exports, module) => {
-  var assert = __require("assert").ok;
-  var zlib = __require("zlib");
-  var util = __require("util");
-  var kMaxLength = __require("buffer").kMaxLength;
+  var assert = __require_gv7hsff9("assert").ok;
+  var zlib = __require_gv7hsff9("zlib");
+  var util = __require_gv7hsff9("util");
+  var kMaxLength = __require_gv7hsff9("buffer").kMaxLength;
   function Inflate(opts) {
     if (!(this instanceof Inflate)) {
       return new Inflate(opts);
@@ -11640,7 +9741,7 @@ var require_filter_parse_sync = __commonJS((exports) => {
 // node_modules/pngjs/lib/parser-sync.js
 var require_parser_sync = __commonJS((exports, module) => {
   var hasSyncZlib = true;
-  var zlib = __require("zlib");
+  var zlib = __require_gv7hsff9("zlib");
   var inflateSync = require_sync_inflate();
   if (!zlib.deflateSync) {
     hasSyncZlib = false;
@@ -11726,7 +9827,7 @@ var require_parser_sync = __commonJS((exports, module) => {
 // node_modules/pngjs/lib/packer-sync.js
 var require_packer_sync = __commonJS((exports, module) => {
   var hasSyncZlib = true;
-  var zlib = __require("zlib");
+  var zlib = __require_gv7hsff9("zlib");
   if (!zlib.deflateSync) {
     hasSyncZlib = false;
   }
@@ -11770,8 +9871,8 @@ var require_png_sync = __commonJS((exports) => {
 
 // node_modules/pngjs/lib/png.js
 var require_png = __commonJS((exports) => {
-  var util = __require("util");
-  var Stream = __require("stream");
+  var util = __require_gv7hsff9("util");
+  var Stream = __require_gv7hsff9("stream");
   var Parser = require_parser_async();
   var Packer = require_packer_async();
   var PNGSync = require_png_sync();
@@ -25238,8 +23339,8 @@ var require_await_to_js_umd = __commonJS((exports, module) => {
 var require_commonjs13 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.writeFile = exports.readFile = exports.existsSync = undefined;
-  var fs_1 = __require("fs");
-  var fs_2 = __require("fs");
+  var fs_1 = __require_gv7hsff9("fs");
+  var fs_2 = __require_gv7hsff9("fs");
   Object.defineProperty(exports, "existsSync", { enumerable: true, get: function() {
     return fs_2.existsSync;
   } });
@@ -28346,8 +26447,8 @@ var require_browser = __commonJS((exports, module) => {
 
 // node_modules/debug/src/node.js
 var require_node = __commonJS((exports, module) => {
-  var tty = __require("tty");
-  var util = __require("util");
+  var tty = __require_gv7hsff9("tty");
+  var util = __require_gv7hsff9("util");
   exports.init = init;
   exports.log = log;
   exports.formatArgs = formatArgs;
@@ -31704,23 +29805,23 @@ var require_commonjs14 = __commonJS((exports) => {
           }
         }
       }
-      static async read(url, options) {
-        if (Buffer.isBuffer(url) || url instanceof ArrayBuffer) {
-          return this.fromBuffer(url);
+      static async read(url2, options) {
+        if (Buffer.isBuffer(url2) || url2 instanceof ArrayBuffer) {
+          return this.fromBuffer(url2);
         }
-        if ((0, file_ops_1.existsSync)(url)) {
-          return this.fromBuffer(await (0, file_ops_1.readFile)(url));
+        if ((0, file_ops_1.existsSync)(url2)) {
+          return this.fromBuffer(await (0, file_ops_1.readFile)(url2));
         }
-        const [fetchErr, response] = await (0, await_to_js_1.to)(fetch(url));
+        const [fetchErr, response] = await (0, await_to_js_1.to)(fetch(url2));
         if (fetchErr) {
-          throw new Error(`Could not load Buffer from URL: ${url}`);
+          throw new Error(`Could not load Buffer from URL: ${url2}`);
         }
         if (!response.ok) {
-          throw new Error(`HTTP Status ${response.status} for url ${url}`);
+          throw new Error(`HTTP Status ${response.status} for url ${url2}`);
         }
         const [arrayBufferErr, data] = await (0, await_to_js_1.to)(response.arrayBuffer());
         if (arrayBufferErr) {
-          throw new Error(`Could not load Buffer from ${url}`);
+          throw new Error(`Could not load Buffer from ${url2}`);
         }
         const buffer = bufferFromArrayBuffer(data);
         return this.fromBuffer(buffer, options);
@@ -32279,7 +30380,7 @@ var require_resize2 = __commonJS((exports) => {
       const hDst = dst.height;
       const bufSrc = src.data;
       const bufDst = dst.data;
-      const interpolate2 = function(k2, kMin, vMin, kMax, vMax) {
+      const interpolate = function(k2, kMin, vMin, kMax, vMax) {
         if (kMin === kMax) {
           return vMin;
         }
@@ -32288,14 +30389,14 @@ var require_resize2 = __commonJS((exports) => {
       const assign = function(pos, offset, x2, xMin, xMax, y2, yMin, yMax) {
         let posMin = (yMin * wSrc + xMin) * 4 + offset;
         let posMax = (yMin * wSrc + xMax) * 4 + offset;
-        const vMin = interpolate2(x2, xMin, bufSrc[posMin], xMax, bufSrc[posMax]);
+        const vMin = interpolate(x2, xMin, bufSrc[posMin], xMax, bufSrc[posMax]);
         if (yMax === yMin) {
           bufDst[pos + offset] = vMin;
         } else {
           posMin = (yMax * wSrc + xMin) * 4 + offset;
           posMax = (yMax * wSrc + xMax) * 4 + offset;
-          const vMax = interpolate2(x2, xMin, bufSrc[posMin], xMax, bufSrc[posMax]);
-          bufDst[pos + offset] = interpolate2(y2, yMin, vMin, yMax, vMax);
+          const vMax = interpolate(x2, xMin, bufSrc[posMin], xMax, bufSrc[posMax]);
+          bufDst[pos + offset] = interpolate(y2, yMin, vMin, yMax, vMax);
         }
       };
       for (let i2 = 0;i2 < hDst; i2++) {
@@ -32314,7 +30415,7 @@ var require_resize2 = __commonJS((exports) => {
         }
       }
     },
-    _interpolate2D(src, dst, options, interpolate2) {
+    _interpolate2D(src, dst, options, interpolate) {
       const bufSrc = src.data;
       const bufDst = dst.data;
       const wSrc = src.width;
@@ -32339,7 +30440,7 @@ var require_resize2 = __commonJS((exports) => {
             const x1 = bufSrc[kPos];
             const x22 = bufSrc[kPos + 4];
             const x3 = xPos < wSrc - 2 ? bufSrc[kPos + 8] : 2 * bufSrc[kPos + 4] - bufSrc[kPos];
-            buf1[buf1Pos + k2] = interpolate2(x0, x1, x22, x3, t2);
+            buf1[buf1Pos + k2] = interpolate(x0, x1, x22, x3, t2);
           }
         }
       }
@@ -32357,7 +30458,7 @@ var require_resize2 = __commonJS((exports) => {
             const y1 = buf1[kPos];
             const y22 = buf1[kPos + wDst2 * 4];
             const y3 = yPos < hSrc - 2 ? buf1[kPos + wDst2 * 8] : 2 * buf1[kPos + wDst2 * 4] - buf1[kPos];
-            buf2[buf2Pos + k2] = interpolate2(y0, y1, y22, y3, t2);
+            buf2[buf2Pos + k2] = interpolate(y0, y1, y22, y3, t2);
           }
         }
       }
@@ -37798,7 +35899,7 @@ var require_sax = __commonJS((exports) => {
     };
     var Stream;
     try {
-      Stream = __require("stream").Stream;
+      Stream = __require_gv7hsff9("stream").Stream;
     } catch (ex) {
       Stream = function() {};
     }
@@ -39237,10 +37338,10 @@ var require_parser3 = __commonJS((exports) => {
       return child;
     }, hasProp = {}.hasOwnProperty;
     sax = require_sax();
-    events = __require("events");
+    events = __require_gv7hsff9("events");
     bom = require_bom();
     processors = require_processors();
-    setImmediate2 = __require("timers").setImmediate;
+    setImmediate2 = __require_gv7hsff9("timers").setImmediate;
     defaults = require_defaults().defaults;
     isEmpty = function(thing) {
       return typeof thing === "object" && thing != null && Object.keys(thing).length === 0;
@@ -40112,7 +38213,7 @@ var require_load_bitmap_font = __commonJS((exports) => {
   var parse_bmfont_binary_1 = __importDefault(require_parse_bmfont_binary());
   var js_png_1 = __importDefault(require_commonjs6());
   var core_1 = require_commonjs14();
-  var path_1 = __importDefault(__require("path"));
+  var path_1 = __importDefault(__require_gv7hsff9("path"));
   var simple_xml_to_json_1 = __importDefault(require_simpleXmlToJson_min());
   var { convertXML } = simple_xml_to_json_1.default;
   exports.isWebWorker = typeof self !== "undefined" && self.document === undefined;
@@ -40216,8 +38317,8 @@ var require_load_font = __commonJS((exports) => {
   async function loadFont(file) {
     let fileOrBuffer = file;
     if (typeof window === "undefined" && !load_bitmap_font_js_1.isWebWorker) {
-      const { existsSync: existsSync4, promises: fs2 } = await import("fs");
-      if (existsSync4(file)) {
+      const { existsSync: existsSync2, promises: fs2 } = await import("fs");
+      if (existsSync2(file)) {
         fileOrBuffer = await fs2.readFile(file);
       }
     }
@@ -40627,9 +38728,9 @@ import { randomBytes as It, createHash as Nt } from "crypto";
 var t = Object.defineProperty;
 var e = Object.getOwnPropertyNames;
 var i = (e2, i2) => t(e2, "name", { value: i2, configurable: true });
-var s = ((t2) => "function" < "u" ? __require : typeof Proxy < "u" ? new Proxy(t2, { get: (t3, e2) => ("function" < "u" ? __require : t3)[e2] }) : t2)(function(t2) {
+var s = ((t2) => "function" < "u" ? __require_gv7hsff9 : typeof Proxy < "u" ? new Proxy(t2, { get: (t3, e2) => ("function" < "u" ? __require_gv7hsff9 : t3)[e2] }) : t2)(function(t2) {
   if ("function" < "u")
-    return __require.apply(this, arguments);
+    return __require_gv7hsff9.apply(this, arguments);
   throw Error('Dynamic require of "' + t2 + '" is not supported');
 });
 var r = {};
@@ -42102,19 +40203,18 @@ async function Gt(t2, e2, i2, s2) {
 i(Pt, "connectVoiceStream"), i(Jt, "transcribeFile"), i(Kt, "transcribeAudioFile"), i(Ht, "startMicRecording"), i(Ut, "checkVoiceDeps"), i(jt, "hasCommand"), i(Wt, "sleep"), i(qt, "readFileAsBuffer"), i(zt, "findConverter"), i(Gt, "streamConvertedAudio");
 
 // provider.ts
-init_signal_wire();
-import { appendFileSync as appendFileSync7, existsSync as existsSync4 } from "fs";
+import { appendFileSync as appendFileSync5, existsSync as existsSync2 } from "fs";
 import { execSync } from "child_process";
-import { join as join9 } from "path";
-import { homedir as homedir9 } from "os";
+import { join as join7 } from "path";
+import { homedir as homedir7 } from "os";
 
-// signal-wire-core-adapter.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync3, readFileSync as readFileSync3, statSync as statSync2, writeFileSync as writeFileSync2, renameSync as renameSync3 } from "fs";
-import { homedir as homedir8 } from "os";
-import { join as join8 } from "path";
+// signal-wire.ts
+import { appendFileSync as appendFileSync3, existsSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
+import { homedir as homedir4 } from "os";
+import { join as join4 } from "path";
 
 // ../../../../../packages/signal-wire-core/dist/domain/action.js
-var ACTION_ORDER2 = [
+var ACTION_ORDER = [
   "block",
   "exec",
   "hint",
@@ -42556,10 +40656,10 @@ class ExecEmitter {
 }
 
 // ../../../../../packages/signal-wire-core/dist/emitters/builtin/audit.js
-import { appendFileSync as appendFileSync4, mkdirSync as mkdirSync4 } from "fs";
-import { dirname, join as join5 } from "path";
-import { homedir as homedir5 } from "os";
-var DEFAULT_AUDIT_PATH = join5(homedir5(), ".context", "hooks", "audit", "signal-wire-audit.jsonl");
+import { appendFileSync, mkdirSync } from "fs";
+import { dirname, join } from "path";
+import { homedir } from "os";
+var DEFAULT_AUDIT_PATH = join(homedir(), ".context", "hooks", "audit", "signal-wire-audit.jsonl");
 
 class AuditEmitter {
   type = "audit";
@@ -42575,8 +40675,8 @@ class AuditEmitter {
       actions_taken: ctx.actionsTakenSoFar ?? []
     };
     try {
-      mkdirSync4(dirname(path), { recursive: true });
-      appendFileSync4(path, JSON.stringify(record) + `
+      mkdirSync(dirname(path), { recursive: true });
+      appendFileSync(path, JSON.stringify(record) + `
 `);
       return {
         type: "audit",
@@ -42616,8 +40716,8 @@ class WakeEmitter {
           wakeTriggered: true
         };
       }
-      const url = new URL("/wake", ctx.serverUrl).toString();
-      const res = await fetch(url, {
+      const url2 = new URL("/wake", ctx.serverUrl).toString();
+      const res = await fetch(url2, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -43148,9 +41248,9 @@ class InMemoryMetricSink {
 }
 
 // ../../../../../packages/signal-wire-core/dist/observability/logger.js
-import { appendFileSync as appendFileSync5 } from "fs";
-import { homedir as homedir6 } from "os";
-import { join as join6 } from "path";
+import { appendFileSync as appendFileSync2 } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
 
 // ../../../../../packages/signal-wire-core/dist/version.js
 var CORE_VERSION = "0.1.0";
@@ -43165,7 +41265,7 @@ function coreIdentityTag(extraPid) {
 }
 
 // ../../../../../packages/signal-wire-core/dist/observability/logger.js
-var LOG_FILE3 = process.env.SIGNAL_WIRE_CORE_LOG_FILE ?? process.env.SIGNAL_WIRE_LOG_FILE ?? join6(homedir6(), ".claude", "signal-wire-debug.log");
+var LOG_FILE = process.env.SIGNAL_WIRE_CORE_LOG_FILE ?? process.env.SIGNAL_WIRE_LOG_FILE ?? join2(homedir2(), ".claude", "signal-wire-debug.log");
 var VERBOSE = process.env.SIGNAL_WIRE_CORE_VERBOSE === "1";
 var bannerEmitted = false;
 function writeLine(line) {
@@ -43173,7 +41273,7 @@ function writeLine(line) {
   const full = `[${ts}] ${coreIdentityTag()} ${line}
 `;
   try {
-    appendFileSync5(LOG_FILE3, full);
+    appendFileSync2(LOG_FILE, full);
   } catch {}
   if (VERBOSE) {
     try {
@@ -43400,8 +41500,8 @@ class Pipeline {
         trace.rulesMatched++;
         this.metricSink.counter("signal_wire.rules.matched", { rule_id: rule.id });
         const sortedActions = [...rule.actions].sort((a2, b2) => {
-          const idxA = ACTION_ORDER2.indexOf(a2.type);
-          const idxB = ACTION_ORDER2.indexOf(b2.type);
+          const idxA = ACTION_ORDER.indexOf(a2.type);
+          const idxB = ACTION_ORDER.indexOf(b2.type);
           return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
         });
         const actionsTakenSoFar = [];
@@ -43532,9 +41632,9 @@ class Pipeline {
   }
 }
 // ../../../../../packages/signal-wire-core/dist/state/file.js
-import { join as join7 } from "path";
-import { homedir as homedir7 } from "os";
-var DEFAULT_ROOT = join7(homedir7(), ".context", "hooks", "state");
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+var DEFAULT_ROOT = join3(homedir3(), ".context", "hooks", "state");
 // ../../../../../packages/signal-wire-core/dist/state/redis.js
 class RedisBackend {
   redis;
@@ -43824,23 +41924,34 @@ function translateActions(legacy1, legacy2) {
   }
   return [];
 }
-
 // ../../../../../packages/signal-wire-core/dist/index.js
 function getBundledRulesPath() {
+  const envPath = typeof process !== "undefined" ? process.env?.SIGNAL_WIRE_RULES_PATH : undefined;
+  if (envPath)
+    return envPath;
+  try {
+    const req = __require_gv7hsff9;
+    if (req) {
+      const pkgJsonPath = req.resolve("@kiberos/signal-wire-core/package.json");
+      const sep = pkgJsonPath.includes("\\") ? "\\" : "/";
+      const pkgRoot = pkgJsonPath.slice(0, pkgJsonPath.lastIndexOf(sep));
+      return `${pkgRoot}${sep}rules${sep}signal-wire-rules.json`;
+    }
+  } catch {}
   const url = new URL("../rules/signal-wire-rules.json", import.meta.url);
   return url.protocol === "file:" ? decodeURIComponent(url.pathname) : url.pathname;
 }
 
-// signal-wire-core-adapter.ts
+// signal-wire.ts
 var ADAPTER_VERSION = "1.0.0";
 var ADAPTER_MTIME = new Date().toISOString();
 var ADAPTER_ID = `sw-adapter-opencode-claude v${ADAPTER_VERSION}@${ADAPTER_MTIME.slice(11, 19)}`;
-var LOG_FILE4 = join8(homedir8(), ".claude", "signal-wire-debug.log");
+var LOG_FILE2 = join4(homedir4(), ".claude", "signal-wire-debug.log");
 function swLog(msg) {
   const line = `[${new Date().toISOString()}] ${coreIdentityTag()} [${ADAPTER_ID}] ${msg}
 `;
   try {
-    appendFileSync6(LOG_FILE4, line);
+    appendFileSync3(LOG_FILE2, line);
   } catch {}
 }
 var adapterBannerEmitted = false;
@@ -43875,18 +41986,18 @@ class RulesStore {
     return this.path;
   }
   loadFromDisk() {
-    if (!existsSync3(this.path)) {
+    if (!existsSync(this.path)) {
       return { rules: [], fingerprint: null };
     }
     let stat;
     try {
-      stat = statSync2(this.path);
+      stat = statSync(this.path);
     } catch {
       return { rules: [], fingerprint: null };
     }
     const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
     try {
-      const raw = JSON.parse(readFileSync3(this.path, "utf8"));
+      const raw = JSON.parse(readFileSync(this.path, "utf8"));
       const legacy = raw.rules ?? [];
       const canonical = translateLegacyRules(legacy, this.platform);
       const validated = validateRuleSet({ rules: canonical }, this.registry).rules;
@@ -43905,11 +42016,11 @@ class RulesStore {
     if (now - this.lastCheckMs < HOT_RELOAD_INTERVAL_MS)
       return { reloaded: false };
     this.lastCheckMs = now;
-    if (!existsSync3(this.path))
+    if (!existsSync(this.path))
       return { reloaded: false, error: "rules file missing" };
     let stat;
     try {
-      stat = statSync2(this.path);
+      stat = statSync(this.path);
     } catch (e2) {
       return { reloaded: false, error: e2 instanceof Error ? e2.message : String(e2) };
     }
@@ -43918,7 +42029,7 @@ class RulesStore {
       return { reloaded: false };
     }
     try {
-      const raw = JSON.parse(readFileSync3(this.path, "utf8"));
+      const raw = JSON.parse(readFileSync(this.path, "utf8"));
       const legacy = raw.rules ?? [];
       const canonical = translateLegacyRules(legacy, this.platform);
       const validated = validateRuleSet({ rules: canonical }, this.registry).rules;
@@ -43940,15 +42051,15 @@ class RulesStore {
     const tmp = `${this.path}.tmp.${process.pid}`;
     const payload = JSON.stringify({ rules: updatedRawRules }, null, 2) + `
 `;
-    writeFileSync2(tmp, payload, "utf8");
-    renameSync3(tmp, this.path);
+    writeFileSync(tmp, payload, "utf8");
+    renameSync(tmp, this.path);
     swLog(`RULES_FILE_REWRITTEN rules=${updatedRawRules.length} path=${this.path}`);
   }
   getRawLegacyRules() {
-    if (!existsSync3(this.path))
+    if (!existsSync(this.path))
       return [];
     try {
-      const raw = JSON.parse(readFileSync3(this.path, "utf8"));
+      const raw = JSON.parse(readFileSync(this.path, "utf8"));
       return raw.rules ?? [];
     } catch {
       return [];
@@ -43956,7 +42067,7 @@ class RulesStore {
   }
 }
 
-class SignalWire2 {
+class SignalWire {
   pipeline;
   registry;
   sessionId;
@@ -44106,33 +42217,136 @@ class SignalWire2 {
   }
 }
 
+// wake-listener.ts
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync2, unlinkSync, appendFileSync as appendFileSync4, renameSync as renameSync2 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir6 } from "os";
+
+// wake-types.ts
+import { homedir as homedir5 } from "os";
+import { join as join5 } from "path";
+var DISCOVERY_DIR = join5(homedir5(), ".opencode", "wake");
+var WARM_CHANNEL_TTL_MS = 5 * 60 * 1000;
+
+// wake-listener.ts
+var DEBUG = process.env.WAKE_LISTENER_DEBUG !== "0";
+var LOG_FILE3 = join6(homedir6(), ".claude", "wake-listener-debug.log");
+var STARTUP_TS = Date.now();
+function dbg2(...args) {
+  if (!DEBUG)
+    return;
+  try {
+    appendFileSync4(LOG_FILE3, `[${new Date().toISOString()}] [wake-listener] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
+`);
+  } catch {}
+}
+var warmChannels = new Map;
+var _agentIdentity = null;
+var _sdkClient = null;
+var _spawnTotal = 0;
+var _currentDepth = null;
+var _inheritedDepth = parseInt(process.env.__SPAWN_DEPTH ?? "", 10);
+if (!isNaN(_inheritedDepth) && _inheritedDepth >= 0) {
+  _currentDepth = _inheritedDepth;
+  dbg2(`spawn depth inherited from parent: ${_inheritedDepth}`);
+}
+var _parentMemberId = process.env.__PARENT_MEMBER_ID ?? null;
+var _parentSessionId = process.env.__PARENT_SESSION_ID ?? null;
+function getSpawnTotal() {
+  return _spawnTotal;
+}
+function getSpawnActive() {
+  const now = Date.now();
+  while (_activeHelperTimestamps.length > 0 && now - _activeHelperTimestamps[0] > HELPER_TIMEOUT_MS) {
+    _activeHelperTimestamps.shift();
+  }
+  return _activeHelperTimestamps.length;
+}
+var HELPER_TIMEOUT_MS = 60000;
+var _activeHelperTimestamps = [];
+function helperStarted() {
+  _spawnTotal++;
+  _activeHelperTimestamps.push(Date.now());
+}
+function getAgentIdentity() {
+  return _agentIdentity;
+}
+async function resolveCurrentDepth(sessionId) {
+  if (_currentDepth !== null)
+    return _currentDepth;
+  let depth = 0;
+  let currentId = sessionId;
+  try {
+    for (let i2 = 0;i2 < 10; i2++) {
+      if (!_sdkClient) {
+        dbg2("resolveCurrentDepth: no sdkClient");
+        break;
+      }
+      const { data: session } = await _sdkClient.session.get({ path: { id: currentId } });
+      if (!session)
+        break;
+      if (!session.parent_id && !session.parentId)
+        break;
+      depth++;
+      currentId = session.parent_id ?? session.parentId;
+    }
+  } catch {
+    dbg2("resolveCurrentDepth: failed, assuming 0");
+  }
+  _currentDepth = depth;
+  dbg2(`resolveCurrentDepth: depth=${depth}`);
+  return depth;
+}
+function checkSpawnAllowed(identity, currentDepth, activeHelpers) {
+  const budget = identity.budget ?? { maxSpawnDepth: 2, maxSubagents: 5 };
+  const maxConcurrent = identity._maxConcurrent ?? budget.maxSubagents;
+  if (activeHelpers >= maxConcurrent) {
+    return {
+      allowed: false,
+      reason: [
+        `\u26A0\uFE0F \u041B\u0438\u043C\u0438\u0442 \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432: ${activeHelpers}/${maxConcurrent} \u0430\u043A\u0442\u0438\u0432\u043D\u044B.`,
+        `\u0414\u043E\u0436\u0434\u0438\u0441\u044C \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0438\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432, \u043F\u043E\u0442\u043E\u043C \u0432\u044B\u0437\u044B\u0432\u0430\u0439 \u043D\u043E\u0432\u044B\u0445.`,
+        `\u0414\u043B\u044F \u0434\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0440\u0430\u0431\u043E\u0442\u044B \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 SynqTask:`,
+        `  todo_tasks({action:"delegate", task_id:"...", to_member_id:"..."})`
+      ].join(`
+`),
+      depth: currentDepth,
+      maxDepth: budget.maxSpawnDepth,
+      active: activeHelpers,
+      maxConcurrent
+    };
+  }
+  return {
+    allowed: true,
+    depth: currentDepth,
+    maxDepth: budget.maxSpawnDepth,
+    active: activeHelpers,
+    maxConcurrent
+  };
+}
+
 // provider.ts
-init_wake_listener();
 try {
   _traceWrite("/tmp/opencode-claude-trace.log", `PROVIDER.TS pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()}
 `);
 } catch {}
-var _SW_ENGINE = (process.env.SIGNAL_WIRE_ENGINE ?? "core").toLowerCase();
-var SignalWire3 = _SW_ENGINE === "legacy" ? SignalWire : SignalWire2;
 (() => {
   try {
-    const { appendFileSync: appendFileSync8 } = __require("fs");
-    const { join: join10 } = __require("path");
-    const { homedir: homedir10 } = __require("os");
-    const logFile = join10(homedir10(), ".claude", "signal-wire-debug.log");
-    const engineChoice = _SW_ENGINE === "legacy" ? "LEGACY" : "CORE";
-    const adapterIdentity = _SW_ENGINE === "legacy" ? "legacy-v1.x" : "sw-adapter-opencode-claude v1.0.0";
-    appendFileSync8(logFile, `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=${engineChoice} implementation=${adapterIdentity} env=${process.env.SIGNAL_WIRE_ENGINE ?? "(unset\u2192core)"}
+    const { appendFileSync: appendFileSync6 } = __require_gv7hsff9("fs");
+    const { join: join8 } = __require_gv7hsff9("path");
+    const { homedir: homedir8 } = __require_gv7hsff9("os");
+    const logFile = join8(homedir8(), ".claude", "signal-wire-debug.log");
+    appendFileSync6(logFile, `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=CORE implementation=sw-adapter-opencode-claude v1.0.0 env=(ts-only)
 `);
   } catch {}
 })();
-var DEBUG5 = process.env.CLAUDE_MAX_DEBUG !== "0";
-var LOG_FILE5 = join9(homedir9(), ".claude", "claude-max-debug.log");
-var STATS_FILE = join9(homedir9(), ".claude", "claude-max-stats.log");
-var STATS_JSONL = join9(homedir9(), ".claude", "claude-max-stats.jsonl");
+var DEBUG2 = process.env.CLAUDE_MAX_DEBUG !== "0";
+var LOG_FILE4 = join7(homedir7(), ".claude", "claude-max-debug.log");
+var STATS_FILE = join7(homedir7(), ".claude", "claude-max-stats.log");
+var STATS_JSONL = join7(homedir7(), ".claude", "claude-max-stats.jsonl");
 var PID = process.pid;
 var SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? "?";
-var PACKAGE_ROOT = join9(import.meta.dir, "..");
+var PACKAGE_ROOT = join7(import.meta.dir, "..");
 var REQUIRED_PLUGIN_FILES = [
   "tui.tsx",
   "wake-preferences.ts",
@@ -44142,8 +42356,8 @@ var REQUIRED_PLUGIN_FILES = [
 var MAX_MEMORY_LINES = 500;
 var MAX_MEMORY_BYTES = 50000;
 var _swServerUrl = "";
-function setSignalWireServerUrl(url) {
-  _swServerUrl = url;
+function setSignalWireServerUrl(url2) {
+  _swServerUrl = url2;
 }
 function setSignalWireSdkClient(client) {
   _signalWire?.setSdkClient(client);
@@ -44154,26 +42368,26 @@ function getSignalWireInstance() {
 }
 function logStats(line, structured) {
   try {
-    appendFileSync7(STATS_FILE, `${line} pid=${PID} ses=${SESSION}
+    appendFileSync5(STATS_FILE, `${line} pid=${PID} ses=${SESSION}
 `);
   } catch {}
   if (structured) {
     try {
-      appendFileSync7(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + `
+      appendFileSync5(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + `
 `);
     } catch {}
   }
 }
-function dbg6(...args) {
-  if (!DEBUG5)
+function dbg3(...args) {
+  if (!DEBUG2)
     return;
   try {
-    appendFileSync7(LOG_FILE5, `[${new Date().toISOString()}] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
+    appendFileSync5(LOG_FILE4, `[${new Date().toISOString()}] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
 `);
   } catch {}
 }
 function assertPluginBundleIntegrity() {
-  const missing = REQUIRED_PLUGIN_FILES.filter((file) => !existsSync4(join9(PACKAGE_ROOT, file)));
+  const missing = REQUIRED_PLUGIN_FILES.filter((file) => !existsSync2(join7(PACKAGE_ROOT, file)));
   if (missing.length === 0)
     return;
   const message = [
@@ -44182,7 +42396,7 @@ function assertPluginBundleIntegrity() {
     "Refusing to start because keepalive/TUI safety features are not fully loaded.",
     "Rebuild or republish @life-ai-tools/opencode-claude with the missing files included."
   ].join(" ");
-  dbg6(message);
+  dbg3(message);
   console.error(message);
   throw new Error(message);
 }
@@ -44233,7 +42447,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
   }
   let mediaType = claimedMediaType;
   if (sniffedMime !== claimedMediaType && claimedMediaType !== "image/*") {
-    dbg6(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} \u2014 using actual`);
+    dbg3(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} \u2014 using actual`);
     mediaType = sniffedMime;
   } else if (claimedMediaType === "image/*") {
     mediaType = sniffedMime;
@@ -44250,7 +42464,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
         return { ok: false, reason: `image too small ${img.width}\xD7${img.height} (min ${IMAGE_MIN_DIMENSION}\xD7${IMAGE_MIN_DIMENSION})` };
       }
       const outBuf = await img.getBuffer("image/png");
-      dbg6(`image transcoded ${mediaType} \u2192 image/png (${img.width}\xD7${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
+      dbg3(`image transcoded ${mediaType} \u2192 image/png (${img.width}\xD7${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
       return { ok: true, data: outBuf.toString("base64"), mediaType: "image/png", reason: `transcoded from ${mediaType}` };
     } catch (e2) {
       return { ok: false, reason: `failed to transcode ${mediaType}: ${e2.message}` };
@@ -44278,9 +42492,9 @@ function getJimp() {
   _jimpChecked = true;
   try {
     _jimp = require_commonjs30();
-    dbg6("Image resizer: jimp loaded");
+    dbg3("Image resizer: jimp loaded");
   } catch {
-    dbg6("Image resizer: jimp not available \u2014 images will not be resized");
+    dbg3("Image resizer: jimp not available \u2014 images will not be resized");
   }
   return _jimp;
 }
@@ -44290,7 +42504,7 @@ async function maybeResizeImage(base64Data, mediaType) {
   const jimpMod = getJimp();
   if (!jimpMod) {
     if (needsSizeReduction) {
-      dbg6(`WARNING: image ${(rawBytes.length / 1024 / 1024).toFixed(1)}MB exceeds ${(IMAGE_TARGET_RAW_BYTES / 1024 / 1024).toFixed(1)}MB target but no resize lib available`);
+      dbg3(`WARNING: image ${(rawBytes.length / 1024 / 1024).toFixed(1)}MB exceeds ${(IMAGE_TARGET_RAW_BYTES / 1024 / 1024).toFixed(1)}MB target but no resize lib available`);
     }
     return { data: base64Data, mediaType, resized: false };
   }
@@ -44319,7 +42533,7 @@ async function maybeResizeImage(base64Data, mediaType) {
       outBuf = await img.getBuffer("image/png");
       outMediaType = "image/png";
       if (outBuf.length > IMAGE_TARGET_RAW_BYTES) {
-        dbg6(`PNG still ${(outBuf.length / 1024).toFixed(0)}KB after resize, converting to JPEG`);
+        dbg3(`PNG still ${(outBuf.length / 1024).toFixed(0)}KB after resize, converting to JPEG`);
         outBuf = await img.getBuffer("image/jpeg");
         outMediaType = "image/jpeg";
       }
@@ -44328,10 +42542,10 @@ async function maybeResizeImage(base64Data, mediaType) {
       outMediaType = "image/jpeg";
     }
     const outBase64 = outBuf.toString("base64");
-    dbg6(`Image resized: ${w2}\xD7${h2} \u2192 ${nw}\xD7${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB \u2192 ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
+    dbg3(`Image resized: ${w2}\xD7${h2} \u2192 ${nw}\xD7${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB \u2192 ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
     return { data: outBase64, mediaType: outMediaType, resized: true };
   } catch (e2) {
-    dbg6("Image resize failed, using original:", e2.message);
+    dbg3("Image resize failed, using original:", e2.message);
     return { data: base64Data, mediaType, resized: false };
   }
 }
@@ -44352,12 +42566,12 @@ function getGitRoot() {
 var _fileCache = new Map;
 function readCachedFile(filePath) {
   try {
-    const { statSync: statSync3, readFileSync: readFileSync4 } = __require("fs");
-    const st2 = statSync3(filePath);
+    const { statSync: statSync2, readFileSync: readFileSync3 } = __require_gv7hsff9("fs");
+    const st2 = statSync2(filePath);
     const cached = _fileCache.get(filePath);
     if (cached && cached.mtimeMs === st2.mtimeMs)
       return cached.content;
-    const content = readFileSync4(filePath, "utf8");
+    const content = readFileSync3(filePath, "utf8");
     _fileCache.set(filePath, { content, mtimeMs: st2.mtimeMs });
     return content;
   } catch {
@@ -44394,19 +42608,19 @@ function buildContextInjection() {
   if (_contextInjectionFrozen !== undefined)
     return _contextInjectionFrozen;
   const tInject = Date.now();
-  const home = homedir9();
+  const home = homedir7();
   const cwd = process.cwd();
   const gitRoot = getGitRoot();
   const projectBase = gitRoot || cwd;
   const sanitized = sanitizePathForProjects(projectBase);
-  const memoryPath = join9(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
+  const memoryPath = join7(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
   const sources = [
-    { path: join9(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
+    { path: join7(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
   ];
   if (cwd !== home) {
-    sources.push({ path: join9(cwd, "CLAUDE.md"), tag: "claude-rules" });
-    const dotClaudePath = join9(cwd, ".claude", "CLAUDE.md");
-    if (dotClaudePath !== join9(home, ".claude", "CLAUDE.md")) {
+    sources.push({ path: join7(cwd, "CLAUDE.md"), tag: "claude-rules" });
+    const dotClaudePath = join7(cwd, ".claude", "CLAUDE.md");
+    if (dotClaudePath !== join7(home, ".claude", "CLAUDE.md")) {
       sources.push({ path: dotClaudePath, tag: "claude-rules" });
     }
   }
@@ -44436,7 +42650,7 @@ ${raw.trim()}
   const content = parts.length > 0 ? parts.join(`
 
 `) : null;
-  dbg6(`context_inject: ${parts.length} sources, ${content?.length ?? 0} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? " TRUNCATED" : ""}) built in ${Date.now() - tInject}ms [FROZEN for session]`);
+  dbg3(`context_inject: ${parts.length} sources, ${content?.length ?? 0} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? " TRUNCATED" : ""}) built in ${Date.now() - tInject}ms [FROZEN for session]`);
   logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject}`, {
     type: "context_inject",
     sources: parts.length,
@@ -44498,7 +42712,7 @@ async function convertPrompt(prompt) {
     if (msg.role === "assistant" && Array.isArray(msg.content)) {
       for (const p2 of msg.content) {
         if (p2.type === "reasoning") {
-          dbg6("PROMPT reasoning part:", {
+          dbg3("PROMPT reasoning part:", {
             textLen: p2.text?.length,
             hasProviderMetadata: !!p2.providerMetadata,
             providerMetadataKeys: p2.providerMetadata ? Object.keys(p2.providerMetadata) : [],
@@ -44548,52 +42762,52 @@ async function convertPrompt(prompt) {
         if (p2.type === "file" && typeof p2.mediaType === "string") {
           const isUrl = p2.data instanceof URL || typeof p2.data === "string" && (p2.data.startsWith("http://") || p2.data.startsWith("https://"));
           if (isUrl) {
-            const url = typeof p2.data === "string" ? p2.data : p2.data.toString();
+            const url2 = typeof p2.data === "string" ? p2.data : p2.data.toString();
             if (p2.mediaType.startsWith("image/")) {
-              content.push({ type: "image", source: { type: "url", url } });
-              dbg6("Converted file part to image URL block:", p2.mediaType, url);
+              content.push({ type: "image", source: { type: "url", url: url2 } });
+              dbg3("Converted file part to image URL block:", p2.mediaType, url2);
             } else if (p2.mediaType === "application/pdf") {
-              content.push({ type: "document", source: { type: "url", url } });
-              dbg6("Converted file part to document URL block:", url);
+              content.push({ type: "document", source: { type: "url", url: url2 } });
+              dbg3("Converted file part to document URL block:", url2);
             }
             continue;
           }
           let data = typeof p2.data === "string" ? p2.data : p2.data instanceof Uint8Array ? Buffer.from(p2.data).toString("base64") : p2.data instanceof ArrayBuffer ? Buffer.from(p2.data).toString("base64") : null;
           if (!data) {
-            dbg6("Skipping file part: could not convert data to base64, type:", typeof p2.data);
+            dbg3("Skipping file part: could not convert data to base64, type:", typeof p2.data);
             continue;
           }
           if (typeof data === "string" && data.startsWith("data:")) {
             const commaIdx = data.indexOf(",");
             if (commaIdx !== -1) {
               data = data.slice(commaIdx + 1);
-              dbg6("Stripped data URL prefix from file data");
+              dbg3("Stripped data URL prefix from file data");
             }
           }
           if (p2.mediaType.startsWith("image/")) {
             const validated = await validateAndNormalizeImage(data, p2.mediaType);
             if (!validated.ok) {
-              dbg6(`image validation failed: ${validated.reason} \u2014 replacing with text placeholder`);
+              dbg3(`image validation failed: ${validated.reason} \u2014 replacing with text placeholder`);
               content.push({ type: "text", text: `[Image could not be processed: ${validated.reason}]` });
               continue;
             }
             if (validated.reason) {
-              dbg6(`image normalized: ${validated.reason}`);
+              dbg3(`image normalized: ${validated.reason}`);
             }
             const resized = await maybeResizeImage(validated.data, validated.mediaType);
             const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024;
             if (resized.data.length > API_IMAGE_MAX_BASE64) {
-              dbg6(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) \u2014 skipping`);
+              dbg3(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) \u2014 skipping`);
               content.push({ type: "text", text: `[Image too large: ${(resized.data.length / 1024 / 1024).toFixed(1)}MB after resize, API limit is 5MB. Please use a smaller image.]` });
               continue;
             }
             content.push({ type: "image", source: { type: "base64", media_type: resized.mediaType, data: resized.data } });
-            dbg6("Converted file part to image block:", resized.mediaType, `${(resized.data.length / 1024).toFixed(0)}KB base64`, resized.resized ? "(resized)" : "(original)");
+            dbg3("Converted file part to image block:", resized.mediaType, `${(resized.data.length / 1024).toFixed(0)}KB base64`, resized.resized ? "(resized)" : "(original)");
           } else if (p2.mediaType === "application/pdf") {
             content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data } });
-            dbg6("Converted file part to document block:", `${(data.length / 1024).toFixed(0)}KB base64`);
+            dbg3("Converted file part to document block:", `${(data.length / 1024).toFixed(0)}KB base64`);
           } else {
-            dbg6("Skipping file part with unsupported mediaType:", p2.mediaType);
+            dbg3("Skipping file part with unsupported mediaType:", p2.mediaType);
           }
         }
       }
@@ -44706,10 +42920,10 @@ async function convertPrompt(prompt) {
       messages.splice(i2 + 1, 0, { role: "user", content: syntheticResults });
     }
     sanitizerHits += orphanIds.length;
-    dbg6(`tool_use_sanitizer: healed ${orphanIds.length} orphan(s) at assistant msg[${i2}] ids=[${orphanIds.join(",")}]`);
+    dbg3(`tool_use_sanitizer: healed ${orphanIds.length} orphan(s) at assistant msg[${i2}] ids=[${orphanIds.join(",")}]`);
   }
   if (sanitizerHits > 0) {
-    dbg6(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`);
+    dbg3(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`);
   }
   try {
     if (_signalWire) {
@@ -44722,13 +42936,13 @@ async function convertPrompt(prompt) {
 ${swResult.hint}
 </system-reminder>` }]
         });
-        dbg6(`signal-wire fired: ${swResult.ruleId} (${swResult.hint.length} chars)`);
+        dbg3(`signal-wire fired: ${swResult.ruleId} (${swResult.hint.length} chars)`);
       }
     }
   } catch (e2) {
-    dbg6(`signal-wire error (non-blocking): ${e2.message}`);
+    dbg3(`signal-wire error (non-blocking): ${e2.message}`);
   }
-  dbg6(`convertPrompt: ${messages.length} messages, system=${typeof system === "string" ? system.length : Array.isArray(system) ? system.length + " blocks" : "none"}, in ${Date.now() - tConvert}ms`);
+  dbg3(`convertPrompt: ${messages.length} messages, system=${typeof system === "string" ? system.length : Array.isArray(system) ? system.length + " blocks" : "none"}, in ${Date.now() - tConvert}ms`);
   return { system, messages };
 }
 var CWD_PATTERNS = [
@@ -44785,7 +42999,7 @@ function convertTools(tools) {
   const count = result.length;
   const hash = result.map((t2) => t2.name).join(",");
   if (_lastToolCount > 0 && count !== _lastToolCount) {
-    dbg6(`\u26A0 TOOL_DRIFT: tool count changed ${_lastToolCount} \u2192 ${count} mid-session (builtin=${builtIn.length} mcp=${mcp.length})`);
+    dbg3(`\u26A0 TOOL_DRIFT: tool count changed ${_lastToolCount} \u2192 ${count} mid-session (builtin=${builtIn.length} mcp=${mcp.length})`);
     logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length}`, {
       type: "tool_drift",
       oldCount: _lastToolCount,
@@ -44794,7 +43008,7 @@ function convertTools(tools) {
       mcpCount: mcp.length
     });
   } else if (_lastToolCount === 0) {
-    dbg6(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length})`);
+    dbg3(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length})`);
   }
   _lastToolCount = count;
   _lastToolHash = hash;
@@ -44848,7 +43062,7 @@ function createLanguageModel(sdk, modelId, providerId) {
     modelId,
     supportedUrls: {},
     async doGenerate(options) {
-      dbg6("doGenerate", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
+      dbg3("doGenerate", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
       const { system, messages } = await convertPrompt(options.prompt);
       const tools = convertTools(options.tools);
       const toolChoice = convertToolChoice(options.toolChoice);
@@ -44927,7 +43141,7 @@ function createLanguageModel(sdk, modelId, providerId) {
     },
     async doStream(options) {
       const t0 = Date.now();
-      dbg6("doStream", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
+      dbg3("doStream", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
       const { system, messages } = await convertPrompt(options.prompt);
       const tools = convertTools(options.tools);
       const toolChoice = convertToolChoice(options.toolChoice);
@@ -44952,9 +43166,9 @@ function createLanguageModel(sdk, modelId, providerId) {
       const isAdaptive = it(modelId);
       if (thinking?.type === "enabled" && thinking?.budgetTokens) {
         sdkOpts.thinking = { type: "enabled", budgetTokens: thinking.budgetTokens };
-        dbg6("doStream thinking from variant:", sdkOpts.thinking);
+        dbg3("doStream thinking from variant:", sdkOpts.thinking);
       } else if (isAdaptive) {
-        dbg6("doStream: adaptive model, SDK will handle thinking");
+        dbg3("doStream: adaptive model, SDK will handle thinking");
       }
       const sdkStream = sdk.stream(sdkOpts);
       let textId = "";
@@ -44972,7 +43186,7 @@ function createLanguageModel(sdk, modelId, providerId) {
           try {
             for await (const event of sdkStream) {
               if (firstEvent) {
-                dbg6(`doStream first event after ${Date.now() - t0}ms`, { type: event.type, modelId });
+                dbg3(`doStream first event after ${Date.now() - t0}ms`, { type: event.type, modelId });
                 firstEvent = false;
               }
               switch (event.type) {
@@ -45054,7 +43268,7 @@ function createLanguageModel(sdk, modelId, providerId) {
                     usage: { in: u2?.inputTokens ?? 0, out: u2?.outputTokens ?? 0, cacheRead: u2?.cacheReadInputTokens ?? 0, cacheWrite: u2?.cacheCreationInputTokens ?? 0 },
                     rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined
                   });
-                  dbg6(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason });
+                  dbg3(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason });
                   try {
                     _signalWire?.trackTokens({ inputTokens: u2?.inputTokens ?? 0, outputTokens: u2?.outputTokens ?? 0, cacheReadInputTokens: u2?.cacheReadInputTokens ?? 0, cacheCreationInputTokens: u2?.cacheCreationInputTokens ?? 0 });
                   } catch {}
@@ -45107,7 +43321,7 @@ function createClaudeMax(options = {}) {
   const rewriteWarnTokens = parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS ?? "50000", 10) || 50000;
   const rewriteBlockEnabled = process.env.CLAUDE_MAX_REWRITE_BLOCK === "1";
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? "1800", 10) || 1800) * 1000;
-  dbg6(`STARTUP createClaudeMax pid=${PID}`, { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts), rewriteWarnIdleMs, rewriteBlockEnabled });
+  dbg3(`STARTUP createClaudeMax pid=${PID}`, { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts), rewriteWarnIdleMs, rewriteBlockEnabled });
   const sdk = new _t({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
@@ -45116,7 +43330,7 @@ function createClaudeMax(options = {}) {
     onTokenStatus: (event) => {
       const emoji = event.level === "rotated" ? "\u2705" : event.level === "warning" ? "\u26A0\uFE0F" : event.level === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
       const line = `${emoji} TOKEN ${event.level.toUpperCase()}: ${event.message} (expires in ${Math.round(event.expiresInMs / 60000)}min, failures=${event.failedAttempts})`;
-      dbg6(line);
+      dbg3(line);
       logStats(`[${new Date().toISOString()}] type=token_${event.level} | expiresIn=${Math.round(event.expiresInMs / 60000)}min failures=${event.failedAttempts} needsReLogin=${event.needsReLogin}`, {
         type: `token_${event.level}`,
         expiresInMin: Math.round(event.expiresInMs / 60000),
@@ -45137,7 +43351,7 @@ function createClaudeMax(options = {}) {
       rewriteBlockEnabled,
       rewriteBlockIdleMs,
       onTick: (tick) => {
-        dbg6(`keepalive tick: idle=${Math.round(tick.idleMs / 1000)}s nextFire=${Math.round(tick.nextFireMs / 1000)}s model=${tick.model}`);
+        dbg3(`keepalive tick: idle=${Math.round(tick.idleMs / 1000)}s nextFire=${Math.round(tick.nextFireMs / 1000)}s model=${tick.model}`);
       },
       onHeartbeat: (stats) => {
         const rl = stats.rateLimit ? ` | quota=${stats.rateLimit.status ?? "?"} claim=${stats.rateLimit.claim ?? "?"}` : "";
@@ -45149,7 +43363,7 @@ function createClaudeMax(options = {}) {
           usage: { in: stats.usage.inputTokens, out: stats.usage.outputTokens, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0 },
           rateLimit: stats.rateLimit ?? undefined
         });
-        dbg6("keepalive FIRED", { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit });
+        dbg3("keepalive FIRED", { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit });
         try {
           _signalWire?.trackTokens({ inputTokens: stats.usage.inputTokens, cacheReadInputTokens: stats.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: stats.usage.cacheCreationInputTokens ?? 0 });
         } catch {}
@@ -45159,7 +43373,7 @@ function createClaudeMax(options = {}) {
           type: "keepalive_disarmed",
           reason: info2.reason
         });
-        dbg6(`keepalive DISARMED reason=${info2.reason} (timer alive, auto-resume on next real stream)`);
+        dbg3(`keepalive DISARMED reason=${info2.reason} (timer alive, auto-resume on next real stream)`);
       },
       onRewriteWarning: (info2) => {
         const tag = info2.blocked ? "cache_rewrite_blocked" : "cache_rewrite_warn";
@@ -45179,25 +43393,25 @@ function createClaudeMax(options = {}) {
           from: info2.from,
           to: info2.to
         });
-        dbg6(`network state: ${info2.from} \u2192 ${info2.to}`);
+        dbg3(`network state: ${info2.from} \u2192 ${info2.to}`);
       }
     }
   });
-  dbg6(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`);
+  dbg3(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`);
   try {
-    _signalWire = new SignalWire3({
+    _signalWire = new SignalWire({
       serverUrl: _swServerUrl || process.env.OPENCODE_SERVER_URL || "",
       sessionId: process.env.OPENCODE_SESSION_ID ?? "?",
       platform: "opencode"
     });
-    dbg6(`signal-wire: instance created (${_signalWire ? "ok" : "null"})`);
+    dbg3(`signal-wire: instance created (${_signalWire ? "ok" : "null"})`);
   } catch (e2) {
-    dbg6(`signal-wire: failed to create instance: ${e2.message}`);
+    dbg3(`signal-wire: failed to create instance: ${e2.message}`);
     _signalWire = null;
   }
   return {
     languageModel(modelId) {
-      dbg6("languageModel requested:", modelId);
+      dbg3("languageModel requested:", modelId);
       return createLanguageModel(sdk, modelId, "claude-max");
     }
   };
@@ -45226,7 +43440,7 @@ async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input)
         };
       }
       helperStarted();
-      dbg6(`helper spawn OK (depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()})`);
+      dbg3(`helper spawn OK (depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()})`);
       return;
     }
     const check = checkSpawnAllowed(identity, depth, getSpawnActive());
@@ -45234,7 +43448,7 @@ async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input)
       const roleName = identity.roleName ?? "unknown";
       const teammates = identity.teammates?.length > 0 ? identity.teammates.map((t2) => `${t2.name} (${t2.roleName ?? "?"})`).join(", ") : "\u043D\u0435\u0442";
       const reason = check.depth >= check.maxDepth ? `\u0413\u043B\u0443\u0431\u0438\u043D\u0430 ${check.depth}/${check.maxDepth} \u0434\u043B\u044F \u0440\u043E\u043B\u0438 '${roleName}'.` : `\u041F\u043E\u0440\u043E\u0436\u0434\u0435\u043D\u043E ${check.spawned}/${check.maxSpawns} \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0434\u043B\u044F \u0440\u043E\u043B\u0438 '${roleName}'.`;
-      dbg6(`spawn budget BLOCKED: ${reason}`);
+      dbg3(`spawn budget BLOCKED: ${reason}`);
       return {
         decision: "block",
         message: [
@@ -45271,10 +43485,10 @@ async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input)
     process.env.__PARENT_SESSION_ID = sessionId;
     process.env.__SPAWN_DEPTH = String(check.depth + 1);
     process.env.__MAX_HELPER_DEPTH = String(identity.budget?.maxSpawnDepth ?? 2);
-    dbg6(`spawn budget OK: depth=${check.depth}/${check.maxDepth} spawned=${check.spawned + 1}/${check.maxSpawns} \u2192 child will be depth=${check.depth + 1}`);
+    dbg3(`spawn budget OK: depth=${check.depth}/${check.maxDepth} spawned=${check.spawned + 1}/${check.maxSpawns} \u2192 child will be depth=${check.depth + 1}`);
     return;
   } catch (e2) {
-    dbg6(`spawn budget check failed (allowing): ${e2?.message}`);
+    dbg3(`spawn budget check failed (allowing): ${e2?.message}`);
     return;
   }
 }

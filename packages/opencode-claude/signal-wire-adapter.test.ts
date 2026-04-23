@@ -1,12 +1,12 @@
 /**
- * Behavior-parity tests for signal-wire-core-adapter.
+ * Behavior tests for the signal-wire adapter (Consumer-1, long-running).
  *
- * Verifies the new adapter matches the legacy SignalWire class contract
- * against real production rules (signal-wire-rules.json).
+ * Verifies the adapter correctly delegates to @kiberos/signal-wire-core and
+ * honors legacy API shape against the production SSOT ruleset.
  */
 
 import { describe, test, expect } from 'bun:test'
-import { SignalWire } from './signal-wire-core-adapter'
+import { SignalWire } from './signal-wire'
 import { translateLegacyRules, getBundledRulesPath } from '@kiberos/signal-wire-core'
 import { readFileSync } from 'node:fs'
 

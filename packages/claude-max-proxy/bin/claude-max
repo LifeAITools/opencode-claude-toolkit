@@ -1,218 +1,648 @@
 #!/usr/bin/env bun
 /**
- * claude-max — CLI wrapper + proxy control.
+ * claude-max — the ONE command to keep Claude Code cache warm.
  *
- * Subcommands:
- *   claude-max              start proxy if needed, then exec native `claude`
- *   claude-max status       print current proxy state and exit
- *   claude-max watch        live TUI dashboard
- *   claude-max logs [-f]    tail proxy logs
- *   claude-max stop         kill proxy
- *   claude-max restart      stop + start
- *   claude-max config       print current config
+ * First run:  auto-installs everything (bun, claude, proxy daemon, OS service),
+ *             then launches Claude Code through the warm-cache proxy.
+ * Every run:  verifies deps, boots proxy if dead, execs native `claude`.
+ *
+ * Subcommands (optional — all power-user niceties):
+ *   claude-max                      default: start proxy + exec claude
+ *   claude-max watch                live TUI dashboard
+ *   claude-max status               proxy state + sessions summary
+ *   claude-max logs [-f]            tail proxy logs (-f = follow)
+ *   claude-max stop                 stop proxy service
+ *   claude-max restart              stop + start
+ *   claude-max uninstall            remove OS service, keep logs
+ *   claude-max doctor               run full self-check + print report
+ *   claude-max config               print resolved config
+ *
+ * Philosophy: user types `claude-max` and it Just Works.
  */
 
 import { spawnSync, spawn } from 'bun'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
-import { loadConfig } from '../src/config.js'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs'
+import { homedir, platform } from 'os'
+import { join, dirname, resolve as pathResolve } from 'path'
 
-const PID_FILE = join(homedir(), '.claude', 'claude-max-proxy.pid')
-const cfg = loadConfig()
-const PROXY_URL = `http://${cfg.proxyHost}:${cfg.proxyPort}`
+// ═══ Paths ════════════════════════════════════════════════════════════
 
-function readPid(): number | null {
-  if (!existsSync(PID_FILE)) return null
-  try {
-    const pid = parseInt(readFileSync(PID_FILE, 'utf8').trim())
-    try { process.kill(pid, 0); return pid } catch { return null }
-  } catch { return null }
+const HOME = homedir()
+const IS_DARWIN = platform() === 'darwin'
+const IS_LINUX = platform() === 'linux'
+
+// Where this very script lives — so we can find src/server.ts, src/tui.ts, etc.
+const PKG_ROOT = pathResolve(import.meta.dir, '..')
+const SERVER_PATH = join(PKG_ROOT, 'src', 'server.ts')
+const TUI_PATH = join(PKG_ROOT, 'src', 'tui.ts')
+
+// Install destinations
+const INSTALL_DIR = join(HOME, '.local', 'share', 'claude-max-proxy')
+const INSTALL_SERVER = join(INSTALL_DIR, 'src', 'server.ts')
+const INSTALL_TUI = join(INSTALL_DIR, 'src', 'tui.ts')
+const BIN_DIR = join(HOME, '.local', 'bin')
+const BIN_LINK = join(BIN_DIR, 'claude-max')
+
+// Runtime state
+const STATE_DIR = join(HOME, '.claude')
+const PID_FILE = join(STATE_DIR, 'claude-max-proxy.pid')
+const LOG_FILE = join(STATE_DIR, 'claude-max-proxy.log')
+const JSONL_FILE = join(STATE_DIR, 'claude-max-proxy.jsonl')
+const CREDS_FILE = join(STATE_DIR, '.credentials.json')
+
+// OS service
+const SYSTEMD_UNIT = join(HOME, '.config', 'systemd', 'user', 'claude-max-proxy.service')
+const LAUNCHD_PLIST = join(HOME, 'Library', 'LaunchAgents', 'com.lifeaitools.claude-max-proxy.plist')
+const LAUNCHD_LABEL = 'com.lifeaitools.claude-max-proxy'
+
+const PROXY_PORT = parseInt(process.env.PROXY_PORT ?? '5050')
+const PROXY_HOST = process.env.PROXY_HOST ?? '127.0.0.1'
+const PROXY_URL = `http://${PROXY_HOST}:${PROXY_PORT}`
+
+// ═══ Logging helpers ════════════════════════════════════════════════
+
+const C = {
+  reset: '\x1b[0m', dim: '\x1b[2m', bold: '\x1b[1m',
+  red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m',
+  blue: '\x1b[34m', cyan: '\x1b[36m', gray: '\x1b[90m',
+}
+const isTTY = process.stderr.isTTY
+const c = (color: string, s: string) => isTTY ? `${color}${s}${C.reset}` : s
+const info = (m: string) => console.error(c(C.cyan, '→') + ' ' + m)
+const ok = (m: string) => console.error(c(C.green, '✓') + ' ' + m)
+const warn = (m: string) => console.error(c(C.yellow, '!') + ' ' + m)
+const err = (m: string) => console.error(c(C.red, '✗') + ' ' + m)
+const step = (m: string) => console.error('\n' + c(C.bold + C.cyan, '▸ ' + m))
+
+// ═══ Utility — command exists, run + capture ═══════════════════════
+
+function which(cmd: string): string | null {
+  const r = spawnSync(['sh', '-c', `command -v ${cmd}`])
+  if (!r.success) return null
+  const out = new TextDecoder().decode(r.stdout).trim()
+  return out || null
 }
 
-function writePid(pid: number): void {
-  writeFileSync(PID_FILE, String(pid) + '\n')
-}
-
-async function isProxyAlive(): Promise<boolean> {
-  try {
-    const r = await fetch(`${PROXY_URL}/health`, {
-      signal: AbortSignal.timeout(1000),
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
-
-async function ensureProxyRunning(): Promise<void> {
-  if (await isProxyAlive()) return
-
-  // Find the server.ts relative to this script
-  const here = import.meta.dir
-  const serverPath = join(here, '..', 'src', 'server.ts')
-
-  if (!existsSync(serverPath)) {
-    console.error(`[claude-max] Cannot find server at ${serverPath}`)
-    process.exit(1)
-  }
-
-  console.error('[claude-max] Starting proxy in background...')
-
-  // Detach: Bun spawn with stdio='ignore' + unref
-  const child = spawn({
-    cmd: ['bun', 'run', serverPath],
-    stdout: 'inherit',
-    stderr: 'inherit',
-    stdin: 'ignore',
-    env: { ...process.env },
+function run(cmd: string[], opts: { quiet?: boolean; input?: string } = {}): { ok: boolean; stdout: string; stderr: string; code: number } {
+  const r = spawnSync({
+    cmd,
+    stdin: opts.input ? new TextEncoder().encode(opts.input) : 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
   })
-  writePid(child.pid!)
+  const stdout = new TextDecoder().decode(r.stdout)
+  const stderr = new TextDecoder().decode(r.stderr)
+  if (!opts.quiet && !r.success) err(`${cmd.join(' ')} failed: ${stderr.slice(0, 200)}`)
+  return { ok: r.success, stdout, stderr, code: r.exitCode ?? 0 }
+}
 
-  // Wait up to 8s for /health
-  for (let i = 0; i < 40; i++) {
-    await new Promise(r => setTimeout(r, 200))
-    if (await isProxyAlive()) {
-      console.error(`[claude-max] Proxy ready on ${PROXY_URL} (pid ${child.pid})`)
-      return
+// ═══ Self-check — what's installed vs missing ═══════════════════════
+
+interface DocReport {
+  bun: string | null         // path or null
+  claude: string | null      // path or null
+  proxyFiles: boolean        // installed to ~/.local/share/claude-max-proxy/
+  binLink: boolean           // ~/.local/bin/claude-max exists
+  binInPath: boolean         // ~/.local/bin is in PATH
+  service: 'systemd' | 'launchd' | 'none'
+  serviceInstalled: boolean
+  serviceActive: boolean
+  credsPresent: boolean
+  proxyAlive: boolean
+}
+
+async function doctor(): Promise<DocReport> {
+  const bun = which('bun')
+  const claude = which('claude')
+
+  const proxyFiles = existsSync(INSTALL_SERVER)
+  const binLink = existsSync(BIN_LINK)
+  const binInPath = (process.env.PATH ?? '').split(':').includes(BIN_DIR)
+
+  let service: DocReport['service'] = 'none'
+  let serviceInstalled = false
+  let serviceActive = false
+  if (IS_DARWIN) {
+    service = 'launchd'
+    serviceInstalled = existsSync(LAUNCHD_PLIST)
+    if (serviceInstalled) {
+      const r = run(['launchctl', 'list', LAUNCHD_LABEL], { quiet: true })
+      serviceActive = r.ok
+    }
+  } else if (IS_LINUX && which('systemctl')) {
+    service = 'systemd'
+    serviceInstalled = existsSync(SYSTEMD_UNIT)
+    if (serviceInstalled) {
+      const r = run(['systemctl', '--user', 'is-active', 'claude-max-proxy.service'], { quiet: true })
+      serviceActive = r.stdout.trim() === 'active'
     }
   }
 
-  console.error(`[claude-max] ERROR: proxy failed to start within 8s. Check logs at ${cfg.logFile}`)
-  process.exit(1)
+  const credsPresent = existsSync(CREDS_FILE)
+
+  let proxyAlive = false
+  try {
+    const r = await fetch(`${PROXY_URL}/health`, { signal: AbortSignal.timeout(800) })
+    proxyAlive = r.ok
+  } catch {}
+
+  return {
+    bun, claude, proxyFiles, binLink, binInPath,
+    service, serviceInstalled, serviceActive,
+    credsPresent, proxyAlive,
+  }
 }
 
-async function cmdStart(args: string[]): Promise<void> {
-  await ensureProxyRunning()
+function printDoctor(d: DocReport): void {
+  console.log(c(C.bold, '\n  claude-max doctor') + '\n')
+  const line = (label: string, value: string | null | boolean, kind: 'ok' | 'warn' | 'err' | 'info' = 'info') => {
+    const mark = value
+      ? (kind === 'err' ? c(C.red, '✗') : c(C.green, '✓'))
+      : (kind === 'warn' ? c(C.yellow, '!') : c(C.red, '✗'))
+    const disp = typeof value === 'string' ? value : (value ? 'yes' : 'no')
+    console.log(`  ${mark} ${label.padEnd(24)} ${c(C.dim, disp ?? '')}`)
+  }
+  line('bun', d.bun, d.bun ? 'ok' : 'err')
+  line('claude CLI', d.claude, d.claude ? 'ok' : 'err')
+  line('proxy files installed', d.proxyFiles, d.proxyFiles ? 'ok' : 'err')
+  line('~/.local/bin/claude-max', d.binLink, d.binLink ? 'ok' : 'warn')
+  line('~/.local/bin in PATH', d.binInPath, d.binInPath ? 'ok' : 'warn')
+  line(`${d.service} unit installed`, d.serviceInstalled, d.serviceInstalled ? 'ok' : 'warn')
+  line(`${d.service} unit active`, d.serviceActive, d.serviceActive ? 'ok' : 'warn')
+  line('OAuth credentials', d.credsPresent, d.credsPresent ? 'ok' : 'err')
+  line(`proxy alive @ :${PROXY_PORT}`, d.proxyAlive, d.proxyAlive ? 'ok' : 'warn')
+  console.log('')
+}
 
-  // Find native claude binary (resolved via PATH, skipping our own wrapper)
-  // On macOS + Linux, CC is at ~/.npm-global/bin/claude
-  const candidates = [
-    join(homedir(), '.npm-global', 'bin', 'claude'),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-  ]
-  const claudeBin = candidates.find(existsSync)
-  if (!claudeBin) {
-    console.error('[claude-max] Native claude CLI not found. Install: npm i -g @anthropic-ai/claude-code')
+// ═══ Self-install routines ═══════════════════════════════════════════
+
+async function installBun(): Promise<void> {
+  step('Installing bun (required runtime)')
+  // bun's official installer: curl -fsSL https://bun.sh/install | bash
+  // This writes to ~/.bun/bin/bun and prints PATH export line.
+  const r = run(['bash', '-c', 'curl -fsSL https://bun.sh/install | bash'])
+  if (!r.ok) {
+    err('bun install failed. Install manually: curl -fsSL https://bun.sh/install | bash')
+    process.exit(1)
+  }
+  // Update PATH for this process — bun lives at ~/.bun/bin/bun
+  const bunBin = join(HOME, '.bun', 'bin')
+  process.env.PATH = `${bunBin}:${process.env.PATH}`
+  ok(`bun installed at ${bunBin}/bun`)
+}
+
+async function installClaudeCLI(): Promise<void> {
+  step('Installing Claude Code CLI (native)')
+  // Need npm. If no npm, bail with actionable message.
+  if (!which('npm')) {
+    err('npm not found. Install Node.js first: https://nodejs.org')
+    process.exit(1)
+  }
+  const r = run(['npm', 'install', '-g', '@anthropic-ai/claude-code'])
+  if (!r.ok) {
+    err('claude CLI install failed. Try: npm install -g @anthropic-ai/claude-code')
+    process.exit(1)
+  }
+  ok('Claude Code CLI installed')
+}
+
+function installProxyFiles(): void {
+  step('Installing proxy files to ~/.local/share/claude-max-proxy/')
+  mkdirSync(INSTALL_DIR, { recursive: true })
+
+  // Copy the entire packages/claude-max-proxy/ src tree
+  const r = run(['cp', '-r', join(PKG_ROOT, 'src'), INSTALL_DIR])
+  if (!r.ok) {
+    err('Failed to copy proxy src. Check permissions on ~/.local/share/')
     process.exit(1)
   }
 
-  // Exec native CC with ANTHROPIC_BASE_URL pointing at our proxy
-  const env = { ...process.env, ANTHROPIC_BASE_URL: PROXY_URL }
+  // Copy package.json + node_modules (for @life-ai-tools/claude-code-sdk + blessed)
+  run(['cp', join(PKG_ROOT, 'package.json'), INSTALL_DIR], { quiet: true })
+  // Copy entire node_modules (heavy but simplest — alternative is bun install in INSTALL_DIR)
+  run(['rsync', '-a', '--delete', join(PKG_ROOT, 'node_modules/'), join(INSTALL_DIR, 'node_modules/')], { quiet: true })
 
-  // If no ANTHROPIC_AUTH_TOKEN, CC refuses to start. Supply a placeholder
-  // — proxy strips/replaces Authorization with OAuth bearer anyway.
-  if (!env.ANTHROPIC_AUTH_TOKEN) {
-    env.ANTHROPIC_AUTH_TOKEN = 'claude-max-proxy-placeholder'
+  ok(`Proxy files installed at ${INSTALL_DIR}`)
+}
+
+function installBinLink(): void {
+  step('Creating ~/.local/bin/claude-max symlink')
+  mkdirSync(BIN_DIR, { recursive: true })
+  // Self-link — this very script lives in the package; symlink it to ~/.local/bin
+  const self = pathResolve(import.meta.url.replace(/^file:\/\//, ''))
+  try {
+    if (existsSync(BIN_LINK)) run(['rm', BIN_LINK], { quiet: true })
+    run(['ln', '-sf', self, BIN_LINK])
+    chmodSync(BIN_LINK, 0o755)
+    ok(`Symlink: ${BIN_LINK} → ${self}`)
+  } catch (e: any) {
+    err(`Failed to create symlink: ${e?.message}`)
+  }
+}
+
+function ensurePathInShellRc(): void {
+  // Check if ~/.local/bin is already in PATH via current env
+  if ((process.env.PATH ?? '').split(':').includes(BIN_DIR)) return
+
+  step('Adding ~/.local/bin to PATH in shell rc')
+
+  const rcFiles = [
+    join(HOME, '.zshrc'),        // macOS default
+    join(HOME, '.bashrc'),        // Linux default
+  ]
+  const line = '\n# Added by claude-max installer\nexport PATH="$HOME/.local/bin:$PATH"\n'
+
+  for (const rc of rcFiles) {
+    if (!existsSync(rc)) continue
+    const content = readFileSync(rc, 'utf8')
+    if (content.includes('.local/bin:$PATH') || content.includes('.local/bin:${PATH}')) {
+      ok(`${rc} already has ~/.local/bin in PATH`)
+      continue
+    }
+    try {
+      writeFileSync(rc, content + line)
+      ok(`Added to ${rc} — open a new terminal or run: source ${rc}`)
+    } catch (e: any) {
+      warn(`Couldn't update ${rc}: ${e?.message}`)
+    }
+  }
+}
+
+function installSystemdUnit(bunBin: string): void {
+  step('Installing systemd user service')
+  mkdirSync(dirname(SYSTEMD_UNIT), { recursive: true })
+
+  const unit = `[Unit]
+Description=claude-max-proxy — cache keepalive proxy for Claude Code CLI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${bunBin} run ${INSTALL_SERVER}
+Restart=on-failure
+RestartSec=2
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
+Environment=LOG_LEVEL=info
+Environment=LOG_FORMAT=both
+
+[Install]
+WantedBy=default.target
+`
+  writeFileSync(SYSTEMD_UNIT, unit)
+  ok(`Wrote ${SYSTEMD_UNIT}`)
+
+  run(['systemctl', '--user', 'daemon-reload'], { quiet: true })
+  run(['systemctl', '--user', 'enable', 'claude-max-proxy.service'], { quiet: true })
+  const r = run(['systemctl', '--user', 'start', 'claude-max-proxy.service'])
+  if (r.ok) ok('systemd service started + enabled (will auto-start on login)')
+  else warn(`systemctl start returned: ${r.stderr.slice(0, 200)}`)
+}
+
+function installLaunchdPlist(bunBin: string): void {
+  step('Installing launchd user agent (macOS)')
+  mkdirSync(dirname(LAUNCHD_PLIST), { recursive: true })
+
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${LAUNCHD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${bunBin}</string>
+        <string>run</string>
+        <string>${INSTALL_SERVER}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>${LOG_FILE}</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_FILE}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LOG_LEVEL</key>
+        <string>info</string>
+        <key>LOG_FORMAT</key>
+        <string>both</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:${HOME}/.bun/bin:${HOME}/.npm-global/bin</string>
+    </dict>
+</dict>
+</plist>
+`
+  writeFileSync(LAUNCHD_PLIST, plist)
+  ok(`Wrote ${LAUNCHD_PLIST}`)
+
+  // unload-then-load to refresh if it was already there
+  run(['launchctl', 'unload', LAUNCHD_PLIST], { quiet: true })
+  const r = run(['launchctl', 'load', LAUNCHD_PLIST])
+  if (r.ok) ok('launchd agent loaded (will auto-start on login)')
+  else warn(`launchctl load returned: ${r.stderr.slice(0, 200)}`)
+}
+
+// ═══ Proxy lifecycle (service or fallback) ═══════════════════════════
+
+async function startProxyViaService(d: DocReport): Promise<boolean> {
+  if (d.service === 'systemd') {
+    const r = run(['systemctl', '--user', 'start', 'claude-max-proxy.service'])
+    return r.ok
+  }
+  if (d.service === 'launchd') {
+    const r = run(['launchctl', 'kickstart', '-k', `gui/${process.getuid?.() ?? 0}/${LAUNCHD_LABEL}`])
+    return r.ok
+  }
+  return false
+}
+
+async function waitForProxyAlive(timeoutMs = 8000): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const r = await fetch(`${PROXY_URL}/health`, { signal: AbortSignal.timeout(500) })
+      if (r.ok) return true
+    } catch {}
+    await new Promise(r => setTimeout(r, 200))
+  }
+  return false
+}
+
+async function startProxyFallback(bunBin: string): Promise<boolean> {
+  // No OS service — fork proxy as detached background process, write pidfile.
+  info('Starting proxy as background process (no OS service configured)')
+
+  const child = Bun.spawn([bunBin, 'run', existsSync(INSTALL_SERVER) ? INSTALL_SERVER : SERVER_PATH], {
+    stdout: Bun.file(LOG_FILE),
+    stderr: Bun.file(LOG_FILE),
+    stdin: 'ignore',
+    env: { ...process.env, LOG_LEVEL: process.env.LOG_LEVEL ?? 'info', LOG_FORMAT: 'both' },
+  })
+
+  // Detach — parent exit should not kill child
+  child.unref()
+  if (child.pid) writeFileSync(PID_FILE, String(child.pid) + '\n')
+
+  return waitForProxyAlive()
+}
+
+async function ensureProxyRunning(d: DocReport, bunBin: string): Promise<void> {
+  if (d.proxyAlive) return
+
+  // Prefer OS service if installed
+  if (d.serviceInstalled) {
+    const started = await startProxyViaService(d)
+    if (started && await waitForProxyAlive()) {
+      ok(`Proxy started via ${d.service}`)
+      return
+    }
+    warn(`${d.service} start failed — falling back to direct background launch`)
   }
 
-  const p = spawn({
-    cmd: [claudeBin, ...args],
-    stdio: ['inherit', 'inherit', 'inherit'],
-    env,
-  })
+  const alive = await startProxyFallback(bunBin)
+  if (!alive) {
+    err(`Proxy failed to start. Check logs: ${LOG_FILE}`)
+    process.exit(1)
+  }
+  ok('Proxy started')
+}
+
+// ═══ Main orchestrator: auto-install everything missing ═════════════
+
+async function ensureInstalled(): Promise<{ d: DocReport; bunBin: string; claudeBin: string }> {
+  let d = await doctor()
+
+  const firstRun = !d.proxyFiles || !d.binLink || (!d.serviceInstalled && d.service !== 'none')
+
+  if (firstRun) {
+    console.error('\n' + c(C.bold + C.cyan, '  claude-max — first-run setup'))
+    console.error(c(C.dim, '  Everything will be installed automatically.'))
+    console.error(c(C.dim, `  OS: ${platform()}, service: ${d.service}`))
+    console.error('')
+  }
+
+  // 1. bun
+  if (!d.bun) await installBun()
+
+  // 2. Claude Code CLI
+  d = await doctor()
+  if (!d.claude) await installClaudeCLI()
+
+  // 3. Proxy files
+  d = await doctor()
+  if (!d.proxyFiles) installProxyFiles()
+
+  // 4. ~/.local/bin symlink
+  d = await doctor()
+  if (!d.binLink) installBinLink()
+  if (!d.binInPath) ensurePathInShellRc()
+
+  // 5. OS service
+  d = await doctor()
+  const bunBin = which('bun') ?? join(HOME, '.bun', 'bin', 'bun')
+
+  if (IS_DARWIN && !d.serviceInstalled) {
+    installLaunchdPlist(bunBin)
+  } else if (IS_LINUX && which('systemctl') && !d.serviceInstalled) {
+    installSystemdUnit(bunBin)
+  }
+
+  // Refresh
+  d = await doctor()
+  const claudeBin = d.claude!
+
+  if (firstRun) {
+    console.error('\n' + c(C.green + C.bold, '  ✓ Setup complete.') + '\n')
+  }
+
+  return { d, bunBin, claudeBin }
+}
+
+// ═══ Subcommands ════════════════════════════════════════════════════
+
+async function cmdRun(args: string[]): Promise<never> {
+  const { d, bunBin, claudeBin } = await ensureInstalled()
+  await ensureProxyRunning(d, bunBin)
+
+  // Exec native claude with our env swap
+  const env = {
+    ...process.env,
+    ANTHROPIC_BASE_URL: PROXY_URL,
+    ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ?? 'claude-max-proxy-placeholder',
+  }
+
+  const p = spawn({ cmd: [claudeBin, ...args], stdio: ['inherit', 'inherit', 'inherit'], env })
   const exit = await p.exited
   process.exit(exit)
 }
 
 async function cmdStatus(): Promise<void> {
-  if (!(await isProxyAlive())) {
-    console.log('Proxy: NOT RUNNING')
-    process.exit(1)
+  const d = await doctor()
+  if (!d.proxyAlive) {
+    console.log(c(C.red, '●') + ' proxy:  ' + c(C.red, 'NOT RUNNING'))
+    if (d.serviceInstalled) console.log(`  try: ${d.service === 'launchd' ? 'launchctl kickstart -k gui/$UID/' + LAUNCHD_LABEL : 'systemctl --user start claude-max-proxy'}`)
+    return
   }
 
   const r = await fetch(`${PROXY_URL}/stats`)
   const stats = await r.json() as any
 
-  console.log(`Proxy: RUNNING (pid ${stats.proxy.pid}, uptime ${stats.proxy.uptime}s, port ${stats.proxy.port})`)
-  console.log(`Sessions: ${stats.sessions.length}`)
+  console.log(c(C.green, '●') + ' proxy:  ' + c(C.green, 'RUNNING') +
+    c(C.dim, `  pid=${stats.proxy.pid}  port=${stats.proxy.port}  uptime=${stats.proxy.uptime}s`))
+  console.log(c(C.dim, `  sessions: ${stats.sessions.length}`))
   for (const s of stats.sessions) {
-    const pid = s.pid ? `pid=${s.pid}` : 'pid=?'
-    const idle = `idle=${s.idleSec}s`
-    console.log(`  ${s.sessionId.slice(0, 12)}  ${pid}  ${idle}  model=${s.model ?? '?'}  KA=${s.ka.timerRunning ? '🟢' : '⚫'}`)
+    const ka = s.ka.timerRunning ? c(C.green, '🟢') : c(C.gray, '⚫')
+    console.log(`    ${s.sessionId.slice(0, 12)}  pid=${s.pid ?? '?'}  idle=${s.idleSec}s  ${s.model ?? '?'}  ${ka}`)
   }
-  console.log(`Quota: 5h=${stats.rateLimit.utilization5h ?? '?'}  7d=${stats.rateLimit.utilization7d ?? '?'}  status=${stats.rateLimit.status ?? '?'}`)
+  const q = stats.rateLimit
+  const q5 = q.utilization5h != null ? `${(q.utilization5h * 100).toFixed(0)}%` : '?'
+  const q7 = q.utilization7d != null ? `${(q.utilization7d * 100).toFixed(0)}%` : '?'
+  console.log(c(C.dim, `  quota: 5h=${q5} 7d=${q7} status=${q.status ?? '?'}`))
 }
 
 async function cmdStop(): Promise<void> {
-  const pid = readPid()
-  if (!pid) {
-    console.log('Proxy not running')
+  const d = await doctor()
+
+  if (d.serviceInstalled) {
+    if (d.service === 'launchd') run(['launchctl', 'unload', LAUNCHD_PLIST])
+    if (d.service === 'systemd') run(['systemctl', '--user', 'stop', 'claude-max-proxy.service'])
+    ok(`${d.service} service stopped`)
     return
   }
 
+  // Fallback PID
+  if (!existsSync(PID_FILE)) { warn('No proxy running'); return }
+  const pid = parseInt(readFileSync(PID_FILE, 'utf8').trim())
   try {
     await fetch(`${PROXY_URL}/admin/shutdown`, { method: 'POST', signal: AbortSignal.timeout(2000) })
-  } catch {
-    // Fall back to SIGTERM
-    try { process.kill(pid, 'SIGTERM') } catch {}
-  }
-
-  // Wait for death
+  } catch {}
   for (let i = 0; i < 20; i++) {
-    if (!(await isProxyAlive())) {
-      console.log('Proxy stopped')
-      return
-    }
+    try { process.kill(pid, 0) } catch { ok('proxy stopped'); return }
     await new Promise(r => setTimeout(r, 200))
   }
-
-  console.log('Proxy did not stop gracefully — sending SIGKILL')
+  warn('proxy did not stop gracefully, sending SIGKILL')
   try { process.kill(pid, 'SIGKILL') } catch {}
+}
+
+async function cmdRestart(): Promise<void> {
+  await cmdStop()
+  await new Promise(r => setTimeout(r, 500))
+  const { d, bunBin } = await ensureInstalled()
+  await ensureProxyRunning(d, bunBin)
+  await cmdStatus()
 }
 
 async function cmdLogs(args: string[]): Promise<void> {
   const follow = args.includes('-f') || args.includes('--follow')
-  const cmd = follow ? ['tail', '-f', cfg.logFile] : ['tail', '-n', '100', cfg.logFile]
+  if (!existsSync(LOG_FILE)) { warn(`No log file at ${LOG_FILE}`); return }
+  const cmd = follow ? ['tail', '-f', LOG_FILE] : ['tail', '-n', '100', LOG_FILE]
   const p = spawn({ cmd, stdio: ['inherit', 'inherit', 'inherit'] })
   await p.exited
 }
 
-async function cmdConfig(): Promise<void> {
-  console.log(JSON.stringify(cfg, null, 2))
-}
-
 async function cmdWatch(): Promise<void> {
-  // TUI dashboard — requires proxy running
-  await ensureProxyRunning()
-  const here = import.meta.dir
-  const tuiPath = join(here, '..', 'src', 'tui.ts')
-  if (!existsSync(tuiPath)) {
-    console.error('[claude-max] TUI file not found at ' + tuiPath)
-    process.exit(1)
-  }
-  // blessed needs a real TTY — inherit all stdio
-  const p = spawn({ cmd: ['bun', 'run', tuiPath], stdio: ['inherit', 'inherit', 'inherit'] })
+  const { d, bunBin } = await ensureInstalled()
+  await ensureProxyRunning(d, bunBin)
+
+  const tuiPath = existsSync(INSTALL_TUI) ? INSTALL_TUI : TUI_PATH
+  if (!existsSync(tuiPath)) { err('TUI file not found'); process.exit(1) }
+  const p = spawn({ cmd: [bunBin, 'run', tuiPath], stdio: ['inherit', 'inherit', 'inherit'] })
   await p.exited
 }
 
-// ═══ Router ═══════════════════════════════════════════════════════
+async function cmdDoctor(): Promise<void> {
+  const d = await doctor()
+  printDoctor(d)
+}
+
+async function cmdConfig(): Promise<void> {
+  console.log(`PROXY_URL         ${PROXY_URL}`)
+  console.log(`PROXY_PORT        ${PROXY_PORT}`)
+  console.log(`INSTALL_DIR       ${INSTALL_DIR}`)
+  console.log(`BIN_LINK          ${BIN_LINK}`)
+  console.log(`LOG_FILE          ${LOG_FILE}`)
+  console.log(`JSONL_FILE        ${JSONL_FILE}`)
+  console.log(`CREDS_FILE        ${CREDS_FILE}`)
+  console.log(`PID_FILE          ${PID_FILE}`)
+  if (IS_DARWIN) console.log(`LAUNCHD_PLIST     ${LAUNCHD_PLIST}`)
+  if (IS_LINUX) console.log(`SYSTEMD_UNIT      ${SYSTEMD_UNIT}`)
+}
+
+async function cmdUninstall(): Promise<void> {
+  step('Uninstalling claude-max-proxy')
+
+  // Stop + unload service
+  if (IS_DARWIN && existsSync(LAUNCHD_PLIST)) {
+    run(['launchctl', 'unload', LAUNCHD_PLIST])
+    run(['rm', '-f', LAUNCHD_PLIST])
+    ok('launchd plist removed')
+  }
+  if (IS_LINUX && existsSync(SYSTEMD_UNIT)) {
+    run(['systemctl', '--user', 'stop', 'claude-max-proxy.service'], { quiet: true })
+    run(['systemctl', '--user', 'disable', 'claude-max-proxy.service'], { quiet: true })
+    run(['rm', '-f', SYSTEMD_UNIT])
+    run(['systemctl', '--user', 'daemon-reload'], { quiet: true })
+    ok('systemd unit removed')
+  }
+
+  // Remove bin link
+  if (existsSync(BIN_LINK)) { run(['rm', '-f', BIN_LINK]); ok('bin symlink removed') }
+
+  // Remove install dir (kept logs)
+  if (existsSync(INSTALL_DIR)) { run(['rm', '-rf', INSTALL_DIR]); ok('install dir removed') }
+
+  console.log('')
+  console.log(c(C.dim, '  Logs preserved at: ' + LOG_FILE))
+  console.log(c(C.dim, '  Credentials kept at: ' + CREDS_FILE))
+  console.log('')
+  console.log(c(C.green, 'Uninstalled. Run claude-max again to reinstall.'))
+}
+
+// ═══ Router ════════════════════════════════════════════════════════
 
 const subcmd = process.argv[2]
 const rest = process.argv.slice(3)
 
-switch (subcmd) {
-  case 'status':   await cmdStatus(); break
-  case 'stop':     await cmdStop(); break
-  case 'restart':  await cmdStop(); await ensureProxyRunning(); break
-  case 'logs':     await cmdLogs(rest); break
-  case 'watch':    await cmdWatch(); break
-  case 'config':   await cmdConfig(); break
-  case 'help':
-  case '--help':
-  case '-h':
-    console.log(`Usage:
-  claude-max              start proxy if needed, exec native claude
-  claude-max status       show proxy state
-  claude-max watch        live TUI dashboard
-  claude-max logs [-f]    tail logs
-  claude-max stop         kill proxy
-  claude-max restart      stop + start
-  claude-max config       print config
+async function main() {
+  switch (subcmd) {
+    case 'status':    await cmdStatus(); break
+    case 'stop':      await cmdStop(); break
+    case 'restart':   await cmdRestart(); break
+    case 'logs':      await cmdLogs(rest); break
+    case 'watch':     await cmdWatch(); break
+    case 'doctor':    await cmdDoctor(); break
+    case 'config':    await cmdConfig(); break
+    case 'uninstall': await cmdUninstall(); break
+    case 'help':
+    case '--help':
+    case '-h': {
+      console.log(`${c(C.bold, 'claude-max')} — warm-cache proxy for Claude Code CLI
+
+${c(C.bold, 'Usage:')}
+  claude-max              ${c(C.dim, 'start proxy (auto-install on first run), exec claude')}
+  claude-max watch        ${c(C.dim, 'live TUI dashboard')}
+  claude-max status       ${c(C.dim, 'proxy state + active sessions')}
+  claude-max logs [-f]    ${c(C.dim, 'tail proxy logs (-f = follow)')}
+  claude-max stop         ${c(C.dim, 'stop proxy service')}
+  claude-max restart      ${c(C.dim, 'stop + start')}
+  claude-max doctor       ${c(C.dim, 'self-check: what is installed vs missing')}
+  claude-max uninstall    ${c(C.dim, 'remove service + binaries (keeps logs/creds)')}
+
+${c(C.bold, 'First run:')} everything is auto-installed. Just run ${c(C.cyan, 'claude-max')}.
 `)
-    break
-  default:
-    // Pass through to native claude with proxy-aware env
-    await cmdStart([subcmd, ...rest].filter(Boolean))
+      break
+    }
+    default:
+      // Default: run claude through proxy (pass any args to claude)
+      await cmdRun([subcmd, ...rest].filter(Boolean))
+  }
 }
+
+main().catch(e => { err(`${e?.message ?? e}\n${e?.stack ?? ''}`); process.exit(1) })

@@ -21,7 +21,7 @@
  */
 
 import { spawnSync, spawn } from 'bun'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname, resolve as pathResolve } from 'path'
 
@@ -49,15 +49,52 @@ const PID_FILE = join(STATE_DIR, 'claude-max-proxy.pid')
 const LOG_FILE = join(STATE_DIR, 'claude-max-proxy.log')
 const JSONL_FILE = join(STATE_DIR, 'claude-max-proxy.jsonl')
 const CREDS_FILE = join(STATE_DIR, '.credentials.json')
+// Discovery — SSOT written by running proxy, read by all CLIs
+const DISCOVERY_FILE = join(STATE_DIR, 'claude-max-proxy.json')
 
 // OS service
 const SYSTEMD_UNIT = join(HOME, '.config', 'systemd', 'user', 'claude-max-proxy.service')
 const LAUNCHD_PLIST = join(HOME, 'Library', 'LaunchAgents', 'com.lifeaitools.claude-max-proxy.plist')
 const LAUNCHD_LABEL = 'com.lifeaitools.claude-max-proxy'
 
-const PROXY_PORT = parseInt(process.env.PROXY_PORT ?? '5050')
-const PROXY_HOST = process.env.PROXY_HOST ?? '127.0.0.1'
-const PROXY_URL = `http://${PROXY_HOST}:${PROXY_PORT}`
+// Preferred port/host (fallback when no discovery state yet).
+const PREF_PORT = parseInt(process.env.PROXY_PORT ?? '5050')
+const PREF_HOST = process.env.PROXY_HOST ?? '127.0.0.1'
+
+// Discovery state shape — must match src/discovery.ts DiscoveryState.
+interface DiscoveryState {
+  port: number
+  host: string
+  pid: number
+  startedAt: string
+  version: string
+  endpoint: string
+}
+
+function readDiscoveryState(): DiscoveryState | null {
+  if (!existsSync(DISCOVERY_FILE)) return null
+  try {
+    const d = JSON.parse(readFileSync(DISCOVERY_FILE, 'utf8')) as DiscoveryState
+    if (typeof d.port !== 'number' || typeof d.pid !== 'number') return null
+    return d
+  } catch { return null }
+}
+
+function clearDiscoveryState(): void {
+  try { unlinkSync(DISCOVERY_FILE) } catch {}
+}
+
+/**
+ * Resolve the endpoint we should connect to.
+ * Priority: 1) discovery file if healthy, 2) preferred (PROXY_PORT env or 5050)
+ */
+function getProxyUrl(): { host: string; port: number; url: string; fromDiscovery: boolean } {
+  const d = readDiscoveryState()
+  if (d) {
+    return { host: d.host, port: d.port, url: d.endpoint, fromDiscovery: true }
+  }
+  return { host: PREF_HOST, port: PREF_PORT, url: `http://${PREF_HOST}:${PREF_PORT}`, fromDiscovery: false }
+}
 
 // ═══ Logging helpers ════════════════════════════════════════════════
 
@@ -111,7 +148,7 @@ interface DocReport {
   proxyAlive: boolean
 }
 
-async function doctor(): Promise<DocReport> {
+async function doctor(): Promise<DocReport & { endpoint?: string; fromDiscovery?: boolean }> {
   const bun = which('bun')
   const claude = which('claude')
 
@@ -140,16 +177,17 @@ async function doctor(): Promise<DocReport> {
 
   const credsPresent = existsSync(CREDS_FILE)
 
+  const { url: endpoint, fromDiscovery } = getProxyUrl()
   let proxyAlive = false
   try {
-    const r = await fetch(`${PROXY_URL}/health`, { signal: AbortSignal.timeout(800) })
+    const r = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(800) })
     proxyAlive = r.ok
   } catch {}
 
   return {
     bun, claude, proxyFiles, binLink, binInPath,
     service, serviceInstalled, serviceActive,
-    credsPresent, proxyAlive,
+    credsPresent, proxyAlive, endpoint, fromDiscovery,
   }
 }
 
@@ -170,7 +208,12 @@ function printDoctor(d: DocReport): void {
   line(`${d.service} unit installed`, d.serviceInstalled, d.serviceInstalled ? 'ok' : 'warn')
   line(`${d.service} unit active`, d.serviceActive, d.serviceActive ? 'ok' : 'warn')
   line('OAuth credentials', d.credsPresent, d.credsPresent ? 'ok' : 'err')
-  line(`proxy alive @ :${PROXY_PORT}`, d.proxyAlive, d.proxyAlive ? 'ok' : 'warn')
+  const whereSuffix = d.endpoint ? ` @ ${d.endpoint}${d.fromDiscovery ? ' (discovered)' : ' (default)'}` : ''
+  line(`proxy alive${whereSuffix}`, d.proxyAlive, d.proxyAlive ? 'ok' : 'warn')
+  // Show discovery file path for transparency
+  if (d.fromDiscovery) {
+    console.log(`  ${c(C.dim, '  via: ' + DISCOVERY_FILE)}`)
+  }
   console.log('')
 }
 
@@ -363,27 +406,27 @@ function installLaunchdPlist(bunBin: string): void {
 //
 // Never kill another proxy. Never create second instance on same port.
 
-async function probeHealth(timeoutMs = 800): Promise<{ alive: boolean; stats?: any; err?: string }> {
+async function probeHealth(timeoutMs = 800): Promise<{ alive: boolean; stats?: any; err?: string; endpoint: string }> {
+  const { url } = getProxyUrl()
   try {
-    const r = await fetch(`${PROXY_URL}/health`, { signal: AbortSignal.timeout(timeoutMs) })
-    if (!r.ok) return { alive: false, err: `HTTP ${r.status}` }
+    const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!r.ok) return { alive: false, err: `HTTP ${r.status}`, endpoint: url }
     const stats = await r.json() as any
-    return { alive: true, stats }
+    return { alive: true, stats, endpoint: url }
   } catch (e: any) {
-    return { alive: false, err: e?.code ?? e?.message ?? 'unknown' }
+    return { alive: false, err: e?.code ?? e?.message ?? 'unknown', endpoint: url }
   }
 }
 
-function portOccupiedByOther(): boolean {
-  // Who listens on PROXY_PORT? lsof on unix. If NO one listens → port free.
-  // If someone listens → occupied (by us or other). Combine with probeHealth().
-  const r = run(['bash', '-c', `lsof -ti :${PROXY_PORT} 2>/dev/null | head -1`], { quiet: true })
+function portOccupiedByOther(port: number): boolean {
+  // Who listens on port? lsof on unix. If NO one listens → port free.
+  const r = run(['bash', '-c', `lsof -ti :${port} 2>/dev/null | head -1`], { quiet: true })
   return r.stdout.trim().length > 0
 }
 
-async function waitForProxyAlive(timeoutMs = 8000): Promise<{ alive: boolean; stats?: any }> {
+async function waitForProxyAlive(timeoutMs = 8000): Promise<{ alive: boolean; stats?: any; endpoint?: string }> {
   const start = Date.now()
-  let last = { alive: false }
+  let last: { alive: boolean; stats?: any; endpoint?: string } = { alive: false }
   while (Date.now() - start < timeoutMs) {
     const r = await probeHealth(500)
     if (r.alive) return r
@@ -427,64 +470,59 @@ async function startProxyFallback(bunBin: string): Promise<boolean> {
 }
 
 async function ensureProxyRunning(d: DocReport, bunBin: string): Promise<void> {
-  // STEP 1 — CONNECT if proxy already alive. This is the common case.
-  // Another claude-max invocation, systemd autostart on login, or a manual
-  // `bun run src/server.ts` already has it running. We just connect.
+  // STEP 1 — Discovery state file. The SSOT for where proxy lives.
+  const { url: discoveredUrl, port: discoveredPort, fromDiscovery } = getProxyUrl()
+
   const probe1 = await probeHealth()
   if (probe1.alive) {
     const upS = probe1.stats?.uptime ?? '?'
     const sess = probe1.stats?.sessions ?? 0
-    ok(`Proxy already running @ ${PROXY_URL} (uptime ${upS}s, ${sess} active sessions) — connecting`)
+    const source = fromDiscovery ? ' (via discovery file)' : ''
+    ok(`Proxy already running @ ${probe1.endpoint}${source} (uptime ${upS}s, ${sess} sessions) — connecting`)
     return
   }
 
-  // STEP 2 — Port occupied but health broken? Someone else bound the port
-  // with a different service or a crashed proxy that can't respond.
-  // NEVER start a second instance on the same port — tell user + exit.
-  if (portOccupiedByOther()) {
-    err(`Port ${PROXY_PORT} is occupied but /health does not respond.`)
-    err(`Another process holds the port but isn't a healthy claude-max-proxy.`)
-    err(`Options:`)
-    err(`  • Check: lsof -i :${PROXY_PORT}`)
-    err(`  • If it's a stale proxy: claude-max stop  (or kill the PID manually)`)
-    err(`  • If a different service uses port ${PROXY_PORT}: change PROXY_PORT env var`)
-    process.exit(1)
+  // STEP 2 — Discovery file was stale (points to dead proxy). Clean it up so
+  // next getProxyUrl() falls back to preferred defaults, then re-find free port.
+  if (fromDiscovery) {
+    warn(`Discovery file pointed to ${discoveredUrl} but /health doesn't respond → stale, clearing`)
+    clearDiscoveryState()
   }
 
-  // STEP 3 — Port is free and proxy is not running. Start via OS service
-  // if installed, else fallback fork. Start is idempotent (safe to call even
-  // if unit is already "enabled" — just ensures it's "active").
+  // STEP 3 — Port is free? If someone else bound our PREFERRED port but we don't
+  // have a discovery record, that's fine — the proxy itself will auto-pick a free
+  // port in the scan range via src/discovery.ts:findFreePort(). We just need to
+  // launch it; the server writes a fresh discovery file.
+  //
+  // If preferred port (5050) IS occupied by a non-proxy process, our proxy will
+  // bind port 5051 (or next free). Discovery file gets updated. Wrapper reads
+  // new port on next invocation. Net effect: proxy auto-adapts.
+  if (portOccupiedByOther(PREF_PORT)) {
+    info(`Preferred port ${PREF_PORT} is occupied — proxy will auto-pick free port in 5050-5099`)
+  }
+
+  // STEP 4 — Start via OS service if installed.
   if (d.serviceInstalled) {
     info(`${d.service} unit installed — starting via service manager`)
     const started = await startProxyViaService(d)
     const r = await waitForProxyAlive()
     if (r.alive) {
-      ok(`Proxy started via ${d.service} (uptime ${r.stats?.uptime ?? '?'}s)`)
+      ok(`Proxy started via ${d.service} @ ${r.endpoint} (uptime ${r.stats?.uptime ?? '?'}s)`)
       return
     }
-    if (!started) {
-      warn(`${d.service} start returned failure — inspecting log`)
-    }
+    if (!started) warn(`${d.service} start returned failure`)
     warn(`${d.service} didn't come up within 8s — falling back to direct fork`)
   }
 
-  // STEP 4 — Last-resort fork. Re-check port in case systemd bound it during wait.
-  const probe2 = await probeHealth()
-  if (probe2.alive) {
-    ok(`Proxy came up while we were deciding what to do — connecting`)
-    return
-  }
-  if (portOccupiedByOther()) {
-    err(`Port ${PROXY_PORT} just became occupied — bailing to avoid double-fork`)
-    process.exit(1)
-  }
-
+  // STEP 5 — Fallback: fork server ourselves. Server's own acquireStartSlot
+  // will handle race with any other concurrent start attempt.
   const alive = await startProxyFallback(bunBin)
   if (!alive) {
     err(`Proxy failed to start. Check logs: ${LOG_FILE}`)
     process.exit(1)
   }
-  ok('Proxy started (background fork)')
+  const probe3 = await probeHealth()
+  ok(`Proxy started @ ${probe3.endpoint} (background fork)`)
 }
 
 // ═══ Main orchestrator: auto-install everything missing ═════════════
@@ -544,10 +582,12 @@ async function cmdRun(args: string[]): Promise<never> {
   const { d, bunBin, claudeBin } = await ensureInstalled()
   await ensureProxyRunning(d, bunBin)
 
-  // Exec native claude with our env swap
+  // Re-read discovery state: proxy may have been assigned non-default port.
+  const { url: activeUrl } = getProxyUrl()
+
   const env = {
     ...process.env,
-    ANTHROPIC_BASE_URL: PROXY_URL,
+    ANTHROPIC_BASE_URL: activeUrl,
     ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ?? 'claude-max-proxy-placeholder',
   }
 
@@ -560,11 +600,12 @@ async function cmdStatus(): Promise<void> {
   const d = await doctor()
   if (!d.proxyAlive) {
     console.log(c(C.red, '●') + ' proxy:  ' + c(C.red, 'NOT RUNNING'))
-    if (d.serviceInstalled) console.log(`  try: ${d.service === 'launchd' ? 'launchctl kickstart -k gui/$UID/' + LAUNCHD_LABEL : 'systemctl --user start claude-max-proxy'}`)
+    if (d.serviceInstalled) console.log(`  try: ${d.service === 'launchd' ? 'launchctl kickstart gui/$UID/' + LAUNCHD_LABEL : 'systemctl --user start claude-max-proxy'}`)
     return
   }
 
-  const r = await fetch(`${PROXY_URL}/stats`)
+  const { url } = getProxyUrl()
+  const r = await fetch(`${url}/stats`)
   const stats = await r.json() as any
 
   console.log(c(C.green, '●') + ' proxy:  ' + c(C.green, 'RUNNING') +
@@ -587,7 +628,8 @@ async function cmdStop(args: string[] = []): Promise<void> {
   // Warn if active sessions — stopping proxy kills their KA protection.
   if (d.proxyAlive) {
     try {
-      const r = await fetch(`${PROXY_URL}/stats`)
+      const { url } = getProxyUrl()
+      const r = await fetch(`${url}/stats`)
       const stats = await r.json() as any
       const activeCount = stats.sessions?.length ?? 0
       if (activeCount > 0 && !force) {
@@ -610,11 +652,13 @@ async function cmdStop(args: string[] = []): Promise<void> {
     return
   }
 
-  // Fallback PID
-  if (!existsSync(PID_FILE)) { warn('No proxy running'); return }
-  const pid = parseInt(readFileSync(PID_FILE, 'utf8').trim())
+  // Fallback PID — use discovery state to find the right endpoint for shutdown
+  const discState = readDiscoveryState()
+  const shutdownEndpoint = discState?.endpoint ?? `http://${PREF_HOST}:${PREF_PORT}`
+  const pid = discState?.pid ?? (existsSync(PID_FILE) ? parseInt(readFileSync(PID_FILE, 'utf8').trim()) : null)
+  if (!pid) { warn('No proxy running (no PID found)'); return }
   try {
-    await fetch(`${PROXY_URL}/admin/shutdown`, { method: 'POST', signal: AbortSignal.timeout(2000) })
+    await fetch(`${shutdownEndpoint}/admin/shutdown`, { method: 'POST', signal: AbortSignal.timeout(2000) })
   } catch {}
   for (let i = 0; i < 20; i++) {
     try { process.kill(pid, 0) } catch { ok('proxy stopped'); return }
@@ -656,16 +700,33 @@ async function cmdDoctor(): Promise<void> {
 }
 
 async function cmdConfig(): Promise<void> {
-  console.log(`PROXY_URL         ${PROXY_URL}`)
-  console.log(`PROXY_PORT        ${PROXY_PORT}`)
-  console.log(`INSTALL_DIR       ${INSTALL_DIR}`)
-  console.log(`BIN_LINK          ${BIN_LINK}`)
-  console.log(`LOG_FILE          ${LOG_FILE}`)
-  console.log(`JSONL_FILE        ${JSONL_FILE}`)
-  console.log(`CREDS_FILE        ${CREDS_FILE}`)
-  console.log(`PID_FILE          ${PID_FILE}`)
-  if (IS_DARWIN) console.log(`LAUNCHD_PLIST     ${LAUNCHD_PLIST}`)
-  if (IS_LINUX) console.log(`SYSTEMD_UNIT      ${SYSTEMD_UNIT}`)
+  const { url, host, port, fromDiscovery } = getProxyUrl()
+  const disc = readDiscoveryState()
+
+  console.log(c(C.bold, 'Runtime (active):'))
+  console.log(`  PROXY_URL          ${url} ${fromDiscovery ? c(C.dim, '(from discovery file)') : c(C.dim, '(default — no discovery yet)')}`)
+  console.log(`  PROXY_HOST         ${host}`)
+  console.log(`  PROXY_PORT         ${port}`)
+  if (disc) {
+    console.log(`  Proxy pid          ${disc.pid}`)
+    console.log(`  Started at         ${disc.startedAt}`)
+    console.log(`  Proxy version      ${disc.version}`)
+  }
+  console.log('')
+  console.log(c(C.bold, 'Preferences (env or default):'))
+  console.log(`  PREF_PORT          ${PREF_PORT} ${process.env.PROXY_PORT ? '(from env)' : '(default)'}`)
+  console.log(`  PREF_HOST          ${PREF_HOST}`)
+  console.log('')
+  console.log(c(C.bold, 'Files:'))
+  console.log(`  INSTALL_DIR        ${INSTALL_DIR}`)
+  console.log(`  BIN_LINK           ${BIN_LINK}`)
+  console.log(`  LOG_FILE           ${LOG_FILE}`)
+  console.log(`  JSONL_FILE         ${JSONL_FILE}`)
+  console.log(`  CREDS_FILE         ${CREDS_FILE}`)
+  console.log(`  DISCOVERY_FILE     ${DISCOVERY_FILE} ${disc ? c(C.green, '✓ present') : c(C.dim, '(absent)')}`)
+  console.log(`  PID_FILE           ${PID_FILE}`)
+  if (IS_DARWIN) console.log(`  LAUNCHD_PLIST      ${LAUNCHD_PLIST}`)
+  if (IS_LINUX) console.log(`  SYSTEMD_UNIT       ${SYSTEMD_UNIT}`)
 }
 
 async function cmdUninstall(): Promise<void> {

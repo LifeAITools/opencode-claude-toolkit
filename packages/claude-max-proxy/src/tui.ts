@@ -16,10 +16,20 @@
 
 import blessed from 'blessed'
 import { loadConfig } from './config.js'
+import { readDiscoveryState } from './discovery.js'
 import { spawn } from 'bun'
 
 const cfg = loadConfig()
-const PROXY_URL = `http://${cfg.proxyHost}:${cfg.proxyPort}`
+
+// Read current endpoint from discovery file; fall back to config defaults.
+function currentProxyUrl(): string {
+  const d = readDiscoveryState()
+  if (d) return d.endpoint
+  return `http://${cfg.proxyHost}:${cfg.proxyPort}`
+}
+
+// Initial URL — but we also re-resolve on each poll, in case proxy restarts on a different port.
+let PROXY_URL = currentProxyUrl()
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -158,13 +168,17 @@ const fireCounts = { lastHour: 0, lastMinute: 0 }
 const fireHistory: Array<{ ts: number; cacheRead: number; cacheWrite: number }> = []
 
 async function poll(): Promise<void> {
+  // Re-resolve proxy URL from discovery file each poll — if proxy restarts on
+  // a different port (e.g. original port was occupied), we pick up the new one.
+  PROXY_URL = currentProxyUrl()
+
   let stats: StatsResponse
   try {
     const r = await fetch(`${PROXY_URL}/stats`, { signal: AbortSignal.timeout(2000) })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     stats = await r.json() as StatsResponse
   } catch (e: any) {
-    header.setContent(`{center}{bold}claude-max-proxy{/bold}  {red-fg}PROXY UNREACHABLE{/} — ${e?.message ?? e}{/center}`)
+    header.setContent(`{center}{bold}claude-max-proxy{/bold}  {red-fg}PROXY UNREACHABLE{/} @ ${PROXY_URL} — ${e?.message ?? e}{/center}`)
     screen.render()
     return
   }

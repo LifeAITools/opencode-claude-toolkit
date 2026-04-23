@@ -24,11 +24,45 @@ import { startLogger } from './logger.js'
 import { SessionTracker } from './session-tracker.js'
 import { getAccessToken, upstreamFetch, invalidateTokenCache } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
+import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath } from './discovery.js'
+
+const PROXY_VERSION = '0.1.0'
 
 const cfg = loadConfig()
 
 // Start logger FIRST so all subsequent events are captured
 const stopLogger = startLogger(cfg)
+
+// ═══ Discovery gate — refuse to start if another healthy proxy exists ═══
+
+const slot = await acquireStartSlot(cfg.proxyHost, cfg.proxyPort)
+
+if (!slot.shouldStart && slot.reason === 'healthy') {
+  const ex = slot.existing
+  console.error(`[claude-max-proxy] Healthy proxy already running: pid=${ex.pid} port=${ex.port} since=${ex.startedAt}`)
+  console.error(`[claude-max-proxy] State file: ${getStateFilePath()}`)
+  console.error(`[claude-max-proxy] Refusing to start second instance. Exiting.`)
+  stopLogger()
+  process.exit(0)
+}
+
+if (!slot.shouldStart && slot.reason === 'no_free_port') {
+  console.error(`[claude-max-proxy] No free port available in range 5050-5099. Cannot start.`)
+  stopLogger()
+  process.exit(1)
+}
+
+// slot.shouldStart === true here — acquired a port (may differ from cfg.proxyPort)
+const RUNTIME_PORT = slot.shouldStart ? slot.port : cfg.proxyPort
+const RUNTIME_HOST = slot.shouldStart ? slot.host : cfg.proxyHost
+
+if (RUNTIME_PORT !== cfg.proxyPort) {
+  emit({
+    level: 'info',
+    kind: 'PROXY_CONFIG',
+    msg: `Preferred port ${cfg.proxyPort} was occupied — auto-selected free port ${RUNTIME_PORT}`,
+  })
+}
 
 emit({
   level: 'info',
@@ -388,10 +422,13 @@ async function handleMessages(req: Request, server: { requestIP(r: Request): { a
 function statsJson() {
   return {
     proxy: {
-      version: '0.1.0',
+      version: PROXY_VERSION,
       pid: process.pid,
       uptime: Math.floor(process.uptime()),
-      port: cfg.proxyPort,
+      port: RUNTIME_PORT,
+      host: RUNTIME_HOST,
+      endpoint: `http://${RUNTIME_HOST}:${RUNTIME_PORT}`,
+      discoveryFile: getStateFilePath(),
     },
     sessions: tracker.list().map(s => ({
       sessionId: s.sessionId,
@@ -418,8 +455,8 @@ function statsJson() {
 // ═══ Bun.serve ═══════════════════════════════════════════════════
 
 const server = Bun.serve({
-  port: cfg.proxyPort,
-  hostname: cfg.proxyHost,
+  port: RUNTIME_PORT,
+  hostname: RUNTIME_HOST,
   idleTimeout: 255,  // max — CC long streams
 
   async fetch(req, server) {
@@ -454,12 +491,21 @@ const server = Bun.serve({
   },
 })
 
+// Publish discovery state so other processes can find us
+const discoveryState = publishDiscoveryState({
+  port: RUNTIME_PORT,
+  host: RUNTIME_HOST,
+  version: PROXY_VERSION,
+})
+
 emit({
   level: 'info',
   kind: 'PROXY_STARTED',
-  port: cfg.proxyPort,
-  host: cfg.proxyHost,
+  port: RUNTIME_PORT,
+  host: RUNTIME_HOST,
   pid: process.pid,
+  discoveryFile: getStateFilePath(),
+  endpoint: discoveryState.endpoint,
 })
 
 // ═══ Shutdown ═══════════════════════════════════════════════════
@@ -469,6 +515,7 @@ function shutdown(): void {
   stopHeartbeat()
   tracker.stopAll()
   server.stop(true)
+  clearDiscoveryState()
   stopLogger()
   process.exit(0)
 }

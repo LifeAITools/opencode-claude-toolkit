@@ -31,6 +31,7 @@ export interface ActionContext {
   variables: Record<string, string>  // interpolation variables
   wakeEvent?: WakeEvent  // if external event triggered this
   auditWriter?: (entry: Record<string, unknown>) => void  // injected by caller
+  sdkClient?: any  // SDK client for in-process session injection (no HTTP)
 }
 
 export interface ActionResult {
@@ -184,34 +185,35 @@ async function executeWake(action: ActionV2, ctx: ActionContext): Promise<Action
   } catch { /* identity not available — proceed without */ }
   const text = identityBlock + formatWakeEvent(ctx.wakeEvent)
 
-  // Try promptAsync first (v1.4.0), fall back to /message
-  const urls = [
-    `${ctx.serverUrl}/session/${ctx.sessionId}/prompt_async`,
-    `${ctx.serverUrl}/session/${ctx.sessionId}/message`,
-  ]
-
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          noReply: false,  // CR-02: triggers full LLM loop
-          parts: [{ type: 'text', text }],
-        }),
-      })
-      if (res.ok) {
-        dbg(`WAKE: injected via ${url.includes('prompt_async') ? 'promptAsync' : 'message'}`)
-        return { type: 'wake', success: true, wakeTriggered: true }
-      }
-      if (res.status === 404 || res.status === 405) continue
-      return { type: 'wake', success: false, error: `HTTP ${res.status}` }
-    } catch (e: any) {
-      dbg(`wake fetch error:`, e?.message)
-      continue
-    }
+  if (!ctx.sdkClient) {
+    dbg('wake: no sdkClient in ActionContext')
+    return { type: 'wake', success: false, error: 'no sdkClient' }
   }
-  return { type: 'wake', success: false, error: 'all endpoints failed' }
+
+  // Try promptAsync first, fall back to prompt
+  try {
+    const { error } = await ctx.sdkClient.session.promptAsync({
+      path: { id: ctx.sessionId },
+      body: { noReply: false, parts: [{ type: 'text', text }] },
+    })
+    if (!error) {
+      dbg('WAKE: injected via sdkClient.promptAsync')
+      return { type: 'wake', success: true, wakeTriggered: true }
+    }
+    // Fallback to prompt (sync)
+    const { error: err2 } = await ctx.sdkClient.session.prompt({
+      path: { id: ctx.sessionId },
+      body: { noReply: false, parts: [{ type: 'text', text }] },
+    })
+    if (!err2) {
+      dbg('WAKE: injected via sdkClient.prompt')
+      return { type: 'wake', success: true, wakeTriggered: true }
+    }
+    return { type: 'wake', success: false, error: `SDK error: ${err2}` }
+  } catch (e: any) {
+    dbg('wake SDK error:', e?.message)
+    return { type: 'wake', success: false, error: e?.message }
+  }
 }
 
 /** Respond: post reply to SynqTask channel (REQ-17) */

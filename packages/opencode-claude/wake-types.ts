@@ -28,6 +28,10 @@ export const WAKE_EVENT_TYPES = {
   COMMENT_ADDED: 'comment_added',
   DELEGATION_RECEIVED: 'delegation_received',
   STATUS_CHANGED: 'status_changed',
+  MENTION: 'mention',
+  TASK_COMPLETED: 'task_completed',
+  TASK_FAILED: 'task_failed',
+  AGENT_STALE: 'agent_stale',
 } as const
 
 // ─── Enums ───────────────────────────────────────────────────────────
@@ -43,6 +47,10 @@ export type WakeEventType =
   | 'webhook_event'
   | 'lifecycle_event'
   | 'timer_event'
+  | 'mention'
+  | 'task_completed'
+  | 'task_failed'
+  | 'agent_stale'
 
 export type DispatchStatus = 'delivered' | 'queued' | 'rate_limited' | 'deduped' | 'failed' | 'agent_not_found'
 
@@ -101,6 +109,12 @@ export interface DiscoveryFile {
   maxSpawnDepth?: number
   /** Max subagents allowed from org role */
   maxSubagents?: number
+  /** Event types this session subscribes to. ["*"] = all, [] = none. Absent = ["*"] (backward compat CR-05) */
+  subscribe?: string[]
+  /** Active preset name (human/agent/pm/quiet) — informational */
+  subscribePreset?: string
+  /** Member type: 'human' (OAuth), 'agent' (X-Agent-Id), 'unknown' */
+  memberType?: 'human' | 'agent' | 'unknown'
 }
 
 // ─── SignalWire Engine (duck-typed to avoid circular imports) ────────
@@ -164,6 +178,12 @@ export interface WakeListenerConfig {
   busyRetryInterval?: number
   /** Max injection retries when agent is busy */
   busyMaxRetries?: number
+  /** Initial subscription list (from preferences). Absent → default preset for memberType */
+  subscribe?: string[]
+  /** Preset name to apply at startup */
+  subscribePreset?: string
+  /** Member type hint (agent/human/unknown) — determines default preset */
+  memberType?: 'human' | 'agent' | 'unknown'
 }
 
 // ─── Wake Response ──────────────────────────────────────────────────

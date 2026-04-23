@@ -90,6 +90,25 @@ function isChannelWarm(channelId: string): boolean {
  *  Exported for signal-wire-actions.ts to prepend identity block on engine-routed wakes. */
 export let _agentIdentity: AgentIdentity | null = null
 
+/**
+ * OpenCode SDK client for in-process session API calls.
+ * Typed as `any` (intentional tech debt — ARCH-02).
+ * Assumed response shapes (from @opencode-ai/sdk types.gen.d.ts):
+ *   session.list()        → { data: Array<{id, directory, parentID, time}> }
+ *   session.get({path})   → { data: {id, parentID, parent_id, ...} }
+ *   session.status()      → { data: {sessions: [{status: 'streaming'|'idle'|...}]} }
+ *   session.prompt({...}) → { data: {...}, error?: ... }
+ *   session.promptAsync() → { data: {...}, error?: ... }
+ * When usage grows beyond current 9 call sites, consider importing
+ * OpencodeClient type from @opencode-ai/sdk for compile-time checking.
+ */
+let _sdkClient: any = null
+
+// ─── Subscription State (written to discovery file) ─────────────────
+let _currentSubscribe: string[] | null = null
+let _currentSubscribePreset: string | null = null
+let _currentMemberType: 'human' | 'agent' | 'unknown' = 'unknown'
+
 // ─── Spawn Budget Tracking (Stage 2 + 2.1) ──────────────────────────
 let _spawnTotal = 0        // total helpers spawned (lifetime, informational)
 let _spawnActive = 0       // currently active helpers (for concurrent limit)
@@ -145,7 +164,7 @@ export function getCurrentDepth(): number | null { return _currentDepth }
  * Priority: inherited from env (O(1)) → walk parent_id chain (O(depth)) → 0.
  * Cached after first resolution.
  */
-export async function resolveCurrentDepth(serverUrl: string, sessionId: string): Promise<number> {
+export async function resolveCurrentDepth(sessionId: string): Promise<number> {
   if (_currentDepth !== null) return _currentDepth
 
   let depth = 0
@@ -153,11 +172,9 @@ export async function resolveCurrentDepth(serverUrl: string, sessionId: string):
 
   try {
     for (let i = 0; i < 10; i++) {  // safety limit
-      const res = await fetch(`${serverUrl}/session/${currentId}`, {
-        signal: AbortSignal.timeout(2000),
-      })
-      if (!res.ok) break
-      const session = await res.json() as any
+      if (!_sdkClient) { dbg('resolveCurrentDepth: no sdkClient'); break }
+      const { data: session } = await _sdkClient.session.get({ path: { id: currentId } })
+      if (!session) break
       if (!session.parent_id && !session.parentId) break
       depth++
       currentId = session.parent_id ?? session.parentId
@@ -526,17 +543,11 @@ function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | null): s
 // ─── Busy Detection ─────────────────────────────────────────────────
 
 /** Check if the agent is currently processing (streaming/busy). */
-async function isAgentBusy(serverUrl: string): Promise<boolean> {
+async function isAgentBusy(): Promise<boolean> {
   try {
-    const res = await fetch(`${serverUrl}/session/status`)
-    if (!res.ok) return false // assume idle if can't check
-    const data = (await res.json()) as any
-    // If any session is actively streaming, agent is busy
-    return (
-      data?.sessions?.some?.(
-        (s: any) => s.status === 'streaming' || s.status === 'busy',
-      ) ?? false
-    )
+    if (!_sdkClient) return false
+    const { data } = await _sdkClient.session.status()
+    return data?.sessions?.some?.((s: any) => s.status === 'streaming' || s.status === 'busy') ?? false
   } catch {
     return false
   }
@@ -545,8 +556,7 @@ async function isAgentBusy(serverUrl: string): Promise<boolean> {
 // ─── Inject Wake Event (CR-02, DB-05) ───────────────────────────────
 
 /**
- * Inject a wake event into the agent's LLM loop.
- * Tries promptAsync first (v1.4.0), falls back to /message endpoint.
+ * Inject a wake event into the agent's LLM loop via sdkClient.session.promptAsync.
  * Uses noReply:false so the LLM processes and responds (CR-02).
  */
 // Cached session ID — resolved lazily on first injection, reused after
@@ -556,7 +566,7 @@ let _discoveryPath: string | null = null
 // CWD of this agent's serve instance — used to filter sessions
 let _agentDirectory: string | null = null
 
-async function resolveSessionId(serverUrl: string, sessionId: string): Promise<string | null> {
+async function resolveSessionId(sessionId: string): Promise<string | null> {
   // Return cached if already resolved
   if (_cachedSessionId && _cachedSessionId !== 'unknown') return _cachedSessionId
 
@@ -578,28 +588,29 @@ async function resolveSessionId(serverUrl: string, sessionId: string): Promise<s
     } catch { /* discovery file not ready yet */ }
   }
 
-  // Fallback 2: find OUR session by directory (CWD of this serve instance)
+  // Fallback 2: find OUR session by directory via sdkClient
   // Each serve runs in agent's workspace dir. Sessions have directory field.
   // Filter by directory to find THIS agent's session, not other agents'.
-  if (_agentDirectory && serverUrl) {
+  if (_agentDirectory) {
     try {
-      const res = await fetch(`${serverUrl}/session?limit=20`)
-      if (res.ok) {
-        const sessions = await res.json() as any[]
-        const match = sessions.find((s: any) => s.directory === _agentDirectory)
-        if (match) {
-          _cachedSessionId = match.id
-          dbg(`resolveSessionId by directory ${_agentDirectory}: ${_cachedSessionId}`)
-          // Update discovery file
-          if (_discoveryPath) {
-            try {
-              const disc = JSON.parse(readFileSync(_discoveryPath, 'utf-8'))
-              disc.sessionId = _cachedSessionId
-              writeFileSync(_discoveryPath, JSON.stringify(disc))
-            } catch {}
-          }
-          return _cachedSessionId
+      if (!_sdkClient) { dbg('resolveSessionId: no sdkClient'); return null }
+      const { data: sessions } = await _sdkClient.session.list()
+      if (!Array.isArray(sessions)) return null
+      const match = sessions.find((s: any) => s.directory === _agentDirectory)
+      if (match) {
+        _cachedSessionId = match.id
+        dbg(`resolveSessionId by directory ${_agentDirectory}: ${_cachedSessionId}`)
+        // Update discovery file (GAP-3 fix: atomic tmp→rename)
+        if (_discoveryPath) {
+          try {
+            const disc = JSON.parse(readFileSync(_discoveryPath, 'utf-8'))
+            disc.sessionId = _cachedSessionId
+            const tmpPath = _discoveryPath + '.tmp'
+            writeFileSync(tmpPath, JSON.stringify(disc))
+            renameSync(tmpPath, _discoveryPath)
+          } catch {}
         }
+        return _cachedSessionId
       }
     } catch (e: any) { dbg(`resolveSessionId by directory failed: ${e?.message}`) }
   }
@@ -610,36 +621,30 @@ async function resolveSessionId(serverUrl: string, sessionId: string): Promise<s
 
 async function injectWakeEvent(
   event: WakeEvent,
-  serverUrl: string,
   sessionId: string,
 ): Promise<boolean> {
-  const resolvedSessionId = await resolveSessionId(serverUrl, sessionId)
+  const resolvedSessionId = await resolveSessionId(sessionId)
   if (!resolvedSessionId) {
     dbg('inject: no valid sessionId')
+    return false
+  }
+  if (!_sdkClient) {
+    dbg('inject: no sdkClient')
     return false
   }
 
   const text = formatWakeMessage(event, _agentIdentity)
 
-  // POST /session/{id}/message with noReply:false
-  // - Idle agent: LLM starts immediately
-  // - Busy agent: message queued, LLM picks up after current response
-  // - TUI (via attach): shows message cleanly in conversation, not in prompt box
-  const url = `${serverUrl}/session/${resolvedSessionId}/message`
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        noReply: false,
-        parts: [{ type: 'text', text }],
-      }),
+    const { error } = await _sdkClient.session.promptAsync({
+      path: { id: resolvedSessionId },
+      body: { noReply: false, parts: [{ type: 'text', text }] },
     })
-    if (res.ok) {
+    if (!error) {
       dbg(`inject OK: session=${resolvedSessionId}`)
       return true
     }
-    dbg(`inject failed: ${res.status}`)
+    dbg(`inject failed: ${error}`)
     return false
   } catch (e: any) {
     dbg(`inject error: ${e?.message}`)
@@ -663,6 +668,9 @@ export async function startWakeListener(
   // Store agent directory for session resolution by CWD
   _agentDirectory = process.cwd()
 
+  // Store sdkClient for in-process session API calls (ARCH-01)
+  _sdkClient = config.sdkClient ?? null
+
   // Fetch identity from SynqTask (CR-02). Fail-open (CN-01).
   if (config.memberId) {
     try {
@@ -681,18 +689,16 @@ export async function startWakeListener(
   // Stage 3: Inject team playbook at session start (CR-11, CN-10: once, not per-wake)
   if (_agentIdentity?.teamPlaybook) {
     try {
-      const playbookSessionId = await resolveSessionId(config.serverUrl, config.sessionId)
+      const playbookSessionId = await resolveSessionId(config.sessionId)
       if (playbookSessionId) {
         const playbookText = `<team-playbook team="${_agentIdentity.teamName ?? 'unknown'}">\n${_agentIdentity.teamPlaybook}\n</team-playbook>`
-        await fetch(`${config.serverUrl}/session/${playbookSessionId}/message`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            noReply: true,
-            parts: [{ type: 'text', text: playbookText }],
-          }),
-        })
-        dbg('playbook injected at session start')
+        if (!_sdkClient) { dbg('playbook: no sdkClient') } else {
+          await _sdkClient.session.prompt({
+            path: { id: playbookSessionId },
+            body: { noReply: true, parts: [{ type: 'text', text: playbookText }] },
+          })
+          dbg('playbook injected at session start')
+        }
       }
     } catch (e: any) { dbg(`playbook injection failed (non-fatal): ${e?.message}`) }
   }
@@ -795,7 +801,7 @@ export async function startWakeListener(
 
     // ─── Fallback: direct injection (original behavior) ────────────
     // Check if agent is busy
-    const busy = await isAgentBusy(config.serverUrl)
+    const busy = await isAgentBusy()
 
     if (busy) {
       // Queue the event (FIFO, drop oldest if full)
@@ -812,7 +818,7 @@ export async function startWakeListener(
     }
 
     // Agent idle — inject immediately
-    const injected = await injectWakeEvent(event, config.serverUrl, config.sessionId)
+    const injected = await injectWakeEvent(event, config.sessionId)
     if (injected) {
       dbg(`wake: injected ${event.eventId}`)
       return Response.json(
@@ -852,6 +858,11 @@ export async function startWakeListener(
     )
     try {
       mkdirSync(DISCOVERY_DIR, { recursive: true })
+      // Set module state from config
+      _currentSubscribe = config.subscribe ?? null
+      _currentSubscribePreset = config.subscribePreset ?? null
+      _currentMemberType = config.memberType ?? 'unknown'
+
       const discoveryData = {
         port: actualPort,
         token,
@@ -867,6 +878,10 @@ export async function startWakeListener(
         spawnDepth: _currentDepth ?? 0,
         maxSpawnDepth: _agentIdentity?.budget?.maxSpawnDepth ?? 2,
         maxSubagents: _agentIdentity?.budget?.maxSubagents ?? 5,
+        // Wake subscriptions (REQ-02)
+        subscribe: _currentSubscribe,
+        subscribePreset: _currentSubscribePreset,
+        memberType: _currentMemberType,
       }
       // Atomic write: tmp → rename (safe against partial writes)
       const tmpPath = discoveryPath + '.tmp'
@@ -886,9 +901,9 @@ export async function startWakeListener(
   const drainInterval = setInterval(async () => {
     if (queue.length === 0) return
     try {
-      if (await isAgentBusy(config.serverUrl)) return
+      if (await isAgentBusy()) return
       const event = queue.shift()!
-      const ok = await injectWakeEvent(event, config.serverUrl, config.sessionId)
+      const ok = await injectWakeEvent(event, config.sessionId)
       dbg(`drain: ${event.eventId} ${ok ? 'injected' : 'failed'}`)
     } catch (e: any) {
       dbg('drain error:', e?.message)
@@ -933,6 +948,75 @@ export function stopWakeListener(handle: WakeListenerHandle): void {
     handle.stop()
   } catch (e: any) {
     dbg('stopWakeListener error:', e?.message)
+  }
+}
+
+// ─── Update Discovery File (CN-05: single writer for all mutations) ─
+
+/**
+ * Update the discovery file with new subscription data.
+ * Called by /wake command (via tui.tsx) — NEVER write discovery directly from TUI.
+ * Uses atomic tmp→rename pattern.
+ *
+ * @returns true if write succeeded, false otherwise
+ */
+export function updateDiscovery(update: {
+  subscribe?: string[]
+  subscribePreset?: string | null
+  memberType?: 'human' | 'agent' | 'unknown'
+}): boolean {
+  if (!_discoveryPath) {
+    dbg('updateDiscovery: no discovery path (listener not started or no memberId)')
+    return false
+  }
+
+  try {
+    // Read current discovery file
+    const raw = readFileSync(_discoveryPath, 'utf-8')
+    const current = JSON.parse(raw)
+
+    // Merge updates
+    if (update.subscribe !== undefined) {
+      current.subscribe = update.subscribe
+      _currentSubscribe = update.subscribe
+    }
+    if (update.subscribePreset !== undefined) {
+      current.subscribePreset = update.subscribePreset
+      _currentSubscribePreset = update.subscribePreset
+    }
+    if (update.memberType !== undefined) {
+      current.memberType = update.memberType
+      _currentMemberType = update.memberType
+    }
+
+    // Atomic write: tmp → rename
+    const tmpPath = _discoveryPath + '.tmp'
+    writeFileSync(tmpPath, JSON.stringify(current))
+    renameSync(tmpPath, _discoveryPath)
+    dbg(`updateDiscovery: subscribe=${JSON.stringify(current.subscribe)} preset=${current.subscribePreset}`)
+    return true
+  } catch (e: any) {
+    dbg(`updateDiscovery failed: ${e?.message}`)
+    return false
+  }
+}
+
+/** Get current subscription state (for /wake status) */
+export function getSubscriptionState(): {
+  subscribe: string[] | null
+  subscribePreset: string | null
+  memberType: 'human' | 'agent' | 'unknown'
+  discoveryPath: string | null
+  memberId: string | null
+  memberName: string | null
+} {
+  return {
+    subscribe: _currentSubscribe,
+    subscribePreset: _currentSubscribePreset,
+    memberType: _currentMemberType,
+    discoveryPath: _discoveryPath,
+    memberId: _agentIdentity?.memberId ?? null,
+    memberName: _agentIdentity?.name ?? null,
   }
 }
 

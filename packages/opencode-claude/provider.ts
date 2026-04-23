@@ -12,7 +12,7 @@ try { _traceWrite('/tmp/opencode-claude-trace.log', `PROVIDER.TS pid=${process.p
  *   // or via file:// path
  */
 
-import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
+import { ClaudeCodeSDK, resolveMaxTokens, supportsAdaptiveThinking } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 
 import { appendFileSync, existsSync } from 'fs'
@@ -970,7 +970,9 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       const sdkOpts: any = {
         model: modelId,
         messages,
-        maxTokens: options.maxOutputTokens ?? 16384,
+        // Resolved from SSOT (src/models.ts): explicit override > env > per-model default.
+        // Replaces the old hardcoded 16384 which caused max_tokens retry loops.
+        maxTokens: resolveMaxTokens(modelId, options.maxOutputTokens),
         signal: options.abortSignal,
       }
       if (system) sdkOpts.system = system
@@ -1050,7 +1052,8 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       const sdkOpts: any = {
         model: modelId,
         messages,
-        maxTokens: options.maxOutputTokens ?? 16384,
+        // Resolved from SSOT (src/models.ts): explicit override > env > per-model default.
+        maxTokens: resolveMaxTokens(modelId, options.maxOutputTokens),
         signal: options.abortSignal,
       }
       if (system) sdkOpts.system = system
@@ -1059,13 +1062,12 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       if (options.temperature !== undefined) sdkOpts.temperature = options.temperature
       if (options.stopSequences?.length) sdkOpts.stopSequences = options.stopSequences
 
-      // Thinking config from providerOptions (effort variant) or default
-      // 4.6+ models (opus-4-6, sonnet-4-6, opus-4-7, etc.) use adaptive thinking
-      // SDK's buildRequestBody will convert to { type: 'adaptive' } for these models
+      // Thinking config from providerOptions (effort variant) or default.
+      // 4.6+ models use adaptive thinking — SDK's buildRequestBody will convert
+      // to { type: 'adaptive' } for models reported as supporting it by the SSOT.
       const po = options.providerOptions?.['claude-max'] ?? options.providerOptions ?? {}
       const thinking = po.thinking ?? po
-      const isAdaptive = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
-        || modelId.includes('opus-4-7') || modelId.includes('sonnet-4-7')
+      const isAdaptive = supportsAdaptiveThinking(modelId)
       if (thinking?.type === 'enabled' && thinking?.budgetTokens) {
         sdkOpts.thinking = { type: 'enabled', budgetTokens: thinking.budgetTokens }
         dbg('doStream thinking from variant:', sdkOpts.thinking)

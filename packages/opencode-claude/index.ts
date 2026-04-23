@@ -25,9 +25,10 @@ import { createHash, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, statSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
-import { setSignalWireServerUrl, getSignalWireInstance, handlePreToolUseSpawnCheck } from './provider.ts'
+import { setSignalWireServerUrl, setSignalWireSdkClient, getSignalWireInstance, handlePreToolUseSpawnCheck } from './provider.ts'
 import { startWakeListener, stopWakeListener } from './wake-listener'
 import type { WakeListenerHandle } from './wake-listener'
+import { loadPreferences, computeSubscribe } from './wake-preferences'
 
 // ─── OAuth Constants (matching Claude CLI exactly) ─────────
 // Source: src/constants/oauth.ts (PROD_OAUTH_CONFIG)
@@ -51,19 +52,12 @@ const SCOPES = [
 
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000
 
-// Models available via Max/Pro subscription
-// Cost per million tokens — equivalent API pricing for savings display.
-// Max subscription doesn't bill per-token, but showing equivalent savings
-// helps users understand the value of caching.
-// Source: https://docs.anthropic.com/en/docs/about-claude/models#model-comparison
-const MAX_MODELS: Record<string, { name: string; context: number; output: number; cost: { input: number; output: number; cacheRead: number; cacheWrite: number } }> = {
-  'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', context: 1000000, output: 16384,
-    cost: { input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 } },
-  'claude-opus-4-6': { name: 'Claude Opus 4.6', context: 1000000, output: 16384,
-    cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } },
-  'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', context: 200000, output: 8192,
-    cost: { input: 0.80, output: 4, cacheRead: 0.08, cacheWrite: 1 } },
-}
+// Models available via Max/Pro subscription — now sourced from SSOT at src/models.ts.
+// This keeps per-model max_tokens / context / cost values in exactly one place across
+// the SDK chain (sdk.ts, claude-max-provider, opencode-claude).
+//
+// If you need to add or update a model, edit src/models.ts in the root SDK package.
+import { MAX_MODELS, supportsAdaptiveThinking } from '@life-ai-tools/claude-code-sdk'
 
 // ─── PKCE Helpers ──────────────────────────────────────────
 
@@ -216,6 +210,73 @@ function dbg(...args: any[]) {
   try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
 }
 
+// ─── Module-level identity error (for Task 6 TUI to read) ─────────
+let _identityError: string | null = null
+
+/** Export for TUI status display (Task 6) */
+export function getIdentityError(): string | null { return _identityError }
+
+/**
+ * Resolve member identity from OAuth token via SynqTask MCP whoami.
+ * Non-blocking with 3s timeout (CN-06, AC-04b).
+ * Returns { memberId, memberName, memberType: 'human' } or null.
+ */
+async function resolveOAuthIdentity(): Promise<{
+  memberId: string
+  memberName: string
+  memberType: 'human'
+} | null> {
+  try {
+    const authPath = join(homedir(), '.local', 'share', 'opencode', 'mcp-auth.json')
+    if (!existsSync(authPath)) return null
+
+    const authData = JSON.parse(readFileSync(authPath, 'utf-8'))
+    const accessToken = authData?.synqtask?.tokens?.accessToken
+    const serverUrl = authData?.synqtask?.serverUrl ?? 'http://localhost:3747/mcp'
+    if (!accessToken) return null
+
+    // Call SynqTask MCP whoami — 3s timeout (CN-06: non-blocking)
+    const res = await fetch(serverUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'todo_session',
+          arguments: { operations: { action: 'whoami' } },
+        },
+      }),
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!res.ok) return null
+
+    // Parse SSE response: "event: message\ndata: {...}\n"
+    const text = await res.text()
+    const dataLine = text.split('\n').find(l => l.startsWith('data: '))
+    if (!dataLine) return null
+
+    const rpcResult = JSON.parse(dataLine.substring(6))
+    const content = rpcResult?.result?.content?.[0]?.text
+    if (!content) return null
+
+    const parsed = JSON.parse(content)
+    const result = parsed?.results?.[0]?.result ?? parsed
+    const memberId = result?.actingAs?.id ?? result?.member?.id ?? result?.ownerId
+    const memberName = result?.actingAs?.name ?? result?.member?.name ?? 'unknown'
+    if (!memberId) return null
+
+    return { memberId, memberName, memberType: 'human' }
+  } catch (e: any) {
+    dbg(`OAuth whoami failed: ${e?.message}`)
+    return null
+  }
+}
+
 export default {
   id: 'opencode-claude-max',
   server: async (input: any) => {
@@ -223,7 +284,7 @@ export default {
     const cwd = input.directory ?? process.cwd()
     const sessionId = process.env.OPENCODE_SESSION_ID ?? process.env.OPENCODE_SESSION_SLUG ?? input.sessionID ?? 'unknown'
     const creds = new CredentialManager(cwd)
-    const providerPath = `file://${import.meta.dir}`
+    const providerPath = `file://${import.meta.dir}/provider.js`
 
     dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} providerPath=${providerPath} initTime=${Date.now() - t0}ms`)
 
@@ -241,9 +302,11 @@ export default {
     // Bun.serve on random port — writes discovery file for Event Router
     let wakeHandle: WakeListenerHandle | null = null
 
-    // Resolve agent member ID — UUID from config is authoritative.
-    // Priority: opencode.json MCP headers (UUID) → env SYNQTASK_MEMBER_ID (fallback)
+    // Resolve member identity — DB-01 priority: X-Agent-Id > OAuth whoami > env var
     let _memberId = process.env.SYNQTASK_MEMBER_ID
+    let _memberType: 'human' | 'agent' | 'unknown' = 'unknown'
+
+    // Priority 1: opencode.json X-Agent-Id header (agent path — CN-01: untouched)
     try {
       const configPath = require('path').join(cwd, 'opencode.json')
       if (require('fs').existsSync(configPath)) {
@@ -251,10 +314,35 @@ export default {
         const synqHeaders = projConfig?.mcp?.synqtask?.headers
         if (synqHeaders?.['X-Agent-Id']) {
           _memberId = synqHeaders['X-Agent-Id']
-          dbg(`WAKE memberId from opencode.json: ${_memberId}`)
+          _memberType = 'agent'
+          dbg(`WAKE memberId from opencode.json (agent): ${_memberId}`)
         }
       }
     } catch (e: any) { dbg(`WAKE config read failed: ${e?.message}`) }
+
+    // Priority 2: OAuth whoami (human path — CR-01, CN-06: 3s timeout, non-blocking)
+    if (!_memberId || _memberType !== 'agent') {
+      try {
+        const oauthResult = await resolveOAuthIdentity()
+        if (oauthResult) {
+          _memberId = oauthResult.memberId
+          _memberType = 'human'
+          dbg(`WAKE memberId from OAuth whoami (human): ${_memberId} name=${oauthResult.memberName}`)
+        } else if (!_memberId) {
+          _identityError = 'OAuth whoami returned no member (token expired or SynqTask down?)'
+          dbg(`WAKE OAuth whoami failed: ${_identityError}`)
+        }
+      } catch (e: any) {
+        _identityError = e?.message ?? 'OAuth whoami exception'
+        dbg(`WAKE OAuth identity failed (non-fatal): ${_identityError}`)
+      }
+    }
+
+    // Priority 3: env SYNQTASK_MEMBER_ID already assigned above as initial value
+
+    // Load wake preferences (SSOT) and compute subscribe list
+    const _wakePrefs = loadPreferences(cwd)
+    const { subscribe: _subscribe, preset: _presetName } = computeSubscribe(_wakePrefs, _memberType)
 
     // Start wake listener if serverUrl available
     if (_serverUrl) {
@@ -269,6 +357,10 @@ export default {
           signalWireResolver: () => getSignalWireInstance() as any,
           // SDK client for in-process injection (TUI mode — no HTTP server)
           sdkClient: input.client,
+          // Wake subscriptions (REQ-02)
+          subscribe: _subscribe,
+          subscribePreset: _presetName ?? undefined,
+          memberType: _memberType,
         })
         dbg(`WAKE listener started on port ${wakeHandle.port} token=${wakeHandle.token.slice(0, 8)}...`)
       } catch (e: any) {
@@ -278,6 +370,26 @@ export default {
     } else {
       dbg(`WAKE listener skipped: serverUrl=${_serverUrl} sessionId=${_sessionId}`)
     }
+
+    // AC-04d: Deferred toast on identity failure (non-silent)
+    if (!_memberId && _identityError) {
+      try {
+        setTimeout(() => {
+          try {
+            if (_serverUrl) {
+              fetch(`${_serverUrl}/tui/toast`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: `⚠️ Wake identity not resolved: ${_identityError}`, type: 'warning' }),
+              }).catch(() => {})
+            }
+          } catch {}
+        }, 2000)
+      } catch {}
+    }
+
+    // Pass SDK client to signal-wire for in-process session injection
+    setSignalWireSdkClient(input.client)
 
     if (!creds.hasCredentials) {
       dbg('Not logged in — run: opencode providers login -p claude-max')
@@ -301,13 +413,15 @@ export default {
         }
 
         for (const [id, info] of Object.entries(MAX_MODELS)) {
-          const is46 = id.includes('opus-4-6') || id.includes('sonnet-4-6')
+          // Adaptive-thinking support sourced from SSOT instead of hardcoded
+          // substring check. Model table at src/models.ts controls this.
+          const isAdaptive = supportsAdaptiveThinking(id)
           config.provider['claude-max'].models[id] = {
             id,
             name: `${info.name} (Max)`,
             api: { id, url: 'https://api.anthropic.com', npm: providerPath },
             providerID: 'claude-max',
-            reasoning: is46,
+            reasoning: isAdaptive,
             // modalities — opencode reads THIS (not capabilities.input/output) to decide
             // whether to pass images/PDFs through or strip them with error text.
             // See provider.ts unsupportedParts() → model.capabilities.input[modality]
@@ -318,7 +432,7 @@ export default {
             },
             capabilities: {
               temperature: true,
-              reasoning: is46,
+              reasoning: isAdaptive,
               attachment: true,
               toolcall: true,
               input: {
@@ -335,15 +449,19 @@ export default {
                 video: false,
                 pdf: false,
               },
-              interleaved: is46 ? { field: 'reasoning_content' as const } : false,
+              interleaved: isAdaptive ? { field: 'reasoning_content' as const } : false,
             },
             cost: { input: info.cost.input, output: info.cost.output, cache: { read: info.cost.cacheRead, write: info.cost.cacheWrite } },
-            limit: { context: info.context, output: info.output },
+            // limit.output — opencode uses this to decide what maxOutputTokens
+            // value to pass into the AI SDK layer. Reads SSOT's defaultOutput
+            // (the per-model "happy path" cap, mirroring native CLI's wa().default).
+            // Previously hardcoded 16384 — too low for large tool-calls.
+            limit: { context: info.context, output: info.defaultOutput },
             status: 'active',
             options: {},
             headers: {},
             // Effort variants — opencode uses these for the reasoning effort selector
-            ...(is46 ? {
+            ...(isAdaptive ? {
               variants: {
                 low:  { thinking: { type: 'enabled', budgetTokens: 5000 } },
                 medium: { thinking: { type: 'enabled', budgetTokens: 16000 } },

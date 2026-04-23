@@ -259,3 +259,74 @@ Once the validation criteria above pass on 3 fresh sessions:
 - Audit report: `/home/relishev/projects/vibe/kiberos-platform/PRPs/signal-wire-architecture-v3/AUDIT-FULL.md`
 - Adapter contract: ADR-0007 (≤200 LOC pure translation)
 - Python CLI output contract (baseline): `/home/relishev/packages/lat-context/src/lat_context/signal_wire_cli.py` (to be deprecated in step 7)
+
+---
+
+## Completion — 2026-04-23
+
+All nine steps executed and validated. Fresh `opencode run` session
+passes all six checks in `validate-ssot.sh`. Summary of final state:
+
+### Ownership at a glance
+
+| Layer | Location | Owns |
+|-------|----------|------|
+| Engine | `@kiberos/signal-wire-core` (`/home/relishev/packages/signal-wire-core/`) | pure rule evaluation, rules SSOT, translation helpers, telemetry emission, bundled CLI |
+| Rules SSOT | `signal-wire-core/rules/signal-wire-rules.json` (22 rules) | single file, no duplicates anywhere |
+| CLI (transport) | `sw-cli` binary via `bun link` (`@kiberos/signal-wire-core`, `apps/cli/`) | stdin/stdout JSON batch + `--rules-from-bundled-ssot` mode for hook consumers |
+| Consumer 1 (long-running) | `packages/opencode-claude/signal-wire.ts` | hot-reload, in-process Pipeline, `CONSUMER_INVOKE` telemetry |
+| Consumer 2 (short-lived) | `.claude-local/.../hooks/signal-wire-hook.sh` | Claude Code hook wrapper, no state, cold-reads rules via sw-cli |
+| Python archive | `packages/lat-context/**/_deprecated/*.py.deprecated` | reference-only; import fails immediately by design |
+
+### End-to-end telemetry format
+
+Per evaluation, the shared log (`~/.claude/signal-wire-debug.log`) gets a
+trace chain keyed by `correlationId`:
+
+```
+[consumer=claude-code-hook|opencode-plugin]  HOOK_INVOKED | CONSUMER_INVOKE
+[sw-core vX@T pid=N]                         EVENT_RECEIVED
+[sw-core vX@T pid=N]                         RULE_FIRED × N
+[sw-core vX@T pid=N]                         EVENT_COMPLETE | EVENT_ERROR
+[consumer=claude-code-hook]                  HOOK_COMPLETE | HOOK_FAILOPEN  (Consumer-2 only)
+```
+
+Grep for one `correlationId` to see the full lifecycle of a single event
+across the consumer → engine → consumer boundary.
+
+### How to roll back
+
+There is no rollback path. The legacy Python engine and the
+`SIGNAL_WIRE_ENGINE=legacy` env branch were deleted. If a regression
+emerges post-migration, the only path forward is:
+
+1. `git revert` the offending commit in `signal-wire-core` or `opencode-claude`.
+2. Rebuild (`bun run build` in `opencode-claude`; `bun run compile:cli`
+   in `signal-wire-core`).
+3. Fresh sessions pick up the revert automatically on next restart;
+   running sessions continue on old in-memory code until they restart.
+
+Legacy Python files live under `_deprecated/` subfolders with
+`.py.deprecated` extensions — readable as reference, unimportable as
+code.
+
+### Commits (all pushed to remote)
+
+| Repo | Commits (oldest→newest) |
+|------|-------------------------|
+| `@kiberos/signal-wire-core` (→ gitea-local) | `10682fc` SSOT+translate+CLI bundled-ssot — `a8a8608` fix getBundledRulesPath for bundled consumers — `53702bf` per-event telemetry |
+| `claude-code-sdk` (→ github origin) | `f67fb19` adapter hot-reload+SSOT — `cebd93f` v1.0.0 drop legacy — `03acb21` CONSUMER_INVOKE telemetry |
+| `lat-context` (→ gitea-local) | `97155d2` deprecate Python engine |
+| `playwright-mcp-broker` (→ gitea-local) | `cb7f332` keep-warm containers (ancillary fix — unblocked opencode startup) |
+
+### Post-migration validation proof
+
+`validate-ssot.sh <pid>` on fresh session pid=3028841 (post-push):
+```
+  [PASS] identity chain — 4 banner lines (≥3 required)
+  [PASS] engine=CORE — ENGINE_SELECT=CORE present
+  [PASS] rules count SSOT — log=18 expected=18 (ssot_total=22, opencode-applicable)
+  [PASS] no duplicates — duplicate rules.json files absent
+  [PASS] rule fires (via sw-cli probe) — engine evaluates, session-start-checklist returned
+  [PASS] clean stops — stops: stop=end_turn, stop=tool_use
+```

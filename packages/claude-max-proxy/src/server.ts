@@ -185,14 +185,38 @@ async function handleMessages(req: Request, server: { requestIP(r: Request): { a
   const model = parsedBody.model ?? 'unknown'
   session.model = model
 
-  // Copy headers (passthrough as-is)
+  // Copy headers (passthrough as-is, EXCEPT Authorization — replaced with OAuth)
   const headers: Record<string, string> = {}
   req.headers.forEach((v, k) => {
-    // Strip host-related headers that fetch() rejects/overrides
     const lk = k.toLowerCase()
-    if (['host', 'content-length', 'connection'].includes(lk)) return
+    if (['host', 'content-length', 'connection', 'authorization'].includes(lk)) return
     headers[k] = v
   })
+
+  // Replace with real OAuth token from ~/.claude/.credentials.json.
+  // CC sends its own ANTHROPIC_AUTH_TOKEN (placeholder when using our wrapper),
+  // but Anthropic only accepts the OAuth bearer. This is the entire point of
+  // the proxy — it unlocks subscription access for native CC.
+  try {
+    const token = await getAccessToken(cfg)
+    headers['Authorization'] = `Bearer ${token}`
+  } catch (e) {
+    emit({ level: 'error', kind: 'TOKEN_NEEDS_RELOGIN', sessionId, msg: 'No OAuth credentials — run: claude login' })
+    return new Response(JSON.stringify({
+      error: { type: 'authentication_error', message: 'No OAuth credentials. Run: claude login' },
+    }), { status: 401 })
+  }
+
+  // Ensure oauth-2025-04-20 beta is present. When CC uses ANTHROPIC_AUTH_TOKEN
+  // (API key mode), it OMITS this beta. But Anthropic requires it for OAuth-
+  // bearer requests. Append it if missing.
+  const existingBeta = headers['anthropic-beta'] ?? headers['Anthropic-Beta'] ?? ''
+  if (!existingBeta.includes('oauth-2025-04-20')) {
+    const prefix = existingBeta ? existingBeta + ',' : ''
+    headers['anthropic-beta'] = prefix + 'oauth-2025-04-20'
+    // Cleanup conflicting casing
+    delete headers['Anthropic-Beta']
+  }
 
   emit({
     level: 'info',
@@ -254,18 +278,38 @@ async function handleMessages(req: Request, server: { requestIP(r: Request): { a
 
   // Byte-level pipe — but TEE one side so we can parse usage for engine.
   // We split the stream: one goes to client, one gets parsed for usage.
-  const [toClient, toParse] = upstream.body.tee()
+  let toClient: ReadableStream<Uint8Array>
+  let toParse: ReadableStream<Uint8Array>
+  try {
+    const teed = upstream.body.tee()
+    toClient = teed[0]
+    toParse = teed[1]
+  } catch (err: any) {
+    emit({ level: 'error', kind: 'REAL_REQUEST_ERROR', sessionId, msg: `tee() failed: ${err?.message}` })
+    return new Response(upstream.body, { status: upstream.status, headers: upstream.headers })
+  }
 
-  // Parse in background to extract usage and notify engine on completion
-  ;(async () => {
+  // Parse in background to extract usage and notify engine on completion.
+  // Hardened: every step wrapped in try/catch, never crashes the server.
+  const parsePromise = (async () => {
     try {
       let usage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
       const decoder = new TextDecoder()
       const reader = toParse.getReader()
       let buffer = ''
       while (true) {
-        const { done, value } = await reader.read()
+        let done: boolean, value: Uint8Array | undefined
+        try {
+          const r = await reader.read()
+          done = r.done
+          value = r.value
+        } catch (readErr: any) {
+          // Client aborted, connection dropped, etc — not fatal
+          emit({ level: 'debug', kind: 'REAL_REQUEST_ERROR', sessionId, msg: `stream read aborted: ${readErr?.message}` })
+          return
+        }
         if (done) break
+        if (!value) continue
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
@@ -291,7 +335,9 @@ async function handleMessages(req: Request, server: { requestIP(r: Request): { a
       }
 
       session.lastUsage = usage
-      session.engine.notifyRealRequestComplete(usage)
+      try { session.engine.notifyRealRequestComplete(usage) } catch (e: any) {
+        emit({ level: 'error', kind: 'REAL_REQUEST_ERROR', sessionId, msg: `engine.notifyRealRequestComplete: ${e?.message}` })
+      }
 
       emit({
         level: 'info',
@@ -315,6 +361,9 @@ async function handleMessages(req: Request, server: { requestIP(r: Request): { a
       })
     }
   })()
+
+  // Attach catch so unhandled rejection never crashes server
+  parsePromise.catch(e => emit({ level: 'error', kind: 'REAL_REQUEST_ERROR', sessionId, msg: `parse promise rejected: ${e?.message}` }))
 
   // Return the other tee — CC gets raw SSE bytes
   return new Response(toClient, {
@@ -415,3 +464,11 @@ function shutdown(): void {
 
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
+
+// Never crash on unhandled errors — proxy must stay alive.
+process.on('uncaughtException', (err) => {
+  emit({ level: 'error', kind: 'ERROR', msg: `uncaughtException: ${err?.message}`, stack: err?.stack?.split('\n').slice(0, 4) })
+})
+process.on('unhandledRejection', (reason: any) => {
+  emit({ level: 'error', kind: 'ERROR', msg: `unhandledRejection: ${reason?.message ?? reason}` })
+})

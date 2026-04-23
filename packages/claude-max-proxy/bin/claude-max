@@ -349,34 +349,66 @@ function installLaunchdPlist(bunBin: string): void {
   else warn(`launchctl load returned: ${r.stderr.slice(0, 200)}`)
 }
 
-// ═══ Proxy lifecycle (service or fallback) ═══════════════════════════
+// ═══ Proxy lifecycle — CONNECT-DON'T-KILL semantics ════════════════
+//
+// Design: the proxy is a SHARED singleton on the host. Every claude-max
+// invocation connects to the same proxy on PROXY_URL. The proxy itself is
+// multi-session (X-Claude-Code-Session-Id in header → per-session KA).
+//
+// Start flow priorities:
+//   1. /health responds OK → DONE. Never start a second one.
+//   2. Port occupied but /health broken → warn + bail (NEVER double-fork).
+//   3. Port free + OS service installed → ask service manager to start.
+//   4. Port free + no service → fallback fork.
+//
+// Never kill another proxy. Never create second instance on same port.
+
+async function probeHealth(timeoutMs = 800): Promise<{ alive: boolean; stats?: any; err?: string }> {
+  try {
+    const r = await fetch(`${PROXY_URL}/health`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!r.ok) return { alive: false, err: `HTTP ${r.status}` }
+    const stats = await r.json() as any
+    return { alive: true, stats }
+  } catch (e: any) {
+    return { alive: false, err: e?.code ?? e?.message ?? 'unknown' }
+  }
+}
+
+function portOccupiedByOther(): boolean {
+  // Who listens on PROXY_PORT? lsof on unix. If NO one listens → port free.
+  // If someone listens → occupied (by us or other). Combine with probeHealth().
+  const r = run(['bash', '-c', `lsof -ti :${PROXY_PORT} 2>/dev/null | head -1`], { quiet: true })
+  return r.stdout.trim().length > 0
+}
+
+async function waitForProxyAlive(timeoutMs = 8000): Promise<{ alive: boolean; stats?: any }> {
+  const start = Date.now()
+  let last = { alive: false }
+  while (Date.now() - start < timeoutMs) {
+    const r = await probeHealth(500)
+    if (r.alive) return r
+    last = r
+    await new Promise(r => setTimeout(r, 200))
+  }
+  return last
+}
 
 async function startProxyViaService(d: DocReport): Promise<boolean> {
   if (d.service === 'systemd') {
+    // systemctl start is idempotent — if already active, returns ok immediately.
     const r = run(['systemctl', '--user', 'start', 'claude-max-proxy.service'])
     return r.ok
   }
   if (d.service === 'launchd') {
-    const r = run(['launchctl', 'kickstart', '-k', `gui/${process.getuid?.() ?? 0}/${LAUNCHD_LABEL}`])
+    // launchctl kickstart -k starts (or restarts if SuccessfulExit=false KeepAlive).
+    const r = run(['launchctl', 'kickstart', `gui/${process.getuid?.() ?? 0}/${LAUNCHD_LABEL}`])
     return r.ok
-  }
-  return false
-}
-
-async function waitForProxyAlive(timeoutMs = 8000): Promise<boolean> {
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(`${PROXY_URL}/health`, { signal: AbortSignal.timeout(500) })
-      if (r.ok) return true
-    } catch {}
-    await new Promise(r => setTimeout(r, 200))
   }
   return false
 }
 
 async function startProxyFallback(bunBin: string): Promise<boolean> {
-  // No OS service — fork proxy as detached background process, write pidfile.
+  // Precondition: port is free. Caller must verify.
   info('Starting proxy as background process (no OS service configured)')
 
   const child = Bun.spawn([bunBin, 'run', existsSync(INSTALL_SERVER) ? INSTALL_SERVER : SERVER_PATH], {
@@ -390,20 +422,61 @@ async function startProxyFallback(bunBin: string): Promise<boolean> {
   child.unref()
   if (child.pid) writeFileSync(PID_FILE, String(child.pid) + '\n')
 
-  return waitForProxyAlive()
+  const r = await waitForProxyAlive()
+  return r.alive
 }
 
 async function ensureProxyRunning(d: DocReport, bunBin: string): Promise<void> {
-  if (d.proxyAlive) return
+  // STEP 1 — CONNECT if proxy already alive. This is the common case.
+  // Another claude-max invocation, systemd autostart on login, or a manual
+  // `bun run src/server.ts` already has it running. We just connect.
+  const probe1 = await probeHealth()
+  if (probe1.alive) {
+    const upS = probe1.stats?.uptime ?? '?'
+    const sess = probe1.stats?.sessions ?? 0
+    ok(`Proxy already running @ ${PROXY_URL} (uptime ${upS}s, ${sess} active sessions) — connecting`)
+    return
+  }
 
-  // Prefer OS service if installed
+  // STEP 2 — Port occupied but health broken? Someone else bound the port
+  // with a different service or a crashed proxy that can't respond.
+  // NEVER start a second instance on the same port — tell user + exit.
+  if (portOccupiedByOther()) {
+    err(`Port ${PROXY_PORT} is occupied but /health does not respond.`)
+    err(`Another process holds the port but isn't a healthy claude-max-proxy.`)
+    err(`Options:`)
+    err(`  • Check: lsof -i :${PROXY_PORT}`)
+    err(`  • If it's a stale proxy: claude-max stop  (or kill the PID manually)`)
+    err(`  • If a different service uses port ${PROXY_PORT}: change PROXY_PORT env var`)
+    process.exit(1)
+  }
+
+  // STEP 3 — Port is free and proxy is not running. Start via OS service
+  // if installed, else fallback fork. Start is idempotent (safe to call even
+  // if unit is already "enabled" — just ensures it's "active").
   if (d.serviceInstalled) {
+    info(`${d.service} unit installed — starting via service manager`)
     const started = await startProxyViaService(d)
-    if (started && await waitForProxyAlive()) {
-      ok(`Proxy started via ${d.service}`)
+    const r = await waitForProxyAlive()
+    if (r.alive) {
+      ok(`Proxy started via ${d.service} (uptime ${r.stats?.uptime ?? '?'}s)`)
       return
     }
-    warn(`${d.service} start failed — falling back to direct background launch`)
+    if (!started) {
+      warn(`${d.service} start returned failure — inspecting log`)
+    }
+    warn(`${d.service} didn't come up within 8s — falling back to direct fork`)
+  }
+
+  // STEP 4 — Last-resort fork. Re-check port in case systemd bound it during wait.
+  const probe2 = await probeHealth()
+  if (probe2.alive) {
+    ok(`Proxy came up while we were deciding what to do — connecting`)
+    return
+  }
+  if (portOccupiedByOther()) {
+    err(`Port ${PROXY_PORT} just became occupied — bailing to avoid double-fork`)
+    process.exit(1)
   }
 
   const alive = await startProxyFallback(bunBin)
@@ -411,7 +484,7 @@ async function ensureProxyRunning(d: DocReport, bunBin: string): Promise<void> {
     err(`Proxy failed to start. Check logs: ${LOG_FILE}`)
     process.exit(1)
   }
-  ok('Proxy started')
+  ok('Proxy started (background fork)')
 }
 
 // ═══ Main orchestrator: auto-install everything missing ═════════════
@@ -507,8 +580,28 @@ async function cmdStatus(): Promise<void> {
   console.log(c(C.dim, `  quota: 5h=${q5} 7d=${q7} status=${q.status ?? '?'}`))
 }
 
-async function cmdStop(): Promise<void> {
+async function cmdStop(args: string[] = []): Promise<void> {
+  const force = args.includes('-f') || args.includes('--force')
   const d = await doctor()
+
+  // Warn if active sessions — stopping proxy kills their KA protection.
+  if (d.proxyAlive) {
+    try {
+      const r = await fetch(`${PROXY_URL}/stats`)
+      const stats = await r.json() as any
+      const activeCount = stats.sessions?.length ?? 0
+      if (activeCount > 0 && !force) {
+        warn(`Proxy has ${activeCount} active session(s). Stopping will end their cache keepalive.`)
+        console.log('')
+        for (const s of stats.sessions) {
+          console.log(`  ${s.sessionId.slice(0, 12)}  pid=${s.pid ?? '?'}  ${s.model ?? '?'}  idle=${s.idleSec}s`)
+        }
+        console.log('')
+        console.log(c(C.yellow, '  Run `claude-max stop -f` to force stop anyway.'))
+        process.exit(2)
+      }
+    } catch {}
+  }
 
   if (d.serviceInstalled) {
     if (d.service === 'launchd') run(['launchctl', 'unload', LAUNCHD_PLIST])
@@ -613,7 +706,7 @@ const rest = process.argv.slice(3)
 async function main() {
   switch (subcmd) {
     case 'status':    await cmdStatus(); break
-    case 'stop':      await cmdStop(); break
+    case 'stop':      await cmdStop(rest); break
     case 'restart':   await cmdRestart(); break
     case 'logs':      await cmdLogs(rest); break
     case 'watch':     await cmdWatch(); break
@@ -630,7 +723,7 @@ ${c(C.bold, 'Usage:')}
   claude-max watch        ${c(C.dim, 'live TUI dashboard')}
   claude-max status       ${c(C.dim, 'proxy state + active sessions')}
   claude-max logs [-f]    ${c(C.dim, 'tail proxy logs (-f = follow)')}
-  claude-max stop         ${c(C.dim, 'stop proxy service')}
+  claude-max stop [-f]    ${c(C.dim, 'stop proxy service (refuses if active sessions; -f to force)')}
   claude-max restart      ${c(C.dim, 'stop + start')}
   claude-max doctor       ${c(C.dim, 'self-check: what is installed vs missing')}
   claude-max uninstall    ${c(C.dim, 'remove service + binaries (keeps logs/creds)')}

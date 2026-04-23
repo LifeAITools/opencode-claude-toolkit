@@ -1,18 +1,25 @@
 {
-  "name": "@life-ai-tools/claude-max-proxy",
+  "name": "@kiberos/claude-max-proxy",
   "version": "0.1.0",
-  "description": "Transparent Anthropic-native proxy for Claude Code CLI with cache-keepalive protection",
+  "description": "Transparent Anthropic-native proxy for native Claude Code CLI — keeps prompt cache warm via autonomous keepalive hits. Saves subscription quota by preventing cache_write bursts.",
   "type": "module",
   "bin": {
     "claude-max": "./bin/claude-max"
   },
+  "files": [
+    "bin",
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "bun run src/server.ts",
     "dev": "bun run --watch src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@life-ai-tools/claude-code-sdk": "file:../..",
+    "@life-ai-tools/claude-code-sdk": "^0.8.0",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0"
   },
@@ -27,8 +34,16 @@
   "keywords": [
     "claude-code",
     "claude-max",
+    "anthropic",
     "proxy",
     "keepalive",
-    "cache"
-  ]
+    "prompt-cache",
+    "cli"
+  ],
+  "author": "Ruslan Elishev <relishev@gmail.com>",
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.muid.io/",
+    "access": "public"
+  }
 }

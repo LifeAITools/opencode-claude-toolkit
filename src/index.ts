@@ -30,11 +30,23 @@ export {
   AuthError,
   APIError,
   RateLimitError,
+  CacheRewriteBlockedError,
 } from './types.js'
 export type { SessionEntry } from './session.js'
 export { oauthLogin } from './auth.js'
 export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js'
 export type { OAuthLoginOptions, OAuthResult } from './auth.js'
+
+// Model metadata SSOT — all max_tokens / model caps live here.
+// See src/models.ts for rationale and override semantics.
+export {
+  MAX_MODELS,
+  FALLBACK_MODEL,
+  resolveMaxTokens,
+  getModelMetadata,
+  supportsAdaptiveThinking,
+} from './models.js'
+export type { ModelMetadata } from './models.js'
 
 // Voice STT — Speech-to-Text via Anthropic voice_stream WebSocket
 export {

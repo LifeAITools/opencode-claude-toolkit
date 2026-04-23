@@ -10,7 +10,7 @@
  *   // or via file:// path
  */
 
-import { ClaudeCodeSDK } from '@life-ai-tools/claude-code-sdk'
+import { ClaudeCodeSDK, resolveMaxTokens, supportsAdaptiveThinking } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 
 // ─── Types (subset of @ai-sdk/provider v3) ────────────────
@@ -181,8 +181,10 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
 
       const sdkOpts: any = {
         model: modelId,
+        // Resolved from SSOT (src/models.ts): explicit override > env > per-model default.
+        // Passing this upward lets the downstream sdk.ts use the same value.
+        maxTokens: resolveMaxTokens(modelId, options.maxOutputTokens),
         messages,
-        maxTokens: options.maxOutputTokens ?? 16384,
         signal: options.abortSignal,
       }
       if (system) sdkOpts.system = system
@@ -191,9 +193,13 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       if (options.temperature !== undefined) sdkOpts.temperature = options.temperature
       if (options.stopSequences?.length) sdkOpts.stopSequences = options.stopSequences
 
-      // Thinking for 4.6 models
-      const is46 = modelId.includes('opus-4-6') || modelId.includes('sonnet-4-6')
-      if (is46) sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
+      // Thinking for 4.6+ models — uses SSOT's supportsAdaptiveThinking() instead of
+      // hardcoded substring check. Note: for 4.7+ adaptive models the SDK itself
+      // sets { type: 'adaptive' } in buildRequestBody — we only set the enabled+budget
+      // form for legacy 4.6 models here.
+      if (supportsAdaptiveThinking(modelId) && !modelId.includes('4-7')) {
+        sdkOpts.thinking = { type: 'enabled', budgetTokens: 10000 }
+      }
 
       const response = await sdk.generate(sdkOpts)
 
@@ -230,8 +236,9 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
 
       const sdkOpts: any = {
         model: modelId,
+        // Resolved from SSOT (src/models.ts): explicit override > env > per-model default.
+        maxTokens: resolveMaxTokens(modelId, options.maxOutputTokens),
         messages,
-        maxTokens: options.maxOutputTokens ?? 16384,
         signal: options.abortSignal,
       }
       if (system) sdkOpts.system = system

@@ -44,7 +44,8 @@ import type {
   KeepaliveTick,
   TokenStatusEvent,
 } from './types.js'
-import { AuthError, APIError, RateLimitError, ClaudeCodeSDKError } from './types.js'
+import { AuthError, APIError, RateLimitError, ClaudeCodeSDKError, CacheRewriteBlockedError } from './types.js'
+import { resolveMaxTokens } from './models.js'
 
 // ============================================================
 // Constants — cherry-picked from Claude Code CLI source
@@ -67,6 +68,9 @@ const EFFORT_BETA = 'effort-2025-11-24'
 const FAST_MODE_BETA = 'fast-mode-2026-02-01'
 const PROMPT_CACHING_SCOPE_BETA = 'prompt-caching-scope-2026-01-05'
 const FINE_GRAINED_TOOL_STREAMING_BETA = 'fine-grained-tool-streaming-2025-05-14'
+const CONTEXT_MANAGEMENT_BETA = 'context-management-2025-06-27'
+const TASK_BUDGETS_BETA = 'task-budgets-2026-03-13'
+const REDACT_THINKING_BETA = 'redact-thinking-2026-02-12'
 
 // Retry — from src/services/api/withRetry.ts:55
 const BASE_DELAY_MS = 300
@@ -197,7 +201,21 @@ export class ClaudeCodeSDK {
   private onTokenStatus: ((event: TokenStatusEvent) => void) | undefined
 
   // Cache keepalive
-  private keepaliveConfig: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens'>> & { onHeartbeat?: (stats: KeepaliveStats) => void; onTick?: (tick: KeepaliveTick) => void }
+  private keepaliveConfig: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens' | 'rewriteWarnIdleMs' | 'rewriteWarnTokens' | 'rewriteBlockIdleMs' | 'rewriteBlockEnabled'>> & {
+    onHeartbeat?: (stats: KeepaliveStats) => void
+    onTick?: (tick: KeepaliveTick) => void
+    onDisarmed?: (info: { reason: string; at: number }) => void
+    onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
+    onNetworkStateChange?: (info: { from: string; to: string; at: number }) => void
+  }
+  // Largest observed cache size per model (used for rewrite cost estimation)
+  private lastKnownCacheTokensByModel = new Map<string, number>()
+  // ── Layer 2: network health probe state ──
+  // 'healthy' → no probe running
+  // 'degraded' → retry chain failed or transient error; probe checking every 30s while cache alive
+  // We never enter 'down' formally; it maps to 'degraded' with no successful probes yet.
+  private networkState: 'healthy' | 'degraded' = 'healthy'
+  private healthProbeTimer: ReturnType<typeof setInterval> | null = null
   private keepaliveRegistry = new Map<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number }>()
   private _pendingSnapshotModel = ''
   private _pendingSnapshotBody: Record<string, unknown> | null = null
@@ -230,15 +248,37 @@ export class ClaudeCodeSDK {
     this.onTokenStatus = options.onTokenStatus
 
     const ka = options.keepalive ?? {}
+
+    // Layer 4: Clamp interval to safe bounds.
+    // - < 60s: quota burn risk (1 req every 60s = 60/hr = 1440/day × N sessions)
+    // - > 240s: leaves <60s margin to 5-min cache TTL → likely cache loss
+    let intervalMs = ka.intervalMs ?? 120_000
+    if (intervalMs < 60_000) {
+      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} below safe min (60000); clamped`)
+      intervalMs = 60_000
+    }
+    if (intervalMs > 240_000) {
+      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} above safe max (240000, cache TTL - 60s); clamped`)
+      intervalMs = 240_000
+    }
+
     this.keepaliveConfig = {
       enabled: ka.enabled ?? true,
       // Fire keepalive at ~120s (2 min), giving ~180s margin before 5-min cache TTL.
       // With tick every 20s, that's up to 9 retry opportunities if API is temporarily busy.
-      intervalMs: ka.intervalMs ?? 120_000,
+      intervalMs,
       idleTimeoutMs: ka.idleTimeoutMs ?? Infinity,  // keep alive as long as process runs
       minTokens: ka.minTokens ?? 2000,
+      // Rewrite guard defaults: warn after 5 min idle if cache would be >50k tokens
+      rewriteWarnIdleMs: ka.rewriteWarnIdleMs ?? 300_000,
+      rewriteWarnTokens: ka.rewriteWarnTokens ?? 50_000,
+      rewriteBlockIdleMs: ka.rewriteBlockIdleMs ?? Infinity,
+      rewriteBlockEnabled: ka.rewriteBlockEnabled ?? false,
       onHeartbeat: ka.onHeartbeat,
       onTick: ka.onTick,
+      onDisarmed: ka.onDisarmed,
+      onRewriteWarning: ka.onRewriteWarning,
+      onNetworkStateChange: ka.onNetworkStateChange,
     }
 
     // Credential store priority:
@@ -284,6 +324,12 @@ export class ClaudeCodeSDK {
 
   /** Streaming: yields events as they arrive from SSE */
   async *stream(options: GenerateOptions): AsyncGenerator<StreamEvent> {
+    // ─── Rewrite-burst guard (Layer 3) ─────────────────────────────────
+    // If cache is presumed dead (long idle since last REAL stream), the incoming
+    // request will pay cacheWrite — potentially 100k+ tokens. Warn (or block)
+    // so 20 dormant sessions waking up at once can't silently burn the quota.
+    this.checkRewriteGuard(options.model)
+
     await this.ensureAuth()
     const body = this.buildRequestBody(options)
     const headers = this.buildHeaders(options)
@@ -365,6 +411,12 @@ export class ClaudeCodeSDK {
       const sysPreview = typeof body.system === 'string' ? body.system.substring(0, 200) : JSON.stringify(body.system)?.substring(0, 200)
       appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
         `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(headers).substring(0, 300)} tools=[${toolNames.substring(0, 500)}] sys=${sysPreview} bodyLen=${bodyStr.length}\n`)
+      // Full request body dump (sans messages content for size) — enable with CLAUDE_MAX_DUMP_REQUESTS=1
+      if (process.env.CLAUDE_MAX_DUMP_REQUESTS === '1') {
+        const dumpBody = { ...body, messages: `[${(body.messages as unknown[])?.length ?? 0} messages]`, system: `[${typeof body.system === 'string' ? body.system.length : 'array'}]` }
+        appendFileSync(join(homedir(), '.claude', 'claude-max-request-dump.jsonl'),
+          JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers, body: dumpBody }) + '\n')
+      }
     } catch {}
 
     let response: Response
@@ -608,6 +660,16 @@ export class ClaudeCodeSDK {
     this.keepaliveLastActivityAt = now
     this.keepaliveLastRealActivityAt = now  // only REAL requests set this
     this.keepaliveCacheWrittenAt = now      // cache is fresh right now
+    // Layer 2: real stream succeeded → network is definitively healthy.
+    // Stop any lingering health probe and notify.
+    if (this.healthProbeTimer || this.networkState !== 'healthy') {
+      this.stopHealthProbe()
+      if (this.networkState !== 'healthy') {
+        const prev = this.networkState
+        this.networkState = 'healthy'
+        try { this.keepaliveConfig.onNetworkStateChange?.({ from: prev, to: 'healthy', at: now }) } catch {}
+      }
+    }
     if (!this.keepaliveConfig.enabled) return
 
     // Register snapshot for this model — ONLY if it's the heaviest context seen.
@@ -624,6 +686,12 @@ export class ClaudeCodeSDK {
       const existing = this.keepaliveRegistry.get(model)
       if (totalTokens >= this.keepaliveConfig.minTokens && (!existing || totalTokens >= existing.inputTokens)) {
         this.keepaliveRegistry.set(model, { body, headers, model, inputTokens: totalTokens })
+      }
+      // Track largest observed cache size per model for rewrite cost estimation.
+      // Never downgrades — preserves upper bound estimate for warn/block decisions.
+      const prevMax = this.lastKnownCacheTokensByModel.get(model) ?? 0
+      if (totalTokens > prevMax) {
+        this.lastKnownCacheTokensByModel.set(model, totalTokens)
       }
 
 
@@ -830,9 +898,11 @@ export class ClaudeCodeSDK {
         // Start dedicated retry chain with exact timing from cache write timestamp.
         this.keepaliveRetryChain(best)
       } else {
-        // Permanent: 429 rate limit, 401 auth — give up.
+        // Permanent: 429 rate limit, 401 auth — clear snapshot, but keep timer alive.
+        // Timer is a cheap unref'd interval; it becomes a no-op with an empty registry.
+        // Next real stream() will rebuild the snapshot and KA resumes automatically.
         this.keepaliveRegistry.clear()
-        this.stopKeepalive()
+        this.onKeepaliveDisarmed('permanent_error')
       }
     } finally {
       this.keepaliveInFlight = false
@@ -854,9 +924,12 @@ export class ClaudeCodeSDK {
     attemptIndex = 0,
   ): void {
     if (attemptIndex >= ClaudeCodeSDK.KEEPALIVE_RETRY_DELAYS.length) {
-      // Exhausted all retries — give up
+      // Exhausted all retries — disarm KA but leave timer running.
+      // Rationale: registry.clear() makes keepaliveTick() a no-op; next real stream()
+      // will repopulate registry and KA resumes automatically. Killing the timer here
+      // is a bug — it makes KA "die permanently" on any transient network blip.
       this.keepaliveRegistry.clear()
-      this.stopKeepalive()
+      this.onKeepaliveDisarmed('retry_exhausted')
       return
     }
 
@@ -867,9 +940,12 @@ export class ClaudeCodeSDK {
 
     // Need at least the delay + 5s safety for the request itself
     if (ttlRemaining < nextDelay + 5000) {
-      // Not enough time — cache will expire before we can retry. Give up cleanly.
+      // Not enough time — cache will expire before we can retry.
+      // CRITICAL INVARIANT: KA must NEVER cache_write. Cache is presumed dead;
+      // next real stream will pay cache_write (user-initiated, expected cost).
+      // Clear registry so no fire can happen; leave timer running for auto-resume.
       this.keepaliveRegistry.clear()
-      this.stopKeepalive()
+      this.onKeepaliveDisarmed('cache_ttl_exhausted')
       return
     }
 
@@ -886,8 +962,9 @@ export class ClaudeCodeSDK {
       // Re-check remaining TTL right before firing (time passed during delay)
       const ageNow = Date.now() - this.keepaliveCacheWrittenAt
       if (ageNow > ClaudeCodeSDK.CACHE_TTL_MS - 5000) {
+        // Cache presumed dead mid-retry. NEVER cache_write from KA — disarm cleanly.
         this.keepaliveRegistry.clear()
-        this.stopKeepalive()
+        this.onKeepaliveDisarmed('cache_ttl_expired_mid_retry')
         return
       }
 
@@ -922,15 +999,171 @@ export class ClaudeCodeSDK {
           this.keepaliveRetryChain(entry, attemptIndex + 1)
           return
         } else {
-          // Permanent failure — stop
+          // Permanent failure (401/429/etc) — disarm but keep timer alive.
           this.keepaliveRegistry.clear()
-          this.stopKeepalive()
+          this.onKeepaliveDisarmed('permanent_error_mid_retry')
         }
       } finally {
         this.keepaliveInFlight = false
         this.keepaliveAbortController = null
       }
     }, nextDelay)
+  }
+
+  /**
+   * Layer 3 — Cache rewrite burst protection.
+   * Called at the top of every real stream() before the request goes out.
+   *
+   * Logic:
+   *   - Compute idle gap = now - last REAL activity (keepaliveLastRealActivityAt).
+   *   - If gap > warnIdleMs AND estimated cache size > warnTokens → log warn event
+   *     (stats.jsonl + stderr via callback) so quota burn is observable.
+   *   - If gap > blockIdleMs AND blockEnabled → throw CacheRewriteBlockedError.
+   *
+   * No side effects on network/KA state. Pure signal + optional block.
+   */
+  private checkRewriteGuard(model: string): void {
+    const lastReal = this.keepaliveLastRealActivityAt
+    if (lastReal === 0) return  // First-ever request; no baseline yet.
+    const idleMs = Date.now() - lastReal
+    const warnIdle = this.keepaliveConfig.rewriteWarnIdleMs
+    const blockIdle = this.keepaliveConfig.rewriteBlockIdleMs
+    if (idleMs < warnIdle) return  // Normal working cadence.
+
+    const estimatedTokens = this.lastKnownCacheTokensByModel.get(model) ?? 0
+    const blocked = this.keepaliveConfig.rewriteBlockEnabled && idleMs >= blockIdle
+
+    if (estimatedTokens >= this.keepaliveConfig.rewriteWarnTokens || blocked) {
+      try { this.keepaliveConfig.onRewriteWarning?.({ idleMs, estimatedTokens, blocked, model }) } catch {}
+    }
+
+    if (blocked) {
+      throw new CacheRewriteBlockedError(idleMs, estimatedTokens, model)
+    }
+  }
+
+  /**
+   * Called whenever KA fire logic decides to "disarm" (stop firing) without
+   * killing the interval timer. Timer remains cheap+unref'd, becomes no-op with
+   * empty registry, and auto-resumes on next real stream() when snapshot rebuilds.
+   *
+   * reason ∈ {
+   *   'permanent_error',         // 401/429/etc on main fire
+   *   'permanent_error_mid_retry',
+   *   'retry_exhausted',         // 13 transient retries all failed
+   *   'cache_ttl_exhausted',     // not enough TTL left to even schedule next retry
+   *   'cache_ttl_expired_mid_retry',
+   * }
+   */
+  private onKeepaliveDisarmed(reason: string): void {
+    // Abort any in-flight fire (cleanup)
+    this.keepaliveAbortController?.abort()
+    this.keepaliveAbortController = null
+    this.keepaliveInFlight = false
+    // Clear retry timer if any
+    if (this.keepaliveRetryTimer) {
+      clearTimeout(this.keepaliveRetryTimer)
+      this.keepaliveRetryTimer = null
+    }
+    // NOTE: intentionally NOT calling clearInterval(keepaliveTimer).
+    // Interval is unref'd (line 729) → negligible CPU, keepaliveTick() returns
+    // immediately when registry is empty (line 739). Keeps SDK in "ready to resume"
+    // state: next stream() → onStreamComplete() → startKeepaliveTimer() (no-op if
+    // already running) → KA fires on fresh snapshot. Zero recovery latency.
+    try { this.keepaliveConfig.onDisarmed?.({ reason, at: Date.now() }) } catch {}
+    // Layer 2: start health probe ONLY if cache is still worth saving.
+    // Reason matters: on permanent errors (401/429) probe won't help; only on network-ish reasons.
+    const networkReasons = new Set(['retry_exhausted', 'cache_ttl_exhausted', 'cache_ttl_expired_mid_retry'])
+    if (networkReasons.has(reason)) {
+      const cacheAge = Date.now() - this.keepaliveCacheWrittenAt
+      const ttlRemaining = ClaudeCodeSDK.CACHE_TTL_MS - cacheAge
+      // Only probe if there's meaningful cache left to rescue (>30s)
+      if (ttlRemaining > 30_000) {
+        this.startHealthProbe()
+      }
+    }
+  }
+
+  // Layer 2 — Network health probe.
+  // Activated only when KA retry chain failed AND cache still has useful TTL.
+  // Uses TCP connect (no HTTP, not billable, not counted against quota).
+  // When network heals before cache dies → immediate KA fire rescues the cache.
+  private static readonly HEALTH_PROBE_INTERVAL_MS = 30_000
+  private static readonly HEALTH_PROBE_TIMEOUT_MS = 3_000
+
+  private startHealthProbe(): void {
+    if (this.healthProbeTimer) return  // already probing
+    const prevState = this.networkState
+    this.networkState = 'degraded'
+    if (prevState !== 'degraded') {
+      try { this.keepaliveConfig.onNetworkStateChange?.({ from: prevState, to: 'degraded', at: Date.now() }) } catch {}
+    }
+
+    const probe = async () => {
+      // Stop probing if cache died during the outage — no more work to do.
+      const cacheAge = Date.now() - this.keepaliveCacheWrittenAt
+      if (cacheAge >= ClaudeCodeSDK.CACHE_TTL_MS) {
+        this.stopHealthProbe()
+        return
+      }
+      // Stop if something already restored real activity (e.g. user sent a prompt that succeeded).
+      // keepaliveCacheWrittenAt would be refreshed; this check stays cheap.
+
+      let ok = false
+      try {
+        // Dynamic import avoids cost at module load time
+        const { connect } = await import('node:net')
+        await new Promise<void>((resolve, reject) => {
+          const sock = connect({ host: 'api.anthropic.com', port: 443 })
+          const t = setTimeout(() => {
+            sock.destroy()
+            reject(new Error('timeout'))
+          }, ClaudeCodeSDK.HEALTH_PROBE_TIMEOUT_MS)
+          sock.once('connect', () => {
+            clearTimeout(t)
+            sock.end()
+            resolve()
+          })
+          sock.once('error', (e) => {
+            clearTimeout(t)
+            reject(e)
+          })
+        })
+        ok = true
+      } catch {
+        ok = false
+      }
+
+      if (ok) {
+        // Network is back. Stop probing, transition state, try to rescue cache.
+        this.stopHealthProbe()
+        const prev = this.networkState
+        this.networkState = 'healthy'
+        try { this.keepaliveConfig.onNetworkStateChange?.({ from: prev, to: 'healthy', at: Date.now() }) } catch {}
+        // If registry still has a snapshot AND cache has meaningful TTL left → fire immediately.
+        // If registry was cleared during disarm, we cannot reconstruct a snapshot;
+        // the cache effectively died (we lost the prefix). Do nothing — next real stream
+        // will repopulate the registry, and KA resumes normally.
+        const ttlLeft = ClaudeCodeSDK.CACHE_TTL_MS - (Date.now() - this.keepaliveCacheWrittenAt)
+        if (this.keepaliveRegistry.size > 0 && ttlLeft > 10_000) {
+          void this.keepaliveTick()  // force immediate attempt
+        }
+      }
+    }
+
+    // Fire first probe immediately, then on interval.
+    void probe()
+    this.healthProbeTimer = setInterval(probe, ClaudeCodeSDK.HEALTH_PROBE_INTERVAL_MS)
+    if (this.healthProbeTimer && typeof this.healthProbeTimer === 'object' && 'unref' in this.healthProbeTimer) {
+      (this.healthProbeTimer as any).unref()
+    }
+  }
+
+  private stopHealthProbe(): void {
+    if (this.healthProbeTimer) {
+      clearInterval(this.healthProbeTimer)
+      this.healthProbeTimer = null
+    }
   }
 
   public stopKeepalive(): void {
@@ -949,6 +1182,7 @@ export class ClaudeCodeSDK {
     this.keepaliveAbortController?.abort()
     this.keepaliveRegistry.clear()
     this.keepaliveInFlight = false
+    this.stopHealthProbe()
   }
 
   // ── Anchor persistence: one number per cwd, survives process restart ──
@@ -1000,7 +1234,10 @@ export class ClaudeCodeSDK {
     const body: Record<string, unknown> = {
       model: options.model,
       messages: options.messages,
-      max_tokens: options.maxTokens ?? 16384,
+      // max_tokens: resolved from SSOT (src/models.ts).
+      // Respects explicit options.maxTokens > CLAUDE_CODE_MAX_OUTPUT_TOKENS env > per-model default.
+      // See src/models.ts for rationale — prevents the max_tokens truncation retry loop.
+      max_tokens: resolveMaxTokens(options.model, options.maxTokens),
       stream: true,
       system,
 
@@ -1035,13 +1272,14 @@ export class ClaudeCodeSDK {
     }
 
     // Thinking — mirrors claude.ts:1604-1630
-    // 4.6 models use adaptive thinking by default
+    // 4.6+ models use adaptive thinking by default (opus-4-6, sonnet-4-6, opus-4-7, etc.)
     const model = options.model.toLowerCase()
-    const is46Model = model.includes('opus-4-6') || model.includes('sonnet-4-6')
+    const isAdaptiveModel = model.includes('opus-4-6') || model.includes('sonnet-4-6')
+      || model.includes('opus-4-7') || model.includes('sonnet-4-7')
     const thinkingDisabled = options.thinking?.type === 'disabled'
 
-    if (!thinkingDisabled && is46Model) {
-      // Sonnet/Opus 4.6 use adaptive thinking — thinking.ts:120
+    if (!thinkingDisabled && isAdaptiveModel) {
+      // 4.6+ models use adaptive thinking — thinking.ts:120
       body.thinking = { type: 'adaptive' }
     } else if (options.thinking?.type === 'enabled') {
       body.thinking = {
@@ -1049,10 +1287,10 @@ export class ClaudeCodeSDK {
         budget_tokens: options.thinking.budgetTokens,
       }
     }
-    // When disabled or omitted for non-4.6: don't send thinking field
+    // When disabled or omitted for non-adaptive models: don't send thinking field
 
     // Temperature only when thinking is disabled — claude.ts:1691-1695
-    const hasThinking = !thinkingDisabled && (is46Model || options.thinking?.type === 'enabled')
+    const hasThinking = !thinkingDisabled && (isAdaptiveModel || options.thinking?.type === 'enabled')
     if (!hasThinking && options.temperature !== undefined) {
       body.temperature = options.temperature
     }
@@ -1062,7 +1300,8 @@ export class ClaudeCodeSDK {
     }
 
     // Effort — goes into output_config.effort (from utils/effort.ts + claude.ts:1563)
-    if (options.effort && is46Model) {
+    // GA since 4.6+ — no beta header required
+    if (options.effort && isAdaptiveModel) {
       body.output_config = { effort: options.effort }
     }
 
@@ -1167,6 +1406,17 @@ export class ClaudeCodeSDK {
     if (options.fast) {
       betas.push(FAST_MODE_BETA)
     }
+
+    // Context management — betas.ts (4.6+ models)
+    if (!isHaiku) {
+      betas.push(CONTEXT_MANAGEMENT_BETA)
+    }
+
+    // Task budgets — betas.ts (new in 4.7)
+    betas.push(TASK_BUDGETS_BETA)
+
+    // Redact thinking — hide thinking from response unless showThinking is set
+    betas.push(REDACT_THINKING_BETA)
 
     // Prompt caching scope — betas.ts:355
     betas.push(PROMPT_CACHING_SCOPE_BETA)

@@ -22,3 +22,9 @@ packages/opencode-proxy/*.sh
 bun.lock
 README.md.toc
 ~/.claude/snapshots/
+
+# Session-local opencode state (local dev env, not code)
+.opencode/
+
+# Timestamped backup files (provider.ts.backup-before-core-switch-YYYYMMDD-HHMMSS)
+*.backup-*

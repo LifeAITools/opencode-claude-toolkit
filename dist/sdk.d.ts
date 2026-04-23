@@ -21,6 +21,9 @@ export declare class ClaudeCodeSDK {
     private tokenIssuedAt;
     private onTokenStatus;
     private keepaliveConfig;
+    private lastKnownCacheTokensByModel;
+    private networkState;
+    private healthProbeTimer;
     private keepaliveRegistry;
     private _pendingSnapshotModel;
     private _pendingSnapshotBody;
@@ -57,6 +60,37 @@ export declare class ClaudeCodeSDK {
      * Checks remaining cache TTL before each attempt to avoid wasting a request on expired cache.
      */
     private keepaliveRetryChain;
+    /**
+     * Layer 3 — Cache rewrite burst protection.
+     * Called at the top of every real stream() before the request goes out.
+     *
+     * Logic:
+     *   - Compute idle gap = now - last REAL activity (keepaliveLastRealActivityAt).
+     *   - If gap > warnIdleMs AND estimated cache size > warnTokens → log warn event
+     *     (stats.jsonl + stderr via callback) so quota burn is observable.
+     *   - If gap > blockIdleMs AND blockEnabled → throw CacheRewriteBlockedError.
+     *
+     * No side effects on network/KA state. Pure signal + optional block.
+     */
+    private checkRewriteGuard;
+    /**
+     * Called whenever KA fire logic decides to "disarm" (stop firing) without
+     * killing the interval timer. Timer remains cheap+unref'd, becomes no-op with
+     * empty registry, and auto-resumes on next real stream() when snapshot rebuilds.
+     *
+     * reason ∈ {
+     *   'permanent_error',         // 401/429/etc on main fire
+     *   'permanent_error_mid_retry',
+     *   'retry_exhausted',         // 13 transient retries all failed
+     *   'cache_ttl_exhausted',     // not enough TTL left to even schedule next retry
+     *   'cache_ttl_expired_mid_retry',
+     * }
+     */
+    private onKeepaliveDisarmed;
+    private static readonly HEALTH_PROBE_INTERVAL_MS;
+    private static readonly HEALTH_PROBE_TIMEOUT_MS;
+    private startHealthProbe;
+    private stopHealthProbe;
     stopKeepalive(): void;
     /** HTTP headers — mimics getAnthropicClient() + getAuthHeaders() */
     private buildHeaders;

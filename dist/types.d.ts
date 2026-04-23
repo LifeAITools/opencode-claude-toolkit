@@ -77,8 +77,39 @@ export interface KeepaliveConfig {
     intervalMs?: number;
     idleTimeoutMs?: number;
     minTokens?: number;
+    /** ── Rewrite burst protection ──────────────────────────────────────
+     * When a real stream() fires after long idle, the cache may be dead.
+     * The first call will silently cost `cacheWrite` (can be 100k+ tokens).
+     * Guard warns (or blocks) such calls to prevent accidental quota burn.
+     */
+    /** Idle threshold that triggers a warning on next real stream. Default: 300_000 (5 min — matches cache TTL) */
+    rewriteWarnIdleMs?: number;
+    /** Only warn if estimated rewrite cost exceeds this. Default: 50_000 tokens */
+    rewriteWarnTokens?: number;
+    /** Hard-block threshold. If idle > this AND block enabled, stream() throws. Default: Infinity (warn only) */
+    rewriteBlockIdleMs?: number;
+    /** Enable hard block. Default: false */
+    rewriteBlockEnabled?: boolean;
     onHeartbeat?: (stats: KeepaliveStats) => void;
     onTick?: (tick: KeepaliveTick) => void;
+    /** Fired when KA disarms (network/cache issues) but timer stays alive for auto-resume */
+    onDisarmed?: (info: {
+        reason: string;
+        at: number;
+    }) => void;
+    /** Fired on next real stream after long idle — surfaces potential cache_write cost */
+    onRewriteWarning?: (info: {
+        idleMs: number;
+        estimatedTokens: number;
+        blocked: boolean;
+        model: string;
+    }) => void;
+    /** Fired when network health probe transitions (degraded ↔ healthy). Reserved for Layer 2. */
+    onNetworkStateChange?: (info: {
+        from: string;
+        to: string;
+        at: number;
+    }) => void;
 }
 export interface KeepaliveTick {
     idleMs: number;
@@ -299,5 +330,16 @@ export declare class RateLimitError extends ClaudeCodeSDKError {
     readonly rateLimitInfo: RateLimitInfo;
     readonly status: number;
     constructor(message: string, rateLimitInfo: RateLimitInfo, status?: number, cause?: unknown);
+}
+/**
+ * Thrown by stream() when rewriteBlockEnabled=true and idleMs exceeds blockIdleMs.
+ * Prevents accidental cache_write bursts from long-idle / dormant sessions waking up.
+ */
+export declare class CacheRewriteBlockedError extends ClaudeCodeSDKError {
+    idleMs: number;
+    estimatedTokens: number;
+    model: string;
+    readonly code = "CACHE_REWRITE_BLOCKED";
+    constructor(idleMs: number, estimatedTokens: number, model: string);
 }
 //# sourceMappingURL=types.d.ts.map

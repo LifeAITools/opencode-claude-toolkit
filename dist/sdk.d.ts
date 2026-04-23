@@ -20,23 +20,8 @@ export declare class ClaudeCodeSDK {
     private proactiveRefreshFailures;
     private tokenIssuedAt;
     private onTokenStatus;
-    private keepaliveConfig;
-    private lastKnownCacheTokensByModel;
-    private networkState;
-    private healthProbeTimer;
-    private keepaliveRegistry;
-    private _pendingSnapshotModel;
-    private _pendingSnapshotBody;
-    private _pendingSnapshotHeaders;
-    private keepaliveLastActivityAt;
-    private keepaliveTimer;
-    private keepaliveAbortController;
-    private keepaliveInFlight;
-    private keepaliveJitterMs;
-    private keepaliveCacheWrittenAt;
-    private keepaliveRetryTimer;
-    private keepaliveLastRealActivityAt;
-    private cacheAnchorMessageCount;
+    private keepalive;
+    private _lastStreamUsage;
     constructor(options?: ClaudeCodeSDKOptions);
     /** Non-streaming: send messages, get full response */
     generate(options: GenerateOptions): Promise<GenerateResponse>;
@@ -45,52 +30,10 @@ export declare class ClaudeCodeSDK {
     getRateLimitInfo(): RateLimitInfo;
     private doStreamRequest;
     private parseSSE;
-    private onStreamComplete;
-    private static readonly SNAPSHOT_TTL_MS;
-    private static readonly DUMP_BODY;
-    private snapshotCallCount;
-    private writeSnapshotDebug;
-    private startKeepaliveTimer;
-    private static readonly CACHE_TTL_MS;
-    private keepaliveTick;
-    private static readonly KEEPALIVE_RETRY_DELAYS;
     /**
-     * Dedicated retry chain for transient keepalive failures.
-     * Uses setTimeout with exact delays from a fixed timestamp — no drift, no timer reuse.
-     * Checks remaining cache TTL before each attempt to avoid wasting a request on expired cache.
+     * Full KA shutdown — stops engine timers, registry, health probe.
+     * Also clears SDK-owned tokenRotationTimer (auth concern, not KA).
      */
-    private keepaliveRetryChain;
-    /**
-     * Layer 3 — Cache rewrite burst protection.
-     * Called at the top of every real stream() before the request goes out.
-     *
-     * Logic:
-     *   - Compute idle gap = now - last REAL activity (keepaliveLastRealActivityAt).
-     *   - If gap > warnIdleMs AND estimated cache size > warnTokens → log warn event
-     *     (stats.jsonl + stderr via callback) so quota burn is observable.
-     *   - If gap > blockIdleMs AND blockEnabled → throw CacheRewriteBlockedError.
-     *
-     * No side effects on network/KA state. Pure signal + optional block.
-     */
-    private checkRewriteGuard;
-    /**
-     * Called whenever KA fire logic decides to "disarm" (stop firing) without
-     * killing the interval timer. Timer remains cheap+unref'd, becomes no-op with
-     * empty registry, and auto-resumes on next real stream() when snapshot rebuilds.
-     *
-     * reason ∈ {
-     *   'permanent_error',         // 401/429/etc on main fire
-     *   'permanent_error_mid_retry',
-     *   'retry_exhausted',         // 13 transient retries all failed
-     *   'cache_ttl_exhausted',     // not enough TTL left to even schedule next retry
-     *   'cache_ttl_expired_mid_retry',
-     * }
-     */
-    private onKeepaliveDisarmed;
-    private static readonly HEALTH_PROBE_INTERVAL_MS;
-    private static readonly HEALTH_PROBE_TIMEOUT_MS;
-    private startHealthProbe;
-    private stopHealthProbe;
     stopKeepalive(): void;
     /** HTTP headers — mimics getAnthropicClient() + getAuthHeaders() */
     private buildHeaders;

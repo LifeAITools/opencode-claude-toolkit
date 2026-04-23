@@ -33,6 +33,16 @@ export {
   CacheRewriteBlockedError,
 } from './types.js'
 export type { SessionEntry } from './session.js'
+
+// KeepaliveEngine — extracted from sdk.ts, reusable in claude-max-proxy
+// and other consumers needing cache-keepalive without full SDK machinery.
+export { KeepaliveEngine } from './keepalive-engine.js'
+export type { KeepaliveEngineOptions } from './keepalive-engine.js'
+export type {
+  KeepaliveConfig,
+  KeepaliveStats,
+  KeepaliveTick,
+} from './types.js'
 export { oauthLogin } from './auth.js'
 export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js'
 export type { OAuthLoginOptions, OAuthResult } from './auth.js'

@@ -1,0 +1,217 @@
+#!/usr/bin/env bun
+/**
+ * claude-max — CLI wrapper + proxy control.
+ *
+ * Subcommands:
+ *   claude-max              start proxy if needed, then exec native `claude`
+ *   claude-max status       print current proxy state and exit
+ *   claude-max watch        live TUI dashboard
+ *   claude-max logs [-f]    tail proxy logs
+ *   claude-max stop         kill proxy
+ *   claude-max restart      stop + start
+ *   claude-max config       print current config
+ */
+
+import { spawnSync, spawn } from 'bun'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
+import { loadConfig } from '../src/config.js'
+
+const PID_FILE = join(homedir(), '.claude', 'claude-max-proxy.pid')
+const cfg = loadConfig()
+const PROXY_URL = `http://${cfg.proxyHost}:${cfg.proxyPort}`
+
+function readPid(): number | null {
+  if (!existsSync(PID_FILE)) return null
+  try {
+    const pid = parseInt(readFileSync(PID_FILE, 'utf8').trim())
+    try { process.kill(pid, 0); return pid } catch { return null }
+  } catch { return null }
+}
+
+function writePid(pid: number): void {
+  writeFileSync(PID_FILE, String(pid) + '\n')
+}
+
+async function isProxyAlive(): Promise<boolean> {
+  try {
+    const r = await fetch(`${PROXY_URL}/health`, {
+      signal: AbortSignal.timeout(1000),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+async function ensureProxyRunning(): Promise<void> {
+  if (await isProxyAlive()) return
+
+  // Find the server.ts relative to this script
+  const here = import.meta.dir
+  const serverPath = join(here, '..', 'src', 'server.ts')
+
+  if (!existsSync(serverPath)) {
+    console.error(`[claude-max] Cannot find server at ${serverPath}`)
+    process.exit(1)
+  }
+
+  console.error('[claude-max] Starting proxy in background...')
+
+  // Detach: Bun spawn with stdio='ignore' + unref
+  const child = spawn({
+    cmd: ['bun', 'run', serverPath],
+    stdout: 'inherit',
+    stderr: 'inherit',
+    stdin: 'ignore',
+    env: { ...process.env },
+  })
+  writePid(child.pid!)
+
+  // Wait up to 8s for /health
+  for (let i = 0; i < 40; i++) {
+    await new Promise(r => setTimeout(r, 200))
+    if (await isProxyAlive()) {
+      console.error(`[claude-max] Proxy ready on ${PROXY_URL} (pid ${child.pid})`)
+      return
+    }
+  }
+
+  console.error(`[claude-max] ERROR: proxy failed to start within 8s. Check logs at ${cfg.logFile}`)
+  process.exit(1)
+}
+
+async function cmdStart(args: string[]): Promise<void> {
+  await ensureProxyRunning()
+
+  // Find native claude binary (resolved via PATH, skipping our own wrapper)
+  // On macOS + Linux, CC is at ~/.npm-global/bin/claude
+  const candidates = [
+    join(homedir(), '.npm-global', 'bin', 'claude'),
+    '/usr/local/bin/claude',
+    '/opt/homebrew/bin/claude',
+  ]
+  const claudeBin = candidates.find(existsSync)
+  if (!claudeBin) {
+    console.error('[claude-max] Native claude CLI not found. Install: npm i -g @anthropic-ai/claude-code')
+    process.exit(1)
+  }
+
+  // Exec native CC with ANTHROPIC_BASE_URL pointing at our proxy
+  const env = { ...process.env, ANTHROPIC_BASE_URL: PROXY_URL }
+
+  // If no ANTHROPIC_AUTH_TOKEN, CC refuses to start. Supply a placeholder
+  // — proxy strips/replaces Authorization with OAuth bearer anyway.
+  if (!env.ANTHROPIC_AUTH_TOKEN) {
+    env.ANTHROPIC_AUTH_TOKEN = 'claude-max-proxy-placeholder'
+  }
+
+  const p = spawn({
+    cmd: [claudeBin, ...args],
+    stdio: ['inherit', 'inherit', 'inherit'],
+    env,
+  })
+  const exit = await p.exited
+  process.exit(exit)
+}
+
+async function cmdStatus(): Promise<void> {
+  if (!(await isProxyAlive())) {
+    console.log('Proxy: NOT RUNNING')
+    process.exit(1)
+  }
+
+  const r = await fetch(`${PROXY_URL}/stats`)
+  const stats = await r.json() as any
+
+  console.log(`Proxy: RUNNING (pid ${stats.proxy.pid}, uptime ${stats.proxy.uptime}s, port ${stats.proxy.port})`)
+  console.log(`Sessions: ${stats.sessions.length}`)
+  for (const s of stats.sessions) {
+    const pid = s.pid ? `pid=${s.pid}` : 'pid=?'
+    const idle = `idle=${s.idleSec}s`
+    console.log(`  ${s.sessionId.slice(0, 12)}  ${pid}  ${idle}  model=${s.model ?? '?'}  KA=${s.ka.timerRunning ? '🟢' : '⚫'}`)
+  }
+  console.log(`Quota: 5h=${stats.rateLimit.utilization5h ?? '?'}  7d=${stats.rateLimit.utilization7d ?? '?'}  status=${stats.rateLimit.status ?? '?'}`)
+}
+
+async function cmdStop(): Promise<void> {
+  const pid = readPid()
+  if (!pid) {
+    console.log('Proxy not running')
+    return
+  }
+
+  try {
+    await fetch(`${PROXY_URL}/admin/shutdown`, { method: 'POST', signal: AbortSignal.timeout(2000) })
+  } catch {
+    // Fall back to SIGTERM
+    try { process.kill(pid, 'SIGTERM') } catch {}
+  }
+
+  // Wait for death
+  for (let i = 0; i < 20; i++) {
+    if (!(await isProxyAlive())) {
+      console.log('Proxy stopped')
+      return
+    }
+    await new Promise(r => setTimeout(r, 200))
+  }
+
+  console.log('Proxy did not stop gracefully — sending SIGKILL')
+  try { process.kill(pid, 'SIGKILL') } catch {}
+}
+
+async function cmdLogs(args: string[]): Promise<void> {
+  const follow = args.includes('-f') || args.includes('--follow')
+  const cmd = follow ? ['tail', '-f', cfg.logFile] : ['tail', '-n', '100', cfg.logFile]
+  const p = spawn({ cmd, stdio: ['inherit', 'inherit', 'inherit'] })
+  await p.exited
+}
+
+async function cmdConfig(): Promise<void> {
+  console.log(JSON.stringify(cfg, null, 2))
+}
+
+async function cmdWatch(): Promise<void> {
+  // TUI dashboard — requires proxy running
+  await ensureProxyRunning()
+  const here = import.meta.dir
+  const tuiPath = join(here, '..', 'src', 'tui.ts')
+  if (!existsSync(tuiPath)) {
+    console.error('[claude-max] TUI not available yet — use `claude-max status` instead')
+    process.exit(1)
+  }
+  const p = spawn({ cmd: ['bun', 'run', tuiPath], stdio: ['inherit', 'inherit', 'inherit'] })
+  await p.exited
+}
+
+// ═══ Router ═══════════════════════════════════════════════════════
+
+const subcmd = process.argv[2]
+const rest = process.argv.slice(3)
+
+switch (subcmd) {
+  case 'status':   await cmdStatus(); break
+  case 'stop':     await cmdStop(); break
+  case 'restart':  await cmdStop(); await ensureProxyRunning(); break
+  case 'logs':     await cmdLogs(rest); break
+  case 'watch':    await cmdWatch(); break
+  case 'config':   await cmdConfig(); break
+  case 'help':
+  case '--help':
+  case '-h':
+    console.log(`Usage:
+  claude-max              start proxy if needed, exec native claude
+  claude-max status       show proxy state
+  claude-max watch        live TUI dashboard
+  claude-max logs [-f]    tail logs
+  claude-max stop         kill proxy
+  claude-max restart      stop + start
+  claude-max config       print config
+`)
+    break
+  default:
+    // Pass through to native claude with proxy-aware env
+    await cmdStart([subcmd, ...rest].filter(Boolean))
+}

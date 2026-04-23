@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+// @bun
 var __create = Object.create;
 var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
@@ -44,7 +44,7 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
-var __require = /* @__PURE__ */ createRequire(import.meta.url);
+var __require = import.meta.require;
 
 // wake-types.ts
 import { homedir } from "os";
@@ -183,9 +183,9 @@ function checkSpawnAllowed(identity, currentDepth, activeHelpers) {
     return {
       allowed: false,
       reason: [
-        `⚠️ Лимит одновременных хелперов: ${activeHelpers}/${maxConcurrent} активны.`,
-        `Дождись завершения текущих хелперов, потом вызывай новых.`,
-        `Для делегирования работы коллегам используй SynqTask:`,
+        `\u26A0\uFE0F \u041B\u0438\u043C\u0438\u0442 \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432: ${activeHelpers}/${maxConcurrent} \u0430\u043A\u0442\u0438\u0432\u043D\u044B.`,
+        `\u0414\u043E\u0436\u0434\u0438\u0441\u044C \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0438\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432, \u043F\u043E\u0442\u043E\u043C \u0432\u044B\u0437\u044B\u0432\u0430\u0439 \u043D\u043E\u0432\u044B\u0445.`,
+        `\u0414\u043B\u044F \u0434\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0440\u0430\u0431\u043E\u0442\u044B \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 SynqTask:`,
         `  todo_tasks({action:"delegate", task_id:"...", to_member_id:"..."})`
       ].join(`
 `),
@@ -349,7 +349,7 @@ function parseAgentsMd() {
     const content = readFileSync(agentsMdPath, "utf-8");
     const nameMatch = content.match(/^#\s+(?:Agent\s+)?(.+)/im);
     const name = nameMatch?.[1]?.trim() ?? null;
-    const roleMatch = content.match(/##\s+(?:Роль|Role)[^\n]*\n([\s\S]*?)(?=\n##|\n$)/i);
+    const roleMatch = content.match(/##\s+(?:\u0420\u043E\u043B\u044C|Role)[^\n]*\n([\s\S]*?)(?=\n##|\n$)/i);
     const rolePrompt = roleMatch?.[1]?.trim() ?? null;
     const idMatch = content.match(/Member ID.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
     const memberId = idMatch?.[1] ?? null;
@@ -387,7 +387,7 @@ function formatWakeMessage(event, identity) {
       `Team: ${identity.teamName ?? "none"}. Teammates: ${teammatesList}.`
     ];
     if (identity.budget) {
-      identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. Делегирование коллегам: SynqTask todo_tasks delegate.`);
+      identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. \u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C: SynqTask todo_tasks delegate.`);
     }
     identityLines.push(`</agent-identity>`);
     identityBlock = identityLines.join(`
@@ -401,7 +401,7 @@ function formatWakeMessage(event, identity) {
       const text = p2.text ?? "(no text)";
       const warm = isChannelWarm(chId);
       if (warm) {
-        const preview = text.length > 120 ? text.slice(0, 120) + "…" : text;
+        const preview = text.length > 120 ? text.slice(0, 120) + "\u2026" : text;
         body = `**${sendName}** in channel \`${chId}\`:
 > ${preview}
 Reply: \`todo_channels({action:"send", channel_id:"${chId}", text:"..."})\``;
@@ -456,7 +456,7 @@ Reply: \`todo_channels({action:"send", channel_id:"${chId}", text:"..."})\``;
       const status = p2.status ?? p2.changes?.status?.to ?? "?";
       const title = p2.title ?? taskId;
       body = [
-        `## Task Status: ${title} → ${status}`,
+        `## Task Status: ${title} \u2192 ${status}`,
         `View: \`todo_tasks({action:"show", task_id:"${taskId}"})\``
       ].join(`
 `);
@@ -818,7 +818,7 @@ var init_wake_listener = __esm(() => {
 // signal-wire-actions.ts
 async function dispatchActions(actions, ctx) {
   if (process.env.SIGNAL_WIRE_ACTIVE === "1") {
-    dbg2("Re-entrancy detected — skipping all actions");
+    dbg2("Re-entrancy detected \u2014 skipping all actions");
     return [];
   }
   const sorted = [...actions].sort((a2, b2) => {
@@ -921,7 +921,7 @@ async function executeWake(action, ctx) {
         `Team: ${identity.teamName ?? "none"}. Teammates: ${teammates}.`
       ];
       if (identity.budget) {
-        identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. Делегирование коллегам: SynqTask todo_tasks delegate.`);
+        identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. \u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C: SynqTask todo_tasks delegate.`);
       }
       identityLines.push(`</agent-identity>`);
       identityBlock = identityLines.join(`
@@ -1186,7 +1186,7 @@ class SignalWire {
     } else {
       this.disabledRules.add(ruleId);
     }
-    dbg4(`toggleRule: ${ruleId} → ${enabled ? "enabled" : "disabled"}`);
+    dbg4(`toggleRule: ${ruleId} \u2192 ${enabled ? "enabled" : "disabled"}`);
     return true;
   }
   listRules() {
@@ -1222,12 +1222,12 @@ class SignalWire {
       const prev = this.contextPosition;
       if (prev > 0 && promptSize > 0 && promptSize < prev * 0.6) {
         this.cooldownMap.clear();
-        dbg4(`compaction detected: ${prev}→${promptSize} (${((1 - promptSize / prev) * 100).toFixed(0)}% drop) — all cooldowns reset`);
+        dbg4(`compaction detected: ${prev}\u2192${promptSize} (${((1 - promptSize / prev) * 100).toFixed(0)}% drop) \u2014 all cooldowns reset`);
       }
       if (promptSize > 0) {
         this.contextPosition = promptSize;
       }
-      dbg4(`trackTokens: promptSize=${promptSize} contextPosition=${prev}→${this.contextPosition}`);
+      dbg4(`trackTokens: promptSize=${promptSize} contextPosition=${prev}\u2192${this.contextPosition}`);
     } catch (e2) {
       dbg4("trackTokens error:", e2.message);
     }
@@ -1264,12 +1264,12 @@ class SignalWire {
             execCmd: rule.action.exec ? this.substituteVars(rule.action.exec, rule, context) : undefined
           });
         }
-        dbg4(`rule fired: ${rule.id} → ${hint.replace(/\n/g, " ").slice(0, 120)}`);
+        dbg4(`rule fired: ${rule.id} \u2192 ${hint.replace(/\n/g, " ").slice(0, 120)}`);
       }
       if (results.length === 0)
         return null;
       const ids = results.map((r2) => r2.ruleId);
-      const combined = results.map((r2) => `⚡ signal-wire: ${r2.ruleId}
+      const combined = results.map((r2) => `\u26A1 signal-wire: ${r2.ruleId}
 ${r2.hint}`).join(`
 
 `);
@@ -1445,9 +1445,9 @@ ${r2.hint}`).join(`
     }).catch((e2) => dbg4("resolveSessionId error:", e2?.message));
   }
   formatTuiMessage(ids, hint) {
-    const header = ids.length === 1 ? `⚡ signal-wire: ${ids[0]}` : `⚡ signal-wire: ${ids.join(" + ")}`;
+    const header = ids.length === 1 ? `\u26A1 signal-wire: ${ids[0]}` : `\u26A1 signal-wire: ${ids.join(" + ")}`;
     const width = Math.max(header.length + 2, 40);
-    const bar = "━".repeat(width);
+    const bar = "\u2501".repeat(width);
     return `${bar}
 ${header}
 ${bar}
@@ -1841,7 +1841,7 @@ function getEventTemplate(event) {
         `### Message`,
         p2.text ? `> ${p2.text}` : "> (no text)",
         ``,
-        `### ⚡ ACTION REQUIRED: Reply in channel`,
+        `### \u26A1 ACTION REQUIRED: Reply in channel`,
         `You MUST reply using this exact tool call:`,
         `\`\`\``,
         `synqtask_todo_channels({action: "send", channel_id: "${chId}", text: "YOUR REPLY HERE"})`,
@@ -1892,7 +1892,7 @@ function getEventTemplate(event) {
         ``,
         p2.task_id || p2.entityId ? `- **Task ID:** \`${p2.task_id ?? p2.entityId}\`` : "",
         p2.title ? `- **Task:** ${p2.title}` : "",
-        p2.changes?.status ? `- **Status:** ${p2.changes.status.from ?? "?"} → ${p2.changes.status.to ?? "?"}` : "",
+        p2.changes?.status ? `- **Status:** ${p2.changes.status.from ?? "?"} \u2192 ${p2.changes.status.to ?? "?"}` : "",
         p2.actorId ? `- **Changed by:** ${p2.actorId}` : "",
         ``,
         `View task: \`synqtask_todo_tasks({action: "show", task_id: "${p2.task_id ?? p2.entityId ?? "TASK_ID"}"})\``
@@ -27248,7 +27248,7 @@ class AbstractTokenizer {
   }
   async ignore(length) {
     if (length < 0) {
-      throw new RangeError("ignore length must be ≥ 0 bytes");
+      throw new RangeError("ignore length must be \u2265 0 bytes");
     }
     if (this.fileInfo.size !== undefined) {
       const bytesLeft = this.fileInfo.size - this.position;
@@ -27349,7 +27349,7 @@ var init_ReadStreamTokenizer = __esm(() => {
     }
     async ignore(length) {
       if (length < 0) {
-        throw new RangeError("ignore length must be ≥ 0 bytes");
+        throw new RangeError("ignore length must be \u2265 0 bytes");
       }
       const bufSize = Math.min(maxBufferSize, length);
       const buf = new Uint8Array(bufSize);
@@ -27498,7 +27498,7 @@ var init_core = __esm(() => {
 });
 
 // node_modules/strtok3/lib/FileTokenizer.js
-import { open as fsOpen } from "node:fs/promises";
+import { open as fsOpen } from "fs/promises";
 var FileTokenizer;
 var init_FileTokenizer = __esm(() => {
   init_AbstractTokenizer();
@@ -27548,7 +27548,7 @@ var init_FileTokenizer = __esm(() => {
 });
 
 // node_modules/strtok3/lib/index.js
-import { stat as fsStat } from "node:fs/promises";
+import { stat as fsStat } from "fs/promises";
 async function fromStream2(stream, options) {
   const rst = fromStream(stream, options);
   if (stream.path) {
@@ -27773,33 +27773,33 @@ function decodeWindows1252(bytes) {
 var WINDOWS_1252_EXTRA, WINDOWS_1252_REVERSE, _utf8Decoder, CHUNK, REPLACEMENT = 65533;
 var init_lib2 = __esm(() => {
   WINDOWS_1252_EXTRA = {
-    128: "€",
-    130: "‚",
-    131: "ƒ",
-    132: "„",
-    133: "…",
-    134: "†",
-    135: "‡",
-    136: "ˆ",
-    137: "‰",
-    138: "Š",
-    139: "‹",
-    140: "Œ",
-    142: "Ž",
-    145: "‘",
-    146: "’",
-    147: "“",
-    148: "”",
-    149: "•",
-    150: "–",
-    151: "—",
-    152: "˜",
-    153: "™",
-    154: "š",
-    155: "›",
-    156: "œ",
-    158: "ž",
-    159: "Ÿ"
+    128: "\u20AC",
+    130: "\u201A",
+    131: "\u0192",
+    132: "\u201E",
+    133: "\u2026",
+    134: "\u2020",
+    135: "\u2021",
+    136: "\u02C6",
+    137: "\u2030",
+    138: "\u0160",
+    139: "\u2039",
+    140: "\u0152",
+    142: "\u017D",
+    145: "\u2018",
+    146: "\u2019",
+    147: "\u201C",
+    148: "\u201D",
+    149: "\u2022",
+    150: "\u2013",
+    151: "\u2014",
+    152: "\u02DC",
+    153: "\u2122",
+    154: "\u0161",
+    155: "\u203A",
+    156: "\u0153",
+    158: "\u017E",
+    159: "\u0178"
   };
   WINDOWS_1252_REVERSE = {};
   for (const [code, char] of Object.entries(WINDOWS_1252_EXTRA)) {
@@ -31486,10 +31486,10 @@ __export(exports_file_type, {
   fileTypeFromBlob: () => fileTypeFromBlob,
   FileTypeParser: () => FileTypeParser2
 });
-import { ReadableStream as WebReadableStream } from "node:stream/web";
-import { pipeline, PassThrough, Readable } from "node:stream";
-import fs from "node:fs/promises";
-import { constants as fileSystemConstants } from "node:fs";
+import { ReadableStream as WebReadableStream } from "stream/web";
+import { pipeline, PassThrough, Readable } from "stream";
+import fs from "fs/promises";
+import { constants as fileSystemConstants } from "fs";
 function isTokenizerStreamBoundsError(error2) {
   if (!(error2 instanceof RangeError) || error2.message !== "offset is out of bounds" || typeof error2.stack !== "string") {
     return false;
@@ -40685,7 +40685,7 @@ async function _(t2 = {}) {
     h(F2, { recursive: true });
   } catch {}
   return o(e2, JSON.stringify(L2, null, 2), "utf8"), c(e2, 384), console.log(`
-✅ Login successful! Credentials saved to ${e2}
+\u2705 Login successful! Credentials saved to ${e2}
 `), { accessToken: N2.accessToken, refreshToken: N2.refreshToken, expiresAt: N2.expiresAt, credentialsPath: e2 };
 }
 async function T(t2, e2) {
@@ -40696,7 +40696,7 @@ async function T(t2, e2) {
     if (i2.pathname !== "/callback")
       return new Response("Not found", { status: 404 });
     let a3 = i2.searchParams.get("code"), n3 = i2.searchParams.get("state"), o3 = i2.searchParams.get("error");
-    return o3 ? (r2(new Error(`OAuth error: ${o3} — ${i2.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } })) : a3 && n3 === t2 ? (s2(a3), new Response(null, { status: 302, headers: { Location: `${$}/oauth/code/success?app=claude-code` } })) : (r2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
+    return o3 ? (r2(new Error(`OAuth error: ${o3} \u2014 ${i2.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } })) : a3 && n3 === t2 ? (s2(a3), new Response(null, { status: 302, headers: { Location: `${$}/oauth/code/success?app=claude-code` } })) : (r2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
   } }), o2 = setTimeout(() => {
     r2(new Error("Login timed out (5 minutes). Try again.")), n2.stop();
   }, 300000);
@@ -41266,7 +41266,7 @@ var _t = class _ClaudeCodeSDK {
         return void this.stopHealthProbe();
       let t3 = false;
       try {
-        let { connect: e3 } = await import("node:net");
+        let { connect: e3 } = await import("net");
         await new Promise((t4, i2) => {
           let s2 = e3({ host: "api.anthropic.com", port: 443 }), r2 = setTimeout(() => {
             s2.destroy(), i2(new Error("timeout"));
@@ -41376,10 +41376,10 @@ var _t = class _ClaudeCodeSDK {
     }
   }
   async forceReLogin() {
-    this.initialLoad && await this.initialLoad, this.dbg("FORCE RE-LOGIN requested — opening browser OAuth flow"), this.emitTokenStatus("critical", "Initiating browser re-login — refresh token may be dead");
+    this.initialLoad && await this.initialLoad, this.dbg("FORCE RE-LOGIN requested \u2014 opening browser OAuth flow"), this.emitTokenStatus("critical", "Initiating browser re-login \u2014 refresh token may be dead");
     try {
       let { oauthLogin: t2 } = await Promise.resolve().then(() => (M(), r)), e2 = this.credentialStore instanceof Tt ? this.credentialStore.path : W(q(), ".claude", ".credentials.json"), i2 = await t2({ credentialsPath: e2 });
-      return this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.emitTokenStatus("rotated", "Re-login successful — fresh tokens"), this.scheduleProactiveRotation(), this.dbg(`RE-LOGIN SUCCESS — new token expires at ${new Date(this.expiresAt).toISOString()}`), true;
+      return this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.emitTokenStatus("rotated", "Re-login successful \u2014 fresh tokens"), this.scheduleProactiveRotation(), this.dbg(`RE-LOGIN SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()}`), true;
     } catch (t2) {
       let e2 = t2?.message ?? String(t2);
       return this.dbg(`RE-LOGIN FAILED: ${e2}`), this.emitTokenStatus("expired", `Re-login failed: ${e2}`), false;
@@ -41406,7 +41406,7 @@ var _t = class _ClaudeCodeSDK {
         this.tokenRotationTimer = null, this.proactiveRefresh();
       }, 30000), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && ("unref" in this.tokenRotationTimer) && this.tokenRotationTimer.unref()));
     let a2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * e2, n2 = a2 > 0 ? e2 / a2 : 1;
-    n2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`⚠️ CRITICAL: token ${Math.round(100 * n2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * n2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : n2 < lt && this.proactiveRefreshFailures > 0 && (this.dbg(`⚠ WARNING: token ${Math.round(100 * n2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * n2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(e2 / 1000)}s, ${Math.round(100 * n2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
+    n2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * n2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * n2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : n2 < lt && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * n2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * n2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(e2 / 1000)}s, ${Math.round(100 * n2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
       this.tokenRotationTimer = null, this.proactiveRefresh();
     }, r2), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
   }
@@ -41418,7 +41418,7 @@ var _t = class _ClaudeCodeSDK {
           let e3 = t3.expiresAt - Date.now();
           if (e3 >= ct)
             return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(e3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(e3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
-          this.dbg(`proactive refresh: disk token has only ${Math.round(e3 / 60000)}min left (need ${Math.round(20)}min) — waiting for cooldown`);
+          this.dbg(`proactive refresh: disk token has only ${Math.round(e3 / 60000)}min left (need ${Math.round(20)}min) \u2014 waiting for cooldown`);
         }
       } catch {}
       if (this.dbg("proactive refresh skipped: global cooldown active, no fresh token found"), !this.tokenRotationTimer) {
@@ -41446,7 +41446,7 @@ var _t = class _ClaudeCodeSDK {
       let t3 = this.expiresAt ?? 0;
       await this.doTokenRefresh(true), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.tokenIssuedAt = Date.now();
       let i2 = (this.expiresAt ?? 0) - Date.now(), s2 = t3 > 0 ? t3 - (this.tokenIssuedAt - 1000) : 2 * i2;
-      i2 > 0 && i2 < 0.5 * s2 && this.dbg(`⚠️ SHRINKING TOKEN: new ${Math.round(i2 / 60000)}min vs prev ${Math.round(s2 / 60000)}min — backing off rotation`), this.dbg(`proactive rotation SUCCESS — new token expires at ${new Date(this.expiresAt).toISOString()} (${Math.round(i2 / 60000)}min lifetime)`), this.emitTokenStatus("rotated", `Token rotated silently — expires ${new Date(this.expiresAt).toISOString()}`), this.scheduleProactiveRotation();
+      i2 > 0 && i2 < 0.5 * s2 && this.dbg(`\u26A0\uFE0F SHRINKING TOKEN: new ${Math.round(i2 / 60000)}min vs prev ${Math.round(s2 / 60000)}min \u2014 backing off rotation`), this.dbg(`proactive rotation SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()} (${Math.round(i2 / 60000)}min lifetime)`), this.emitTokenStatus("rotated", `Token rotated silently \u2014 expires ${new Date(this.expiresAt).toISOString()}`), this.scheduleProactiveRotation();
     } catch (t3) {
       this.proactiveRefreshFailures++;
       let e3 = t3?.message ?? String(t3);
@@ -41456,13 +41456,13 @@ var _t = class _ClaudeCodeSDK {
         this.setRefreshCooldown(t4), this.dbg(`proactive rotation: 429 cooldown ${Math.round(t4 / 1000)}s (attempt #${this.refreshConsecutive429s})`);
       }
       let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = this.tokenIssuedAt > 0 && this.expiresAt ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? i2 / s2 : 0;
-      i2 <= ot ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${e3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}. Consider forceReLogin()`) : r2 < lt && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}`), this.expiresAt && this.expiresAt > Date.now() + ot ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired — emitting expired status"), this.emitTokenStatus("expired", `Token expired — refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
+      i2 <= ot ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${e3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}. Consider forceReLogin()`) : r2 < lt && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}`), this.expiresAt && this.expiresAt > Date.now() + ot ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
     } finally {
       e2 && e2();
     }
   }
   emitTokenStatus(t2, e2) {
-    let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = { level: t2, message: e2, expiresInMs: i2, failedAttempts: this.proactiveRefreshFailures, needsReLogin: t2 === "expired" || t2 === "critical" && this.proactiveRefreshFailures >= 3 }, r2 = t2 === "rotated" ? "✅" : t2 === "warning" ? "⚠️" : t2 === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
+    let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = { level: t2, message: e2, expiresInMs: i2, failedAttempts: this.proactiveRefreshFailures, needsReLogin: t2 === "expired" || t2 === "critical" && this.proactiveRefreshFailures >= 3 }, r2 = t2 === "rotated" ? "\u2705" : t2 === "warning" ? "\u26A0\uFE0F" : t2 === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
     this.dbg(`${r2} [${t2.toUpperCase()}] ${e2} (expires in ${Math.round(i2 / 60000)}min, failures=${this.proactiveRefreshFailures})`), this.onTokenStatus?.(s2);
   }
   isRefreshOnCooldown() {
@@ -41529,10 +41529,10 @@ var _t = class _ClaudeCodeSDK {
     if (this.isRefreshOnCooldown() && !t2) {
       let t3 = await this.credentialStore.read();
       if (t3 && !(Date.now() + ot >= t3.expiresAt))
-        return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, void this.dbg("refresh skipped (cooldown) — another process already refreshed");
+        return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, void this.dbg("refresh skipped (cooldown) \u2014 another process already refreshed");
       if (this.expiresAt && this.expiresAt > Date.now() + 600000)
         throw new G("Token refresh on cooldown due to rate limiting. Will retry later.");
-      this.dbg("refresh: ignoring cooldown — token critically close to expiry");
+      this.dbg("refresh: ignoring cooldown \u2014 token critically close to expiry");
     }
     let e2 = [500, 1500, 3000, 5000, 8000];
     for (let i3 = 0;i3 < 5; i3++) {
@@ -41543,14 +41543,14 @@ var _t = class _ClaudeCodeSDK {
         let e3 = s2.expiresAt - Date.now();
         if (s2.accessToken !== this.accessToken && e3 >= ct)
           return this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(e3 / 60000)}min remaining) (attempt ${i3})`);
-        s2.accessToken !== this.accessToken ? (this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(e3 / 60000)}min left — proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
+        s2.accessToken !== this.accessToken ? (this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(e3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
       }
       let r2 = await fetch("https://platform.claude.com/v1/oauth/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: this.refreshToken, client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e" }), signal: AbortSignal.timeout(15000) });
       if (r2.ok) {
         let t3 = await r2.json();
         this.accessToken = t3.access_token, this.refreshToken = t3.refresh_token ?? this.refreshToken, this.expiresAt = Date.now() + 1000 * t3.expires_in, this.tokenIssuedAt = Date.now();
         let e3 = await this.credentialStore.read(), i4 = e3?.scopes?.length ? e3.scopes : ["user:file_upload", "user:inference", "user:mcp_servers", "user:profile", "user:sessions:claude_code"];
-        return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK — expires in ${Math.round(t3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
+        return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK \u2014 expires in ${Math.round(t3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
       }
       if ((r2.status === 429 || r2.status >= 500) && i3 < 4) {
         let t3 = e2[i3] ?? 8000, s3 = Math.random() * t3 * 0.5;
@@ -41982,7 +41982,7 @@ async function Pt(t2, e2, s2) {
       let t4 = p2;
       p2 = "", e2.onTranscript(t4, true);
     }
-    d2?.("ws_close"), !u2 && t3 !== 1000 && t3 !== 1005 && e2.onError(`Connection closed: code ${t3}${i2 ? ` — ${i2}` : ""}`), e2.onClose(), m2.destroy();
+    d2?.("ws_close"), !u2 && t3 !== 1000 && t3 !== 1005 && e2.onError(`Connection closed: code ${t3}${i2 ? ` \u2014 ${i2}` : ""}`), e2.onClose(), m2.destroy();
   }
   return i(T2, "processFrames"), i(S2, "handleMessage"), i(v2, "handleClose"), m2.on("data", (t3) => {
     _2 = Buffer.concat([_2, t3]), T2();
@@ -42109,7 +42109,7 @@ import { join as join9 } from "path";
 import { homedir as homedir9 } from "os";
 
 // signal-wire-core-adapter.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { appendFileSync as appendFileSync6, existsSync as existsSync3, readFileSync as readFileSync3, statSync as statSync2, writeFileSync as writeFileSync2, renameSync as renameSync3 } from "fs";
 import { homedir as homedir8 } from "os";
 import { join as join8 } from "path";
 
@@ -42487,7 +42487,7 @@ class ExecEmitter {
           };
         }
       }
-      const { spawn } = await import("node:child_process");
+      const { spawn } = await import("child_process");
       return await new Promise((resolve) => {
         const proc = spawn("sh", ["-c", command]);
         let stdout = "";
@@ -42556,9 +42556,9 @@ class ExecEmitter {
 }
 
 // ../../../../../packages/signal-wire-core/dist/emitters/builtin/audit.js
-import { appendFileSync as appendFileSync4, mkdirSync as mkdirSync4 } from "node:fs";
-import { dirname, join as join5 } from "node:path";
-import { homedir as homedir5 } from "node:os";
+import { appendFileSync as appendFileSync4, mkdirSync as mkdirSync4 } from "fs";
+import { dirname, join as join5 } from "path";
+import { homedir as homedir5 } from "os";
 var DEFAULT_AUDIT_PATH = join5(homedir5(), ".context", "hooks", "audit", "signal-wire-audit.jsonl");
 
 class AuditEmitter {
@@ -43096,7 +43096,7 @@ class MemoryBackend {
 }
 
 // ../../../../../packages/signal-wire-core/dist/observability/trace.js
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "crypto";
 
 class NoopTraceSink {
   emit(_trace) {}
@@ -43148,9 +43148,9 @@ class InMemoryMetricSink {
 }
 
 // ../../../../../packages/signal-wire-core/dist/observability/logger.js
-import { appendFileSync as appendFileSync5 } from "node:fs";
-import { homedir as homedir6 } from "node:os";
-import { join as join6 } from "node:path";
+import { appendFileSync as appendFileSync5 } from "fs";
+import { homedir as homedir6 } from "os";
+import { join as join6 } from "path";
 
 // ../../../../../packages/signal-wire-core/dist/version.js
 var CORE_VERSION = "0.1.0";
@@ -43532,8 +43532,8 @@ class Pipeline {
   }
 }
 // ../../../../../packages/signal-wire-core/dist/state/file.js
-import { join as join7 } from "node:path";
-import { homedir as homedir7 } from "node:os";
+import { join as join7 } from "path";
+import { homedir as homedir7 } from "os";
 var DEFAULT_ROOT = join7(homedir7(), ".context", "hooks", "state");
 // ../../../../../packages/signal-wire-core/dist/state/redis.js
 class RedisBackend {
@@ -43746,7 +43746,7 @@ function sanitizeName(name) {
 function escapeLabelValue(v2) {
   return v2.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, "\\\"");
 }
-// signal-wire-translate.ts
+// ../../../../../packages/signal-wire-core/dist/translate/index.js
 var EVENT_MAP = {
   UserPromptSubmit: "chat.message",
   PreToolUse: "tool.before",
@@ -43825,22 +43825,135 @@ function translateActions(legacy1, legacy2) {
   return [];
 }
 
+// ../../../../../packages/signal-wire-core/dist/index.js
+function getBundledRulesPath() {
+  const url = new URL("../rules/signal-wire-rules.json", import.meta.url);
+  return url.protocol === "file:" ? decodeURIComponent(url.pathname) : url.pathname;
+}
+
 // signal-wire-core-adapter.ts
 var ADAPTER_VERSION = "1.0.0";
 var ADAPTER_MTIME = new Date().toISOString();
 var ADAPTER_ID = `sw-adapter-opencode-claude v${ADAPTER_VERSION}@${ADAPTER_MTIME.slice(11, 19)}`;
 var LOG_FILE4 = join8(homedir8(), ".claude", "signal-wire-debug.log");
+function swLog(msg) {
+  const line = `[${new Date().toISOString()}] ${coreIdentityTag()} [${ADAPTER_ID}] ${msg}
+`;
+  try {
+    appendFileSync6(LOG_FILE4, line);
+  } catch {}
+}
 var adapterBannerEmitted = false;
 function emitAdapterBanner(rulesLoaded, rulesPath) {
   if (adapterBannerEmitted)
     return;
   adapterBannerEmitted = true;
-  const ts = new Date().toISOString();
-  const line = `[${ts}] ${coreIdentityTag()} [${ADAPTER_ID}] ADAPTER_BANNER pid=${process.pid} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? "(unset)"}
+  swLog(`ADAPTER_BANNER pid=${process.pid} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? "(unset)"}`);
+}
+var HOT_RELOAD_INTERVAL_MS = 2000;
+
+class RulesStore {
+  rules;
+  translatedLegacy = [];
+  path;
+  platform;
+  registry;
+  lastFingerprint = null;
+  lastCheckMs = 0;
+  onSwap;
+  constructor(opts) {
+    this.path = opts.path;
+    this.platform = opts.platform;
+    this.registry = opts.registry;
+    this.onSwap = opts.onSwap;
+    this.rules = this.loadFromDisk().rules;
+  }
+  getRules() {
+    return this.rules;
+  }
+  getPath() {
+    return this.path;
+  }
+  loadFromDisk() {
+    if (!existsSync3(this.path)) {
+      return { rules: [], fingerprint: null };
+    }
+    let stat;
+    try {
+      stat = statSync2(this.path);
+    } catch {
+      return { rules: [], fingerprint: null };
+    }
+    const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
+    try {
+      const raw = JSON.parse(readFileSync3(this.path, "utf8"));
+      const legacy = raw.rules ?? [];
+      const canonical = translateLegacyRules(legacy, this.platform);
+      const validated = validateRuleSet({ rules: canonical }, this.registry).rules;
+      this.translatedLegacy = canonical;
+      this.lastFingerprint = fp;
+      return { rules: validated, fingerprint: fp };
+    } catch (e2) {
+      const msg = e2 instanceof Error ? e2.message : String(e2);
+      swLog(`RULES_LOAD_FAIL path=${this.path} error="${msg}"`);
+      this.lastFingerprint = fp;
+      return { rules: [], fingerprint: fp };
+    }
+  }
+  maybeReload() {
+    const now = Date.now();
+    if (now - this.lastCheckMs < HOT_RELOAD_INTERVAL_MS)
+      return { reloaded: false };
+    this.lastCheckMs = now;
+    if (!existsSync3(this.path))
+      return { reloaded: false, error: "rules file missing" };
+    let stat;
+    try {
+      stat = statSync2(this.path);
+    } catch (e2) {
+      return { reloaded: false, error: e2 instanceof Error ? e2.message : String(e2) };
+    }
+    const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
+    if (this.lastFingerprint && fp.mtimeMs === this.lastFingerprint.mtimeMs && fp.size === this.lastFingerprint.size) {
+      return { reloaded: false };
+    }
+    try {
+      const raw = JSON.parse(readFileSync3(this.path, "utf8"));
+      const legacy = raw.rules ?? [];
+      const canonical = translateLegacyRules(legacy, this.platform);
+      const validated = validateRuleSet({ rules: canonical }, this.registry).rules;
+      const oldCount = this.rules.length;
+      this.rules = validated;
+      this.translatedLegacy = canonical;
+      this.lastFingerprint = fp;
+      this.onSwap(validated);
+      swLog(`RULES_RELOADED old=${oldCount} new=${validated.length} mtime=${new Date(fp.mtimeMs).toISOString()}`);
+      return { reloaded: true };
+    } catch (e2) {
+      const msg = e2 instanceof Error ? e2.message : String(e2);
+      this.lastFingerprint = fp;
+      swLog(`RULES_RELOAD_FAIL error="${msg}" keeping-old-rules=${this.rules.length}`);
+      return { reloaded: false, error: msg };
+    }
+  }
+  writeRulesFile(updatedRawRules) {
+    const tmp = `${this.path}.tmp.${process.pid}`;
+    const payload = JSON.stringify({ rules: updatedRawRules }, null, 2) + `
 `;
-  try {
-    appendFileSync6(LOG_FILE4, line);
-  } catch {}
+    writeFileSync2(tmp, payload, "utf8");
+    renameSync3(tmp, this.path);
+    swLog(`RULES_FILE_REWRITTEN rules=${updatedRawRules.length} path=${this.path}`);
+  }
+  getRawLegacyRules() {
+    if (!existsSync3(this.path))
+      return [];
+    try {
+      const raw = JSON.parse(readFileSync3(this.path, "utf8"));
+      return raw.rules ?? [];
+    } catch {
+      return [];
+    }
+  }
 }
 
 class SignalWire2 {
@@ -43849,7 +43962,7 @@ class SignalWire2 {
   sessionId;
   platform;
   maxRulesPerFire;
-  rules;
+  rulesStore;
   disabledRuleIds = new Set;
   contextPosition = 0;
   lastAsyncResult = null;
@@ -43858,10 +43971,16 @@ class SignalWire2 {
     this.platform = config.platform ?? "opencode";
     this.maxRulesPerFire = config.maxRulesPerFire ?? 3;
     this.registry = new EmitterRegistry;
-    this.rules = this.loadAndTranslate(config.rulesPath);
-    emitAdapterBanner(this.rules.length, config.rulesPath);
+    const resolvedPath = config.rulesPath ?? getBundledRulesPath();
+    this.rulesStore = new RulesStore({
+      path: resolvedPath,
+      platform: this.platform,
+      registry: this.registry,
+      onSwap: (newRules) => this.applyRulesToPipeline(newRules)
+    });
+    emitAdapterBanner(this.rulesStore.getRules().length, resolvedPath);
     this.pipeline = new Pipeline({
-      rules: this.rules,
+      rules: this.rulesStore.getRules(),
       registry: this.registry,
       stateBackend: new MemoryBackend,
       sessionId: this.sessionId || "opencode-claude",
@@ -43874,17 +43993,12 @@ class SignalWire2 {
     coreVersion: CORE_VERSION,
     coreHash: CORE_SOURCE_HASH
   };
-  loadAndTranslate(path) {
-    if (!path || !existsSync3(path))
-      return [];
-    try {
-      const raw = JSON.parse(readFileSync3(path, "utf8"));
-      const legacy = raw.rules ?? [];
-      const canonical = translateLegacyRules(legacy, this.platform);
-      return validateRuleSet({ rules: canonical }, this.registry).rules;
-    } catch {
-      return [];
-    }
+  applyRulesToPipeline(rules) {
+    const effective = rules.map((r2) => ({
+      ...r2,
+      enabled: r2.enabled !== false && !this.disabledRuleIds.has(r2.id)
+    }));
+    this.pipeline._setRules(effective);
   }
   setSdkClient(_client) {}
   trackTokens(u2) {
@@ -43903,21 +44017,34 @@ class SignalWire2 {
     return this.contextPosition;
   }
   toggleRule(ruleId, enabled) {
-    if (!this.rules.some((r2) => r2.id === ruleId))
+    this.rulesStore.maybeReload();
+    const rules = this.rulesStore.getRules();
+    if (!rules.some((r2) => r2.id === ruleId))
       return false;
     if (enabled)
       this.disabledRuleIds.delete(ruleId);
     else
       this.disabledRuleIds.add(ruleId);
-    const effective = this.rules.map((r2) => ({
-      ...r2,
-      enabled: r2.enabled !== false && !this.disabledRuleIds.has(r2.id)
-    }));
-    this.pipeline._setRules(effective);
+    this.applyRulesToPipeline(rules);
+    try {
+      const rawRules = this.rulesStore.getRawLegacyRules();
+      const patched = rawRules.map((r2) => {
+        if (typeof r2 !== "object" || r2 === null)
+          return r2;
+        const rec = r2;
+        if (rec.id === ruleId)
+          return { ...rec, enabled };
+        return rec;
+      });
+      this.rulesStore.writeRulesFile(patched);
+    } catch (e2) {
+      swLog(`TOGGLE_PERSIST_FAIL rule=${ruleId} enabled=${enabled} error="${e2 instanceof Error ? e2.message : String(e2)}"`);
+    }
     return true;
   }
   listRules() {
-    return this.rules.map((r2) => ({
+    this.rulesStore.maybeReload();
+    return this.rulesStore.getRules().map((r2) => ({
       id: r2.id,
       description: "",
       enabled: r2.enabled !== false && !this.disabledRuleIds.has(r2.id),
@@ -43925,9 +44052,11 @@ class SignalWire2 {
     }));
   }
   isRuleEnabled(ruleId) {
+    this.rulesStore.maybeReload();
     return !this.disabledRuleIds.has(ruleId);
   }
   evaluate(ctx) {
+    this.rulesStore.maybeReload();
     const event = contextToEvent(ctx, this.sessionId);
     this.pipeline.process(event).then((rs) => {
       this.lastAsyncResult = this.toLegacy(rs);
@@ -43935,6 +44064,7 @@ class SignalWire2 {
     return this.lastAsyncResult;
   }
   async evaluateAsync(ctx) {
+    this.rulesStore.maybeReload();
     const event = contextToEvent(ctx, this.sessionId);
     const results = await this.pipeline.process(event);
     const legacy = this.toLegacy(results);
@@ -43942,6 +44072,7 @@ class SignalWire2 {
     return legacy;
   }
   async evaluateExternal(wakeEvent) {
+    this.rulesStore.maybeReload();
     const event = {
       source: "wake",
       type: `wake.${wakeEvent.type}`,
@@ -43958,7 +44089,8 @@ class SignalWire2 {
     };
     const results = await this.pipeline.process(event);
     const firedIds = new Set(results.map((r2) => r2.ruleId));
-    return { matched: this.rules.filter((r2) => firedIds.has(r2.id)), results };
+    const currentRules = this.rulesStore.getRules();
+    return { matched: currentRules.filter((r2) => firedIds.has(r2.id)), results };
   }
   toLegacy(results) {
     const hintBearing = results.filter((r2) => (r2.type === "hint" || r2.type === "respond") && r2.success && r2.hintText);
@@ -43990,7 +44122,7 @@ var SignalWire3 = _SW_ENGINE === "legacy" ? SignalWire : SignalWire2;
     const logFile = join10(homedir10(), ".claude", "signal-wire-debug.log");
     const engineChoice = _SW_ENGINE === "legacy" ? "LEGACY" : "CORE";
     const adapterIdentity = _SW_ENGINE === "legacy" ? "legacy-v1.x" : "sw-adapter-opencode-claude v1.0.0";
-    appendFileSync8(logFile, `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=${engineChoice} implementation=${adapterIdentity} env=${process.env.SIGNAL_WIRE_ENGINE ?? "(unset→core)"}
+    appendFileSync8(logFile, `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=${engineChoice} implementation=${adapterIdentity} env=${process.env.SIGNAL_WIRE_ENGINE ?? "(unset\u2192core)"}
 `);
   } catch {}
 })();
@@ -44101,7 +44233,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
   }
   let mediaType = claimedMediaType;
   if (sniffedMime !== claimedMediaType && claimedMediaType !== "image/*") {
-    dbg6(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} — using actual`);
+    dbg6(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} \u2014 using actual`);
     mediaType = sniffedMime;
   } else if (claimedMediaType === "image/*") {
     mediaType = sniffedMime;
@@ -44115,10 +44247,10 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
       const { Jimp } = jimpMod2;
       const img = await Jimp.fromBuffer(raw);
       if (img.width < IMAGE_MIN_DIMENSION || img.height < IMAGE_MIN_DIMENSION) {
-        return { ok: false, reason: `image too small ${img.width}×${img.height} (min ${IMAGE_MIN_DIMENSION}×${IMAGE_MIN_DIMENSION})` };
+        return { ok: false, reason: `image too small ${img.width}\xD7${img.height} (min ${IMAGE_MIN_DIMENSION}\xD7${IMAGE_MIN_DIMENSION})` };
       }
       const outBuf = await img.getBuffer("image/png");
-      dbg6(`image transcoded ${mediaType} → image/png (${img.width}×${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
+      dbg6(`image transcoded ${mediaType} \u2192 image/png (${img.width}\xD7${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
       return { ok: true, data: outBuf.toString("base64"), mediaType: "image/png", reason: `transcoded from ${mediaType}` };
     } catch (e2) {
       return { ok: false, reason: `failed to transcode ${mediaType}: ${e2.message}` };
@@ -44130,7 +44262,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
       const { Jimp } = jimpMod;
       const img = await Jimp.fromBuffer(raw);
       if (img.width < IMAGE_MIN_DIMENSION || img.height < IMAGE_MIN_DIMENSION) {
-        return { ok: false, reason: `image too small ${img.width}×${img.height} (min ${IMAGE_MIN_DIMENSION}×${IMAGE_MIN_DIMENSION})` };
+        return { ok: false, reason: `image too small ${img.width}\xD7${img.height} (min ${IMAGE_MIN_DIMENSION}\xD7${IMAGE_MIN_DIMENSION})` };
       }
     } catch (e2) {
       return { ok: false, reason: `image appears corrupted (${mediaType} decode failed: ${e2.message})` };
@@ -44148,7 +44280,7 @@ function getJimp() {
     _jimp = require_commonjs30();
     dbg6("Image resizer: jimp loaded");
   } catch {
-    dbg6("Image resizer: jimp not available — images will not be resized");
+    dbg6("Image resizer: jimp not available \u2014 images will not be resized");
   }
   return _jimp;
 }
@@ -44196,7 +44328,7 @@ async function maybeResizeImage(base64Data, mediaType) {
       outMediaType = "image/jpeg";
     }
     const outBase64 = outBuf.toString("base64");
-    dbg6(`Image resized: ${w2}×${h2} → ${nw}×${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB → ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
+    dbg6(`Image resized: ${w2}\xD7${h2} \u2192 ${nw}\xD7${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB \u2192 ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
     return { data: outBase64, mediaType: outMediaType, resized: true };
   } catch (e2) {
     dbg6("Image resize failed, using original:", e2.message);
@@ -44220,8 +44352,8 @@ function getGitRoot() {
 var _fileCache = new Map;
 function readCachedFile(filePath) {
   try {
-    const { statSync: statSync2, readFileSync: readFileSync4 } = __require("fs");
-    const st2 = statSync2(filePath);
+    const { statSync: statSync3, readFileSync: readFileSync4 } = __require("fs");
+    const st2 = statSync3(filePath);
     const cached = _fileCache.get(filePath);
     if (cached && cached.mtimeMs === st2.mtimeMs)
       return cached.content;
@@ -44441,7 +44573,7 @@ async function convertPrompt(prompt) {
           if (p2.mediaType.startsWith("image/")) {
             const validated = await validateAndNormalizeImage(data, p2.mediaType);
             if (!validated.ok) {
-              dbg6(`image validation failed: ${validated.reason} — replacing with text placeholder`);
+              dbg6(`image validation failed: ${validated.reason} \u2014 replacing with text placeholder`);
               content.push({ type: "text", text: `[Image could not be processed: ${validated.reason}]` });
               continue;
             }
@@ -44451,7 +44583,7 @@ async function convertPrompt(prompt) {
             const resized = await maybeResizeImage(validated.data, validated.mediaType);
             const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024;
             if (resized.data.length > API_IMAGE_MAX_BASE64) {
-              dbg6(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) — skipping`);
+              dbg6(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) \u2014 skipping`);
               content.push({ type: "text", text: `[Image too large: ${(resized.data.length / 1024 / 1024).toFixed(1)}MB after resize, API limit is 5MB. Please use a smaller image.]` });
               continue;
             }
@@ -44653,7 +44785,7 @@ function convertTools(tools) {
   const count = result.length;
   const hash = result.map((t2) => t2.name).join(",");
   if (_lastToolCount > 0 && count !== _lastToolCount) {
-    dbg6(`⚠ TOOL_DRIFT: tool count changed ${_lastToolCount} → ${count} mid-session (builtin=${builtIn.length} mcp=${mcp.length})`);
+    dbg6(`\u26A0 TOOL_DRIFT: tool count changed ${_lastToolCount} \u2192 ${count} mid-session (builtin=${builtIn.length} mcp=${mcp.length})`);
     logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length}`, {
       type: "tool_drift",
       oldCount: _lastToolCount,
@@ -44982,7 +45114,7 @@ function createClaudeMax(options = {}) {
     expiresAt: options.expiresAt,
     credentialsPath: options.credentialsPath,
     onTokenStatus: (event) => {
-      const emoji = event.level === "rotated" ? "✅" : event.level === "warning" ? "⚠️" : event.level === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
+      const emoji = event.level === "rotated" ? "\u2705" : event.level === "warning" ? "\u26A0\uFE0F" : event.level === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
       const line = `${emoji} TOKEN ${event.level.toUpperCase()}: ${event.message} (expires in ${Math.round(event.expiresInMs / 60000)}min, failures=${event.failedAttempts})`;
       dbg6(line);
       logStats(`[${new Date().toISOString()}] type=token_${event.level} | expiresIn=${Math.round(event.expiresInMs / 60000)}min failures=${event.failedAttempts} needsReLogin=${event.needsReLogin}`, {
@@ -45038,7 +45170,7 @@ function createClaudeMax(options = {}) {
           estimatedTokens: info2.estimatedTokens,
           blocked: info2.blocked
         });
-        const banner = info2.blocked ? `\uD83D\uDEAB [claude-max] CACHE REWRITE BLOCKED — idle=${Math.round(info2.idleMs / 1000)}s, would cost ~${info2.estimatedTokens} tokens. Unset CLAUDE_MAX_REWRITE_BLOCK to allow.` : `⚠️  [claude-max] Cache likely dead — idle=${Math.round(info2.idleMs / 1000)}s, next request will cost ~${info2.estimatedTokens} cache_write tokens`;
+        const banner = info2.blocked ? `\uD83D\uDEAB [claude-max] CACHE REWRITE BLOCKED \u2014 idle=${Math.round(info2.idleMs / 1000)}s, would cost ~${info2.estimatedTokens} tokens. Unset CLAUDE_MAX_REWRITE_BLOCK to allow.` : `\u26A0\uFE0F  [claude-max] Cache likely dead \u2014 idle=${Math.round(info2.idleMs / 1000)}s, next request will cost ~${info2.estimatedTokens} cache_write tokens`;
         console.error(banner);
       },
       onNetworkStateChange: (info2) => {
@@ -45047,7 +45179,7 @@ function createClaudeMax(options = {}) {
           from: info2.from,
           to: info2.to
         });
-        dbg6(`network state: ${info2.from} → ${info2.to}`);
+        dbg6(`network state: ${info2.from} \u2192 ${info2.to}`);
       }
     }
   });
@@ -45056,7 +45188,6 @@ function createClaudeMax(options = {}) {
     _signalWire = new SignalWire3({
       serverUrl: _swServerUrl || process.env.OPENCODE_SERVER_URL || "",
       sessionId: process.env.OPENCODE_SESSION_ID ?? "?",
-      rulesPath: join9(import.meta.dir, "signal-wire-rules.json"),
       platform: "opencode"
     });
     dbg6(`signal-wire: instance created (${_signalWire ? "ok" : "null"})`);
@@ -45084,12 +45215,12 @@ async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input)
         return {
           decision: "block",
           message: [
-            `⚠️ Хелпер заблокирован: глубина ${depth}/${maxDepth}.`,
-            `Допустимая вложенность хелперов определяется ролью вызвавшего агента.`,
-            `На этом уровне порождение запрещено.`,
+            `\u26A0\uFE0F \u0425\u0435\u043B\u043F\u0435\u0440 \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D: \u0433\u043B\u0443\u0431\u0438\u043D\u0430 ${depth}/${maxDepth}.`,
+            `\u0414\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u0430\u044F \u0432\u043B\u043E\u0436\u0435\u043D\u043D\u043E\u0441\u0442\u044C \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432 \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u044F\u0435\u0442\u0441\u044F \u0440\u043E\u043B\u044C\u044E \u0432\u044B\u0437\u0432\u0430\u0432\u0448\u0435\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430.`,
+            `\u041D\u0430 \u044D\u0442\u043E\u043C \u0443\u0440\u043E\u0432\u043D\u0435 \u043F\u043E\u0440\u043E\u0436\u0434\u0435\u043D\u0438\u0435 \u0437\u0430\u043F\u0440\u0435\u0449\u0435\u043D\u043E.`,
             ``,
-            `Выполни задание сам и верни результат.`,
-            `Используй bash, read, grep, webfetch — но не task/call_omo_agent.`
+            `\u0412\u044B\u043F\u043E\u043B\u043D\u0438 \u0437\u0430\u0434\u0430\u043D\u0438\u0435 \u0441\u0430\u043C \u0438 \u0432\u0435\u0440\u043D\u0438 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442.`,
+            `\u0418\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 bash, read, grep, webfetch \u2014 \u043D\u043E \u043D\u0435 task/call_omo_agent.`
           ].join(`
 `)
         };
@@ -45101,20 +45232,20 @@ async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input)
     const check = checkSpawnAllowed(identity, depth, getSpawnActive());
     if (!check.allowed) {
       const roleName = identity.roleName ?? "unknown";
-      const teammates = identity.teammates?.length > 0 ? identity.teammates.map((t2) => `${t2.name} (${t2.roleName ?? "?"})`).join(", ") : "нет";
-      const reason = check.depth >= check.maxDepth ? `Глубина ${check.depth}/${check.maxDepth} для роли '${roleName}'.` : `Порождено ${check.spawned}/${check.maxSpawns} субагентов для роли '${roleName}'.`;
+      const teammates = identity.teammates?.length > 0 ? identity.teammates.map((t2) => `${t2.name} (${t2.roleName ?? "?"})`).join(", ") : "\u043D\u0435\u0442";
+      const reason = check.depth >= check.maxDepth ? `\u0413\u043B\u0443\u0431\u0438\u043D\u0430 ${check.depth}/${check.maxDepth} \u0434\u043B\u044F \u0440\u043E\u043B\u0438 '${roleName}'.` : `\u041F\u043E\u0440\u043E\u0436\u0434\u0435\u043D\u043E ${check.spawned}/${check.maxSpawns} \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0434\u043B\u044F \u0440\u043E\u043B\u0438 '${roleName}'.`;
       dbg6(`spawn budget BLOCKED: ${reason}`);
       return {
         decision: "block",
         message: [
-          `⚠️ Spawn blocked: ${reason}`,
+          `\u26A0\uFE0F Spawn blocked: ${reason}`,
           ``,
-          `Варианты:`,
-          `1. Выполни работу сам — ты ${roleName}`,
-          `2. Попроси teammate помочь: todo_channels({action:"send", channel_id:"333fec34-5604-447e-ac5d-4046d856ee5a", text:"Нужна помощь с [задача]"})`,
+          `\u0412\u0430\u0440\u0438\u0430\u043D\u0442\u044B:`,
+          `1. \u0412\u044B\u043F\u043E\u043B\u043D\u0438 \u0440\u0430\u0431\u043E\u0442\u0443 \u0441\u0430\u043C \u2014 \u0442\u044B ${roleName}`,
+          `2. \u041F\u043E\u043F\u0440\u043E\u0441\u0438 teammate \u043F\u043E\u043C\u043E\u0447\u044C: todo_channels({action:"send", channel_id:"333fec34-5604-447e-ac5d-4046d856ee5a", text:"\u041D\u0443\u0436\u043D\u0430 \u043F\u043E\u043C\u043E\u0449\u044C \u0441 [\u0437\u0430\u0434\u0430\u0447\u0430]"})`,
           `   Teammates: ${teammates}`,
-          `3. Запроси специалиста: todo_members({action:"find_available", capability:"[нужная]"})`,
-          `4. Эскалируй owner'у: todo_channels({action:"send", ..., text:"@relishjev нужен специалист с [capability]"})`
+          `3. \u0417\u0430\u043F\u0440\u043E\u0441\u0438 \u0441\u043F\u0435\u0446\u0438\u0430\u043B\u0438\u0441\u0442\u0430: todo_members({action:"find_available", capability:"[\u043D\u0443\u0436\u043D\u0430\u044F]"})`,
+          `4. \u042D\u0441\u043A\u0430\u043B\u0438\u0440\u0443\u0439 owner'\u0443: todo_channels({action:"send", ..., text:"@relishjev \u043D\u0443\u0436\u0435\u043D \u0441\u043F\u0435\u0446\u0438\u0430\u043B\u0438\u0441\u0442 \u0441 [capability]"})`
         ].join(`
 `)
       };
@@ -45124,13 +45255,13 @@ async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input)
       return {
         decision: "block",
         message: [
-          `⚠️ Делегирование заблокировано: описание слишком короткое (${description.length} символов, нужно 200+).`,
+          `\u26A0\uFE0F \u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D\u043E: \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435 \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u043A\u043E\u0440\u043E\u0442\u043A\u043E\u0435 (${description.length} \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432, \u043D\u0443\u0436\u043D\u043E 200+).`,
           ``,
-          `Включи в описание:`,
-          `- Что конкретно сделать`,
-          `- Что НЕ делать`,
-          `- ID родительской задачи для контекста`,
-          `- Какие файлы/результаты прочитать`
+          `\u0412\u043A\u043B\u044E\u0447\u0438 \u0432 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435:`,
+          `- \u0427\u0442\u043E \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u043E \u0441\u0434\u0435\u043B\u0430\u0442\u044C`,
+          `- \u0427\u0442\u043E \u041D\u0415 \u0434\u0435\u043B\u0430\u0442\u044C`,
+          `- ID \u0440\u043E\u0434\u0438\u0442\u0435\u043B\u044C\u0441\u043A\u043E\u0439 \u0437\u0430\u0434\u0430\u0447\u0438 \u0434\u043B\u044F \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u0430`,
+          `- \u041A\u0430\u043A\u0438\u0435 \u0444\u0430\u0439\u043B\u044B/\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C`
         ].join(`
 `)
       };
@@ -45140,7 +45271,7 @@ async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input)
     process.env.__PARENT_SESSION_ID = sessionId;
     process.env.__SPAWN_DEPTH = String(check.depth + 1);
     process.env.__MAX_HELPER_DEPTH = String(identity.budget?.maxSpawnDepth ?? 2);
-    dbg6(`spawn budget OK: depth=${check.depth}/${check.maxDepth} spawned=${check.spawned + 1}/${check.maxSpawns} → child will be depth=${check.depth + 1}`);
+    dbg6(`spawn budget OK: depth=${check.depth}/${check.maxDepth} spawned=${check.spawned + 1}/${check.maxSpawns} \u2192 child will be depth=${check.depth + 1}`);
     return;
   } catch (e2) {
     dbg6(`spawn budget check failed (allowing): ${e2?.message}`);

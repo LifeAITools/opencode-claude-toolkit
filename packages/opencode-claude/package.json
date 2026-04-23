@@ -14,9 +14,12 @@
     "tui.tsx",
     "wake-preferences.ts",
     "wake-listener.ts",
-    "wake-types.ts",
-    "signal-wire-rules.json"
+    "wake-types.ts"
   ],
+  "scripts": {
+    "build": "bun build provider.ts --target=bun --outfile=dist/provider.js && bun build index.ts --target=bun --outfile=dist/index.js",
+    "test": "bun test"
+  },
   "dependencies": {
     "@life-ai-tools/claude-code-sdk": "^0.6.0",
     "@kiberos/signal-wire-core": "file:/home/relishev/packages/signal-wire-core"

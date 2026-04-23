@@ -7,11 +7,11 @@
 
 import { describe, test, expect } from 'bun:test'
 import { SignalWire } from './signal-wire-core-adapter'
-import { translateLegacyRules } from './signal-wire-translate'
+import { translateLegacyRules, getBundledRulesPath } from '@kiberos/signal-wire-core'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
-const PROD_RULES_PATH = join(import.meta.dir, 'signal-wire-rules.json')
+// SSOT — lives inside @kiberos/signal-wire-core, resolved at runtime.
+const PROD_RULES_PATH = getBundledRulesPath()
 
 describe('signal-wire-translate', () => {
   test('translateLegacyRules maps UserPromptSubmit → chat.message', () => {
@@ -192,4 +192,104 @@ describe('SignalWire adapter — wake event path', () => {
     })
     expect(Array.isArray(results)).toBe(true)
   })
+})
+
+describe('SignalWire adapter — hot-reload', () => {
+  test('picks up new rule within 2s after rules file changes', async () => {
+    const { writeFileSync, readFileSync, mkdtempSync, rmSync, statSync, utimesSync } = await import('node:fs')
+    const { join: j } = await import('node:path')
+    const os = await import('node:os')
+
+    // Use a temp rules file to avoid stomping on SSOT during the test
+    const tmpDir = mkdtempSync(j(os.tmpdir(), 'sw-hotreload-'))
+    const tmpRules = j(tmpDir, 'signal-wire-rules.json')
+
+    try {
+      // Start with minimal 1-rule set
+      writeFileSync(tmpRules, JSON.stringify({
+        rules: [{
+          id: 'test-rule-A',
+          events: ['UserPromptSubmit'],
+          action: { hint: 'hello from A' },
+          platforms: ['opencode'],
+        }],
+      }), 'utf8')
+
+      const sw = new SignalWire({
+        serverUrl: 'http://127.0.0.1:0',
+        sessionId: 'ses_reload',
+        rulesPath: tmpRules,
+        platform: 'opencode',
+      })
+
+      // Initial snapshot: one rule present
+      expect(sw.listRules().map(r => r.id)).toEqual(['test-rule-A'])
+
+      // Write a second rule; bump mtime into the past to bypass 2s debounce
+      // window and make the fingerprint (mtimeMs, size) change cheap-visibly.
+      writeFileSync(tmpRules, JSON.stringify({
+        rules: [
+          {
+            id: 'test-rule-A',
+            events: ['UserPromptSubmit'],
+            action: { hint: 'hello from A' },
+            platforms: ['opencode'],
+          },
+          {
+            id: 'test-rule-B',
+            events: ['UserPromptSubmit'],
+            action: { hint: 'hello from B' },
+            platforms: ['opencode'],
+          },
+        ],
+      }), 'utf8')
+
+      // Force the debounce to elapse — set mtime to well in the past and
+      // wait >2s so Date.now() - lastCheckMs > HOT_RELOAD_INTERVAL_MS.
+      await new Promise(r => setTimeout(r, 2100))
+
+      const listed = sw.listRules().map(r => r.id)
+      expect(listed).toContain('test-rule-A')
+      expect(listed).toContain('test-rule-B')
+    } finally {
+      try { rmSync(tmpDir, { recursive: true, force: true }) } catch {}
+    }
+  }, 8000)
+
+  test('keeps old rules active when file becomes invalid JSON', async () => {
+    const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs')
+    const { join: j } = await import('node:path')
+    const os = await import('node:os')
+
+    const tmpDir = mkdtempSync(j(os.tmpdir(), 'sw-hotreload-bad-'))
+    const tmpRules = j(tmpDir, 'signal-wire-rules.json')
+
+    try {
+      writeFileSync(tmpRules, JSON.stringify({
+        rules: [{
+          id: 'good-rule',
+          events: ['UserPromptSubmit'],
+          action: { hint: 'still here' },
+          platforms: ['opencode'],
+        }],
+      }), 'utf8')
+
+      const sw = new SignalWire({
+        serverUrl: 'http://127.0.0.1:0',
+        sessionId: 'ses_reload_bad',
+        rulesPath: tmpRules,
+        platform: 'opencode',
+      })
+      expect(sw.listRules().map(r => r.id)).toEqual(['good-rule'])
+
+      // Corrupt the file
+      writeFileSync(tmpRules, '{broken json', 'utf8')
+      await new Promise(r => setTimeout(r, 2100))
+
+      // Old rules must still be active (keep-old-rules on validation fail)
+      expect(sw.listRules().map(r => r.id)).toEqual(['good-rule'])
+    } finally {
+      try { rmSync(tmpDir, { recursive: true, force: true }) } catch {}
+    }
+  }, 8000)
 })

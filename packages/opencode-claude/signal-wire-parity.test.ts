@@ -11,9 +11,10 @@
 import { describe, test, expect } from 'bun:test'
 import { SignalWire as LegacySignalWire } from './signal-wire'
 import { SignalWire as CoreSignalWire } from './signal-wire-core-adapter'
-import { join } from 'node:path'
+import { getBundledRulesPath } from '@kiberos/signal-wire-core'
 
-const PROD_RULES = join(import.meta.dir, 'signal-wire-rules.json')
+// SSOT — lives inside @kiberos/signal-wire-core.
+const PROD_RULES = getBundledRulesPath()
 
 function makeLegacy(): LegacySignalWire {
   return new LegacySignalWire({

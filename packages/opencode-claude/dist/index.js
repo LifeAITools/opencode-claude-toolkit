@@ -2587,6 +2587,12 @@ function emitBanner(context) {
   const ctx = context ? ` context=${JSON.stringify(context)}` : "";
   writeLine(`BANNER sw-core online source=${CORE_SOURCE_HASH}${ctx}`);
 }
+function info(message, extra) {
+  if (!bannerEmitted)
+    emitBanner();
+  const suffix = extra ? ` ${JSON.stringify(extra)}` : "";
+  writeLine(`INFO ${message}${suffix}`);
+}
 
 // ../../../../../packages/signal-wire-core/dist/engine/pipeline.js
 function validateRuleSet(ruleSet, registry) {
@@ -2764,6 +2770,14 @@ class Pipeline {
     };
     try {
       this.metricSink.counter("signal_wire.events.received", { source: event.source, type: event.type });
+      info("EVENT_RECEIVED", {
+        correlationId,
+        eventId,
+        source: event.source,
+        type: event.type,
+        sessionId: event.sessionId ?? null,
+        rulesConsidered: trace.rulesEvaluated
+      });
       if (event.type === "session.compacted") {
         try {
           await this.cooldowns.resetSession(sessionIdForState);
@@ -2798,6 +2812,17 @@ class Pipeline {
         }
         trace.rulesMatched++;
         this.metricSink.counter("signal_wire.rules.matched", { rule_id: rule.id });
+        const matchVarKeys = Object.keys(match.variables || {});
+        info("RULE_FIRED", {
+          correlationId,
+          eventId,
+          ruleId: rule.id,
+          eventType: event.type,
+          actions: rule.actions.map((a2) => a2.type),
+          matchVars: matchVarKeys,
+          cooldownScope: scope,
+          sessionId: sessionIdForState
+        });
         const sortedActions = [...rule.actions].sort((a2, b2) => {
           const idxA = ACTION_ORDER.indexOf(a2.type);
           const idxB = ACTION_ORDER.indexOf(b2.type);
@@ -2888,6 +2913,21 @@ class Pipeline {
       try {
         await this.traceSink.emit(trace);
       } catch {}
+      const resultsByType = {};
+      for (const r2 of allResults) {
+        const key = r2.success ? r2.type : `${r2.type}!fail`;
+        resultsByType[key] = (resultsByType[key] ?? 0) + 1;
+      }
+      info("EVENT_COMPLETE", {
+        correlationId,
+        eventId,
+        type: event.type,
+        outcome: trace.outcome,
+        rulesMatched: trace.rulesMatched,
+        actionsEmitted: trace.actionsEmitted,
+        durationMs: trace.endedAt - trace.startedAt,
+        results: resultsByType
+      });
       return allResults;
     } catch (e2) {
       trace.outcome = "error";
@@ -2896,6 +2936,13 @@ class Pipeline {
       try {
         await this.traceSink.emit(trace);
       } catch {}
+      info("EVENT_ERROR", {
+        correlationId,
+        eventId,
+        type: event.type,
+        error: e2 instanceof Error ? e2.message : String(e2),
+        durationMs: trace.endedAt - trace.startedAt
+      });
       return [];
     } finally {
       this._processing = false;
@@ -3465,9 +3512,13 @@ class SignalWire {
     this.rulesStore.maybeReload();
     return !this.disabledRuleIds.has(ruleId);
   }
+  logInvoke(mode, event) {
+    swLog(`CONSUMER_INVOKE consumer=opencode-plugin mode=${mode} type=${event.type} session=${this.sessionId || "?"}`);
+  }
   evaluate(ctx) {
     this.rulesStore.maybeReload();
     const event = contextToEvent(ctx, this.sessionId);
+    this.logInvoke("evaluate-sync", event);
     this.pipeline.process(event).then((rs) => {
       this.lastAsyncResult = this.toLegacy(rs);
     }).catch(() => {});
@@ -3476,6 +3527,7 @@ class SignalWire {
   async evaluateAsync(ctx) {
     this.rulesStore.maybeReload();
     const event = contextToEvent(ctx, this.sessionId);
+    this.logInvoke("evaluate-async", event);
     const results = await this.pipeline.process(event);
     const legacy = this.toLegacy(results);
     this.lastAsyncResult = legacy;
@@ -3497,6 +3549,7 @@ class SignalWire {
       },
       timestamp: Date.now()
     };
+    this.logInvoke("evaluate-external", event);
     const results = await this.pipeline.process(event);
     const firedIds = new Set(results.map((r2) => r2.ruleId));
     const currentRules = this.rulesStore.getRules();

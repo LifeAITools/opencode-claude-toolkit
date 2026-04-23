@@ -340,9 +340,20 @@ export class SignalWire {
    *
    * NEW callers should use evaluateAsync() for immediate results.
    */
+  /**
+   * Structured consumer-invoke log — one line per evaluate entry.
+   * Complements the engine-side EVENT_RECEIVED/RULE_FIRED/EVENT_COMPLETE
+   * lines so operators can trace: plugin-invoke → engine-receive →
+   * rule-fire → engine-complete → (hook-complete if consumer-2).
+   */
+  private logInvoke(mode: string, event: SignalWireEvent): void {
+    swLog(`CONSUMER_INVOKE consumer=opencode-plugin mode=${mode} type=${event.type} session=${this.sessionId || '?'}`)
+  }
+
   evaluate(ctx: SignalWireContext): SignalWireResult | null {
     this.rulesStore.maybeReload()
     const event = contextToEvent(ctx, this.sessionId)
+    this.logInvoke('evaluate-sync', event)
     this.pipeline.process(event)
       .then(rs => { this.lastAsyncResult = this.toLegacy(rs) })
       .catch(() => { /* CN-09 */ })
@@ -353,6 +364,7 @@ export class SignalWire {
   async evaluateAsync(ctx: SignalWireContext): Promise<SignalWireResult | null> {
     this.rulesStore.maybeReload()
     const event = contextToEvent(ctx, this.sessionId)
+    this.logInvoke('evaluate-async', event)
     const results = await this.pipeline.process(event)
     const legacy = this.toLegacy(results)
     this.lastAsyncResult = legacy
@@ -376,6 +388,7 @@ export class SignalWire {
       },
       timestamp: Date.now(),
     }
+    this.logInvoke('evaluate-external', event)
     const results = await this.pipeline.process(event)
     const firedIds = new Set(results.map(r => r.ruleId))
     const currentRules = this.rulesStore.getRules()

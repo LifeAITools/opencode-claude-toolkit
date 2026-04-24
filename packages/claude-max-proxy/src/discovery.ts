@@ -141,12 +141,24 @@ async function isPortFree(host: string, port: number): Promise<boolean> {
 }
 
 /**
- * Find a free port in the scan range, preferring `preferred` if free.
- * Returns null if no port in range is available.
+ * Find a free port in a scan range, preferring `preferred` if free.
+ *   - host: interface to bind test
+ *   - preferred: try this port first
+ *   - rangeMin, rangeMax: fallback scan range (inclusive)
+ *
+ * Defaults to global range 5050-5099 for backward compat; embedded mode
+ * supplies 5100-5199 explicitly.
+ *
+ * Returns null if no port in range is bindable.
  */
-export async function findFreePort(host: string, preferred: number = DEFAULT_PORT): Promise<number | null> {
+export async function findFreePort(
+  host: string,
+  preferred: number = DEFAULT_PORT,
+  rangeMin: number = PORT_SCAN_MIN,
+  rangeMax: number = PORT_SCAN_MAX,
+): Promise<number | null> {
   if (await isPortFree(host, preferred)) return preferred
-  for (let p = PORT_SCAN_MIN; p <= PORT_SCAN_MAX; p++) {
+  for (let p = rangeMin; p <= rangeMax; p++) {
     if (p === preferred) continue
     if (await isPortFree(host, p)) return p
   }

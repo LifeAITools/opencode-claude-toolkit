@@ -1,6 +1,6 @@
 {
   "name": "@life-ai-tools/claude-code-sdk",
-  "version": "0.8.0",
+  "version": "0.11.0",
   "description": "TypeScript SDK for Claude Code API — use your Claude Max/Pro subscription programmatically",
   "type": "module",
   "main": "dist/index.js",
@@ -46,6 +46,10 @@
   },
   "homepage": "https://github.com/LifeAITools/opencode-claude-toolkit",
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.muid.io/",
+    "access": "public"
+  },
   "files": [
     "dist/index.js",
     "dist/*.d.ts",

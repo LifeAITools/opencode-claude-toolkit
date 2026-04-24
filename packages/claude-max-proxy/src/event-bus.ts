@@ -23,6 +23,8 @@ export type EventKind =
   | 'PROXY_STARTED'
   | 'PROXY_SHUTDOWN'
   | 'PROXY_CONFIG'
+  | 'PROXY_MODE_START'         // embedded/global mode identified at boot
+  | 'PROXY_PARENT_GONE'         // embedded: parent PID died, self-terminating
 
   // Session lifecycle
   | 'SESSION_TRACKED'
@@ -177,3 +179,22 @@ export const bus = new TypedEventBus()
 // Convenience shortcuts
 export const emit = (e: Omit<BaseEvent, 'ts'> & Partial<BaseEvent> & Record<string, unknown>) =>
   bus.emitEvent(e)
+
+// ═══ Adapter: SDK IEventEmitter → proxy bus ═════════════════════════
+//
+// ProxyClient (from SDK) expects an IEventEmitter. We wrap our own bus so
+// every event from SDK flows through the same logger/TUI/heartbeat chain.
+//
+// IEventEmitter's event shape is structural (level + kind + arbitrary fields).
+// Our bus accepts the same — just relaying.
+
+import type { IEventEmitter, ProxyEvent as SDKProxyEvent } from '@life-ai-tools/claude-code-sdk'
+
+export class BusEventEmitterAdapter implements IEventEmitter {
+  emit(event: SDKProxyEvent): void {
+    // Route SDK event through our TypedEventBus — same fanout as native emit().
+    // SDK's kind is a string; we accept any string (TypedEventBus lists known
+    // kinds for TS tooling, but runtime accepts string).
+    bus.emitEvent(event as any)
+  }
+}

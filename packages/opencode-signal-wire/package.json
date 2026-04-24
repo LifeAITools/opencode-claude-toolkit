@@ -1,0 +1,53 @@
+{
+  "name": "@life-ai-tools/opencode-signal-wire",
+  "version": "0.1.0",
+  "description": "Signal-wire + wake-listener infrastructure for opencode — agent coordination, spawn depth tracking, wake event routing",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./signal-wire": "./signal-wire.ts",
+    "./wake-listener": "./wake-listener.ts",
+    "./wake-preferences": "./wake-preferences.ts",
+    "./wake-types": "./wake-types.ts",
+    "./tui": "./tui.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kiberos/signal-wire-core": "file:/home/relishev/packages/signal-wire-core"
+  },
+  "peerDependencies": {
+    "solid-js": "*"
+  },
+  "peerDependenciesMeta": {
+    "solid-js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "solid-js": "^1.8.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "signal-wire",
+    "wake-listener",
+    "agent-coordination"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LifeAITools/opencode-claude-toolkit"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.muid.io/",
+    "access": "public"
+  }
+}

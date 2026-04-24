@@ -13,7 +13,13 @@
  */
 
 import type { ProxyConfig } from './config.js'
-import type { SessionTracker } from './session-tracker.js'
+// Minimal tracker interface — heartbeat only needs list() + size().
+// This decouples from the specific implementation (legacy SessionTracker
+// or the SDK-backed shim in server.ts).
+interface HeartbeatTracker {
+  list(): Array<{ engine: unknown }>
+  size(): number
+}
 import { bus, emit } from './event-bus.js'
 import { readFileSync } from 'fs'
 
@@ -22,10 +28,19 @@ const HOUR_MS = 60 * 60 * 1000
 const fireHistory: { ts: number; cacheRead: number; cacheWrite: number }[] = []
 const tickHistory: { ts: number }[] = []
 
+// Most recent network/error state (for heartbeat observability)
+let _networkState: 'healthy' | 'degraded' = 'healthy'
+let _lastDisarmReason: string | null = null
+let _lastDisarmAt: number | null = null
+let _lastErrorMsg: string | null = null
+let _lastErrorAt: number | null = null
+let _disarmsLastHour: { ts: number; reason: string }[] = []
+
 function pruneOld(): void {
   const cutoff = Date.now() - HOUR_MS
   while (fireHistory.length && fireHistory[0].ts < cutoff) fireHistory.shift()
   while (tickHistory.length && tickHistory[0].ts < cutoff) tickHistory.shift()
+  while (_disarmsLastHour.length && _disarmsLastHour[0].ts < cutoff) _disarmsLastHour.shift()
 }
 
 // Subscribe to relevant events to populate history
@@ -41,9 +56,27 @@ bus.onKind('KA_TICK_IDLE', () => {
   tickHistory.push({ ts: Date.now() })
 })
 
+// Track network state aggregation (proxy may have multiple sessions —
+// "degraded" if ANY is degraded, "healthy" when all healthy).
+bus.onKind('NETWORK_DEGRADED', () => { _networkState = 'degraded' })
+bus.onKind('NETWORK_HEALTHY', () => { _networkState = 'healthy' })
+
+// Track last disarm reason + rolling history of disarms
+bus.onKind('KA_DISARM', (e: any) => {
+  _lastDisarmReason = String(e.reason ?? 'unknown')
+  _lastDisarmAt = Date.now()
+  _disarmsLastHour.push({ ts: _lastDisarmAt, reason: _lastDisarmReason })
+})
+
+// Track last real-request error (so heartbeat reflects recent upstream issues)
+bus.onKind('REAL_REQUEST_ERROR', (e: any) => {
+  _lastErrorMsg = String(e.msg ?? '').slice(0, 120)
+  _lastErrorAt = Date.now()
+})
+
 export function startHeartbeat(
   cfg: ProxyConfig,
-  tracker: SessionTracker,
+  tracker: HeartbeatTracker,
   getRateLimit: () => { utilization5h: number | null; utilization7d: number | null },
 ): () => void {
   if (cfg.healthHeartbeatSec <= 0) return () => {}
@@ -72,6 +105,11 @@ export function startHeartbeat(
       if ((sess.engine as any)._timer !== null) liveKa++
     }
 
+    // Age of last disarm/error in seconds (null if never happened or >1h ago)
+    const now = Date.now()
+    const lastDisarmAgoSec = _lastDisarmAt ? Math.floor((now - _lastDisarmAt) / 1000) : null
+    const lastErrorAgoSec = _lastErrorAt ? Math.floor((now - _lastErrorAt) / 1000) : null
+
     emit({
       level: 'info',
       kind: 'HEALTH_HEARTBEAT',
@@ -84,7 +122,12 @@ export function startHeartbeat(
       util5h: rl.utilization5h,
       util7d: rl.utilization7d,
       tokenExpiresInSec,
-      networkState: 'healthy',  // TODO: aggregate from sessions
+      networkState: _networkState,
+      disarmsLastHour: _disarmsLastHour.length,
+      lastDisarmReason: _lastDisarmReason,
+      lastDisarmAgoSec,
+      lastErrorMsg: _lastErrorMsg,
+      lastErrorAgoSec,
     })
   }, cfg.healthHeartbeatSec * 1000)
 

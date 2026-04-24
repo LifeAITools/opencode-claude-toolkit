@@ -66,6 +66,16 @@ export interface KeepaliveEngineOptions {
 
   /** Returns current rate limit snapshot (used by onHeartbeat callback). */
   getRateLimitInfo: () => RateLimitInfo
+
+  /**
+   * Optional just-in-time liveness check. Called BEFORE every KA fire.
+   * If returns false → engine stops (registry cleared, timer dead).
+   * Use case: proxy-side PID-of-owner check — don't burn quota firing
+   * KA into a cache whose consumer process already exited.
+   *
+   * If omitted → engine assumes owner is always alive (current behavior).
+   */
+  isOwnerAlive?: () => boolean
 }
 
 // ============================================================
@@ -96,6 +106,55 @@ function readKeepaliveConfig(): Record<string, unknown> | null {
 // Re-exported from types.ts — engine throws this on guard block
 import { CacheRewriteBlockedError } from './types.js'
 
+/**
+ * Classify an error thrown during doFetch into actionable categories.
+ *
+ *   'network' — transport-level failure (can't reach api.anthropic.com).
+ *               Caused by: offline, DNS fail, TCP refused/reset, TLS handshake fail.
+ *               Action: TCP probe + retry when network returns.
+ *
+ *   'server_transient' — Anthropic returned 5xx/429/529/503. Server is up
+ *               but overloaded. Action: retryChain with backoff.
+ *
+ *   'auth' — 401/403. Token expired or revoked.
+ *               Action: refresh token, retry once.
+ *
+ *   'permanent' — 400, other 4xx. Something wrong with the request itself.
+ *               Action: disarm, surface to user.
+ */
+type ErrorCategory = 'network' | 'server_transient' | 'auth' | 'permanent'
+
+function classifyError(err: unknown): ErrorCategory {
+  const e = err as { status?: number; code?: string; cause?: { code?: string }; message?: string } | undefined
+  if (!e) return 'permanent'
+
+  // HTTP status always wins if present (we saw a real response)
+  const status = e.status
+  if (status === 401 || status === 403) return 'auth'
+  if (status === 429 || status === 503 || status === 529 || (status && status >= 500)) return 'server_transient'
+  if (status && status >= 400 && status < 500) return 'permanent'
+
+  // No status → transport-level. Check known network error codes.
+  const code = e.code ?? e.cause?.code ?? ''
+  const msg = (e.message ?? '').toLowerCase()
+  const networkCodes = new Set([
+    'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH',
+    'ENETDOWN', 'EHOSTUNREACH', 'EHOSTDOWN', 'ENOTFOUND',
+    'EAI_AGAIN', 'EPIPE', 'ERR_SOCKET_CONNECTION_TIMEOUT',
+    'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_ABORTED',
+    'ConnectionRefused', 'FailedToOpenSocket', // Bun-style
+  ])
+  if (code && networkCodes.has(code)) return 'network'
+  // Heuristic on message for Bun/Undici variants
+  if (msg.includes('unable to connect') || msg.includes('failed to open socket') ||
+      msg.includes('connection refused') || msg.includes('network is unreachable') ||
+      msg.includes('timeout') || msg.includes('dns')) return 'network'
+
+  // Unknown → treat as transient (safer than permanent — we'd prefer to
+  // attempt recovery than disarm on an unrecognized error).
+  return 'server_transient'
+}
+
 // ============================================================
 // KeepaliveEngine
 // ============================================================
@@ -104,6 +163,13 @@ export class KeepaliveEngine {
   // Anthropic cache TTL — API silently downgrades our ttl:'1h' to 5 minutes
   // (ephemeral_1h_input_tokens=0 in response). We're not on the 1h allowlist.
   private static readonly CACHE_TTL_MS = 5 * 60 * 1000
+
+  // Safety margin when deciding whether a KA fire can complete before TTL
+  // expiry. Network latency + DNS + TLS handshake can add 1-10s unpredictably.
+  // Firing too close to expiry risks landing AFTER expiry, where Anthropic
+  // treats our request as cache-miss → cache_write burst. 15s is conservative
+  // headroom (previously was 5s, which was insufficient on slow networks).
+  private static readonly CACHE_SAFETY_MARGIN_MS = 15 * 1000
 
   // Retry backoff: start fast (2s), ramp to 20s max. 13 attempts fit in ~180s margin.
   // Fire at ~120s, cache expires at 300s → 180s window for retries.
@@ -116,7 +182,12 @@ export class KeepaliveEngine {
   private static readonly DUMP_BODY = process.env.CLAUDE_SDK_DUMP_BODY === '1'
 
   // Layer 2 — Network health probe.
-  private static readonly HEALTH_PROBE_INTERVAL_MS = 30_000
+  // Aggressive escalating intervals, CAPPED at 10s so network-revival is
+  // detected fast (within ≤10s of TCP reachability returning). Rationale:
+  // unbounded backoff could miss a window where cache is still salvageable;
+  // 10s cap guarantees we'll notice recovery within one probe interval.
+  // Schedule: 3s → 5s → 7s → 10s → 10s → 10s (repeats at 10s up to cap).
+  private static readonly HEALTH_PROBE_INTERVALS_MS = [3_000, 5_000, 7_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000]
   private static readonly HEALTH_PROBE_TIMEOUT_MS = 3_000
 
   // ── Config ──────────────────────────────────────────────────
@@ -132,6 +203,7 @@ export class KeepaliveEngine {
   private readonly getToken: () => Promise<string>
   private readonly doFetch: KeepaliveEngineOptions['doFetch']
   private readonly getRateLimitInfo: () => RateLimitInfo
+  private readonly isOwnerAlive: () => boolean
 
   // ── State ──────────────────────────────────────────────────
   // Largest observed cache size per model (used for rewrite cost estimation)
@@ -139,7 +211,8 @@ export class KeepaliveEngine {
 
   // Layer 2: network health probe state
   private networkState: 'healthy' | 'degraded' = 'healthy'
-  private healthProbeTimer: ReturnType<typeof setInterval> | null = null
+  private healthProbeTimer: ReturnType<typeof setTimeout> | null = null
+  private healthProbeAttempt = 0
 
   // KA registry — one entry per model, heaviest-wins
   private registry = new Map<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number }>()
@@ -168,6 +241,8 @@ export class KeepaliveEngine {
     this.getToken = opts.getToken
     this.doFetch = opts.doFetch
     this.getRateLimitInfo = opts.getRateLimitInfo
+    // Default: always-alive (preserve existing behavior when caller omits).
+    this.isOwnerAlive = opts.isOwnerAlive ?? (() => true)
 
     const ka = opts.config ?? {}
 
@@ -323,6 +398,35 @@ export class KeepaliveEngine {
   private async tick(): Promise<void> {
     if (this.registry.size === 0 || this.inFlight) return
 
+    // ── Layer 0a: owner-alive check (JIT PID-death gate) ───────────
+    // Call BEFORE anything else — if consumer process is gone, instantly
+    // disarm. Saves wasted KA fires into a dead owner's cache.
+    try {
+      if (!this.isOwnerAlive()) {
+        this.registry.clear()
+        this.stop()
+        this.onDisarmed('owner_dead')
+        return
+      }
+    } catch {
+      // isOwnerAlive callback errored — assume alive, do not stop.
+    }
+
+    // ── Layer 0b: wake-from-sleep detection ────────────────────────
+    // On laptop wake: if cacheWrittenAt + CACHE_TTL < now, the cache we
+    // were protecting is 100% dead at Anthropic (TTL expired during sleep).
+    // Firing a KA would cache_create a NEW cache the user didn't ask for,
+    // wasting large prompt-cache-write tokens. Disarm and wait for a real
+    // user request to prime a fresh snapshot.
+    if (this.cacheWrittenAt > 0) {
+      const cacheAge = Date.now() - this.cacheWrittenAt
+      if (cacheAge > KeepaliveEngine.CACHE_TTL_MS) {
+        this.registry.clear()
+        this.onDisarmed('cache_expired_during_sleep')
+        return
+      }
+    }
+
     // Live-reload config from ~/.claude/keepalive.json (mtime-cached, cheap)
     const liveConfig = readKeepaliveConfig()
     if (liveConfig) {
@@ -412,12 +516,31 @@ export class KeepaliveEngine {
         },
       })
     } catch (err: unknown) {
-      const status = (err as { status?: number })?.status
-      const isTransient = !status || status === 503 || status === 529 || status >= 500
+      const category = classifyError(err)
 
-      if (isTransient) {
+      if (category === 'network') {
+        // Network fault: don't bang HTTPS against a dead link — wastes time
+        // and doesn't help. Jump straight to aggressive TCP probe (cheap).
+        // Probe will auto-fire KA once network returns and cache is still alive.
+        const cacheAge = Date.now() - this.cacheWrittenAt
+        const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - cacheAge
+        // If cache effectively dead (< 15s of safety margin), go to revive-mode
+        // so we know when net is back without attempting KA on dead cache.
+        const reviveMode = ttlRemaining <= 15_000
+        this.onDisarmed('network_error')
+        this.startHealthProbe({ reviveMode })
+      } else if (category === 'server_transient') {
+        // Anthropic is up but struggling. Classic HTTP-level retry with
+        // backoff — kept identical to previous behavior.
         this.retryChain(best)
+      } else if (category === 'auth') {
+        // Token issue — disarm, token refresh is the consumer's responsibility
+        // (they should refresh via credentialStore on 401). Engine will resume
+        // on next real request with fresh creds.
+        this.registry.clear()
+        this.onDisarmed('auth_error')
       } else {
+        // Permanent (400, malformed request, etc). Don't retry.
         this.registry.clear()
         this.onDisarmed('permanent_error')
       }
@@ -445,7 +568,13 @@ export class KeepaliveEngine {
     const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - cacheAge
     const nextDelay = KeepaliveEngine.KEEPALIVE_RETRY_DELAYS[attemptIndex]! * 1000
 
-    if (ttlRemaining < nextDelay + 5000) {
+    // CACHE SAFETY MARGIN: increased from 5s → 15s (2025-04).
+    // Rationale: network latency on KA request can add 1-10s unpredictably.
+    // If we fire at TTL-5s and network hiccups by 6s, we'd land AFTER TTL
+    // expiry → Anthropic would treat our request as cache-miss and create
+    // a fresh one (~70k tokens cache_write = wasted quota).
+    // 15s margin gives headroom for slow networks + DNS lookup + handshake.
+    if (ttlRemaining < nextDelay + KeepaliveEngine.CACHE_SAFETY_MARGIN_MS) {
       // CRITICAL INVARIANT: KA must NEVER cache_write.
       this.registry.clear()
       this.onDisarmed('cache_ttl_exhausted')
@@ -455,13 +584,24 @@ export class KeepaliveEngine {
     this.retryTimer = setTimeout(async () => {
       this.retryTimer = null
 
+      // JIT owner-alive check before retry — consumer PID may have died
+      // between scheduled retry and fire time.
+      try {
+        if (!this.isOwnerAlive()) {
+          this.registry.clear()
+          this.stop()
+          this.onDisarmed('owner_dead')
+          return
+        }
+      } catch {}
+
       // Re-check: if a real request happened since we started retrying, stop.
       if (this.lastRealActivityAt > this.cacheWrittenAt) {
         return
       }
 
       const ageNow = Date.now() - this.cacheWrittenAt
-      if (ageNow > KeepaliveEngine.CACHE_TTL_MS - 5000) {
+      if (ageNow > KeepaliveEngine.CACHE_TTL_MS - KeepaliveEngine.CACHE_SAFETY_MARGIN_MS) {
         this.registry.clear()
         this.onDisarmed('cache_ttl_expired_mid_retry')
         return
@@ -485,10 +625,21 @@ export class KeepaliveEngine {
         this.lastActivityAt = Date.now()
         this.cacheWrittenAt = Date.now()
       } catch (err: unknown) {
-        const status = (err as { status?: number })?.status
-        const isTransient = !status || status === 503 || status === 529 || status >= 500
+        const category = classifyError(err)
 
-        if (isTransient) {
+        if (category === 'network') {
+          // Same logic as tick(): network-level error in retry → go straight
+          // to TCP probe, don't waste more HTTPS attempts on a dead link.
+          this.inFlight = false
+          this.abortController = null
+          const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - (Date.now() - this.cacheWrittenAt)
+          const reviveMode = ttlRemaining <= KeepaliveEngine.CACHE_SAFETY_MARGIN_MS
+          this.onDisarmed('network_error_mid_retry')
+          this.startHealthProbe({ reviveMode })
+          return
+        }
+
+        if (category === 'server_transient') {
           this.inFlight = false
           this.abortController = null
           this.retryChain(entry, attemptIndex + 1)
@@ -520,14 +671,30 @@ export class KeepaliveEngine {
     // NOTE: intentionally NOT calling clearInterval(timer).
     try { this.config.onDisarmed?.({ reason, at: Date.now() }) } catch {}
 
-    // Layer 2: start health probe ONLY if cache is still worth saving.
-    const networkReasons = new Set(['retry_exhausted', 'cache_ttl_exhausted', 'cache_ttl_expired_mid_retry'])
-    if (networkReasons.has(reason)) {
+    // Layer 2: start network health probe on any network-related disarm.
+    // Escalating intervals [5s, 5s, 10s, 10s, 20s, ...] — fast reaction if
+    // network blip is short enough to save the cache; slower as TTL depletes.
+    //
+    // Two modes:
+    //   a) cache-alive (ttlRemaining > safety margin): probe to save cache —
+    //      on TCP success fire KA immediately.
+    //   b) revive-mode (cache dead but fault is network): probe to detect
+    //      when network returns. No KA fire on success (cache is dead) —
+    //      engine sits idle waiting for next real request.
+    //
+    // Note: 'network_error' callers start their own probe explicitly with
+    // correct mode, so don't double-start here — we only cover legacy
+    // reason codes from retryChain/tick fall-throughs.
+    const networkReasons = new Set([
+      'retry_exhausted',
+      'cache_ttl_exhausted',
+      'cache_ttl_expired_mid_retry',
+    ])
+    if (networkReasons.has(reason) && !this.healthProbeTimer) {
       const cacheAge = Date.now() - this.cacheWrittenAt
       const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - cacheAge
-      if (ttlRemaining > 30_000) {
-        this.startHealthProbe()
-      }
+      const reviveMode = ttlRemaining <= KeepaliveEngine.CACHE_SAFETY_MARGIN_MS
+      this.startHealthProbe({ reviveMode })
     }
   }
 
@@ -535,17 +702,60 @@ export class KeepaliveEngine {
   // Layer 2 — Network health probe (TCP-only, non-billable)
   // ────────────────────────────────────────────────────────────
 
-  private startHealthProbe(): void {
+  /**
+   * Aggressive TCP health probe to api.anthropic.com:443.
+   * Uses escalating intervals [5s, 5s, 10s, 10s, 20s, 20s, 30s, 30s, ...] —
+   * hits fast first (cache is precious, network blip may be short) and
+   * ramps down when cache approaches TTL death.
+   *
+   * TCP-only: no tokens burned. On reconnect detection, triggers KA tick
+   * if cache is still alive (>10s TTL remaining).
+   *
+   * Caller passes `restartRegistry` when network fault happened with cache
+   * presumed dead — probe still runs so that on reconnect we can signal
+   * `network_revived` → caller may want to try 1 KA fire to see if the
+   * cache miraculously survived (very rare but free to check).
+   */
+  private startHealthProbe(opts: { reviveMode?: boolean } = {}): void {
     if (this.healthProbeTimer) return
+    this.healthProbeAttempt = 0
     const prevState = this.networkState
     this.networkState = 'degraded'
     if (prevState !== 'degraded') {
       try { this.config.onNetworkStateChange?.({ from: prevState, to: 'degraded', at: Date.now() }) } catch {}
     }
 
+    const scheduleNext = () => {
+      const intervals = KeepaliveEngine.HEALTH_PROBE_INTERVALS_MS
+      const idx = Math.min(this.healthProbeAttempt, intervals.length - 1)
+      const delay = intervals[idx]!
+      this.healthProbeTimer = setTimeout(probe, delay)
+      if (this.healthProbeTimer && typeof this.healthProbeTimer === 'object' && 'unref' in this.healthProbeTimer) {
+        (this.healthProbeTimer as any).unref()
+      }
+    }
+
     const probe = async () => {
+      this.healthProbeTimer = null
+      this.healthProbeAttempt++
+
       const cacheAge = Date.now() - this.cacheWrittenAt
-      if (cacheAge >= KeepaliveEngine.CACHE_TTL_MS) {
+      // "Dead" = cache is past TTL - safety margin. Even if technically
+      // still alive for a few seconds, firing would risk landing AFTER
+      // expiry (network latency adds unpredictable 1-10s).
+      const cacheDead = cacheAge >= (KeepaliveEngine.CACHE_TTL_MS - KeepaliveEngine.CACHE_SAFETY_MARGIN_MS)
+
+      // Stop probing when cache is dead AND we're not in revive-mode
+      // (revive-mode wants to know ASAP when network returns so next real
+      // request doesn't hang on ConnectionRefused).
+      if (cacheDead && !opts.reviveMode) {
+        this.stopHealthProbe()
+        return
+      }
+
+      // Hard stop: 10+ failed probes even in revive-mode = give up, wait
+      // for user-initiated real request to break the silence.
+      if (this.healthProbeAttempt > KeepaliveEngine.HEALTH_PROBE_INTERVALS_MS.length) {
         this.stopHealthProbe()
         return
       }
@@ -574,30 +784,40 @@ export class KeepaliveEngine {
         ok = false
       }
 
-      if (ok) {
-        this.stopHealthProbe()
-        const prev = this.networkState
-        this.networkState = 'healthy'
-        try { this.config.onNetworkStateChange?.({ from: prev, to: 'healthy', at: Date.now() }) } catch {}
-        const ttlLeft = KeepaliveEngine.CACHE_TTL_MS - (Date.now() - this.cacheWrittenAt)
-        if (this.registry.size > 0 && ttlLeft > 10_000) {
-          void this.tick()
-        }
+      if (!ok) {
+        scheduleNext()
+        return
       }
+
+      // Network is back.
+      this.stopHealthProbe()
+      const prev = this.networkState
+      this.networkState = 'healthy'
+      try { this.config.onNetworkStateChange?.({ from: prev, to: 'healthy', at: Date.now() }) } catch {}
+
+      const ttlLeft = KeepaliveEngine.CACHE_TTL_MS - (Date.now() - this.cacheWrittenAt)
+
+      if (this.registry.size > 0 && ttlLeft > KeepaliveEngine.CACHE_SAFETY_MARGIN_MS) {
+        // Cache still alive with safety margin → fire KA immediately.
+        // Note: we check SAFETY_MARGIN (not just >0) because fire itself
+        // takes time — if we're within margin, tick() would just disarm anyway.
+        void this.tick()
+      }
+      // If cache is dead or registry empty — do nothing. Engine stays in
+      // post-disarm state, waiting for next real request from user which
+      // will prime a new snapshot.
     }
 
+    // First probe runs immediately (fastest reaction to network blip).
     void probe()
-    this.healthProbeTimer = setInterval(probe, KeepaliveEngine.HEALTH_PROBE_INTERVAL_MS)
-    if (this.healthProbeTimer && typeof this.healthProbeTimer === 'object' && 'unref' in this.healthProbeTimer) {
-      (this.healthProbeTimer as any).unref()
-    }
   }
 
   private stopHealthProbe(): void {
     if (this.healthProbeTimer) {
-      clearInterval(this.healthProbeTimer)
+      clearTimeout(this.healthProbeTimer)
       this.healthProbeTimer = null
     }
+    this.healthProbeAttempt = 0
   }
 
   // ────────────────────────────────────────────────────────────

@@ -26,9 +26,9 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, statSync
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { setSignalWireServerUrl, setSignalWireSdkClient, getSignalWireInstance, handlePreToolUseSpawnCheck } from './provider.ts'
-import { startWakeListener, stopWakeListener } from './wake-listener'
-import type { WakeListenerHandle } from './wake-listener'
-import { loadPreferences, computeSubscribe } from './wake-preferences'
+import { startWakeListener, stopWakeListener } from '@life-ai-tools/opencode-signal-wire'
+import type { WakeListenerHandle } from '@life-ai-tools/opencode-signal-wire'
+import { loadPreferences, computeSubscribe } from '@life-ai-tools/opencode-signal-wire'
 
 // ─── OAuth Constants (matching Claude CLI exactly) ─────────
 // Source: src/constants/oauth.ts (PROD_OAUTH_CONFIG)
@@ -210,11 +210,15 @@ function dbg(...args: any[]) {
   try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
 }
 
-// ─── Module-level identity error (for Task 6 TUI to read) ─────────
-let _identityError: string | null = null
+// ─── Module-level identity error (bridged to signal-wire package) ──
+//
+// Identity-resolution errors flow: opencode-claude writes → signal-wire
+// package (via setIdentityError) → tui.tsx reads (via getIdentityError).
+// Re-exported for backward compat with any external consumers.
+import { setIdentityError, getIdentityError as _getIdentityError } from '@life-ai-tools/opencode-signal-wire'
 
 /** Export for TUI status display (Task 6) */
-export function getIdentityError(): string | null { return _identityError }
+export const getIdentityError = _getIdentityError
 
 /**
  * Resolve member identity from OAuth token via SynqTask MCP whoami.
@@ -329,11 +333,11 @@ export default {
           _memberType = 'human'
           dbg(`WAKE memberId from OAuth whoami (human): ${_memberId} name=${oauthResult.memberName}`)
         } else if (!_memberId) {
-          _identityError = 'OAuth whoami returned no member (token expired or SynqTask down?)'
+          setIdentityError('OAuth whoami returned no member (token expired or SynqTask down?)')
           dbg(`WAKE OAuth whoami failed: ${_identityError}`)
         }
       } catch (e: any) {
-        _identityError = e?.message ?? 'OAuth whoami exception'
+        setIdentityError(e?.message ?? 'OAuth whoami exception')
         dbg(`WAKE OAuth identity failed (non-fatal): ${_identityError}`)
       }
     }

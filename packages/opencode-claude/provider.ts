@@ -24,7 +24,7 @@ import { homedir } from 'os'
 // Legacy fallback (SIGNAL_WIRE_ENGINE=legacy) was removed 2026-04-23 after
 // the core engine reached full parity (150+ golden vectors, 20+ adapter
 // tests, live validation via validate-ssot.sh) — see SIGNAL-WIRE-CORE-MIGRATION.md.
-import { SignalWire } from './signal-wire.ts'
+import { SignalWire } from '@life-ai-tools/opencode-signal-wire'
 
 // Provider-level startup banner — writes one line to signal-wire-debug.log
 // so operators can `tail -f` and confirm which engine build is loaded.
@@ -40,7 +40,7 @@ import { SignalWire } from './signal-wire.ts'
     )
   } catch {}
 })()
-import { getAgentIdentity, getSpawnActive, getSpawnTotal, helperStarted, helperFinished, resolveCurrentDepth, checkSpawnAllowed } from './wake-listener'
+import { getAgentIdentity, getSpawnActive, getSpawnTotal, helperStarted, helperFinished, resolveCurrentDepth, checkSpawnAllowed } from '@life-ai-tools/opencode-signal-wire'
 
 const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
@@ -49,14 +49,6 @@ const STATS_JSONL = join(homedir(), '.claude', 'claude-max-stats.jsonl')
 
 const PID = process.pid
 const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? '?'
-const PACKAGE_ROOT = join(import.meta.dir, '..')
-
-const REQUIRED_PLUGIN_FILES = [
-  'tui.tsx',
-  'wake-preferences.ts',
-  'wake-listener.ts',
-  'wake-types.ts',
-] as const
 
 const MAX_MEMORY_LINES = 500
 const MAX_MEMORY_BYTES = 50_000
@@ -79,22 +71,6 @@ function logStats(line: string, structured?: Record<string, unknown>) {
 function dbg(...args: any[]) {
   if (!DEBUG) return
   try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
-}
-
-function assertPluginBundleIntegrity() {
-  const missing = REQUIRED_PLUGIN_FILES.filter((file) => !existsSync(join(PACKAGE_ROOT, file)))
-  if (missing.length === 0) return
-
-  const message = [
-    '[claude-max] FATAL: opencode-claude package is incomplete.',
-    `Missing bundled files: ${missing.join(', ')}`,
-    'Refusing to start because keepalive/TUI safety features are not fully loaded.',
-    'Rebuild or republish @life-ai-tools/opencode-claude with the missing files included.',
-  ].join(' ')
-
-  dbg(message)
-  console.error(message)
-  throw new Error(message)
 }
 
 // ─── Types (subset of @ai-sdk/provider v3) ────────────────
@@ -1224,7 +1200,10 @@ export interface ClaudeMaxProviderOptions {
 
 export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
   const tCreate = Date.now()
-  assertPluginBundleIntegrity()
+  // Note: signal-wire/wake-listener moved to @life-ai-tools/opencode-signal-wire.
+  // If that package isn't resolvable, the imports at top of file throw —
+  // no separate runtime check needed.
+
   // Provider options from opencode.json → provider.claude-max.options
   // These override env vars for user-friendly configuration.
   const providerOpts = (options as any).providerOptions ?? {}

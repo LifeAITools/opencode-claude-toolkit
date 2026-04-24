@@ -27,7 +27,7 @@ export interface TrackedSession {
 }
 
 /** Resolve source PID from TCP ESTABLISHED peer port (localhost:<srcPort>). */
-function resolvePidFromPort(srcPort: number): number | null {
+export function resolvePidFromPort(srcPort: number): number | null {
   try {
     if (process.platform === 'darwin') {
       const r = spawnSync(['lsof', '-nP', `-iTCP:${srcPort}`, '-sTCP:ESTABLISHED', '-F', 'p'])
@@ -75,6 +75,9 @@ function resolvePidFromPort(srcPort: number): number | null {
 function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
 }
+
+/** Exported for consumers who need it (e.g. for isOwnerAlive DI callback). */
+export { processAlive }
 
 // ─── Tracker ──────────────────────────────────────────────────
 
@@ -150,5 +153,27 @@ export class SessionTracker {
 
   list(): TrackedSession[] {
     return Array.from(this.sessions.values())
+  }
+
+  /**
+   * Get session by ID (used for just-in-time PID check by engine's
+   * isOwnerAlive callback — reads the session's resolved PID).
+   */
+  get(sessionId: string): TrackedSession | undefined {
+    return this.sessions.get(sessionId)
+  }
+
+  /**
+   * Check if a session's owner process is still alive.
+   * Returns true if:
+   *   - Session not yet registered (PID not resolved) — default to alive
+   *   - PID resolved AND still running
+   * Returns false only when PID was resolved and process has exited.
+   */
+  isOwnerAlive(sessionId: string): boolean {
+    const sess = this.sessions.get(sessionId)
+    if (!sess) return true           // unknown session — don't falsely kill
+    if (sess.pid === null) return true // PID never resolved — don't kill
+    return processAlive(sess.pid)
   }
 }

@@ -42,21 +42,33 @@ export interface KeepaliveEngineOptions {
     doFetch: (body: Record<string, unknown>, headers: Record<string, string>, signal?: AbortSignal) => AsyncGenerator<StreamEvent>;
     /** Returns current rate limit snapshot (used by onHeartbeat callback). */
     getRateLimitInfo: () => RateLimitInfo;
+    /**
+     * Optional just-in-time liveness check. Called BEFORE every KA fire.
+     * If returns false → engine stops (registry cleared, timer dead).
+     * Use case: proxy-side PID-of-owner check — don't burn quota firing
+     * KA into a cache whose consumer process already exited.
+     *
+     * If omitted → engine assumes owner is always alive (current behavior).
+     */
+    isOwnerAlive?: () => boolean;
 }
 export declare class KeepaliveEngine {
     private static readonly CACHE_TTL_MS;
+    private static readonly CACHE_SAFETY_MARGIN_MS;
     private static readonly KEEPALIVE_RETRY_DELAYS;
     private static readonly SNAPSHOT_TTL_MS;
     private static readonly DUMP_BODY;
-    private static readonly HEALTH_PROBE_INTERVAL_MS;
+    private static readonly HEALTH_PROBE_INTERVALS_MS;
     private static readonly HEALTH_PROBE_TIMEOUT_MS;
     private config;
     private readonly getToken;
     private readonly doFetch;
     private readonly getRateLimitInfo;
+    private readonly isOwnerAlive;
     private lastKnownCacheTokensByModel;
     private networkState;
     private healthProbeTimer;
+    private healthProbeAttempt;
     private registry;
     private _pendingSnapshotModel;
     private _pendingSnapshotBody;
@@ -103,6 +115,20 @@ export declare class KeepaliveEngine {
      * with empty registry, and auto-resumes on next real request.
      */
     private onDisarmed;
+    /**
+     * Aggressive TCP health probe to api.anthropic.com:443.
+     * Uses escalating intervals [5s, 5s, 10s, 10s, 20s, 20s, 30s, 30s, ...] —
+     * hits fast first (cache is precious, network blip may be short) and
+     * ramps down when cache approaches TTL death.
+     *
+     * TCP-only: no tokens burned. On reconnect detection, triggers KA tick
+     * if cache is still alive (>10s TTL remaining).
+     *
+     * Caller passes `restartRegistry` when network fault happened with cache
+     * presumed dead — probe still runs so that on reconnect we can signal
+     * `network_revived` → caller may want to try 1 KA fire to see if the
+     * cache miraculously survived (very rare but free to check).
+     */
     private startHealthProbe;
     private stopHealthProbe;
     private writeSnapshotDebug;

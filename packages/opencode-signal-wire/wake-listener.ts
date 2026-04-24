@@ -417,7 +417,6 @@ function parseAgentsMd(): AgentIdentity | null {
       roleName: null,
       rolePrompt,
       teamName: null,
-      teamPlaybook: null,
       teammates: [],
       fetchedAt: Date.now(),
     }

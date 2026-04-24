@@ -714,8 +714,45 @@ async function cmdWatch(): Promise<void> {
 }
 
 async function cmdDoctor(): Promise<void> {
-  const d = await doctor()
-  printDoctor(d)
+  // Doctor is a SELF-HEALING diagnostic:
+  //   1. Report current state (what's installed vs missing)
+  //   2. If anything is missing — auto-install it (no --fix flag needed)
+  //   3. Re-report after healing to show the final state
+  //
+  // Rationale: one command = everything works. User shouldn't have to
+  // remember "run doctor, then run doctor --fix, then start service". Just
+  // run `claude-max doctor` and it makes the system work.
+  const before = await doctor()
+  printDoctor(before)
+
+  const needsHealing =
+    !before.bun ||
+    !before.claude ||
+    !before.proxyFiles ||
+    !before.binLink ||
+    !before.binInPath ||
+    (before.service !== 'none' && (!before.serviceInstalled || !before.serviceActive)) ||
+    !before.proxyAlive
+
+  if (!needsHealing) return  // everything green — done
+
+  console.log(c(C.cyan, '→') + ' Healing missing components...')
+  console.log('')
+
+  // ensureInstalled is already idempotent — it re-checks doctor at each step
+  // and only installs what's actually missing.
+  const { d: healed, bunBin } = await ensureInstalled()
+
+  // If proxy is still not alive after install — start it.
+  if (!healed.proxyAlive) {
+    await ensureProxyRunning(healed, bunBin)
+  }
+
+  // Re-report final state
+  const after = await doctor()
+  console.log('')
+  console.log(c(C.bold, '  After healing:'))
+  printDoctor(after)
 }
 
 async function cmdConfig(): Promise<void> {

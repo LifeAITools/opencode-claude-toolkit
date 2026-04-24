@@ -6,6 +6,11 @@ export { ClaudeCodeSDKError, AuthError, APIError, RateLimitError, CacheRewriteBl
 export type { SessionEntry } from './session.js';
 export { KeepaliveEngine } from './keepalive-engine.js';
 export type { KeepaliveEngineOptions } from './keepalive-engine.js';
+export type { ICredentialsProvider, IEventEmitter, ISessionStore, IUpstreamFetcher, ILivenessChecker, ProxyEvent, Session, ProxyClientAdapters, } from './proxy-ports.js';
+export { FileCredentialsProvider, ConsoleEventEmitter, NullEventEmitter, InMemorySessionStore, DefaultLivenessChecker, NativeFetchUpstream, } from './proxy-adapters.js';
+export type { FileCredentialsProviderOptions, ConsoleEventEmitterOptions, } from './proxy-adapters.js';
+export { ProxyClient } from './proxy-client.js';
+export type { ProxyClientConfig, ProxyClientOptions, HandleRequestContext, RateLimitSnapshot, } from './proxy-client.js';
 export type { KeepaliveConfig, KeepaliveStats, KeepaliveTick, } from './types.js';
 export { oauthLogin } from './auth.js';
 export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js';

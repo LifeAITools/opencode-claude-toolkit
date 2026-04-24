@@ -10,6 +10,23 @@ import type { StreamEvent } from '@life-ai-tools/claude-code-sdk'
 import type { ProxyConfig } from './config.js'
 import { emit } from './event-bus.js'
 
+// ═══ SDK ICredentialsProvider adapter ═══════════════════════════════
+//
+// Wraps our per-module getAccessToken/invalidateTokenCache into the SDK's
+// ICredentialsProvider interface so ProxyClient can use them.
+
+import type { ICredentialsProvider } from '@life-ai-tools/claude-code-sdk'
+
+export class ProxyConfigCredentialsAdapter implements ICredentialsProvider {
+  constructor(private cfg: ProxyConfig) {}
+  async getAccessToken(): Promise<string> {
+    return getAccessToken(this.cfg)
+  }
+  invalidate(): void {
+    invalidateTokenCache()
+  }
+}
+
 // ═══ Credential reader ═══════════════════════════════════════════
 
 let _store: FileCredentialStore | null = null

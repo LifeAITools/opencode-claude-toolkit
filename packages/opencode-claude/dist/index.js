@@ -5109,6 +5109,17 @@ async function resolveOAuthIdentity() {
     return null;
   }
 }
+function _readPkgVersion(p2) {
+  try {
+    const j2 = JSON.parse(readFileSync4(p2, "utf8"));
+    return `${j2.name ?? "?"}@${j2.version ?? "?"}`;
+  } catch {
+    return "unknown";
+  }
+}
+var _PLUGIN_PKG = _readPkgVersion(join9(import.meta.dir, "..", "package.json"));
+var _SDK_PKG = _readPkgVersion(join9(import.meta.dir, "..", "node_modules", "@life-ai-tools", "claude-code-sdk", "package.json"));
+var _SIGNALWIRE_PKG = _readPkgVersion(join9(import.meta.dir, "..", "node_modules", "@life-ai-tools", "opencode-signal-wire", "package.json"));
 var opencode_claude_default = {
   id: "opencode-claude-max",
   server: async (input) => {
@@ -5117,7 +5128,24 @@ var opencode_claude_default = {
     const sessionId = process.env.OPENCODE_SESSION_ID ?? process.env.OPENCODE_SESSION_SLUG ?? input.sessionID ?? "unknown";
     const creds = new CredentialManager(cwd);
     const providerPath = `file://${import.meta.dir}/provider.js`;
-    dbg4(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} providerPath=${providerPath} initTime=${Date.now() - t0}ms`);
+    let _providerMtime = "unknown";
+    try {
+      _providerMtime = statSync2(join9(import.meta.dir, "provider.js")).mtime.toISOString();
+    } catch {}
+    let _proxyPkg = "unknown";
+    try {
+      const proxyUrl = process.env.CLAUDE_MAX_PROXY_URL ?? "http://127.0.0.1:5050";
+      const ctrl = new AbortController;
+      const timer = setTimeout(() => ctrl.abort(), 500);
+      const r2 = await fetch(`${proxyUrl}/version`, { signal: ctrl.signal }).catch(() => null);
+      clearTimeout(timer);
+      if (r2 && r2.ok) {
+        const j2 = await r2.json().catch(() => null);
+        if (j2?.version)
+          _proxyPkg = `${j2.name ?? "@kiberos/claude-max-proxy"}@${j2.version}`;
+      }
+    } catch {}
+    dbg4(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdk=${_SDK_PKG} signalWire=${_SIGNALWIRE_PKG} proxy=${_proxyPkg} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`);
     const _serverUrl = typeof input.serverUrl === "object" && input.serverUrl?.href ? input.serverUrl.href.replace(/\/$/, "") : typeof input.serverUrl === "string" ? input.serverUrl.replace(/\/$/, "") : "";
     const _sessionId = process.env.OPENCODE_SESSION_ID ?? sessionId;
     dbg4(`STARTUP signal-wire: serverUrl=${_serverUrl} sessionId=${_sessionId}`);

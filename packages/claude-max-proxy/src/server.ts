@@ -55,7 +55,7 @@ import { startHeartbeat } from './heartbeat.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient } from '@life-ai-tools/claude-code-sdk'
 
-const PROXY_VERSION = '0.5.0'
+const PROXY_VERSION = '0.5.1'
 
 // ═══ Mode detection ═══════════════════════════════════════════════
 
@@ -298,6 +298,10 @@ const server = Bun.serve({
 
     if (req.method === 'GET' && url.pathname === '/health') {
       return Response.json({ ok: true, uptime: Math.floor(process.uptime()), sessions: tracker.size() })
+    }
+
+    if (req.method === 'GET' && url.pathname === '/version') {
+      return Response.json({ name: '@kiberos/claude-max-proxy', version: PROXY_VERSION, pid: process.pid, uptime: Math.floor(process.uptime()) })
     }
 
     if (req.method === 'GET' && url.pathname === '/stats') {

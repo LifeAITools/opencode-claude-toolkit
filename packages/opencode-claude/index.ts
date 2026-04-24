@@ -281,6 +281,18 @@ async function resolveOAuthIdentity(): Promise<{
   }
 }
 
+// Resolve module versions at startup — read package.json files alongside the bundled provider.
+// Falls back gracefully if any file is missing/unreadable.
+function _readPkgVersion(p: string): string {
+  try {
+    const j = JSON.parse(readFileSync(p, 'utf8')) as { name?: string; version?: string }
+    return `${j.name ?? '?'}@${j.version ?? '?'}`
+  } catch { return 'unknown' }
+}
+const _PLUGIN_PKG = _readPkgVersion(join(import.meta.dir, '..', 'package.json'))
+const _SDK_PKG = _readPkgVersion(join(import.meta.dir, '..', 'node_modules', '@life-ai-tools', 'claude-code-sdk', 'package.json'))
+const _SIGNALWIRE_PKG = _readPkgVersion(join(import.meta.dir, '..', 'node_modules', '@life-ai-tools', 'opencode-signal-wire', 'package.json'))
+
 export default {
   id: 'opencode-claude-max',
   server: async (input: any) => {
@@ -290,7 +302,25 @@ export default {
     const creds = new CredentialManager(cwd)
     const providerPath = `file://${import.meta.dir}/provider.js`
 
-    dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} providerPath=${providerPath} initTime=${Date.now() - t0}ms`)
+    // Resolve provider.js mtime (build timestamp marker — useful when versions don't change but rebuilds happen)
+    let _providerMtime = 'unknown'
+    try { _providerMtime = statSync(join(import.meta.dir, 'provider.js')).mtime.toISOString() } catch {}
+
+    // Probe local proxy for its version (best-effort, short timeout — never blocks startup)
+    let _proxyPkg = 'unknown'
+    try {
+      const proxyUrl = process.env.CLAUDE_MAX_PROXY_URL ?? 'http://127.0.0.1:5050'
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 500)
+      const r = await fetch(`${proxyUrl}/version`, { signal: ctrl.signal }).catch(() => null)
+      clearTimeout(timer)
+      if (r && r.ok) {
+        const j = await r.json().catch(() => null) as { name?: string; version?: string } | null
+        if (j?.version) _proxyPkg = `${j.name ?? '@kiberos/claude-max-proxy'}@${j.version}`
+      }
+    } catch {}
+
+    dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdk=${_SDK_PKG} signalWire=${_SIGNALWIRE_PKG} proxy=${_proxyPkg} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`)
 
     // Signal-wire: capture serverUrl for TUI notifications
     const _serverUrl = typeof input.serverUrl === 'object' && input.serverUrl?.href

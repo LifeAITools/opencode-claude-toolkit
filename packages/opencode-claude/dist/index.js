@@ -5132,20 +5132,7 @@ var opencode_claude_default = {
     try {
       _providerMtime = statSync2(join9(import.meta.dir, "provider.js")).mtime.toISOString();
     } catch {}
-    let _proxyPkg = "unknown";
-    try {
-      const proxyUrl = process.env.CLAUDE_MAX_PROXY_URL ?? "http://127.0.0.1:5050";
-      const ctrl = new AbortController;
-      const timer = setTimeout(() => ctrl.abort(), 500);
-      const r2 = await fetch(`${proxyUrl}/version`, { signal: ctrl.signal }).catch(() => null);
-      clearTimeout(timer);
-      if (r2 && r2.ok) {
-        const j2 = await r2.json().catch(() => null);
-        if (j2?.version)
-          _proxyPkg = `${j2.name ?? "@kiberos/claude-max-proxy"}@${j2.version}`;
-      }
-    } catch {}
-    dbg4(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdk=${_SDK_PKG} signalWire=${_SIGNALWIRE_PKG} proxy=${_proxyPkg} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`);
+    dbg4(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdkInProc=${_SDK_PKG} signalWire=${_SIGNALWIRE_PKG} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`);
     const _serverUrl = typeof input.serverUrl === "object" && input.serverUrl?.href ? input.serverUrl.href.replace(/\/$/, "") : typeof input.serverUrl === "string" ? input.serverUrl.replace(/\/$/, "") : "";
     const _sessionId = process.env.OPENCODE_SESSION_ID ?? sessionId;
     dbg4(`STARTUP signal-wire: serverUrl=${_serverUrl} sessionId=${_sessionId}`);

@@ -55,7 +55,7 @@ import { startHeartbeat } from './heartbeat.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient } from '@life-ai-tools/claude-code-sdk'
 
-const PROXY_VERSION = '0.5.1'
+const PROXY_VERSION = '0.5.2'
 
 // ═══ Mode detection ═══════════════════════════════════════════════
 
@@ -337,6 +337,25 @@ if (PROXY_MODE === 'global') {
     version: PROXY_VERSION,
   })
 
+  // Emit a clear STARTUP marker (greppable) — tells you exactly which proxy
+  // instance is running and where it logs. Distinct from in-process plugin
+  // STARTUP events (those go to ~/.claude/claude-max-debug.log).
+  emit({
+    level: 'info',
+    kind: 'STARTUP',
+    component: 'standalone-proxy',
+    pkg: `@kiberos/claude-max-proxy@${PROXY_VERSION}`,
+    mode: 'global',
+    port: RUNTIME_PORT,
+    host: RUNTIME_HOST,
+    pid: process.pid,
+    parentPid: process.ppid,
+    node: process.version,
+    consumer: 'native-claude-code-cli (NOT opencode-plugin)',
+    logFiles: { human: cfg.logFile, jsonl: cfg.logJsonl },
+    versionEndpoint: `http://${RUNTIME_HOST}:${RUNTIME_PORT}/version`,
+  })
+
   emit({
     level: 'info',
     kind: 'PROXY_STARTED',
@@ -361,6 +380,23 @@ if (PROXY_MODE === 'global') {
     endpoint,
     version: PROXY_VERSION,
   }))
+
+  // Same STARTUP marker as global mode — distinguishes embedded instances.
+  emit({
+    level: 'info',
+    kind: 'STARTUP',
+    component: 'standalone-proxy',
+    pkg: `@kiberos/claude-max-proxy@${PROXY_VERSION}`,
+    mode: 'embedded',
+    port: RUNTIME_PORT,
+    host: RUNTIME_HOST,
+    pid: process.pid,
+    parentPid: PARENT_PID,
+    node: process.version,
+    consumer: `parent-pid=${PARENT_PID} (typically native CC CLI spawned us)`,
+    logFiles: { human: cfg.logFile, jsonl: cfg.logJsonl },
+    versionEndpoint: `http://${RUNTIME_HOST}:${RUNTIME_PORT}/version`,
+  })
 
   emit({
     level: 'info',

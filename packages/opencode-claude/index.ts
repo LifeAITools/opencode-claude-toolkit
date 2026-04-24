@@ -281,8 +281,21 @@ async function resolveOAuthIdentity(): Promise<{
   }
 }
 
-// Resolve module versions at startup — read package.json files alongside the bundled provider.
-// Falls back gracefully if any file is missing/unreadable.
+// ─── In-process module versions ──────────────────────────────────
+//
+// IMPORTANT — what these versions describe:
+//   This plugin runs IN-PROCESS inside opencode. It does NOT use the
+//   standalone @kiberos/claude-max-proxy daemon (port 5050) — that proxy
+//   is for the native Claude Code CLI only.
+//
+//   Instead, this plugin uses an EMBEDDED keepalive engine + HTTP forwarder
+//   imported from @life-ai-tools/claude-code-sdk. So when you see "sdk=..."
+//   below, that IS the in-process equivalent of the proxy.
+//
+//   Logs are split by component:
+//     • This plugin → ~/.claude/claude-max-debug.log (this file)
+//     • Standalone proxy daemon (if running) → ~/.claude/claude-max-proxy.log[.jsonl]
+//
 function _readPkgVersion(p: string): string {
   try {
     const j = JSON.parse(readFileSync(p, 'utf8')) as { name?: string; version?: string }
@@ -306,21 +319,17 @@ export default {
     let _providerMtime = 'unknown'
     try { _providerMtime = statSync(join(import.meta.dir, 'provider.js')).mtime.toISOString() } catch {}
 
-    // Probe local proxy for its version (best-effort, short timeout — never blocks startup)
-    let _proxyPkg = 'unknown'
-    try {
-      const proxyUrl = process.env.CLAUDE_MAX_PROXY_URL ?? 'http://127.0.0.1:5050'
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 500)
-      const r = await fetch(`${proxyUrl}/version`, { signal: ctrl.signal }).catch(() => null)
-      clearTimeout(timer)
-      if (r && r.ok) {
-        const j = await r.json().catch(() => null) as { name?: string; version?: string } | null
-        if (j?.version) _proxyPkg = `${j.name ?? '@kiberos/claude-max-proxy'}@${j.version}`
-      }
-    } catch {}
-
-    dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdk=${_SDK_PKG} signalWire=${_SIGNALWIRE_PKG} proxy=${_proxyPkg} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`)
+    // STARTUP fields (in-process plugin only — DOES NOT include standalone proxy):
+    //   plugin       — this opencode plugin package
+    //   sdkInProc    — in-process keepalive engine + HTTP forwarder (what you'd call "embedded proxy")
+    //   signalWire   — extracted signal-wire helper package
+    //   node         — Node/Bun runtime version
+    //   providerPath — file:// URL to bundled dist/provider.js (what opencode actually loads)
+    //   providerMtime — build timestamp of that bundle (useful when version doesn't change but rebuild happens)
+    //
+    // For standalone proxy daemon version — query its own log: GET http://127.0.0.1:5050/version
+    // (that proxy logs to ~/.claude/claude-max-proxy.log, not here).
+    dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdkInProc=${_SDK_PKG} signalWire=${_SIGNALWIRE_PKG} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`)
 
     // Signal-wire: capture serverUrl for TUI notifications
     const _serverUrl = typeof input.serverUrl === 'object' && input.serverUrl?.href

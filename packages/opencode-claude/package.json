@@ -1,6 +1,6 @@
 {
   "name": "@life-ai-tools/opencode-claude",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "OpenCode plugin + AI SDK provider for Claude Max/Pro subscription \u2014 OAuth login, streaming, tool use via claude-code-sdk",
   "type": "module",
   "exports": {

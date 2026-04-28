@@ -16,6 +16,8 @@
 
 export { SignalWire } from './signal-wire'
 export type { HookEvent, SignalWireContext } from './signal-wire'
+export { default as plugin } from './plugin'
+export { default } from './plugin'
 
 export {
   startWakeListener,
@@ -32,7 +34,15 @@ export type { WakeListenerHandle } from './wake-listener'
 
 export { loadPreferences, computeSubscribe } from './wake-preferences'
 
-export type { WakeEvent } from './wake-types'
+export type {
+  AgentTransport,
+  DiscoveryFile,
+  DispatchStatus,
+  WakeEvent,
+  WakeEventPriority,
+  WakeEventType,
+  WakeResponse,
+} from './wake-types'
 export { DISCOVERY_DIR, WAKE_EVENT_TYPES, WARM_CHANNEL_TTL_MS } from './wake-types'
 
 // ─── Identity error bridge (for TUI status display) ─────────────

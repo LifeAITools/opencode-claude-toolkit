@@ -12,8 +12,28 @@
 import { homedir } from 'os'
 import { join } from 'path'
 
-/** Directory where plugin wake listeners write discovery files */
-export const DISCOVERY_DIR = join(homedir(), '.opencode', 'wake')
+/**
+ * Directory where plugin wake listeners write discovery files.
+ *
+ * Resolution order:
+ *   1. WAKE_DISCOVERY_DIR env var (deployment override; same value must be
+ *      set in wake-router so reads/writes converge).
+ *   2. $HOME/.opencode/wake (default for normal local installs).
+ *
+ * Resolved lazily so a launcher that sets WAKE_DISCOVERY_DIR after this
+ * module is imported (e.g. via dynamic isolation in agent-runner) still
+ * picks up the override.
+ */
+export function discoveryDir(): string {
+  return process.env.WAKE_DISCOVERY_DIR ?? join(homedir(), '.opencode', 'wake')
+}
+
+/**
+ * Eager constant kept for backward compatibility with consumers that
+ * import DISCOVERY_DIR at module load time. New code should call
+ * discoveryDir() to honor late-set env overrides.
+ */
+export const DISCOVERY_DIR = discoveryDir()
 
 /** Default token length (bytes of randomness, hex-encoded) */
 export const DEFAULT_TOKEN_LENGTH = 32
@@ -52,7 +72,7 @@ export type WakeEventType =
   | 'task_failed'
   | 'agent_stale'
 
-export type DispatchStatus = 'delivered' | 'queued' | 'rate_limited' | 'deduped' | 'failed' | 'agent_not_found'
+export type DispatchStatus = 'delivered' | 'queued' | 'rate_limited' | 'deduped' | 'failed' | 'agent_not_found' | 'filtered' | 'blocked_by_rule'
 
 export type AgentTransport = 'http' | 'vsock'
 
@@ -88,6 +108,8 @@ export interface DiscoveryFile {
   token: string
   /** OpenCode session ID */
   sessionId: string
+  /** Stable OpenCode agent instance ID; distinct from member identity and session identity. */
+  agentInstanceId?: string
   /** SynqTask member ID (if available) */
   memberId?: string
   /** Process ID of the OpenCode process */
@@ -156,6 +178,8 @@ export interface WakeListenerConfig {
   serverUrl: string
   /** Current session ID */
   sessionId: string
+  /** Stable OpenCode agent instance ID; distinct from member identity and session identity. */
+  agentInstanceId?: string
   /** SynqTask member ID (from env SYNQTASK_MEMBER_ID) */
   memberId?: string
   /** Optional: SignalWire engine instance — if provided, route through engine */
@@ -184,6 +208,14 @@ export interface WakeListenerConfig {
   subscribePreset?: string
   /** Member type hint (agent/human/unknown) — determines default preset */
   memberType?: 'human' | 'agent' | 'unknown'
+  /** Optional listener-owned agent registration/reconciliation hints. Fail-open if SynqTask is unavailable. */
+  agentRegistration?: {
+    enabled?: boolean
+    name?: string
+    displayName?: string
+    description?: string
+    spaceId?: string
+  }
 }
 
 // ─── Wake Response ──────────────────────────────────────────────────

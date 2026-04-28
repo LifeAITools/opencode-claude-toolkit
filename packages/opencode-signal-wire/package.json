@@ -6,6 +6,7 @@
   "main": "./index.ts",
   "exports": {
     ".": "./index.ts",
+    "./plugin": "./plugin.ts",
     "./signal-wire": "./signal-wire.ts",
     "./wake-listener": "./wake-listener.ts",
     "./wake-preferences": "./wake-preferences.ts",

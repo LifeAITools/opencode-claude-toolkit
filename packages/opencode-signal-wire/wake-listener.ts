@@ -25,7 +25,7 @@ import type {
   WakeResponse,
   DiscoveryFile,
 } from './wake-types'
-import { DISCOVERY_DIR, WAKE_EVENT_TYPES, WARM_CHANNEL_TTL_MS } from './wake-types'
+import { DISCOVERY_DIR, discoveryDir, WAKE_EVENT_TYPES, WARM_CHANNEL_TTL_MS } from './wake-types'
 
 // ─── Constants ────────────────────────────────────────────
 
@@ -34,6 +34,9 @@ const LOG_FILE = join(homedir(), '.claude', 'wake-listener-debug.log')
 const MAX_QUEUE_DEFAULT = 50
 const BUSY_RETRY_INTERVAL_DEFAULT = 5 // seconds
 const STARTUP_TS = Date.now()
+const FALLBACK_REPLAY_LIMIT = 20
+const FALLBACK_REPLAY_TIMEOUT_MS = 3000
+const DEDUP_CACHE_LIMIT = 500
 
 // ─── Logging (standalone — mirrors signal-wire.ts dbg() pattern) ─
 
@@ -104,10 +107,477 @@ export let _agentIdentity: AgentIdentity | null = null
  */
 let _sdkClient: any = null
 
+type SynqtaskMcpCallOptions = {
+  synqtaskUrl?: string
+  timeoutMs?: number
+}
+
+type LifecycleAction = 'starting' | 'online' | 'busy' | 'injecting' | 'resting' | 'offline'
+
+type TaskSyncAction = 'start_accepted' | 'start_injected' | 'start_comment' | 'result_recorded' | 'completed' | 'failed'
+
+type LifecycleSyncInput = {
+  action: LifecycleAction
+  currentTaskId?: string | null
+  event?: WakeEvent
+  reason?: string
+  force?: boolean
+}
+
+const LIFECYCLE_SYNC_MIN_INTERVAL_MS = 30_000
+let _lifecycleLastSyncAt = 0
+let _lifecycleLastKey = ''
+let _lifecycleConfig: WakeListenerConfig | null = null
+let _lifecycleMemberId: string | null = null
+let _lastActivityCursor: string | null = null
+const _seenWakeEventIds = new Set<string>()
+const _seenWakeFingerprints = new Set<string>()
+const _taskSyncKeys = new Set<string>()
+
+function extractWakeTaskId(event?: WakeEvent): string | null {
+  const payload = event?.payload as Record<string, any> | undefined
+  if (!payload) return null
+  const taskId = payload.task_id ?? payload.taskId ?? payload.entityId
+  return typeof taskId === 'string' && taskId.length > 0 ? taskId : null
+}
+
+function wakeFingerprint(event?: WakeEvent): string | null {
+  const payload = event?.payload as Record<string, any> | undefined
+  const fingerprint = event?.fingerprint ?? payload?.fingerprint
+  return typeof fingerprint === 'string' && fingerprint.length > 0 ? fingerprint : null
+}
+
+function extractWakeTaskTitle(event: WakeEvent, taskId: string): string {
+  const payload = event.payload as Record<string, any>
+  const title = payload.title ?? payload.taskTitle ?? payload.task_title ?? payload.name
+  return typeof title === 'string' && title.trim().length > 0 ? title.trim() : `task ${taskId}`
+}
+
+function taskSyncMetadataValue(event: WakeEvent, taskId: string, action: TaskSyncAction): string {
+  return JSON.stringify({
+    action,
+    taskId,
+    syncedAt: new Date().toISOString(),
+    sessionId: _lifecycleConfig?.sessionId ?? null,
+    agentInstanceId: _lifecycleConfig?.agentInstanceId ?? null,
+    memberId: _lifecycleMemberId ?? _agentIdentity?.memberId ?? null,
+    eventId: event.eventId,
+    eventType: event.type,
+    source: event.source,
+    fingerprint: wakeFingerprint(event),
+  })
+}
+
+function rememberTaskSync(action: TaskSyncAction, taskId: string, event: WakeEvent): boolean {
+  const key = [
+    action,
+    taskId,
+    event.eventId,
+    wakeFingerprint(event) ?? '',
+    _lifecycleConfig?.sessionId ?? '',
+    _lifecycleConfig?.agentInstanceId ?? '',
+  ].join(':')
+  if (_taskSyncKeys.has(key)) return false
+  _taskSyncKeys.add(key)
+  const oldest = _taskSyncKeys.values().next().value
+  if (_taskSyncKeys.size > DEDUP_CACHE_LIMIT && oldest) _taskSyncKeys.delete(oldest)
+  return true
+}
+
+async function syncTaskStart(event: WakeEvent, action: Extract<TaskSyncAction, 'start_accepted' | 'start_injected'>): Promise<void> {
+  const config = _lifecycleConfig
+  const taskId = extractWakeTaskId(event)
+  if (isExplicitCompletion(event) || isExplicitFailure(event) || explicitResultText(event)) return
+  if (!config || !taskId || !rememberTaskSync(action, taskId, event)) return
+
+  const status = action === 'start_accepted' ? 'started' : 'in_progress'
+  try {
+    await callSynqtaskMcp(
+      'todo_tasks',
+      { action: 'set_status', task_id: taskId, status },
+      { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+    )
+    dbg(`task sync: ${action} task=${taskId} status=${status} event=${event.eventId} fp=${wakeFingerprint(event) ?? '-'}`)
+  } catch (e: any) {
+    dbg(`task sync start failed (non-fatal): action=${action} task=${taskId} event=${event.eventId} error=${e?.message}`)
+  }
+
+  if (rememberTaskSync('start_comment', taskId, event)) {
+    try {
+      await callSynqtaskMcp(
+        'todo_comments',
+        { action: 'add', task_id: taskId, text: `Starting work on: ${extractWakeTaskTitle(event, taskId)}` },
+        { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+      )
+      dbg(`task sync: start_comment task=${taskId} event=${event.eventId} fp=${wakeFingerprint(event) ?? '-'}`)
+    } catch (e: any) {
+      dbg(`task start comment sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e?.message}`)
+    }
+  }
+
+  const memberId = _lifecycleMemberId ?? _agentIdentity?.memberId
+  if (!memberId || memberId === 'unknown') return
+  try {
+    await callSynqtaskMcp(
+      'todo_members',
+      { action: 'set_metadata', member_id: memberId, key: 'wakeTaskSync', value: taskSyncMetadataValue(event, taskId, action) },
+      { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+    )
+  } catch (e: any) {
+    dbg(`task sync metadata failed (non-fatal): action=${action} task=${taskId} event=${event.eventId} error=${e?.message}`)
+  }
+}
+
+function explicitResultText(event: WakeEvent): string | null {
+  const payload = event.payload as Record<string, any>
+  const result = payload.resultText ?? payload.result_text ?? payload.taskResult ?? payload.task_result ?? payload.completionResult ?? payload.completion_result
+  return typeof result === 'string' && result.trim().length > 0 ? result : null
+}
+
+function isExplicitCompletion(event: WakeEvent): boolean {
+  const payload = event.payload as Record<string, any>
+  const status = String(payload.status ?? payload.taskStatus ?? payload.task_status ?? '').toLowerCase()
+  return event.type === WAKE_EVENT_TYPES.TASK_COMPLETED
+    || payload.completed === true
+    || payload.complete === true
+    || status === 'done'
+    || status === 'completed'
+}
+
+function isExplicitFailure(event: WakeEvent): boolean {
+  const payload = event.payload as Record<string, any>
+  const status = String(payload.status ?? payload.taskStatus ?? payload.task_status ?? payload.resultStatus ?? payload.result_status ?? '').toLowerCase()
+  return event.type === WAKE_EVENT_TYPES.TASK_FAILED
+    || payload.failed === true
+    || payload.failure === true
+    || status === 'failed'
+    || status === 'failure'
+    || status === 'error'
+}
+
+async function syncExplicitTaskResultOrCompletion(event: WakeEvent): Promise<void> {
+  const config = _lifecycleConfig
+  const taskId = extractWakeTaskId(event)
+  if (!config || !taskId) return
+
+  const resultText = explicitResultText(event)
+  if (resultText && rememberTaskSync('result_recorded', taskId, event)) {
+    try {
+      await callSynqtaskMcp(
+        'todo_comments',
+        { action: 'add_result', task_id: taskId, text: resultText },
+        { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+      )
+      dbg(`task sync: result_recorded task=${taskId} event=${event.eventId}`)
+    } catch (e: any) {
+      dbg(`task result sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e?.message}`)
+    }
+  }
+
+  if (isExplicitCompletion(event) && rememberTaskSync('completed', taskId, event)) {
+    try {
+      await callSynqtaskMcp(
+        'todo_tasks',
+        { action: 'set_status', task_id: taskId, status: 'done' },
+        { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+      )
+      dbg(`task sync: completed task=${taskId} event=${event.eventId}`)
+    } catch (e: any) {
+      dbg(`task completion sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e?.message}`)
+    }
+  }
+
+  if (isExplicitFailure(event) && rememberTaskSync('failed', taskId, event)) {
+    try {
+      await callSynqtaskMcp(
+        'todo_tasks',
+        { action: 'set_status', task_id: taskId, status: 'failed' },
+        { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+      )
+      dbg(`task sync: failed task=${taskId} event=${event.eventId}`)
+    } catch (e: any) {
+      dbg(`task failure sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e?.message}`)
+    }
+  }
+}
+
+function lifecycleMetadataValue(input: LifecycleSyncInput, config: WakeListenerConfig): string {
+  const now = new Date().toISOString()
+  const event = input.event
+  const payload = event?.payload as Record<string, any> | undefined
+  const spaceId = config.agentRegistration?.spaceId ?? process.env.SYNQTASK_SPACE_ID
+  return JSON.stringify({
+    action: input.action,
+    currentTaskId: input.currentTaskId ?? extractWakeTaskId(event) ?? null,
+    lastActive: now,
+    memberType: _currentMemberType,
+    sessionId: config.sessionId,
+    agentInstanceId: config.agentInstanceId ?? null,
+    spaceId: spaceId ?? null,
+    eventId: event?.eventId ?? null,
+    eventType: event?.type ?? null,
+    source: event?.source ?? null,
+    fingerprint: event?.fingerprint ?? payload?.fingerprint ?? null,
+    reason: input.reason ?? null,
+  })
+}
+
+function lifecycleRuntimeState(action: LifecycleAction): 'starting' | 'online' | 'busy' | 'resting' {
+  if (action === 'starting') return 'starting'
+  if (action === 'online') return 'online'
+  if (action === 'busy' || action === 'injecting') return 'busy'
+  return 'resting'
+}
+
+async function syncLifecycle(input: LifecycleSyncInput): Promise<void> {
+  const config = _lifecycleConfig
+  const memberId = _lifecycleMemberId ?? _agentIdentity?.memberId
+  if (!config || !memberId || memberId === 'unknown') return
+
+  const currentTaskId = input.currentTaskId ?? extractWakeTaskId(input.event) ?? null
+  const key = `${input.action}:${currentTaskId ?? ''}:${input.event?.eventId ?? ''}:${input.reason ?? ''}`
+  const now = Date.now()
+  if (!input.force && key === _lifecycleLastKey && now - _lifecycleLastSyncAt < LIFECYCLE_SYNC_MIN_INTERVAL_MS) return
+
+  _lifecycleLastKey = key
+  _lifecycleLastSyncAt = now
+
+  const metadata = lifecycleMetadataValue({ ...input, currentTaskId }, config)
+  try {
+    await callSynqtaskMcp(
+      'todo_members',
+      {
+        action: 'batch_update_active',
+        updates: [{
+          member_id: memberId,
+          last_active_at: new Date().toISOString(),
+          runtime_state: lifecycleRuntimeState(input.action),
+        }],
+      },
+      { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+    )
+  } catch (e: any) {
+    dbg(`lifecycle lastActive update failed (non-fatal): action=${input.action} event=${input.event?.eventId ?? '-'} error=${e?.message}`)
+  }
+
+  try {
+    await callSynqtaskMcp(
+      'todo_members',
+      { action: 'set_metadata', member_id: memberId, key: 'wakeLifecycle', value: metadata },
+      { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+    )
+    await callSynqtaskMcp(
+      'todo_members',
+      { action: 'set_metadata', member_id: memberId, key: 'currentTaskId', value: currentTaskId ?? '' },
+      { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+    )
+    dbg(`lifecycle sync: action=${input.action} member=${memberId} task=${currentTaskId ?? '-'} event=${input.event?.eventId ?? '-'}`)
+  } catch (e: any) {
+    dbg(`lifecycle metadata update failed (non-fatal): action=${input.action} event=${input.event?.eventId ?? '-'} error=${e?.message}`)
+  }
+}
+
 // ─── Subscription State (written to discovery file) ─────────────────
 let _currentSubscribe: string[] | null = null
 let _currentSubscribePreset: string | null = null
 let _currentMemberType: 'human' | 'agent' | 'unknown' = 'unknown'
+
+function readSynqtaskBearerToken(): string {
+  let bearerToken = process.env.SYNQTASK_BEARER_TOKEN ?? ''
+  if (bearerToken) return bearerToken
+  try {
+    const authPath = join(homedir(), '.local', 'share', 'opencode', 'mcp-auth.json')
+    const authData = JSON.parse(readFileSync(authPath, 'utf-8'))
+    bearerToken = authData?.synqtask?.tokens?.accessToken ?? ''
+  } catch { /* no mcp-auth.json, proceed without auth */ }
+  return bearerToken
+}
+
+async function callSynqtaskMcp<T = any>(
+  toolName: string,
+  operations: unknown,
+  options: SynqtaskMcpCallOptions = {},
+): Promise<T | null> {
+  const url = options.synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? 'http://localhost:3747'
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+  }
+  const bearerToken = readSynqtaskBearerToken()
+  if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`
+
+  const res = await fetch(`${url}/mcp`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      method: 'tools/call',
+      params: { name: toolName, arguments: { operations } },
+    }),
+    signal: AbortSignal.timeout(options.timeoutMs ?? 3000),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+  const text = await res.text()
+  const dataLine = text.split('\n').find(l => l.startsWith('data: '))
+  if (!dataLine) throw new Error('no data line in response')
+
+  const rpcResult = JSON.parse(dataLine.substring(6))
+  const content = rpcResult?.result?.content?.[0]?.text
+  if (!content) throw new Error('empty content')
+
+  const parsed = JSON.parse(content)
+  const result = parsed?.results?.[0]?.result ?? parsed
+  return result as T
+}
+
+function synqtaskRestHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Accept': 'application/json' }
+  const bearerToken = readSynqtaskBearerToken()
+  if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`
+  return headers
+}
+
+function rememberWakeEvent(event: WakeEvent): void {
+  const addLimited = (set: Set<string>, value?: string | null) => {
+    if (!value) return
+    set.add(value)
+    const oldest = set.values().next().value
+    if (set.size > DEDUP_CACHE_LIMIT && oldest) set.delete(oldest)
+  }
+  addLimited(_seenWakeEventIds, event.eventId)
+  addLimited(_seenWakeFingerprints, event.fingerprint ?? (event.payload as any)?.fingerprint)
+}
+
+function hasSeenWakeEvent(event: WakeEvent): boolean {
+  const fingerprint = event.fingerprint ?? (event.payload as any)?.fingerprint
+  return _seenWakeEventIds.has(event.eventId) || (!!fingerprint && _seenWakeFingerprints.has(fingerprint))
+}
+
+function stableHash(input: string): string {
+  let hash = 2166136261
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function stableStringify(value: any): string {
+  try {
+    return JSON.stringify(value, Object.keys(value ?? {}).sort())
+  } catch {
+    return String(value)
+  }
+}
+
+function activityCursorValue(value: any): string | null {
+  const cursor = value?.cursor ?? value?.activityCursor ?? value?.id ?? value?.lastId
+  return typeof cursor === 'string' && cursor.length > 0 ? cursor : null
+}
+
+function activityEntries(value: any): any[] {
+  const entries = value?.entries ?? value?.items ?? value?.activities ?? value?.results ?? value
+  return Array.isArray(entries) ? entries : []
+}
+
+function inferWakeType(entry: any, payload: Record<string, any>): string {
+  const raw = String(entry?.type ?? entry?.eventType ?? entry?.action ?? '').toLowerCase()
+  const entityType = String(entry?.entityType ?? payload.entityType ?? '').toLowerCase()
+  if (raw.includes('message') || entityType === 'channel' || entityType === 'message') return WAKE_EVENT_TYPES.CHANNEL_MESSAGE
+  if (raw.includes('comment') || entityType === 'comment') return WAKE_EVENT_TYPES.COMMENT_ADDED
+  if (raw.includes('delegat')) return WAKE_EVENT_TYPES.DELEGATION_RECEIVED
+  if (raw.includes('assign')) return WAKE_EVENT_TYPES.TASK_ASSIGNED
+  if (raw.includes('status') || raw.includes('update') || raw.includes('change')) return WAKE_EVENT_TYPES.STATUS_CHANGED
+  return raw || 'webhook_event'
+}
+
+function activityTargetMemberId(payload: Record<string, any>, fallbackMemberId: string | null): string {
+  const target = payload.targetMemberId ?? payload.target_member_id ?? payload.assigneeId ?? payload.assignee_id
+    ?? payload.memberId ?? payload.member_id ?? payload.toMemberId ?? payload.to_member_id
+  return typeof target === 'string' && target.length > 0 ? target : (fallbackMemberId ?? '')
+}
+
+function activityToWakeEvent(entry: any, config: WakeListenerConfig): WakeEvent | null {
+  const payloadSource = (entry?.payload ?? entry?.data ?? entry?.details ?? {}) as Record<string, any>
+  const payload: Record<string, any> = {
+    ...payloadSource,
+    activityId: entry?.id ?? entry?.activityId ?? null,
+    activityType: entry?.type ?? entry?.eventType ?? entry?.action ?? null,
+    entityType: entry?.entityType ?? payloadSource.entityType ?? null,
+    entityId: entry?.entityId ?? payloadSource.entityId ?? payloadSource.taskId ?? payloadSource.task_id ?? null,
+    replayedFromActivity: true,
+  }
+  const eventType = inferWakeType(entry, payload)
+  const targetMemberId = activityTargetMemberId(payload, _lifecycleMemberId ?? _agentIdentity?.memberId ?? config.memberId ?? null)
+  if (!targetMemberId) return null
+
+  const sourceId = entry?.eventId ?? entry?.id ?? entry?.activityId ?? stableHash(stableStringify(entry))
+  const timestamp = entry?.timestamp ?? entry?.createdAt ?? entry?.ts ?? new Date().toISOString()
+  const fingerprint = `replay:${entry?.fingerprint ?? stableHash(`${eventType}:${targetMemberId}:${sourceId}:${stableStringify(payload)}`)}`
+  return {
+    schemaVersion: 1,
+    eventId: `replay:${sourceId}:${targetMemberId}:${stableHash(eventType)}`,
+    source: 'synqtask.activity',
+    type: eventType,
+    priority: 'info',
+    targetMemberId,
+    payload: { ...payload, fingerprint, replaySourceEventId: sourceId },
+    timestamp,
+    fingerprint,
+  }
+}
+
+function isWakeEventSubscribed(event: WakeEvent): boolean {
+  const subscribe = _currentSubscribe
+  if (!subscribe) return true
+  if (subscribe.length === 0) return false
+  return subscribe.includes('*') || subscribe.includes(event.type) || subscribe.includes(`${event.source}:${event.type}`)
+}
+
+function isWakeEventRelevant(event: WakeEvent): boolean {
+  const memberId = _lifecycleMemberId ?? _agentIdentity?.memberId ?? null
+  if (!memberId || memberId === 'unknown') return true
+  if (event.targetMemberId === memberId) return true
+  const payload = event.payload as Record<string, any>
+  const mentioned = payload.mentions ?? payload.memberIds ?? payload.channelMemberIds
+  return Array.isArray(mentioned) && mentioned.includes(memberId)
+}
+
+async function fetchActivityCursor(config: WakeListenerConfig): Promise<string | null> {
+  try {
+    const result = await callSynqtaskMcp<any>(
+      'todo_io',
+      { action: 'activity_cursor' },
+      { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs ?? FALLBACK_REPLAY_TIMEOUT_MS },
+    )
+    const cursor = activityCursorValue(result)
+    if (cursor) return cursor
+  } catch (e: any) {
+    dbg(`activity cursor MCP fallback failed-open: ${e?.message}`)
+  }
+
+  const url = config.synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? 'http://localhost:3747'
+  const res = await fetch(`${url}/api/activity/cursor`, {
+    headers: synqtaskRestHeaders(),
+    signal: AbortSignal.timeout(config.identityFetchTimeoutMs ?? FALLBACK_REPLAY_TIMEOUT_MS),
+  })
+  if (!res.ok) throw new Error(`cursor HTTP ${res.status}`)
+  return activityCursorValue(await res.json())
+}
+
+async function pollActivity(config: WakeListenerConfig, cursor: string | null): Promise<{ entries: any[]; cursor: string | null }> {
+  const url = config.synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? 'http://localhost:3747'
+  const qs = new URLSearchParams({ limit: String(FALLBACK_REPLAY_LIMIT), save: '0' })
+  if (cursor) qs.set('cursor', cursor)
+  const res = await fetch(`${url}/api/activity/poll?${qs.toString()}`, {
+    headers: synqtaskRestHeaders(),
+    signal: AbortSignal.timeout(config.identityFetchTimeoutMs ?? FALLBACK_REPLAY_TIMEOUT_MS),
+  })
+  if (!res.ok) throw new Error(`poll HTTP ${res.status}`)
+  const body = await res.json()
+  return { entries: activityEntries(body), cursor: activityCursorValue(body) }
+}
 
 // ─── Spawn Budget Tracking (Stage 2 + 2.1) ──────────────────────────
 let _spawnTotal = 0        // total helpers spawned (lifetime, informational)
@@ -234,57 +704,13 @@ async function fetchIdentity(
   timeoutMs?: number,
 ): Promise<AgentIdentity | null> {
   const url = synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? 'http://localhost:3747'
-  // Resolve Bearer token: env var → mcp-auth.json → none
-  let bearerToken = process.env.SYNQTASK_BEARER_TOKEN ?? ''
-  if (!bearerToken) {
-    try {
-      const authPath = join(homedir(), '.local', 'share', 'opencode', 'mcp-auth.json')
-      const authData = JSON.parse(readFileSync(authPath, 'utf-8'))
-      bearerToken = authData?.synqtask?.tokens?.accessToken ?? ''
-    } catch { /* no mcp-auth.json, proceed without auth */ }
-  }
   try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
-    }
-    if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`
-    const res = await fetch(`${url}/mcp`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: 1,
-        method: 'tools/call',
-        params: {
-          name: 'todo_members',
-          arguments: { operations: { action: 'get_role_prompt', member_id: memberId } },
-        },
-      }),
-      signal: AbortSignal.timeout(timeoutMs ?? 3000),
-    })
-
-    if (!res.ok) {
-      dbg(`fetchIdentity: HTTP ${res.status}`)
-      return parseAgentsMd()
-    }
-
-    // Parse SSE response: "event: message\ndata: {...}\n"
-    const text = await res.text()
-    const dataLine = text.split('\n').find(l => l.startsWith('data: '))
-    if (!dataLine) {
-      dbg('fetchIdentity: no data line in response')
-      return parseAgentsMd()
-    }
-
-    const rpcResult = JSON.parse(dataLine.substring(6))
-    const content = rpcResult?.result?.content?.[0]?.text
-    if (!content) {
-      dbg('fetchIdentity: empty content')
-      return parseAgentsMd()
-    }
-
-    const parsed = JSON.parse(content)
-    const result = parsed?.results?.[0]?.result ?? parsed
+    const result = await callSynqtaskMcp<any>(
+      'todo_members',
+      { action: 'get_role_prompt', member_id: memberId },
+      { synqtaskUrl, timeoutMs },
+    )
+    if (!result) return parseAgentsMd()
 
     // Map to AgentIdentity
     const identity: AgentIdentity = {
@@ -304,7 +730,11 @@ async function fetchIdentity(
       try {
         const teamRes = await fetch(`${url}/mcp`, {
           method: 'POST',
-          headers,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream',
+            ...(readSynqtaskBearerToken() ? { Authorization: `Bearer ${readSynqtaskBearerToken()}` } : {}),
+          },
           body: JSON.stringify({
             jsonrpc: '2.0', id: 2,
             method: 'tools/call',
@@ -330,7 +760,11 @@ async function fetchIdentity(
                 try {
                   const mRes = await fetch(`${url}/mcp`, {
                     method: 'POST',
-                    headers,
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Accept': 'application/json, text/event-stream',
+                      ...(readSynqtaskBearerToken() ? { Authorization: `Bearer ${readSynqtaskBearerToken()}` } : {}),
+                    },
                     body: JSON.stringify({
                       jsonrpc: '2.0', id: 3,
                       method: 'tools/call',
@@ -384,6 +818,127 @@ async function fetchIdentity(
   }
 }
 
+function firstMemberId(value: any): string | null {
+  const item = Array.isArray(value) ? value[0]
+    : Array.isArray(value?.members) ? value.members[0]
+    : Array.isArray(value?.results) ? value.results[0]
+    : value
+  return item?.id ?? item?.memberId ?? item?.member?.id ?? item?.result?.id ?? item?.result?.memberId ?? null
+}
+
+async function setMemberMetadata(
+  memberId: string,
+  key: string,
+  value: string | undefined,
+  config: WakeListenerConfig,
+): Promise<void> {
+  if (!value) return
+  try {
+    await callSynqtaskMcp(
+      'todo_members',
+      { action: 'set_metadata', member_id: memberId, key, value },
+      { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs },
+    )
+  } catch (e: any) {
+    dbg(`agent registration metadata ${key} failed (non-fatal): ${e?.message}`)
+  }
+}
+
+async function resolveOrRegisterAgentIdentity(config: WakeListenerConfig): Promise<{
+  memberId?: string
+  memberName?: string
+  memberType: 'human' | 'agent' | 'unknown'
+}> {
+  if (config.memberId) {
+    try {
+      _agentIdentity = await fetchIdentity(
+        config.memberId,
+        config.synqtaskUrl,
+        config.identityFetchTimeoutMs,
+      )
+      dbg(`identity: ${_agentIdentity?.name ?? 'null'} role=${_agentIdentity?.roleName ?? 'none'} team=${_agentIdentity?.teamName ?? 'none'} teammates=${_agentIdentity?.teammates?.length ?? 0}`)
+    } catch (e: any) {
+      // CN-01: never crash on identity fetch failure
+      dbg(`identity fetch failed (non-fatal): ${e?.message}`)
+    }
+    return {
+      memberId: config.memberId,
+      memberName: _agentIdentity?.name ?? config.memberId,
+      memberType: config.memberType ?? 'unknown',
+    }
+  }
+
+  const envEnabled = process.env.SYNQTASK_AGENT_REGISTRATION === '1' || process.env.SYNQTASK_REGISTER_AGENT === '1'
+  const registration = config.agentRegistration
+  const enabled = registration?.enabled ?? envEnabled
+  if (!enabled) {
+    dbg('agent registration skipped: no memberId and registration not enabled')
+    return { memberType: config.memberType ?? 'unknown' }
+  }
+
+  const timeoutMs = config.identityFetchTimeoutMs
+  const synqtaskUrl = config.synqtaskUrl
+  const name = registration?.name
+    ?? process.env.SYNQTASK_AGENT_NAME
+    ?? `opencode-agent-${process.pid}`
+  const displayName = registration?.displayName ?? name
+  const description = registration?.description
+    ?? `OpenCode agent session ${config.sessionId} (${config.agentInstanceId ?? 'no-instance-id'})`
+
+  try {
+    let memberId: string | null = null
+    if (config.agentInstanceId) {
+      const existing = await callSynqtaskMcp(
+        'todo_members',
+        { action: 'search_by_metadata', key: 'agentInstanceId', value: config.agentInstanceId },
+        { synqtaskUrl, timeoutMs },
+      )
+      memberId = firstMemberId(existing)
+      if (memberId) dbg(`agent registration reconciled by agentInstanceId: ${memberId}`)
+    }
+
+    if (!memberId) {
+      const added = await callSynqtaskMcp(
+        'todo_members',
+        {
+          action: 'add',
+          name,
+          display_name: displayName,
+          description,
+          member_type: 'agent',
+        },
+        { synqtaskUrl, timeoutMs },
+      )
+      memberId = firstMemberId(added)
+      if (!memberId) throw new Error('todo_members.add returned no member id')
+      dbg(`agent registration created member: ${memberId}`)
+    }
+
+    await setMemberMetadata(memberId, 'sessionId', config.sessionId, config)
+    await setMemberMetadata(memberId, 'agentInstanceId', config.agentInstanceId, config)
+    await setMemberMetadata(memberId, 'spaceId', registration?.spaceId ?? process.env.SYNQTASK_SPACE_ID, config)
+
+    const fetched = await fetchIdentity(memberId, synqtaskUrl, timeoutMs)
+    _agentIdentity = fetched?.memberId && fetched.memberId !== 'unknown'
+      ? fetched
+      : {
+        memberId,
+        name: displayName,
+        displayName,
+        roleName: null,
+        rolePrompt: null,
+        teamName: null,
+        teammates: [],
+        fetchedAt: Date.now(),
+      }
+
+    return { memberId, memberName: _agentIdentity.name, memberType: 'agent' }
+  } catch (e: any) {
+    dbg(`agent registration degraded (non-fatal): ${e?.message}`)
+    return { memberName: displayName, memberType: config.memberType ?? 'unknown' }
+  }
+}
+
 /**
  * Parse AGENTS.md from cwd as fallback identity source (DB-03, AMD-04).
  * Returns null if file missing or unparseable — never throws (CN-01).
@@ -434,7 +989,7 @@ function parseAgentsMd(): AgentIdentity | null {
  *  WARM channels: compact reference (~40 tokens) — agent already has context
  *  COLD channels: full message with instructions (~100-150 tokens)
  */
-function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | null): string {
+export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | null): string {
   const p = event.payload as Record<string, any>
   const esc = (s: string) => s.replace(/"/g, '&quot;')
   const tag = `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}">`
@@ -465,7 +1020,10 @@ function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | null): s
   switch (event.type) {
     case WAKE_EVENT_TYPES.CHANNEL_MESSAGE: {
       const chId = p.channel_id ?? p.channelId ?? ''
-      const sendName = p.sender_name ?? p.senderName ?? p.senderId ?? 'unknown'
+      // Canonical SynqTask wake payload uses authorName/authorId. Older keys
+      // (sender_name/senderName/senderId) kept for backward compat with any
+      // non-SynqTask wake source.
+      const sendName = p.authorName ?? p.author_name ?? p.sender_name ?? p.senderName ?? p.authorId ?? p.senderId ?? 'unknown'
       const text = p.text ?? '(no text)'
       const warm = isChannelWarm(chId)
 
@@ -565,6 +1123,49 @@ let _discoveryPath: string | null = null
 // CWD of this agent's serve instance — used to filter sessions
 let _agentDirectory: string | null = null
 
+function updateDiscoverySession(sessionId: string, agentInstanceId?: string): boolean {
+  if (!_discoveryPath) {
+    dbg('updateDiscoverySession: no discovery path')
+    return false
+  }
+  try {
+    const disc = JSON.parse(readFileSync(_discoveryPath, 'utf-8'))
+    disc.sessionId = sessionId
+    if (agentInstanceId) disc.agentInstanceId = agentInstanceId
+    const tmpPath = _discoveryPath + '.tmp'
+    writeFileSync(tmpPath, JSON.stringify(disc))
+    renameSync(tmpPath, _discoveryPath)
+    dbg(`SESSION_BOUND discovery updated session=${sessionId} agentInstanceId=${disc.agentInstanceId ?? '-'}`)
+    return true
+  } catch (e: any) {
+    dbg(`updateDiscoverySession failed: ${e?.message}`)
+    return false
+  }
+}
+
+export function bindWakeListenerSession(
+  handle: WakeListenerHandle | null,
+  sessionId: string,
+  opts?: { agentInstanceId?: string; reason?: string },
+): boolean {
+  if (!handle) {
+    dbg(`SESSION_BIND_WAITING no handle session=${sessionId}`)
+    return false
+  }
+  if (!sessionId || sessionId === 'unknown') {
+    dbg(`SESSION_BIND_WAITING invalid session=${sessionId}`)
+    return false
+  }
+  if (_cachedSessionId && _cachedSessionId !== 'unknown' && _cachedSessionId !== sessionId) {
+    dbg(`SESSION_BIND_AMBIGUOUS existing=${_cachedSessionId} candidate=${sessionId} reason=${opts?.reason ?? '-'}`)
+    return false
+  }
+  _cachedSessionId = sessionId
+  updateDiscoverySession(sessionId, opts?.agentInstanceId)
+  dbg(`SESSION_BOUND session=${sessionId} reason=${opts?.reason ?? 'explicit'} agentInstanceId=${opts?.agentInstanceId ?? '-'}`)
+  return true
+}
+
 async function resolveSessionId(sessionId: string): Promise<string | null> {
   // Return cached if already resolved
   if (_cachedSessionId && _cachedSessionId !== 'unknown') return _cachedSessionId
@@ -587,29 +1188,25 @@ async function resolveSessionId(sessionId: string): Promise<string | null> {
     } catch { /* discovery file not ready yet */ }
   }
 
-  // Fallback 2: find OUR session by directory via sdkClient
-  // Each serve runs in agent's workspace dir. Sessions have directory field.
-  // Filter by directory to find THIS agent's session, not other agents'.
+  // Degraded fallback: bind by directory only when exactly one candidate exists.
+  // Multiple sessions in one workspace are ambiguous and must not be guessed.
   if (_agentDirectory) {
     try {
       if (!_sdkClient) { dbg('resolveSessionId: no sdkClient'); return null }
       const { data: sessions } = await _sdkClient.session.list()
       if (!Array.isArray(sessions)) return null
-      const match = sessions.find((s: any) => s.directory === _agentDirectory)
+      const matches = sessions.filter((s: any) => s.directory === _agentDirectory)
+      if (matches.length > 1) {
+        dbg(`SESSION_BIND_AMBIGUOUS directory=${_agentDirectory} candidates=${matches.map((s: any) => s.id).join(',')}`)
+        return null
+      }
+      const match = matches[0]
       if (match) {
-        _cachedSessionId = match.id
-        dbg(`resolveSessionId by directory ${_agentDirectory}: ${_cachedSessionId}`)
-        // Update discovery file (GAP-3 fix: atomic tmp→rename)
-        if (_discoveryPath) {
-          try {
-            const disc = JSON.parse(readFileSync(_discoveryPath, 'utf-8'))
-            disc.sessionId = _cachedSessionId
-            const tmpPath = _discoveryPath + '.tmp'
-            writeFileSync(tmpPath, JSON.stringify(disc))
-            renameSync(tmpPath, _discoveryPath)
-          } catch {}
-        }
-        return _cachedSessionId
+        const matchedSessionId = String(match.id)
+        _cachedSessionId = matchedSessionId
+        dbg(`SESSION_BOUND_FALLBACK by directory ${_agentDirectory}: ${matchedSessionId}`)
+        updateDiscoverySession(matchedSessionId)
+        return matchedSessionId
       }
     } catch (e: any) { dbg(`resolveSessionId by directory failed: ${e?.message}`) }
   }
@@ -624,7 +1221,7 @@ async function injectWakeEvent(
 ): Promise<boolean> {
   const resolvedSessionId = await resolveSessionId(sessionId)
   if (!resolvedSessionId) {
-    dbg('inject: no valid sessionId')
+    dbg(`INJECT_DEFERRED_NO_SESSION event=${event.eventId}`)
     return false
   }
   if (!_sdkClient) {
@@ -635,11 +1232,14 @@ async function injectWakeEvent(
   const text = formatWakeMessage(event, _agentIdentity)
 
   try {
+    await syncLifecycle({ action: 'injecting', event, currentTaskId: extractWakeTaskId(event) })
     const { error } = await _sdkClient.session.promptAsync({
       path: { id: resolvedSessionId },
       body: { noReply: false, parts: [{ type: 'text', text }] },
     })
     if (!error) {
+      await syncTaskStart(event, 'start_injected')
+      await syncLifecycle({ action: 'online', event, currentTaskId: extractWakeTaskId(event) })
       dbg(`inject OK: session=${resolvedSessionId}`)
       return true
     }
@@ -670,20 +1270,12 @@ export async function startWakeListener(
   // Store sdkClient for in-process session API calls (ARCH-01)
   _sdkClient = config.sdkClient ?? null
 
-  // Fetch identity from SynqTask (CR-02). Fail-open (CN-01).
-  if (config.memberId) {
-    try {
-      _agentIdentity = await fetchIdentity(
-        config.memberId,
-        config.synqtaskUrl,
-        config.identityFetchTimeoutMs,
-      )
-      dbg(`identity: ${_agentIdentity?.name ?? 'null'} role=${_agentIdentity?.roleName ?? 'none'} team=${_agentIdentity?.teamName ?? 'none'} teammates=${_agentIdentity?.teammates?.length ?? 0}`)
-    } catch (e: any) {
-      // CN-01: never crash on identity fetch failure
-      dbg(`identity fetch failed (non-fatal): ${e?.message}`)
-    }
-  }
+  // Resolve known member identity or fail-open register/reconcile missing agent identity (CR-07).
+  const resolvedIdentity = await resolveOrRegisterAgentIdentity(config)
+  _currentMemberType = resolvedIdentity.memberType
+  _lifecycleConfig = config
+  _lifecycleMemberId = resolvedIdentity.memberId ?? config.memberId ?? _agentIdentity?.memberId ?? null
+  await syncLifecycle({ action: 'starting', reason: 'listener_start', force: true })
 
   // Stage 3: Inject team playbook at session start (CR-11, CN-10: once, not per-wake)
   if (_agentIdentity?.teamPlaybook) {
@@ -709,6 +1301,50 @@ export async function startWakeListener(
   const queue: WakeEvent[] = []
   const maxQueue = config.maxQueueSize ?? MAX_QUEUE_DEFAULT
   const retryInterval = config.busyRetryInterval ?? BUSY_RETRY_INTERVAL_DEFAULT
+
+  function queueWakeEvent(event: WakeEvent, reason: string): number {
+    if (hasSeenWakeEvent(event)) return queue.findIndex(e => e.eventId === event.eventId) + 1
+    if (queue.length >= maxQueue) {
+      const dropped = queue.shift()
+      dbg(`wake: queue full, dropped oldest event ${dropped?.eventId}`)
+    }
+    queue.push(event)
+    rememberWakeEvent(event)
+    dbg(`wake: queued ${event.eventId} reason=${reason} position=${queue.length}`)
+    return queue.length
+  }
+
+  async function runDegradedActivityCatchup(reason: string): Promise<void> {
+    try {
+      if (!_lastActivityCursor) {
+        _lastActivityCursor = await fetchActivityCursor(config)
+        dbg(`fallback catch-up initialized cursor=${_lastActivityCursor ?? '-'} reason=${reason}`)
+        return
+      }
+
+      const { entries, cursor } = await pollActivity(config, _lastActivityCursor)
+      let replayed = 0
+      for (const entry of entries.slice(0, FALLBACK_REPLAY_LIMIT)) {
+        const event = activityToWakeEvent(entry, config)
+        if (!event) continue
+        if (!isWakeEventRelevant(event) || !isWakeEventSubscribed(event)) continue
+        if (hasSeenWakeEvent(event)) continue
+
+        if (await isAgentBusy()) {
+          queueWakeEvent(event, `fallback_${reason}`)
+        } else if (await injectWakeEvent(event, config.sessionId)) {
+          rememberWakeEvent(event)
+        } else {
+          queueWakeEvent(event, `fallback_${reason}_inject_failed`)
+        }
+        replayed++
+      }
+      _lastActivityCursor = cursor ?? _lastActivityCursor
+      dbg(`fallback catch-up complete reason=${reason} entries=${entries.length} replayed=${replayed} cursor=${_lastActivityCursor ?? '-'}`)
+    } catch (e: any) {
+      dbg(`fallback catch-up failed-open reason=${reason} error=${e?.message}`)
+    }
+  }
 
   // ─── Route handler ───────────────────────────
 
@@ -776,6 +1412,16 @@ export async function startWakeListener(
 
     dbg(`wake: received ${event.type} from ${event.source} [${event.priority}]`)
 
+    if (hasSeenWakeEvent(event)) {
+      dbg(`wake: duplicate ignored ${event.eventId}`)
+      return Response.json(
+        { accepted: true, queued: false } satisfies WakeResponse,
+      )
+    }
+
+    await syncTaskStart(event, 'start_accepted')
+    await syncExplicitTaskResultOrCompletion(event)
+
     // ─── Engine routing: evaluate through SignalWire if available ───
     const signalWireInstance = config.signalWire ?? config.signalWireResolver?.() ?? null
     if (signalWireInstance) {
@@ -783,6 +1429,7 @@ export async function startWakeListener(
         const result = await signalWireInstance.evaluateExternal(event)
         if (result.matched) {
           // Engine handled it (may have triggered wake action, or just logged)
+          rememberWakeEvent(event)
           dbg(`wake: engine handled event ${event.eventId} (wake=${result.wakeTriggered}, actions=${result.actionsExecuted.length})`)
           return Response.json({
             accepted: true,
@@ -804,12 +1451,8 @@ export async function startWakeListener(
 
     if (busy) {
       // Queue the event (FIFO, drop oldest if full)
-      if (queue.length >= maxQueue) {
-        const dropped = queue.shift()
-        dbg(`wake: queue full, dropped oldest event ${dropped?.eventId}`)
-      }
-      queue.push(event)
-      const pos = queue.length
+      const pos = queueWakeEvent(event, 'busy')
+      await syncLifecycle({ action: 'busy', event, currentTaskId: extractWakeTaskId(event), reason: 'queued' })
       dbg(`wake: agent busy, queued at position ${pos}`)
       return Response.json(
         { accepted: true, queued: true, queuePosition: pos } satisfies WakeResponse,
@@ -819,6 +1462,7 @@ export async function startWakeListener(
     // Agent idle — inject immediately
     const injected = await injectWakeEvent(event, config.sessionId)
     if (injected) {
+      rememberWakeEvent(event)
       dbg(`wake: injected ${event.eventId}`)
       return Response.json(
         { accepted: true, queued: false } satisfies WakeResponse,
@@ -826,13 +1470,11 @@ export async function startWakeListener(
     }
 
     // Injection failed — queue as fallback
-    if (queue.length >= maxQueue) {
-      queue.shift()
-    }
-    queue.push(event)
-    dbg(`wake: inject failed, queued at position ${queue.length}`)
+    const queuePosition = queueWakeEvent(event, 'inject_failed')
+    await syncLifecycle({ action: 'busy', event, currentTaskId: extractWakeTaskId(event), reason: 'inject_failed_queued' })
+    dbg(`wake: inject failed, queued at position ${queuePosition}`)
     return Response.json(
-      { accepted: true, queued: true, queuePosition: queue.length } satisfies WakeResponse,
+      { accepted: true, queued: true, queuePosition } satisfies WakeResponse,
     )
   }
 
@@ -847,53 +1489,53 @@ export async function startWakeListener(
   dbg(`started on port ${actualPort} for session ${config.sessionId}`)
 
   // ─── Write discovery file (DB-04) ────────────
-  // Only write discovery for agent sessions (with memberId).
-  // Non-agent sessions don't need to be discoverable by the router.
+  // Resolve lazily so launchers that set WAKE_DISCOVERY_DIR (e.g. agent
+  // runner with isolated HOME) are honored even if this module was
+  // imported before the env var was set.
+  const resolvedDiscoveryDir = discoveryDir()
+  const discoveryPath = join(
+    resolvedDiscoveryDir,
+    `${process.pid}-${config.sessionId}.json`,
+  )
+  try {
+    mkdirSync(resolvedDiscoveryDir, { recursive: true })
+    // Set module state from config/reconciled identity
+    _currentSubscribe = config.subscribe ?? null
+    _currentSubscribePreset = config.subscribePreset ?? null
+    _currentMemberType = resolvedIdentity.memberType
 
-  if (config.memberId) {
-    const discoveryPath = join(
-      DISCOVERY_DIR,
-      `${process.pid}-${config.sessionId}.json`,
-    )
-    try {
-      mkdirSync(DISCOVERY_DIR, { recursive: true })
-      // Set module state from config
-      _currentSubscribe = config.subscribe ?? null
-      _currentSubscribePreset = config.subscribePreset ?? null
-      _currentMemberType = config.memberType ?? 'unknown'
-
-      const discoveryData = {
-        port: actualPort,
-        token,
-        sessionId: config.sessionId,
-        memberId: config.memberId,
-        memberName: _agentIdentity?.name ?? config.memberId,
-        pid: process.pid,
-        startedAt: new Date().toISOString(),
-        transport: 'http',
-        // Stage 2.1: Chain tracking (REQ-16a)
-        parentMemberId: _parentMemberId,
-        parentSessionId: _parentSessionId,
-        spawnDepth: _currentDepth ?? 0,
-        maxSpawnDepth: _agentIdentity?.budget?.maxSpawnDepth ?? 2,
-        maxSubagents: _agentIdentity?.budget?.maxSubagents ?? 5,
-        // Wake subscriptions (REQ-02)
-        subscribe: _currentSubscribe,
-        subscribePreset: _currentSubscribePreset,
-        memberType: _currentMemberType,
-      }
-      // Atomic write: tmp → rename (safe against partial writes)
-      const tmpPath = discoveryPath + '.tmp'
-      writeFileSync(tmpPath, JSON.stringify(discoveryData))
-      renameSync(tmpPath, discoveryPath)
-      _discoveryPath = discoveryPath
-      dbg(`discovery file written: ${discoveryPath} depth=${discoveryData.spawnDepth} parent=${discoveryData.parentMemberId ?? 'ROOT'}`)
-    } catch (e: any) {
-      dbg('discovery file write failed:', e?.message)
+    const discoveryData: DiscoveryFile = {
+      port: actualPort,
+      token,
+      sessionId: config.sessionId,
+      agentInstanceId: config.agentInstanceId,
+      memberId: resolvedIdentity.memberId,
+      memberName: resolvedIdentity.memberName ?? _agentIdentity?.name ?? resolvedIdentity.memberId,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      transport: 'http',
+      // Stage 2.1: Chain tracking (REQ-16a)
+      parentMemberId: _parentMemberId,
+      parentSessionId: _parentSessionId,
+      spawnDepth: _currentDepth ?? 0,
+      maxSpawnDepth: _agentIdentity?.budget?.maxSpawnDepth ?? 2,
+      maxSubagents: _agentIdentity?.budget?.maxSubagents ?? 5,
+      // Wake subscriptions (REQ-02)
+      subscribe: _currentSubscribe ?? undefined,
+      subscribePreset: _currentSubscribePreset ?? undefined,
+      memberType: _currentMemberType,
     }
-  } else {
-    dbg('skipping discovery file: no memberId configured (non-agent session)')
+    // Atomic write: tmp → rename (safe against partial writes)
+    const tmpPath = discoveryPath + '.tmp'
+    writeFileSync(tmpPath, JSON.stringify(discoveryData))
+    renameSync(tmpPath, discoveryPath)
+    _discoveryPath = discoveryPath
+    dbg(`discovery file written: ${discoveryPath} member=${discoveryData.memberId ?? 'unregistered'} depth=${discoveryData.spawnDepth} parent=${discoveryData.parentMemberId ?? 'ROOT'}`)
+  } catch (e: any) {
+    dbg('discovery file write failed:', e?.message)
   }
+  await syncLifecycle({ action: 'online', reason: 'listener_ready', force: true })
+  void runDegradedActivityCatchup('listener_ready')
 
   // ─── Queue drain timer ───────────────────────
 
@@ -903,6 +1545,7 @@ export async function startWakeListener(
       if (await isAgentBusy()) return
       const event = queue.shift()!
       const ok = await injectWakeEvent(event, config.sessionId)
+      if (queue.length === 0) await syncLifecycle({ action: 'resting', event, currentTaskId: extractWakeTaskId(event), reason: ok ? 'queue_drained' : 'queue_empty_after_failed_drain' })
       dbg(`drain: ${event.eventId} ${ok ? 'injected' : 'failed'}`)
     } catch (e: any) {
       dbg('drain error:', e?.message)
@@ -916,6 +1559,7 @@ export async function startWakeListener(
     if (cleaned) return
     cleaned = true
     clearInterval(drainInterval)
+    void syncLifecycle({ action: 'offline', reason: 'listener_stop', force: true })
     try {
       if (_discoveryPath) unlinkSync(_discoveryPath)
     } catch {}
@@ -1018,4 +1662,3 @@ export function getSubscriptionState(): {
     memberName: _agentIdentity?.name ?? null,
   }
 }
-

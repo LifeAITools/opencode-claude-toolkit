@@ -25,6 +25,48 @@
  *   Activate 1h by writing { "cacheTtlSec": 3600, ... } to keepalive.json.
  *   Hot-reload picks it up on the next mtime-check (next request or KA tick).
  */
+export interface DumpConfig {
+    /** Master switch — disable all body dumps. Default: true. */
+    readonly enabled: boolean;
+    /** Always dump first N calls of each PID (initial baseline). Default: 3. */
+    readonly initialCalls: number;
+    /**
+     * Tier-1 rolling ring: keep recent body dumps for post-hoc analysis.
+     * After ringRetentionMs, oldest dumps are deleted. 0 = disabled.
+     * Default: 2*60*60*1000 (2 hours).
+     */
+    readonly ringRetentionMs: number;
+    /**
+     * Tier-1 rolling ring: max disk size in MB. If reached, oldest dumps removed.
+     * Default: 300 MB. 0 = no cap (only retentionMs matters).
+     */
+    readonly ringMaxMb: number;
+    /**
+     * Tier-2 suspicious archive: when a "suspicious" event happens (cold,
+     * sysHash drift, tool drift, large cw without proportional cr), preserve
+     * THIS dump + the previous N dumps from ring into a separate archive
+     * directory that survives ring rotation. Default: 5 (this + 4 previous).
+     */
+    readonly suspiciousContextSize: number;
+    /**
+     * Tier-2 archive retention. Default: 24*60*60*1000 (24 hours).
+     */
+    readonly suspiciousRetentionMs: number;
+    /**
+     * Tier-2 archive max disk size in MB. Default: 100 MB.
+     */
+    readonly suspiciousMaxMb: number;
+    /**
+     * Detect cold-start events: cw > coldCwThreshold AND cr == 0 AND
+     * callNum > initialCalls (not the first few). Default: 10000 tokens.
+     */
+    readonly coldCwThreshold: number;
+    /**
+     * Tier-3 metadata retention. Default: 7 days. (Was 24h via env;
+     * we extend it because metadata is tiny — ~440 B per call.)
+     */
+    readonly metadataRetentionMs: number;
+}
 export interface ResolvedKeepaliveConfig {
     /** Cache TTL in milliseconds. Default: 5*60*1000 (legacy). Recommend: 60*60*1000 (1h). */
     readonly cacheTtlMs: number;
@@ -54,6 +96,8 @@ export interface ResolvedKeepaliveConfig {
     readonly minTokens: number;
     /** Block real requests with too-aggressive cache rewrites (rare safety net). Default: false. */
     readonly rewriteBlockEnabled: boolean;
+    /** Body-dump policy with rotation. See DumpConfig docs. */
+    readonly dump: DumpConfig;
     /** Source of truth — where we read this config from (for diagnostics). */
     readonly _source: 'defaults' | 'file' | 'mixed';
 }

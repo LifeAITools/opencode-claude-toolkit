@@ -96,6 +96,201 @@ function getProxyUrl(): { host: string; port: number; url: string; fromDiscovery
   return { host: PREF_HOST, port: PREF_PORT, url: `http://${PREF_HOST}:${PREF_PORT}`, fromDiscovery: false }
 }
 
+// ═══ Version + Update check ════════════════════════════════════════
+//
+// Behavior:
+//   - On every run (except `claude-max update`, `--no-update`, `help`):
+//     1. Read installed version from package.json (THIS package, the bin script's package).
+//     2. Async-check npm.muid.io for latest published version (3s timeout).
+//     3. If newer version exists: print warning + exit, suggesting:
+//          claude-max update    (to install latest)
+//          claude-max --no-update <args>    (to run anyway with current)
+//   - Designed so user always knows when behind, but can override.
+//   - Network failure / timeout / registry unreachable: silent (don't block).
+//   - Cache the check result for 1 hour to avoid hammering the registry.
+
+const NPM_REGISTRY = 'https://npm.muid.io'
+const PKG_NAME = '@kiberos/claude-max-proxy'
+const VERSION_CHECK_TIMEOUT_MS = 3000
+const VERSION_CHECK_CACHE_FILE = join(STATE_DIR, '.claude-max-version-check.json')
+const VERSION_CHECK_CACHE_TTL_MS = 60 * 60 * 1000  // 1 hour
+
+interface VersionCheckCache {
+  checkedAt: number
+  installedVersion: string
+  latestVersion: string
+}
+
+function readInstalledVersion(): string {
+  try {
+    const pkgJson = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8'))
+    return String(pkgJson.version ?? 'unknown')
+  } catch {
+    return 'unknown'
+  }
+}
+
+function readVersionCheckCache(): VersionCheckCache | null {
+  if (!existsSync(VERSION_CHECK_CACHE_FILE)) return null
+  try {
+    const raw = JSON.parse(readFileSync(VERSION_CHECK_CACHE_FILE, 'utf8'))
+    if (typeof raw.checkedAt !== 'number') return null
+    if (typeof raw.latestVersion !== 'string') return null
+    if (Date.now() - raw.checkedAt > VERSION_CHECK_CACHE_TTL_MS) return null
+    return raw as VersionCheckCache
+  } catch {
+    return null
+  }
+}
+
+function writeVersionCheckCache(installed: string, latest: string): void {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true })
+    writeFileSync(VERSION_CHECK_CACHE_FILE, JSON.stringify({
+      checkedAt: Date.now(),
+      installedVersion: installed,
+      latestVersion: latest,
+    }, null, 2))
+  } catch { /* non-fatal */ }
+}
+
+/** Fetch latest version from npm registry. Returns null on failure/timeout. */
+async function fetchLatestVersion(): Promise<string | null> {
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), VERSION_CHECK_TIMEOUT_MS)
+    try {
+      const res = await fetch(`${NPM_REGISTRY}/${encodeURIComponent(PKG_NAME)}/latest`, {
+        signal: ctrl.signal,
+        headers: { 'Accept': 'application/json' },
+      })
+      if (!res.ok) return null
+      const body = await res.json() as { version?: string }
+      return typeof body.version === 'string' ? body.version : null
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Compare semver-ish versions. Returns:
+ *    1 if a > b  (a is newer)
+ *    0 if equal
+ *   -1 if a < b  (b is newer)
+ * Falls back to string comparison if not parseable.
+ */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(p => parseInt(p, 10))
+  const pb = b.split('.').map(p => parseInt(p, 10))
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const ai = pa[i] ?? 0
+    const bi = pb[i] ?? 0
+    if (Number.isNaN(ai) || Number.isNaN(bi)) return a < b ? -1 : a > b ? 1 : 0
+    if (ai > bi) return 1
+    if (ai < bi) return -1
+  }
+  return 0
+}
+
+/**
+ * Check for newer version. If found, print message and EXIT (non-zero).
+ * Caller passes args; if `--no-update` present, skip check entirely.
+ */
+async function enforceVersionCheck(args: string[]): Promise<void> {
+  if (args.includes('--no-update')) return
+  // Skip for commands that should never block. Find first non-flag positional.
+  const positional = args.find(a => !a.startsWith('-')) ?? ''
+  if (['update', 'uninstall', 'help', 'version', 'doctor'].includes(positional)) return
+  if (args.includes('--help') || args.includes('-h') || args.includes('--version') || args.includes('-v')) return
+
+  const installed = readInstalledVersion()
+  if (installed === 'unknown') return  // can't compare
+
+  // Use cached check if fresh (< 1h old)
+  let latest: string | null = null
+  const cached = readVersionCheckCache()
+  if (cached && cached.installedVersion === installed) {
+    latest = cached.latestVersion
+  } else {
+    latest = await fetchLatestVersion()
+    if (latest) writeVersionCheckCache(installed, latest)
+  }
+
+  if (!latest) return  // network failure — don't block
+
+  if (compareVersions(latest, installed) > 0) {
+    // Newer version available — print and EXIT.
+    console.error('')
+    console.error(c(C.bold + C.yellow, '  ⚠ claude-max update available'))
+    console.error('')
+    console.error(c(C.dim, `  Installed:  ${installed}`))
+    console.error(c(C.green,    `  Latest:     ${latest}`))
+    console.error('')
+    console.error('  Run one of:')
+    console.error(c(C.cyan, `    claude-max update`) + c(C.dim, '              # install ' + latest))
+    console.error(c(C.cyan, `    claude-max --no-update ${process.argv.slice(2).filter(a => a !== '--no-update').join(' ') || '<args>'}`) + c(C.dim, '   # run anyway with ' + installed))
+    console.error('')
+    process.exit(2)
+  }
+}
+
+/** Self-update via npm — full reinstall flow. */
+async function cmdUpdate(): Promise<void> {
+  step('Checking npm registry for latest version')
+
+  const installed = readInstalledVersion()
+  const latest = await fetchLatestVersion()
+
+  if (!latest) {
+    err(`Could not reach npm registry (${NPM_REGISTRY}). Check network or use --no-update flag.`)
+    process.exit(1)
+  }
+
+  console.log(`  Installed:  ${installed}`)
+  console.log(`  Latest:     ${latest}`)
+
+  if (compareVersions(latest, installed) <= 0) {
+    ok(`Already on latest (${installed}). No update needed.`)
+    return
+  }
+
+  step(`Updating ${installed} → ${latest}`)
+
+  // Stop running proxy first (so we can replace files cleanly)
+  step('Stopping running proxy if any')
+  if (IS_LINUX) run(['systemctl', '--user', 'stop', 'claude-max-proxy.service'], { quiet: true })
+  if (IS_DARWIN) run(['launchctl', 'unload', LAUNCHD_PLIST], { quiet: true })
+
+  // Reinstall via npm install -g
+  step('Running npm install -g')
+  const r = run(['npm', 'install', '-g', `${PKG_NAME}@${latest}`, '--registry', NPM_REGISTRY])
+  if (!r.ok) {
+    err(`npm install failed: ${r.stderr}`)
+    process.exit(1)
+  }
+
+  // Refresh installed proxy files (force re-copy from the new package location)
+  step('Refreshing proxy files at ~/.local/share/claude-max-proxy/')
+  if (existsSync(INSTALL_DIR)) {
+    run(['rm', '-rf', INSTALL_DIR], { quiet: true })
+  }
+  // Re-run installation (downloads/copies are idempotent)
+  installProxyFiles()
+
+  // Restart service
+  step('Restarting proxy service')
+  if (IS_LINUX) run(['systemctl', '--user', 'start', 'claude-max-proxy.service'], { quiet: true })
+  if (IS_DARWIN) run(['launchctl', 'load', LAUNCHD_PLIST], { quiet: true })
+
+  // Invalidate version-check cache so next run sees the fresh install
+  try { unlinkSync(VERSION_CHECK_CACHE_FILE) } catch {}
+
+  ok(`Updated to ${latest}. Verify: claude-max status`)
+}
+
 // ═══ Logging helpers ════════════════════════════════════════════════
 
 const C = {
@@ -819,11 +1014,21 @@ async function cmdUninstall(): Promise<void> {
 
 // ═══ Router ════════════════════════════════════════════════════════
 
-const subcmd = process.argv[2]
-const rest = process.argv.slice(3)
+// Strip our own flags from argv before subcmd parsing — they should NOT
+// be passed through to subcommands or the wrapped `claude` CLI.
+const ownFlags = new Set(['--no-update'])
+const cleanArgv = process.argv.slice(2).filter(a => !ownFlags.has(a))
+const subcmd = cleanArgv[0]
+const rest = cleanArgv.slice(1)
 
 async function main() {
+  // Pre-flight: check for newer version on npm.muid.io. Exits early with
+  // hint if a newer version is published (unless --no-update flag passed,
+  // or running update/uninstall/help/doctor itself).
+  await enforceVersionCheck(process.argv.slice(2))
+
   switch (subcmd) {
+    case 'update':    await cmdUpdate(); break
     case 'status':    await cmdStatus(); break
     case 'stop':      await cmdStop(rest); break
     case 'restart':   await cmdRestart(); break
@@ -839,6 +1044,7 @@ async function main() {
 
 ${c(C.bold, 'Usage:')}
   claude-max              ${c(C.dim, 'start proxy (auto-install on first run), exec claude')}
+  claude-max update       ${c(C.dim, 'check npm registry; install latest if newer')}
   claude-max watch        ${c(C.dim, 'live TUI dashboard')}
   claude-max status       ${c(C.dim, 'proxy state + active sessions')}
   claude-max logs [-f]    ${c(C.dim, 'tail proxy logs (-f = follow)')}
@@ -847,7 +1053,13 @@ ${c(C.bold, 'Usage:')}
   claude-max doctor       ${c(C.dim, 'self-check: what is installed vs missing')}
   claude-max uninstall    ${c(C.dim, 'remove service + binaries (keeps logs/creds)')}
 
+${c(C.bold, 'Flags:')}
+  --no-update             ${c(C.dim, 'skip the auto-check for newer published version')}
+
 ${c(C.bold, 'First run:')} everything is auto-installed. Just run ${c(C.cyan, 'claude-max')}.
+${c(C.bold, 'Update flow:')} on every run, checks ${NPM_REGISTRY} for newer version.
+                If newer found → exits with hint.
+                Run ${c(C.cyan, 'claude-max update')} to install, or ${c(C.cyan, '--no-update')} to bypass.
 `)
       break
     }

@@ -1090,6 +1090,59 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
       break
     }
 
+    case WAKE_EVENT_TYPES.QUOTA_CRITICAL: {
+      // Payload (from quota-watcher.ts): accountHint, util5h, util7d,
+      // resetAt (epoch ms), level, message, issuedAt (ISO).
+      const accountHint = String(p.accountHint ?? 'unknown')
+      const util5h = typeof p.util5h === 'number' ? Math.round(p.util5h * 100) : null
+      const resetAtMs = typeof p.resetAt === 'number' ? p.resetAt : null
+      const resetIso = resetAtMs ? new Date(resetAtMs).toISOString() : 'unknown'
+      const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60_000)) : null
+      const message = String(p.message ?? `Quota critical on account ${accountHint}.`)
+      body = [
+        `## ⚠️ Claude Max Quota Critical`,
+        `**Account:** \`${accountHint}\``,
+        util5h !== null ? `**5h utilization:** ${util5h}% (≥98% = critical)` : '',
+        resetInMin !== null ? `**Resets in:** ${resetInMin}min (${resetIso})` : '',
+        ``,
+        message,
+        ``,
+        `<rules>`,
+        `  <stop>Do NOT start new long tasks. Do NOT send long prompts.</stop>`,
+        `  <action>Notify the user immediately. Offer two options:</action>`,
+        resetInMin !== null
+          ? `  <option name="wait">Wait ${resetInMin}min for natural reset (preserves cache)</option>`
+          : `  <option name="wait">Wait for natural reset (preserves cache)</option>`,
+        `  <option name="switch-org">Switch via 'claude /login' to another account (cache rebuild ~150k cw on new org, recoverable)</option>`,
+        `  <stop-condition>Resume normal work after util drops below 0.95 OR user explicitly tells you to continue.</stop-condition>`,
+        `</rules>`,
+      ].filter(Boolean).join('\n')
+      break
+    }
+
+    case WAKE_EVENT_TYPES.QUOTA_WARNING: {
+      // Early heads-up before critical. Same payload shape, gentler text.
+      const accountHint = String(p.accountHint ?? 'unknown')
+      const util5h = typeof p.util5h === 'number' ? Math.round(p.util5h * 100) : null
+      const resetAtMs = typeof p.resetAt === 'number' ? p.resetAt : null
+      const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60_000)) : null
+      const message = String(p.message ?? `Quota approaching limit on account ${accountHint}.`)
+      body = [
+        `## Claude Max Quota Warning`,
+        `**Account:** \`${accountHint}\``,
+        util5h !== null ? `**5h utilization:** ${util5h}% (≥85% = warning)` : '',
+        resetInMin !== null ? `**Resets in:** ${resetInMin}min` : '',
+        ``,
+        message,
+        ``,
+        `<rules>`,
+        `  <note>Approaching quota limit. Plan to wrap up current work soon.</note>`,
+        `  <action>Avoid starting new long tasks; finish what's in flight.</action>`,
+        `</rules>`,
+      ].filter(Boolean).join('\n')
+      break
+    }
+
     default:
       body = `Event: ${event.type}\n${JSON.stringify(p, null, 2)}`
   }
@@ -1119,6 +1172,21 @@ async function isAgentBusy(): Promise<boolean> {
 // Cached session ID — resolved lazily on first injection, reused after
 let _cachedSessionId: string | null = null
 let _discoveryPath: string | null = null
+
+// Cross-module session-id hand-off. Other in-process modules (e.g.,
+// opencode-claude's quota-consumer) need the freshest bound session ID
+// for direct injection paths that don't go through wake-listener. Expose
+// via a globalThis property to avoid creating an import cycle between
+// opencode-claude and opencode-signal-wire packages. Set by
+// updateBoundSessionGlobal() whenever _cachedSessionId moves to a new
+// concrete value.
+function updateBoundSessionGlobal(sessionId: string | null): void {
+  try {
+    if (sessionId && sessionId !== 'unknown') {
+      ;(globalThis as any).__opencodeBoundSessionId__ = sessionId
+    }
+  } catch { /* not all runtimes allow globalThis writes; ignore */ }
+}
 
 // CWD of this agent's serve instance — used to filter sessions
 let _agentDirectory: string | null = null
@@ -1161,6 +1229,7 @@ export function bindWakeListenerSession(
     return false
   }
   _cachedSessionId = sessionId
+  updateBoundSessionGlobal(sessionId)
   updateDiscoverySession(sessionId, opts?.agentInstanceId)
   dbg(`SESSION_BOUND session=${sessionId} reason=${opts?.reason ?? 'explicit'} agentInstanceId=${opts?.agentInstanceId ?? '-'}`)
   return true
@@ -1173,6 +1242,7 @@ async function resolveSessionId(sessionId: string): Promise<string | null> {
   // Use explicit session ID from env/config
   if (sessionId && sessionId !== 'unknown') {
     _cachedSessionId = sessionId
+    updateBoundSessionGlobal(sessionId)
     return sessionId
   }
 
@@ -1182,6 +1252,7 @@ async function resolveSessionId(sessionId: string): Promise<string | null> {
       const disc = JSON.parse(readFileSync(_discoveryPath, 'utf-8'))
       if (disc.sessionId && disc.sessionId !== 'unknown') {
         _cachedSessionId = disc.sessionId
+        updateBoundSessionGlobal(_cachedSessionId)
         dbg(`resolveSessionId from discovery file: ${_cachedSessionId}`)
         return _cachedSessionId
       }
@@ -1204,6 +1275,7 @@ async function resolveSessionId(sessionId: string): Promise<string | null> {
       if (match) {
         const matchedSessionId = String(match.id)
         _cachedSessionId = matchedSessionId
+        updateBoundSessionGlobal(matchedSessionId)
         dbg(`SESSION_BOUND_FALLBACK by directory ${_agentDirectory}: ${matchedSessionId}`)
         updateDiscoverySession(matchedSessionId)
         return matchedSessionId
@@ -1213,6 +1285,58 @@ async function resolveSessionId(sessionId: string): Promise<string | null> {
 
   dbg('resolveSessionId: no session ID yet, events will queue')
   return null
+}
+
+/**
+ * Inject a wake event as a CONTEXT-ONLY message (noReply: true).
+ *
+ * Difference from `injectWakeEvent`:
+ *   - injectWakeEvent  uses noReply:false → triggers full LLM loop. For
+ *     actionable agent-coordination events (channel_message, task_assigned)
+ *     where we WANT the agent to wake and respond.
+ *   - injectContextEvent uses noReply:true → message is appended to the
+ *     conversation tail without forcing a turn. Agent will see it on its
+ *     next natural response. For advisory signals (quota warnings, system
+ *     notices) where we DON'T want to interrupt the agent's flow but WANT
+ *     them to be aware on next turn.
+ *
+ * Same formatter (formatWakeMessage) → same wrap conventions, same payload
+ * access. Single canonical formatting path.
+ *
+ * Cache cost: ~hint-size cw on the message tail. Prefix preserved.
+ *
+ * Exported so peer modules in this package (quota-watcher.ts) can route
+ * synthetic context events through the canonical sink.
+ */
+export async function injectContextEvent(
+  event: WakeEvent,
+  sessionId: string,
+): Promise<boolean> {
+  const resolvedSessionId = await resolveSessionId(sessionId)
+  if (!resolvedSessionId) {
+    dbg(`CONTEXT_INJECT_DEFERRED_NO_SESSION event=${event.eventId}`)
+    return false
+  }
+  if (!_sdkClient) {
+    dbg('context inject: no sdkClient')
+    return false
+  }
+  const text = formatWakeMessage(event, _agentIdentity)
+  try {
+    const { error } = await _sdkClient.session.prompt({
+      path: { id: resolvedSessionId },
+      body: { noReply: true, parts: [{ type: 'text', text }] },
+    })
+    if (!error) {
+      dbg(`context inject OK: session=${resolvedSessionId} type=${event.type} chars=${text.length}`)
+      return true
+    }
+    dbg(`context inject failed: ${error}`)
+    return false
+  } catch (e: any) {
+    dbg(`context inject error: ${e?.message}`)
+    return false
+  }
 }
 
 async function injectWakeEvent(
@@ -1247,6 +1371,55 @@ async function injectWakeEvent(
     return false
   } catch (e: any) {
     dbg(`inject error: ${e?.message}`)
+    return false
+  }
+}
+
+/**
+ * Inject a rule-emitted hint as a context-only message (noReply:true).
+ *
+ * Used by the engine-routing branch in handleWake: when SignalWire rules
+ * fire `hint` or `respond` actions, their hintText needs to reach the
+ * agent's conversation. Goes through the same `_sdkClient.session.prompt`
+ * path as wake events but with noReply:true so it adds context without
+ * forcing a turn (the agent will see the hint on its next response cycle).
+ *
+ * Cache cost: one user-message turn appended at the conversation tail.
+ * Cache prefix preserved (system + prior turns stay cached); only the
+ * new message + downstream text invalidates. ~50-200 tokens of cw per hint.
+ *
+ * Returns true on successful API call, false on missing session or API error.
+ */
+async function injectHintText(
+  text: string,
+  sessionId: string,
+  sourceEvent: WakeEvent,
+): Promise<boolean> {
+  const resolvedSessionId = await resolveSessionId(sessionId)
+  if (!resolvedSessionId) {
+    dbg(`HINT_INJECT_DEFERRED_NO_SESSION event=${sourceEvent.eventId}`)
+    return false
+  }
+  if (!_sdkClient) {
+    dbg('hint inject: no sdkClient')
+    return false
+  }
+  // Wrap in a marker tag so the agent recognizes it as engine-emitted
+  // context (vs a user prompt). Trimmed to keep the marker small.
+  const wrapped = `<signal-wire-hint event="${sourceEvent.eventId}">\n${text}\n</signal-wire-hint>`
+  try {
+    const { error } = await _sdkClient.session.prompt({
+      path: { id: resolvedSessionId },
+      body: { noReply: true, parts: [{ type: 'text', text: wrapped }] },
+    })
+    if (!error) {
+      dbg(`hint inject OK: session=${resolvedSessionId} chars=${text.length}`)
+      return true
+    }
+    dbg(`hint inject failed: ${error}`)
+    return false
+  } catch (e: any) {
+    dbg(`hint inject error: ${e?.message}`)
     return false
   }
 }
@@ -1423,30 +1596,122 @@ export async function startWakeListener(
     await syncExplicitTaskResultOrCompletion(event)
 
     // ─── Engine routing: evaluate through SignalWire if available ───
+    //
+    // FIX (systematic): the previous logic checked `if (result.matched)` —
+    // but `matched` is a CoreRule[] array. Empty array is truthy in JS, so
+    // the early-return branch swallowed EVERY engine evaluation, including
+    // the (most common) "no rule matched" case. That broke direct
+    // injection for all wake events going through the engine since the
+    // signal-wire-architecture-v3 migration. Symptom: the 18 loaded rules
+    // fired into the void, and unmatched wake events also stopped
+    // injecting via the fallback path.
+    //
+    // New behavior:
+    //   - If rules matched AND emitted hint/respond actions: inject the
+    //     concatenated hintText via `_sdkClient.session.prompt(noReply:true)`.
+    //     This is the canonical sink for rule-driven context injection.
+    //   - If rules matched but no hint actions (e.g., audit-only): return
+    //     early as today (engine handled it, no message to inject).
+    //   - If no rules matched: fall through to the original direct-
+    //     injection fallback (formatWakeMessage → session.promptAsync).
     const signalWireInstance = config.signalWire ?? config.signalWireResolver?.() ?? null
     if (signalWireInstance) {
       try {
-        const result = await signalWireInstance.evaluateExternal(event)
-        if (result.matched) {
-          // Engine handled it (may have triggered wake action, or just logged)
-          rememberWakeEvent(event)
-          dbg(`wake: engine handled event ${event.eventId} (wake=${result.wakeTriggered}, actions=${result.actionsExecuted.length})`)
-          return Response.json({
-            accepted: true,
-            engineHandled: true,
-            wakeTriggered: result.wakeTriggered,
-            actionsExecuted: result.actionsExecuted.length,
-          })
+        const result = await signalWireInstance.evaluateExternal(event) as {
+          matched: boolean
+          matchedCount?: number
+          actionsExecuted: { type: string; wakeTriggered?: boolean }[]
+          wakeTriggered: boolean
+          hintTexts?: string[]
         }
-        // No matching rule — fall through to direct injection as fallback
-        dbg('no matching rule for event, falling back to direct injection')
+        const matched = Boolean(result.matched)
+        if (matched) {
+          const hintTexts = Array.isArray(result.hintTexts) ? result.hintTexts : []
+          if (hintTexts.length > 0) {
+            const combined = hintTexts.join('\n\n')
+            const injected = await injectHintText(combined, config.sessionId, event)
+            rememberWakeEvent(event)
+            dbg(`wake: engine matched, ${hintTexts.length} hint(s) injected=${injected}`)
+            return Response.json({
+              accepted: true,
+              engineHandled: true,
+              wakeTriggered: result.wakeTriggered,
+              actionsExecuted: result.actionsExecuted.length,
+              hintsInjected: injected ? hintTexts.length : 0,
+            })
+          }
+          // Matched. Check if any executed action is `wake` — if so, the
+          // rule wants the canonical wake-formatter path (formatWakeMessage
+          // with full event.payload access). The hint.text template path
+          // is too limited (only sessionId/tool/ruleId vars + regex groups
+          // — see signal-wire-core/engine/evaluator.ts:260-269), so rules
+          // that need rich payload-derived text use `actions: [{type:"wake",
+          // wakeTemplate:"<name>"}]` and we render via the switch in
+          // formatWakeMessage().
+          //
+          // Fixes the dormant routing case: previously, matched-but-no-hint
+          // events returned engineHandled with hintsInjected=0 and never
+          // injected. The wake-action contract was unimplemented for the
+          // engine path. Quota events (which use wake-action exclusively)
+          // are the first consumer of this corrected path; existing wake
+          // events also benefit (channel_message, task_assigned were
+          // currently relying on the unmatched-fallback path because they
+          // didn't actually match in the engine — those keep working too).
+          const hasWakeAction = result.actionsExecuted.some(a => a.type === 'wake')
+          if (hasWakeAction) {
+            // Fall through to fallback inject path below — formatWakeMessage
+            // is the formatter; injectWakeEvent is the canonical sink.
+            dbg(`wake: engine matched with wake-action, routing to formatWakeMessage path`)
+          } else {
+            // Audit-only (or other non-injecting actions) — engine logged it.
+            rememberWakeEvent(event)
+            dbg(`wake: engine matched, audit-only (no hint, no wake action)`)
+            return Response.json({
+              accepted: true,
+              engineHandled: true,
+              wakeTriggered: result.wakeTriggered,
+              actionsExecuted: result.actionsExecuted.length,
+              hintsInjected: 0,
+            })
+          }
+        } else {
+          // No matching rule — fall through to direct injection as fallback
+          dbg('no matching rule for event, falling back to direct injection')
+        }
       } catch (e: any) {
         dbg('engine evaluateExternal error, falling back:', e?.message)
       }
     }
 
     // ─── Fallback: direct injection (original behavior) ────────────
-    // Check if agent is busy
+    // Advisory events (quota_*) inject as context-only via noReply:true so
+    // they don't force a turn. Actionable events (channel_message,
+    // task_assigned) use noReply:false to wake the agent into a response.
+    const isAdvisoryEvent = (
+      event.type === WAKE_EVENT_TYPES.QUOTA_CRITICAL ||
+      event.type === WAKE_EVENT_TYPES.QUOTA_WARNING
+    )
+
+    if (isAdvisoryEvent) {
+      // Advisory: skip busy-check (we don't compete for the LLM loop) and
+      // skip queue (advisory events shouldn't pile up — engine cooldown
+      // already throttles). Just append to context tail and return.
+      const injected = await injectContextEvent(event, config.sessionId)
+      if (injected) {
+        rememberWakeEvent(event)
+        dbg(`wake: advisory injected ${event.eventId} (type=${event.type})`)
+        return Response.json(
+          { accepted: true, queued: false } satisfies WakeResponse,
+        )
+      }
+      dbg(`wake: advisory inject failed for ${event.eventId} (session not bound?)`)
+      return Response.json(
+        { accepted: false, error: 'session not bound' } satisfies WakeResponse,
+        { status: 503 },
+      )
+    }
+
+    // Actionable wake event — original behavior with busy-check + queue
     const busy = await isAgentBusy()
 
     if (busy) {

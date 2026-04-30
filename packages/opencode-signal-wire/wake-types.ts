@@ -52,6 +52,15 @@ export const WAKE_EVENT_TYPES = {
   TASK_COMPLETED: 'task_completed',
   TASK_FAILED: 'task_failed',
   AGENT_STALE: 'agent_stale',
+  // ─── Quota events (signal-wire-architecture-v3 phase Q) ──────
+  // Emitted by quota-watcher.ts (in this package), source: 'proxy'.
+  // Producer: claude-max-proxy writes ~/.claude-local/quota-status.json;
+  // quota-watcher reads it, transitions level → emit synthetic WakeEvent
+  // → signalWire.evaluateExternal → wake-action with template
+  // → formatWakeMessage formats rich text → injectWakeEvent.
+  // Single canonical inject path; no parallel session.prompt calls.
+  QUOTA_CRITICAL: 'quota_critical',
+  QUOTA_WARNING: 'quota_warning',
 } as const
 
 // ─── Enums ───────────────────────────────────────────────────────────
@@ -71,6 +80,8 @@ export type WakeEventType =
   | 'task_completed'
   | 'task_failed'
   | 'agent_stale'
+  | 'quota_critical'
+  | 'quota_warning'
 
 export type DispatchStatus = 'delivered' | 'queued' | 'rate_limited' | 'deduped' | 'failed' | 'agent_not_found' | 'filtered' | 'blocked_by_rule'
 

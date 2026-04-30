@@ -54,8 +54,8 @@ export interface KeepaliveEngineOptions {
     isOwnerAlive?: () => boolean;
 }
 export declare class KeepaliveEngine {
-    private readonly cacheTtlMs;
-    private readonly safetyMarginMs;
+    private cacheTtlMs;
+    private safetyMarginMs;
     private readonly retryDelaysMs;
     private readonly healthProbeIntervalsMs;
     private readonly healthProbeTimeoutMs;

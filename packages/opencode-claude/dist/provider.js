@@ -21150,29 +21150,29 @@ var require_types2 = __commonJS((exports) => {
       const params = { errorMap: ctx.common.contextualErrorMap };
       const fn = ctx.data;
       if (this._def.returns instanceof ZodPromise) {
-        const me = this;
+        const me2 = this;
         return (0, parseUtil_js_1.OK)(async function(...args) {
           const error = new ZodError_js_1.ZodError([]);
-          const parsedArgs = await me._def.args.parseAsync(args, params).catch((e2) => {
+          const parsedArgs = await me2._def.args.parseAsync(args, params).catch((e2) => {
             error.addIssue(makeArgsIssue(args, e2));
             throw error;
           });
           const result = await Reflect.apply(fn, this, parsedArgs);
-          const parsedReturns = await me._def.returns._def.type.parseAsync(result, params).catch((e2) => {
+          const parsedReturns = await me2._def.returns._def.type.parseAsync(result, params).catch((e2) => {
             error.addIssue(makeReturnsIssue(result, e2));
             throw error;
           });
           return parsedReturns;
         });
       } else {
-        const me = this;
+        const me2 = this;
         return (0, parseUtil_js_1.OK)(function(...args) {
-          const parsedArgs = me._def.args.safeParse(args, params);
+          const parsedArgs = me2._def.args.safeParse(args, params);
           if (!parsedArgs.success) {
             throw new ZodError_js_1.ZodError([makeArgsIssue(args, parsedArgs.error)]);
           }
           const result = Reflect.apply(fn, this, parsedArgs.data);
-          const parsedReturns = me._def.returns.safeParse(result, params);
+          const parsedReturns = me2._def.returns.safeParse(result, params);
           if (!parsedReturns.success) {
             throw new ZodError_js_1.ZodError([makeReturnsIssue(result, parsedReturns.error)]);
           }
@@ -34071,9 +34071,9 @@ var require_XMLNode = __commonJS((exports, module) => {
 // node_modules/xmlbuilder/lib/XMLStringifier.js
 var require_XMLStringifier = __commonJS((exports, module) => {
   (function() {
-    var XMLStringifier, bind = function(fn, me) {
+    var XMLStringifier, bind = function(fn, me2) {
       return function() {
-        return fn.apply(me, arguments);
+        return fn.apply(me2, arguments);
       };
     }, hasProp = {}.hasOwnProperty;
     module.exports = XMLStringifier = function() {
@@ -35942,28 +35942,28 @@ var require_sax = __commonJS((exports) => {
       this._parser = new SAXParser(strict, opt);
       this.writable = true;
       this.readable = true;
-      var me = this;
+      var me2 = this;
       this._parser.onend = function() {
-        me.emit("end");
+        me2.emit("end");
       };
       this._parser.onerror = function(er) {
-        me.emit("error", er);
-        me._parser.error = null;
+        me2.emit("error", er);
+        me2._parser.error = null;
       };
       this._decoder = null;
       this._decoderBuffer = null;
       streamWraps.forEach(function(ev) {
-        Object.defineProperty(me, "on" + ev, {
+        Object.defineProperty(me2, "on" + ev, {
           get: function() {
-            return me._parser["on" + ev];
+            return me2._parser["on" + ev];
           },
           set: function(h2) {
             if (!h2) {
-              me.removeAllListeners(ev);
-              me._parser["on" + ev] = h2;
+              me2.removeAllListeners(ev);
+              me2._parser["on" + ev] = h2;
               return h2;
             }
-            me.on(ev, h2);
+            me2.on(ev, h2);
           },
           enumerable: true,
           configurable: false
@@ -36026,15 +36026,15 @@ var require_sax = __commonJS((exports) => {
       return true;
     };
     SAXStream.prototype.on = function(ev, handler) {
-      var me = this;
-      if (!me._parser["on" + ev] && streamWraps.indexOf(ev) !== -1) {
-        me._parser["on" + ev] = function() {
+      var me2 = this;
+      if (!me2._parser["on" + ev] && streamWraps.indexOf(ev) !== -1) {
+        me2._parser["on" + ev] = function() {
           var args = arguments.length === 1 ? [arguments[0]] : Array.apply(null, arguments);
           args.splice(0, 0, ev);
-          me.emit.apply(me, args);
+          me2.emit.apply(me2, args);
         };
       }
-      return Stream.prototype.on.call(me, ev, handler);
+      return Stream.prototype.on.call(me2, ev, handler);
     };
     var CDATA = "[CDATA[";
     var DOCTYPE = "DOCTYPE";
@@ -37320,9 +37320,9 @@ var require_processors = __commonJS((exports) => {
 // node_modules/xml2js/lib/parser.js
 var require_parser3 = __commonJS((exports) => {
   (function() {
-    var bom, defaults, events, isEmpty, processItem, processors, sax, setImmediate2, bind = function(fn, me) {
+    var bom, defaults, events, isEmpty, processItem, processors, sax, setImmediate2, bind = function(fn, me2) {
       return function() {
-        return fn.apply(me, arguments);
+        return fn.apply(me2, arguments);
       };
     }, extend = function(child, parent) {
       for (var key in parent) {
@@ -38715,24 +38715,24 @@ import { createHash as n, randomBytes as a } from "crypto";
 import { writeFileSync as o, readFileSync as l, mkdirSync as h, chmodSync as c } from "fs";
 import { dirname as u, join as d } from "path";
 import { homedir as f } from "os";
-import { createHash as N, randomBytes as I, randomUUID as x } from "crypto";
-import { readFileSync as L, writeFileSync as F, chmodSync as P, mkdirSync as U, rmdirSync as B, statSync as J, unlinkSync as W, appendFileSync as H } from "fs";
-import { join as j } from "path";
-import { homedir as K } from "os";
-import { mkdirSync as ie, readdirSync as se, statSync as re, unlinkSync as ne, writeFileSync as ae } from "fs";
-import { createHash as oe } from "crypto";
-import { homedir as le } from "os";
-import { join as he } from "path";
-import { statSync as ce, readFileSync as ue } from "fs";
-import { homedir as de } from "os";
-import { join as fe } from "path";
-import { readFileSync as Ve, writeFileSync as Xe, mkdirSync as Ze } from "fs";
-import { dirname as et } from "path";
-import { randomUUID as tt } from "crypto";
-import { readFileSync as nt, statSync as at } from "fs";
-import { spawn as vt, spawnSync as Et } from "child_process";
-import { request as Rt } from "https";
-import { randomBytes as St, createHash as bt } from "crypto";
+import { createHash as x, randomBytes as I, randomUUID as N } from "crypto";
+import { readFileSync as L, writeFileSync as F, chmodSync as P, mkdirSync as U, rmdirSync as B, statSync as H, unlinkSync as J, appendFileSync as W } from "fs";
+import { join as K } from "path";
+import { homedir as j } from "os";
+import { appendFileSync as ie, mkdirSync as se, readdirSync as re, statSync as ne, unlinkSync as ae, writeFileSync as oe } from "fs";
+import { createHash as le } from "crypto";
+import { homedir as he } from "os";
+import { join as ce } from "path";
+import { statSync as ue, readFileSync as de } from "fs";
+import { homedir as fe } from "os";
+import { join as pe } from "path";
+import { readFileSync as Ze, writeFileSync as et, mkdirSync as tt } from "fs";
+import { dirname as it } from "path";
+import { randomUUID as st } from "crypto";
+import { readFileSync as ot, statSync as lt } from "fs";
+import { spawn as Rt, spawnSync as St } from "child_process";
+import { request as $t } from "https";
+import { randomBytes as bt, createHash as Mt } from "crypto";
 var e = Object.defineProperty;
 var t = Object.getOwnPropertyNames;
 var i = (t2, i2) => e(t2, "name", { value: i2, configurable: true });
@@ -38745,7 +38745,7 @@ var r = {};
 ((t2, i2) => {
   for (var s2 in i2)
     e(t2, s2, { get: i2[s2], enumerable: true });
-})(r, { getClaudeConfigDir: () => p, getDefaultCredentialsPath: () => m, oauthLogin: () => T });
+})(r, { getClaudeConfigDir: () => p, getDefaultCredentialsPath: () => m, oauthLogin: () => _ });
 function p() {
   return (process.env.CLAUDE_CONFIG_DIR ?? d(f(), ".claude")).normalize("NFC");
 }
@@ -38764,40 +38764,40 @@ function w() {
 function k(e2) {
   return e2.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
-async function T(e2 = {}) {
-  let t2 = e2.credentialsPath ?? m(), i2 = y(), s2 = g(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await _(r2, e2.port), f2 = `http://localhost:${n2}/callback`, p2 = e2.loginWithClaudeAi !== false ? b : S, k2 = new URLSearchParams({ client_id: E, response_type: "code", scope: D, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
+async function _(e2 = {}) {
+  let t2 = e2.credentialsPath ?? m(), i2 = y(), s2 = g(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await T(r2, e2.port), f2 = `http://localhost:${n2}/callback`, p2 = e2.loginWithClaudeAi !== false ? $ : S, k2 = new URLSearchParams({ client_id: v, response_type: "code", scope: D, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
   e2.loginHint && k2.set("login_hint", e2.loginHint), e2.loginMethod && k2.set("login_method", e2.loginMethod), e2.orgUUID && k2.set("orgUUID", e2.orgUUID);
-  let T2, R, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, O = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(M)}`;
+  let _2, R, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, O = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(M)}`;
   e2.onAuthUrl ? e2.onAuthUrl(C, O) : (console.log(`
 \uD83D\uDD10 Login to Claude
 `), console.log(`Open this URL in your browser:
 `), console.log(`  ${O}
-`)), e2.openBrowser !== false && v(C).catch(() => {});
+`)), e2.openBrowser !== false && E(C).catch(() => {});
   try {
-    T2 = await a2, R = f2;
+    _2 = await a2, R = f2;
   } catch (e3) {
     throw d2(), e3;
   }
   d2();
-  let A = await fetch($, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: T2, redirect_uri: R, client_id: E, code_verifier: i2, state: r2 }) });
+  let A = await fetch(b, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: R, client_id: v, code_verifier: i2, state: r2 }) });
   if (!A.ok) {
     let e3 = await A.text();
     throw new Error(`Token exchange failed (${A.status}): ${e3}`);
   }
-  let N2 = await A.json(), I2 = Date.now() + 1000 * N2.expires_in, x2 = { accessToken: N2.access_token, refreshToken: N2.refresh_token, expiresAt: I2, scopes: N2.scope?.split(" ") ?? [] }, L2 = {};
+  let x2 = await A.json(), I2 = Date.now() + 1000 * x2.expires_in, N2 = { accessToken: x2.access_token, refreshToken: x2.refresh_token, expiresAt: I2, scopes: x2.scope?.split(" ") ?? [] }, L2 = {};
   try {
     L2 = JSON.parse(l(t2, "utf8"));
   } catch {}
-  L2.claudeAiOauth = x2;
+  L2.claudeAiOauth = N2;
   let F2 = u(t2);
   try {
     h(F2, { recursive: true });
   } catch {}
   return o(t2, JSON.stringify(L2, null, 2), "utf8"), c(t2, 384), console.log(`
 \u2705 Login successful! Credentials saved to ${t2}
-`), { accessToken: x2.accessToken, refreshToken: x2.refreshToken, expiresAt: x2.expiresAt, credentialsPath: t2 };
+`), { accessToken: N2.accessToken, refreshToken: N2.refreshToken, expiresAt: N2.expiresAt, credentialsPath: t2 };
 }
-async function _(e2, t2) {
+async function T(e2, t2) {
   let s2, r2, n2 = new Promise((e3, t3) => {
     s2 = e3, r2 = t3;
   }), a2 = Bun.serve({ port: t2 ?? 0, async fetch(t3) {
@@ -38813,7 +38813,7 @@ async function _(e2, t2) {
     clearTimeout(o2), a2.stop();
   }, "close") };
 }
-async function v(e2) {
+async function E(e2) {
   let t2 = (() => {
     switch (process.platform) {
       case "darwin":
@@ -38831,17 +38831,17 @@ async function v(e2) {
         return;
     } catch {}
 }
-var E;
+var v;
 var R;
 var S;
-var b;
 var $;
+var b;
 var M;
 var D;
 var C;
 var O;
 var A = (C = { "src/auth.ts"() {
-  E = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (R = "https://platform.claude.com") + "/oauth/authorize", b = "https://claude.com/cai/oauth/authorize", $ = `${R}/v1/oauth/token`, M = `${R}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), D = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(T, "oauthLogin"), i(_, "startCallbackServer"), i(v, "tryOpenBrowser");
+  v = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (R = "https://platform.claude.com") + "/oauth/authorize", $ = "https://claude.com/cai/oauth/authorize", b = `${R}/v1/oauth/token`, M = `${R}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), D = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(_, "oauthLogin"), i(T, "startCallbackServer"), i(E, "tryOpenBrowser");
 } }, function() {
   return C && (O = (0, C[t(C)[0]])(C = 0)), O;
 });
@@ -38886,12 +38886,12 @@ var Y = class extends q {
   }
   code = "CACHE_REWRITE_BLOCKED";
 };
-var V = { "claude-opus-4-7": { name: "Claude Opus 4.7", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-opus-4-6": { name: "Claude Opus 4.6", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-sonnet-4-6": { name: "Claude Sonnet 4.6", context: 1e6, defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } }, "claude-haiku-4-5-20251001": { name: "Claude Haiku 4.5", context: 200000, defaultOutput: 32000, maxOutput: 64000, adaptiveThinking: false, cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 } } };
-var X = { defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: false };
+var X = { "claude-opus-4-7": { name: "Claude Opus 4.7", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-opus-4-6": { name: "Claude Opus 4.6", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-sonnet-4-6": { name: "Claude Sonnet 4.6", context: 1e6, defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } }, "claude-haiku-4-5-20251001": { name: "Claude Haiku 4.5", context: 200000, defaultOutput: 32000, maxOutput: 64000, adaptiveThinking: false, cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 } } };
+var V = { defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: false };
 function Z(e2, t2) {
   if (typeof t2 == "number" && t2 > 0)
     return t2;
-  let i2 = ee(e2), s2 = i2?.maxOutput ?? X.maxOutput, r2 = i2?.defaultOutput ?? X.defaultOutput, n2 = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+  let i2 = ee(e2), s2 = i2?.maxOutput ?? V.maxOutput, r2 = i2?.defaultOutput ?? V.defaultOutput, n2 = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
   if (n2) {
     let e3 = parseInt(n2, 10);
     if (Number.isFinite(e3) && e3 > 0)
@@ -38900,13 +38900,13 @@ function Z(e2, t2) {
   return r2;
 }
 function ee(e2) {
-  if (V[e2])
-    return V[e2];
+  if (X[e2])
+    return X[e2];
   let t2 = e2.toLowerCase();
-  for (let [e3, i2] of Object.entries(V))
+  for (let [e3, i2] of Object.entries(X))
     if (t2.includes(e3) || e3.includes(t2))
       return i2;
-  for (let [e3, i2] of Object.entries(V)) {
+  for (let [e3, i2] of Object.entries(X)) {
     let s2 = e3.replace(/^claude-/, "").split("-").slice(0, 3).join("-");
     if (t2.includes(s2))
       return i2;
@@ -38920,60 +38920,61 @@ function te(e2) {
   return i2.includes("opus-4-7") || i2.includes("opus-4-6") || i2.includes("sonnet-4-6") || i2.includes("sonnet-4-7");
 }
 i(Z, "resolveMaxTokens"), i(ee, "getModelMetadata"), i(te, "supportsAdaptiveThinking");
-var pe = { cacheTtlMs: 300000, safetyMarginMs: 15000, intervalMs: 120000, intervalClampMin: 60000, retryDelaysMs: [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20].map((e2) => 1000 * e2), rewriteWarnIdleMs: 300000, rewriteWarnTokens: 50000, healthProbeIntervalsMs: [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4], healthProbeTimeoutMs: 3000, enabled: true, idleTimeoutMs: 1 / 0, minTokens: 2000, rewriteBlockEnabled: false };
-var ye = fe(de(), ".claude", "keepalive.json");
-var ge = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH || ye;
-var we = 0;
-var ke = null;
-var Te = new Set;
-function _e() {
+var me = { enabled: true, initialCalls: 3, ringRetentionMs: 7200000, ringMaxMb: 300, suspiciousContextSize: 5, suspiciousRetentionMs: 86400000, suspiciousMaxMb: 100, coldCwThreshold: 1e4, metadataRetentionMs: 604800000 };
+var ye = { cacheTtlMs: 300000, safetyMarginMs: 15000, intervalMs: 120000, intervalClampMin: 60000, retryDelaysMs: [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20].map((e2) => 1000 * e2), rewriteWarnIdleMs: 300000, rewriteWarnTokens: 50000, healthProbeIntervalsMs: [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4], healthProbeTimeoutMs: 3000, enabled: true, idleTimeoutMs: 1 / 0, minTokens: 2000, rewriteBlockEnabled: false, dump: me };
+var we = pe(fe(), ".claude", "keepalive.json");
+var ke = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH || we;
+var _e = 0;
+var Te = null;
+var Ee = new Set;
+function ve() {
   try {
-    let e2 = ce(ge);
-    return e2.mtimeMs === we && ke ? null : (we = e2.mtimeMs, Te.clear(), JSON.parse(ue(ge, "utf8")));
+    let e2 = ue(ke);
+    return e2.mtimeMs === _e && Te ? null : (_e = e2.mtimeMs, Ee.clear(), JSON.parse(de(ke, "utf8")));
   } catch {
     return null;
   }
 }
-function ve(e2, t2, i2, s2, r2) {
+function Re(e2, t2, i2, s2, r2) {
   if (e2 == null)
     return i2;
   let n2 = typeof e2 == "number" ? e2 : Number(e2);
-  return Number.isFinite(n2) ? n2 < s2 || n2 > r2 ? (Te.has(t2) || (console.error(`[keepalive-config] ${t2}=${n2} out of range [${s2}, ${r2}] \u2014 clamping`), Te.add(t2)), Math.max(s2, Math.min(r2, n2))) : n2 : (Te.has(t2) || (console.error(`[keepalive-config] ${t2}=${JSON.stringify(e2)} is not a number \u2014 using fallback ${i2}`), Te.add(t2)), i2);
+  return Number.isFinite(n2) ? n2 < s2 || n2 > r2 ? (Ee.has(t2) || (console.error(`[keepalive-config] ${t2}=${n2} out of range [${s2}, ${r2}] \u2014 clamping`), Ee.add(t2)), Math.max(s2, Math.min(r2, n2))) : n2 : (Ee.has(t2) || (console.error(`[keepalive-config] ${t2}=${JSON.stringify(e2)} is not a number \u2014 using fallback ${i2}`), Ee.add(t2)), i2);
 }
-function Ee(e2, t2, i2, s2 = 1, r2 = 30) {
+function Se(e2, t2, i2, s2 = 1, r2 = 30) {
   if (e2 == null)
     return i2;
   if (!Array.isArray(e2))
-    return Te.has(t2) || (console.error(`[keepalive-config] ${t2} is not an array \u2014 using fallback`), Te.add(t2)), i2;
+    return Ee.has(t2) || (console.error(`[keepalive-config] ${t2} is not an array \u2014 using fallback`), Ee.add(t2)), i2;
   let n2 = e2.map((e3) => typeof e3 == "number" ? e3 : Number(e3)).filter((e3) => Number.isFinite(e3) && e3 > 0);
-  return n2.length < s2 || n2.length > r2 ? (Te.has(t2) || (console.error(`[keepalive-config] ${t2} length ${n2.length} out of [${s2}, ${r2}] \u2014 using fallback`), Te.add(t2)), i2) : n2;
+  return n2.length < s2 || n2.length > r2 ? (Ee.has(t2) || (console.error(`[keepalive-config] ${t2} length ${n2.length} out of [${s2}, ${r2}] \u2014 using fallback`), Ee.add(t2)), i2) : n2;
 }
-function Re(e2, t2) {
+function $e(e2, t2) {
   return e2 == null ? t2 : typeof e2 == "boolean" ? e2 : typeof e2 == "string" ? e2 === "true" || e2 === "1" || e2 === "yes" : !!e2;
 }
-function Se() {
-  let e2 = _e();
-  return e2 === null && ke ? ke : $e(e2 ?? null);
-}
 function be() {
-  return we = 0, ke = null, Se();
-}
-function $e(e2) {
-  let t2 = e2 === null ? "defaults" : Object.keys(e2).length > 0 ? "mixed" : "defaults", i2 = ve(e2?.cacheTtlMs ?? (typeof e2?.cacheTtlSec == "number" ? 1000 * e2.cacheTtlSec : undefined), "cacheTtlMs", pe.cacheTtlMs, 60000, 7200000), s2 = ve(e2?.safetyMarginMs ?? (typeof e2?.safetyMarginSec == "number" ? 1000 * e2.safetyMarginSec : undefined), "safetyMarginMs", pe.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = ve(e2?.intervalMs ?? (typeof e2?.intervalSec == "number" ? 1000 * e2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = pe.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
-  n2 < a2 && (n2 = a2), n2 > o2 && (n2 = o2);
-  let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: Ee(e2?.retryDelaysMs ?? (Array.isArray(e2?.retryDelaysSec) ? e2.retryDelaysSec.map((e3) => typeof e3 == "number" ? 1000 * e3 : NaN) : undefined), "retryDelaysMs", pe.retryDelaysMs), rewriteWarnIdleMs: ve(e2?.rewriteWarnIdleMs ?? (typeof e2?.rewriteWarnIdleSec == "number" ? 1000 * e2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: ve(e2?.rewriteWarnTokens, "rewriteWarnTokens", pe.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: Ee(e2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", pe.healthProbeIntervalsMs), healthProbeTimeoutMs: ve(e2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", pe.healthProbeTimeoutMs, 500, 60000), enabled: Re(e2?.enabled, pe.enabled), idleTimeoutMs: e2?.idleTimeoutMs === null || e2?.idleTimeoutSec === null ? 1 / 0 : ve(e2?.idleTimeoutMs ?? (typeof e2?.idleTimeoutSec == "number" ? 1000 * e2.idleTimeoutSec : undefined), "idleTimeoutMs", pe.idleTimeoutMs === 1 / 0 ? 86400000 : pe.idleTimeoutMs, 0, 86400000), minTokens: ve(e2?.minTokens, "minTokens", pe.minTokens, 1, 1e6), rewriteBlockEnabled: Re(e2?.rewriteBlockEnabled, pe.rewriteBlockEnabled), t: t2 };
-  return ke = l2, l2;
+  let e2 = ve();
+  return e2 === null && Te ? Te : De(e2 ?? null);
 }
 function Me() {
-  return ge;
+  return _e = 0, Te = null, be();
 }
-function De() {
-  return Se().cacheTtlMs;
+function De(e2) {
+  let t2 = e2 === null ? "defaults" : Object.keys(e2).length > 0 ? "mixed" : "defaults", i2 = Re(e2?.cacheTtlMs ?? (typeof e2?.cacheTtlSec == "number" ? 1000 * e2.cacheTtlSec : undefined), "cacheTtlMs", ye.cacheTtlMs, 60000, 7200000), s2 = Re(e2?.safetyMarginMs ?? (typeof e2?.safetyMarginSec == "number" ? 1000 * e2.safetyMarginSec : undefined), "safetyMarginMs", ye.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = Re(e2?.intervalMs ?? (typeof e2?.intervalSec == "number" ? 1000 * e2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = ye.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
+  n2 < a2 && (n2 = a2), n2 > o2 && (n2 = o2);
+  let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: Se(e2?.retryDelaysMs ?? (Array.isArray(e2?.retryDelaysSec) ? e2.retryDelaysSec.map((e3) => typeof e3 == "number" ? 1000 * e3 : NaN) : undefined), "retryDelaysMs", ye.retryDelaysMs), rewriteWarnIdleMs: Re(e2?.rewriteWarnIdleMs ?? (typeof e2?.rewriteWarnIdleSec == "number" ? 1000 * e2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: Re(e2?.rewriteWarnTokens, "rewriteWarnTokens", ye.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: Se(e2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", ye.healthProbeIntervalsMs), healthProbeTimeoutMs: Re(e2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", ye.healthProbeTimeoutMs, 500, 60000), enabled: $e(e2?.enabled, ye.enabled), idleTimeoutMs: e2?.idleTimeoutMs === null || e2?.idleTimeoutSec === null ? 1 / 0 : Re(e2?.idleTimeoutMs ?? (typeof e2?.idleTimeoutSec == "number" ? 1000 * e2.idleTimeoutSec : undefined), "idleTimeoutMs", ye.idleTimeoutMs === 1 / 0 ? 86400000 : ye.idleTimeoutMs, 0, 86400000), minTokens: Re(e2?.minTokens, "minTokens", ye.minTokens, 1, 1e6), rewriteBlockEnabled: $e(e2?.rewriteBlockEnabled, ye.rewriteBlockEnabled), dump: me, t: t2 };
+  return Te = l2, l2;
 }
 function Ce() {
-  return Se().safetyMarginMs;
+  return ke;
 }
-function Oe(e2) {
+function Oe() {
+  return be().cacheTtlMs;
+}
+function Ae() {
+  return be().safetyMarginMs;
+}
+function xe(e2) {
   let t2 = e2;
   if (!t2)
     return "permanent";
@@ -38987,8 +38988,8 @@ function Oe(e2) {
   let s2 = t2.code ?? t2.cause?.code ?? "", r2 = t2.name ?? t2.cause?.name ?? "", n2 = `${(t2.message ?? "").toLowerCase()} ${(t2.cause?.message ?? "").toLowerCase()}`.trim();
   return r2 === "AbortError" || r2 === "TimeoutError" || n2.includes("aborted") || n2.includes("the operation timed out") || n2.includes("request timed out") || s2 && new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_ABORTED", "ABORT_ERR", "ERR_NETWORK", "ConnectionRefused", "FailedToOpenSocket"]).has(s2) || n2.includes("unable to connect") || n2.includes("failed to open socket") || n2.includes("connection refused") || n2.includes("network is unreachable") || n2.includes("network error") || n2.includes("fetch failed") || n2.includes("timeout") || n2.includes("dns") || n2.includes("socket hang up") || n2.includes("terminated") ? "network" : "server_transient";
 }
-i(_e, "readRawConfig"), i(ve, "num"), i(Ee, "numArray"), i(Re, "bool"), i(Se, "loadKeepaliveConfig"), i(be, "reloadKeepaliveConfig"), i($e, "_resolve"), i(Me, "getConfigPath"), i(De, "getCacheTtlMs"), i(Ce, "getSafetyMarginMs"), i(Oe, "classifyError");
-var Ae = class _KeepaliveEngine {
+i(ve, "readRawConfig"), i(Re, "num"), i(Se, "numArray"), i($e, "bool"), i(be, "loadKeepaliveConfig"), i(Me, "reloadKeepaliveConfig"), i(De, "_resolve"), i(Ce, "getConfigPath"), i(Oe, "getCacheTtlMs"), i(Ae, "getSafetyMarginMs"), i(xe, "classifyError");
+var Ie = class _KeepaliveEngine {
   static {
     i(this, "KeepaliveEngine");
   }
@@ -39023,7 +39024,7 @@ var Ae = class _KeepaliveEngine {
   snapshotCallCount = 0;
   constructor(e2) {
     this.getToken = e2.getToken, this.doFetch = e2.doFetch, this.getRateLimitInfo = e2.getRateLimitInfo, this.isOwnerAlive = e2.isOwnerAlive ?? (() => true);
-    let t2 = e2.config ?? {}, i2 = Se();
+    let t2 = e2.config ?? {}, i2 = be();
     this.cacheTtlMs = i2.cacheTtlMs, this.safetyMarginMs = i2.safetyMarginMs, this.retryDelaysMs = i2.retryDelaysMs, this.healthProbeIntervalsMs = i2.healthProbeIntervalsMs, this.healthProbeTimeoutMs = i2.healthProbeTimeoutMs;
     let s2 = t2.intervalMs ?? i2.intervalMs;
     s2 < i2.intervalClampMin && (console.error(`[claude-sdk] keepalive intervalMs=${s2} below safe min (${i2.intervalClampMin}); clamped`), s2 = i2.intervalClampMin), s2 > i2.intervalClampMax && (console.error(`[claude-sdk] keepalive intervalMs=${s2} above safe max (${i2.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`), s2 = i2.intervalClampMax), this.config = { enabled: t2.enabled ?? i2.enabled, intervalMs: s2, idleTimeoutMs: t2.idleTimeoutMs ?? i2.idleTimeoutMs, minTokens: t2.minTokens ?? i2.minTokens, rewriteWarnIdleMs: t2.rewriteWarnIdleMs ?? i2.rewriteWarnIdleMs, rewriteWarnTokens: t2.rewriteWarnTokens ?? i2.rewriteWarnTokens, rewriteBlockIdleMs: t2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: t2.rewriteBlockEnabled ?? i2.rewriteBlockEnabled, onHeartbeat: t2.onHeartbeat, onTick: t2.onTick, onDisarmed: t2.onDisarmed, onRewriteWarning: t2.onRewriteWarning, onNetworkStateChange: t2.onNetworkStateChange };
@@ -39080,11 +39081,35 @@ var Ae = class _KeepaliveEngine {
       if (!this.isOwnerAlive())
         return this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
     } catch {}
-    if (this.cacheWrittenAt > 0 && Date.now() - this.cacheWrittenAt > this.cacheTtlMs)
-      return this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
-    let e2 = Se();
+    if (this.cacheWrittenAt > 0) {
+      let e3 = Date.now() - this.cacheWrittenAt;
+      if (e3 > this.cacheTtlMs) {
+        try {
+          ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(e3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((e3 - this.cacheTtlMs) / 1000)}
+`);
+        } catch {}
+        return this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
+      }
+    }
+    let e2 = be();
     if (!e2.enabled)
       return this.registry.clear(), void this.stop();
+    if (e2.cacheTtlMs !== this.cacheTtlMs) {
+      let t3 = this.cacheTtlMs;
+      this.cacheTtlMs = e2.cacheTtlMs;
+      try {
+        ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] CACHE_TTL_RELOADED pid=${process.pid} oldMs=${t3} newMs=${e2.cacheTtlMs} oldMin=${Math.round(t3 / 60000)} newMin=${Math.round(e2.cacheTtlMs / 60000)}
+`);
+      } catch {}
+    }
+    if (e2.safetyMarginMs !== this.safetyMarginMs) {
+      let t3 = this.safetyMarginMs;
+      this.safetyMarginMs = e2.safetyMarginMs;
+      try {
+        ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] SAFETY_MARGIN_RELOADED pid=${process.pid} oldMs=${t3} newMs=${e2.safetyMarginMs}
+`);
+      } catch {}
+    }
     let t2 = Math.max(e2.intervalClampMin, Math.min(e2.intervalMs, e2.intervalClampMax));
     t2 !== this.config.intervalMs && (this.config.intervalMs = t2), e2.idleTimeoutMs !== this.config.idleTimeoutMs && (this.config.idleTimeoutMs = e2.idleTimeoutMs), e2.minTokens !== this.config.minTokens && (this.config.minTokens = e2.minTokens);
     let i2 = Date.now() - this.lastRealActivityAt;
@@ -39113,7 +39138,7 @@ var Ae = class _KeepaliveEngine {
         let c2 = this.getRateLimitInfo();
         this.config.onHeartbeat?.({ usage: l2, durationMs: h2, idleMs: r2, model: s2.model, rateLimit: { status: c2.status, claim: c2.claim, resetAt: c2.resetAt } });
       } catch (e3) {
-        let t3 = Oe(e3);
+        let t3 = xe(e3);
         if (t3 === "network") {
           let e4 = Date.now() - this.cacheWrittenAt, t4 = this.cacheTtlMs - e4 <= this.safetyMarginMs;
           this.onDisarmed("network_error"), this.startHealthProbe({ reviveMode: t4 });
@@ -39152,7 +39177,7 @@ var Ae = class _KeepaliveEngine {
             ;
           this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
         } catch (i3) {
-          let s3 = Oe(i3);
+          let s3 = xe(i3);
           if (s3 === "network") {
             this.inFlight = false, this.abortController = null;
             let e3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
@@ -39228,23 +39253,23 @@ var Ae = class _KeepaliveEngine {
   }
   writeSnapshotDebug(e2, t2, i2) {
     try {
-      let s2 = he(le(), ".claude", "snapshots");
-      ie(s2, { recursive: true });
+      let s2 = ce(he(), ".claude", "snapshots");
+      se(s2, { recursive: true });
       try {
         let e3 = Date.now() - _KeepaliveEngine.SNAPSHOT_TTL_MS;
-        for (let t3 of se(s2)) {
-          let i3 = he(s2, t3);
-          re(i3).mtimeMs < e3 && ne(i3);
+        for (let t3 of re(s2)) {
+          let i3 = ce(s2, t3);
+          ne(i3).mtimeMs < e3 && ae(i3);
         }
       } catch {}
       this.snapshotCallCount++;
-      let { messages: r2, system: n2, tools: a2 } = t2, o2 = typeof n2 == "string" ? n2 : JSON.stringify(n2), l2 = oe("md5").update(o2).digest("hex").slice(0, 8), h2 = { ts: new Date().toISOString(), pid: process.pid, callNum: this.snapshotCallCount, model: e2, messages: r2?.length ?? 0, tools: a2?.length ?? 0, sysHash: l2, sysLen: o2.length, usage: { input: i2.inputTokens ?? 0, cacheRead: i2.cacheReadInputTokens ?? 0, cacheWrite: i2.cacheCreationInputTokens ?? 0 }, firstMsg: r2?.[0] ? { role: r2[0].role, contentLen: JSON.stringify(r2[0].content).length, contentHash: oe("md5").update(JSON.stringify(r2[0].content)).digest("hex").slice(0, 8) } : null, lastMsg: r2?.length ? { role: r2[r2.length - 1].role, contentLen: JSON.stringify(r2[r2.length - 1].content).length } : null, toolsHash: a2?.length ? oe("md5").update(JSON.stringify(a2.map((e3) => e3.name ?? "").join(","))).digest("hex").slice(0, 8) : null }, c2 = `${process.pid}-${Date.now()}.json`;
-      if (ae(he(s2, c2), JSON.stringify(h2, null, 2) + `
+      let { messages: r2, system: n2, tools: a2 } = t2, o2 = typeof n2 == "string" ? n2 : JSON.stringify(n2), l2 = le("md5").update(o2).digest("hex").slice(0, 8), h2 = { ts: new Date().toISOString(), pid: process.pid, callNum: this.snapshotCallCount, model: e2, messages: r2?.length ?? 0, tools: a2?.length ?? 0, sysHash: l2, sysLen: o2.length, usage: { input: i2.inputTokens ?? 0, cacheRead: i2.cacheReadInputTokens ?? 0, cacheWrite: i2.cacheCreationInputTokens ?? 0 }, firstMsg: r2?.[0] ? { role: r2[0].role, contentLen: JSON.stringify(r2[0].content).length, contentHash: le("md5").update(JSON.stringify(r2[0].content)).digest("hex").slice(0, 8) } : null, lastMsg: r2?.length ? { role: r2[r2.length - 1].role, contentLen: JSON.stringify(r2[r2.length - 1].content).length } : null, toolsHash: a2?.length ? le("md5").update(JSON.stringify(a2.map((e3) => e3.name ?? "").join(","))).digest("hex").slice(0, 8) : null }, c2 = `${process.pid}-${Date.now()}.json`;
+      if (oe(ce(s2, c2), JSON.stringify(h2, null, 2) + `
 `), _KeepaliveEngine.DUMP_BODY || this.snapshotCallCount <= 3) {
-        let e3 = he(s2, "bodies");
-        ie(e3, { recursive: true });
+        let e3 = ce(s2, "bodies");
+        se(e3, { recursive: true });
         let i3 = `${process.pid}-call${this.snapshotCallCount}-${Date.now()}.json`;
-        ae(he(e3, i3), JSON.stringify(t2, null, 2) + `
+        oe(ce(e3, i3), JSON.stringify(t2, null, 2) + `
 `);
       }
     } catch {}
@@ -39264,10 +39289,10 @@ var Ae = class _KeepaliveEngine {
   k(e2) {
     this.lastRealActivityAt = e2;
   }
-  T(e2) {
+  _(e2) {
     this.cacheWrittenAt = e2;
   }
-  get _() {
+  get T() {
     return this.cacheWrittenAt;
   }
   v(e2, t2, i2) {
@@ -39275,48 +39300,48 @@ var Ae = class _KeepaliveEngine {
   }
 };
 var Ne = 300000;
-var Ie = 0.25;
-var xe = 300000;
-var Le = 1200000;
-var Fe = j(K(), ".claude", ".refresh-cooldown");
-var Pe = 1800000;
-var Ue = "2.1.90";
-var Be = { todowrite: "todo_write" };
-var Je = Object.fromEntries(Object.entries(Be).map(([e2, t2]) => [t2, e2]));
-function We(e2) {
+var Le = 0.25;
+var Fe = 300000;
+var Pe = 1200000;
+var Ue = K(j(), ".claude", ".refresh-cooldown");
+var Be = 1800000;
+var He = "2.1.90";
+var Je = { todowrite: "todo_write" };
+var We = Object.fromEntries(Object.entries(Je).map(([e2, t2]) => [t2, e2]));
+function Ke(e2) {
   if (!e2?.length)
     return { remapped: e2, didRemap: false };
   let t2 = false;
   return { remapped: e2.map((e3) => {
-    let i2 = Be[e3.name];
+    let i2 = Je[e3.name];
     return i2 ? (t2 = true, { ...e3, name: i2 }) : e3;
   }), didRemap: t2 };
 }
-function He(e2) {
-  return Je[e2] ?? e2;
+function je(e2) {
+  return We[e2] ?? e2;
 }
-i(We, "remapToolNames"), i(He, "unremapToolName");
-var je = j(K(), ".claude", ".token-refresh-lock");
-async function Ke() {
+i(Ke, "remapToolNames"), i(je, "unremapToolName");
+var qe = K(j(), ".claude", ".token-refresh-lock");
+async function ze() {
   for (let e2 = 0;e2 < 30; e2++)
     try {
-      return U(je), F(j(je, "pid"), `${process.pid}
+      return U(qe), F(K(qe, "pid"), `${process.pid}
 ${Date.now()}`), () => {
         try {
-          W(j(je, "pid")), B(je);
+          J(K(qe, "pid")), B(qe);
         } catch {}
       };
     } catch (e3) {
       if (e3.code === "EEXIST") {
         try {
-          let e4 = L(j(je, "pid"), "utf8"), t2 = parseInt(e4.split(`
+          let e4 = L(K(qe, "pid"), "utf8"), t2 = parseInt(e4.split(`
 `)[1] ?? "0");
           if (Date.now() - t2 > 30000) {
             try {
-              W(j(je, "pid"));
+              J(K(qe, "pid"));
             } catch {}
             try {
-              B(je);
+              B(qe);
             } catch {}
             continue;
           }
@@ -39328,7 +39353,7 @@ ${Date.now()}`), () => {
     }
   return null;
 }
-async function qe(e2, t2, i2) {
+async function Ge(e2, t2, i2) {
   let s2 = Date.now() + t2;
   for (;Date.now() < s2; ) {
     try {
@@ -39340,8 +39365,8 @@ async function qe(e2, t2, i2) {
   }
   return null;
 }
-i(Ke, "acquireTokenRefreshLock"), i(qe, "pollDiskForFreshToken");
-var ze = class {
+i(ze, "acquireTokenRefreshLock"), i(Ge, "pollDiskForFreshToken");
+var Qe = class {
   static {
     i(this, "ClaudeCodeSDK");
   }
@@ -39368,7 +39393,7 @@ var ze = class {
   keepalive;
   R = null;
   constructor(e2 = {}) {
-    this.sessionId = x(), this.deviceId = e2.deviceId ?? I(32).toString("hex"), this.accountUuid = e2.accountUuid ?? this.readAccountUuid(), this.timeout = e2.timeout ?? 600000, this.maxRetries = e2.maxRetries ?? 10, this.onTokenStatus = e2.onTokenStatus, this.keepalive = new Ae({ config: e2.keepalive, getToken: i(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: i((e3, t2, i2) => this.doStreamRequest(e3, t2, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimitInfo, "getRateLimitInfo") }), e2.credentialStore ? this.credentialStore = e2.credentialStore : e2.accessToken ? (this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken ?? null, this.expiresAt = e2.expiresAt ?? null, this.credentialStore = new Qe({ accessToken: e2.accessToken, refreshToken: e2.refreshToken ?? "", expiresAt: e2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new Ge(e2.credentialsPath ?? j(K(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {}));
+    this.sessionId = N(), this.deviceId = e2.deviceId ?? I(32).toString("hex"), this.accountUuid = e2.accountUuid ?? this.readAccountUuid(), this.timeout = e2.timeout ?? 600000, this.maxRetries = e2.maxRetries ?? 10, this.onTokenStatus = e2.onTokenStatus, this.keepalive = new Ie({ config: e2.keepalive, getToken: i(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: i((e3, t2, i2) => this.doStreamRequest(e3, t2, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimitInfo, "getRateLimitInfo") }), e2.credentialStore ? this.credentialStore = e2.credentialStore : e2.accessToken ? (this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken ?? null, this.expiresAt = e2.expiresAt ?? null, this.credentialStore = new Xe({ accessToken: e2.accessToken, refreshToken: e2.refreshToken ?? "", expiresAt: e2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new Ye(e2.credentialsPath ?? K(j(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {}));
   }
   async generate(e2) {
     let t2 = [];
@@ -39413,13 +39438,13 @@ var ze = class {
     let a2, o2 = Date.now(), l2 = JSON.stringify(e2);
     try {
       let { appendFileSync: i3 } = s("fs");
-      i3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${e2.model} msgs=${e2.messages?.length ?? 0}
+      i3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${e2.model} msgs=${e2.messages?.length ?? 0}
 `);
       let r3 = e2.tools?.map((e3) => e3.name).join(",") ?? "none", n3 = typeof e2.system == "string" ? e2.system.substring(0, 200) : JSON.stringify(e2.system)?.substring(0, 200);
-      if (i3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(t2).substring(0, 300)} tools=[${r3.substring(0, 500)}] sys=${n3} bodyLen=${l2.length}
+      if (i3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(t2).substring(0, 300)} tools=[${r3.substring(0, 500)}] sys=${n3} bodyLen=${l2.length}
 `), process.env.CLAUDE_MAX_DUMP_REQUESTS === "1") {
         let s2 = { ...e2, messages: `[${e2.messages?.length ?? 0} messages]`, system: `[${typeof e2.system == "string" ? e2.system.length : "array"}]` };
-        i3(j(K(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: t2, body: s2 }) + `
+        i3(K(j(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: t2, body: s2 }) + `
 `);
       }
     } catch {}
@@ -39429,7 +39454,7 @@ var ze = class {
       clearTimeout(n2);
       try {
         let { appendFileSync: t3 } = s("fs");
-        t3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - o2}ms err=${e3.message}
+        t3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - o2}ms err=${e3.message}
 `);
       } catch {}
       throw new q("Network error", e3);
@@ -39441,8 +39466,8 @@ var ze = class {
         t3[i4] = e4;
       });
       let i3 = { ts: new Date().toISOString(), pid: process.pid, status: a2.status, statusText: a2.statusText, ttfbMs: Date.now() - o2, headers: t3 };
-      e3(j(K(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
-`), e3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${a2.status} ttfb=${Date.now() - o2}ms
+      e3(K(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
+`), e3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${a2.status} ttfb=${Date.now() - o2}ms
 `);
     } catch {}
     if (this.lastRateLimitInfo = this.parseRateLimitHeaders(a2.headers), !a2.ok) {
@@ -39455,7 +39480,7 @@ var ze = class {
         let { appendFileSync: i3 } = s("fs"), r3 = {};
         a2.headers.forEach((e4, t4) => {
           r3[t4] = e4;
-        }), i3(j(K(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: a2.status, requestId: t3, headers: r3, body: e3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
+        }), i3(K(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: a2.status, requestId: t3, headers: r3, body: e3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
 `);
       } catch {}
       throw a2.status === 429 ? new Q(`Rate limited: ${e3}`, this.lastRateLimitInfo, 429) : new G(`API error ${a2.status}: ${e3}`, a2.status, t3);
@@ -39499,7 +39524,7 @@ var ze = class {
             if (e5) {
               o2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens, cacheReadInputTokens: e5.cache_read_input_tokens };
               try {
-                H(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(e5)}
+                W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(e5)}
 `);
               } catch {}
             }
@@ -39508,7 +39533,7 @@ var ze = class {
           if (r3 === "content_block_start") {
             let { index: e5, content_block: i4 } = t3;
             if (i4.type === "tool_use") {
-              let t4 = He(i4.name);
+              let t4 = je(i4.name);
               a2.set(e5, { type: "tool_use", id: i4.id, name: t4, input: "" }), yield { type: "tool_use_start", id: i4.id, name: t4 };
             } else
               i4.type === "text" ? a2.set(e5, { type: "text", text: "" }) : i4.type === "thinking" && a2.set(e5, { type: "thinking", thinking: "", signature: i4.signature ?? undefined });
@@ -39553,18 +39578,18 @@ var ze = class {
   }
   buildHeaders(e2) {
     let t2 = this.buildBetas(e2);
-    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": t2.join(","), "anthropic-dangerous-direct-browser-access": "true", "x-app": "cli", "User-Agent": `claude-cli/${Ue}`, "X-Claude-Code-Session-Id": this.sessionId };
+    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": t2.join(","), "anthropic-dangerous-direct-browser-access": "true", "x-app": "cli", "User-Agent": `claude-cli/${He}`, "X-Claude-Code-Session-Id": this.sessionId };
   }
   buildRequestBody(e2) {
-    let t2, i2 = this.computeFingerprint(e2.messages), s2 = `x-anthropic-billing-header: cc_version=${Ue}.${i2}; cc_entrypoint=cli; cch=00000;`;
+    let t2, i2 = this.computeFingerprint(e2.messages), s2 = `x-anthropic-billing-header: cc_version=${He}.${i2}; cc_entrypoint=cli; cch=00000;`;
     t2 = (typeof e2.system == "string" ? e2.system : Array.isArray(e2.system) ? JSON.stringify(e2.system) : "").includes("x-anthropic-billing-header") ? e2.system : typeof e2.system == "string" ? s2 + `
 ` + e2.system : Array.isArray(e2.system) ? [{ type: "text", text: s2 }, ...e2.system] : s2;
     let r2 = { model: e2.model, messages: e2.messages, max_tokens: Z(e2.model, e2.maxTokens), stream: true, system: t2, metadata: { user_id: JSON.stringify({ device_id: this.deviceId, account_uuid: this.accountUuid, session_id: this.sessionId }) } };
     if (e2.tools && e2.tools.length > 0) {
-      let { remapped: t3 } = We(e2.tools);
+      let { remapped: t3 } = Ke(e2.tools);
       if (r2.tools = t3, e2.toolChoice) {
         let t4 = typeof e2.toolChoice == "string" ? { type: e2.toolChoice } : { ...e2.toolChoice };
-        t4.type === "tool" && t4.name && Be[t4.name] && (t4.name = Be[t4.name]), r2.tool_choice = t4;
+        t4.type === "tool" && t4.name && Je[t4.name] && (t4.name = Je[t4.name]), r2.tool_choice = t4;
       }
     }
     e2.caching !== false && this.addCacheMarkers(r2);
@@ -39597,6 +39622,22 @@ var ze = class {
     return i2 || t2.push("claude-code-20250219"), t2.push("oauth-2025-04-20"), /\[1m\]/i.test(e2.model) && t2.push("context-1m-2025-08-07"), !i2 && e2.thinking?.type !== "disabled" && t2.push("interleaved-thinking-2025-05-14"), e2.effort && t2.push("effort-2025-11-24"), e2.fast && t2.push("fast-mode-2026-02-01"), i2 || t2.push("context-management-2025-06-27"), t2.push("task-budgets-2026-03-13"), t2.push("redact-thinking-2026-02-12"), t2.push("prompt-caching-scope-2026-01-05"), t2.push("fine-grained-tool-streaming-2025-05-14"), e2.extraBetas && t2.push(...e2.extraBetas), t2;
   }
   async ensureAuth() {
+    if (this.accessToken && this.credentialStore.hasChanged)
+      try {
+        if (await this.credentialStore.hasChanged()) {
+          try {
+            let e2 = (this.accessToken ?? "").slice(13, 21);
+            W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${e2} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token
+`);
+          } catch {}
+          this.accessToken = null, this.refreshToken = null, this.expiresAt = 0;
+        }
+      } catch (e2) {
+        try {
+          W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_MTIME_CHECK_FAILED pid=${process.pid} error=${e2?.message ?? String(e2)}
+`);
+        } catch {}
+      }
     if (!this.accessToken || this.isTokenExpired())
       return this.pendingAuth || (this.pendingAuth = this.S().finally(() => {
         this.pendingAuth = null;
@@ -39606,10 +39647,24 @@ var ze = class {
     this.credentialStore.hasChanged && await this.credentialStore.hasChanged() && await this.loadFromStore(), (!this.accessToken || this.isTokenExpired()) && (!this.accessToken && (await this.loadFromStore(), this.accessToken && !this.isTokenExpired()) || this.accessToken && this.isTokenExpired() && await this.refreshTokenWithTripleCheck());
   }
   async loadFromStore() {
-    let e2 = await this.credentialStore.read();
-    if (!e2?.accessToken)
+    let e2 = this.accessToken, t2 = await this.credentialStore.read();
+    if (!t2?.accessToken)
       throw new z('No OAuth tokens found. Run "claude login" first or provide credentials.');
-    this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, this.expiresAt = e2.expiresAt, !this.tokenIssuedAt && this.expiresAt && (this.tokenIssuedAt = Date.now()), this.scheduleProactiveRotation();
+    this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, !this.tokenIssuedAt && this.expiresAt && (this.tokenIssuedAt = Date.now()), this.scheduleProactiveRotation();
+    try {
+      let i2 = t2.accessToken.slice(13, 21);
+      if (e2)
+        if (e2 !== t2.accessToken) {
+          let t3 = e2.slice(13, 21);
+          W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${t3} newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
+`);
+        } else
+          W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=reload hint=${i2}
+`);
+      else
+        W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
+`);
+    } catch {}
   }
   isTokenExpired() {
     return !!this.expiresAt && Date.now() + Ne >= this.expiresAt;
@@ -39630,7 +39685,7 @@ var ze = class {
   async forceReLogin() {
     this.initialLoad && await this.initialLoad, this.dbg("FORCE RE-LOGIN requested \u2014 opening browser OAuth flow"), this.emitTokenStatus("critical", "Initiating browser re-login \u2014 refresh token may be dead");
     try {
-      let { oauthLogin: e2 } = await Promise.resolve().then(() => (A(), r)), t2 = this.credentialStore instanceof Ge ? this.credentialStore.path : j(K(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
+      let { oauthLogin: e2 } = await Promise.resolve().then(() => (A(), r)), t2 = this.credentialStore instanceof Ye ? this.credentialStore.path : K(j(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
       return this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.emitTokenStatus("rotated", "Re-login successful \u2014 fresh tokens"), this.scheduleProactiveRotation(), this.dbg(`RE-LOGIN SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()}`), true;
     } catch (e2) {
       let t2 = e2?.message ?? String(e2);
@@ -39641,7 +39696,7 @@ var ze = class {
     if (!this.expiresAt)
       return { expiresAt: null, expiresInMs: 0, lifetimePct: 0, failedRefreshes: this.proactiveRefreshFailures, status: "unknown" };
     let e2, t2 = Date.now(), i2 = this.expiresAt - t2, s2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? Math.max(0, i2 / s2) : 0;
-    return e2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < Ie ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: e2 };
+    return e2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < Le ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: e2 };
   }
   async getTokenHealthAsync() {
     return this.initialLoad && await this.initialLoad, this.getTokenHealth();
@@ -39652,13 +39707,13 @@ var ze = class {
     let e2 = Date.now(), t2 = this.expiresAt - e2;
     if (t2 <= 0)
       return void this.emitTokenStatus("expired", "Token has expired");
-    let i2 = Math.max(0.8 * t2, xe), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, t2 - Ne);
+    let i2 = Math.max(0.8 * t2, Fe), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, t2 - Ne);
     if (r2 <= 0)
       return this.dbg(`proactive rotation: delay=${r2}ms <= 0, scheduling emergency refresh in 30s`), void (this.tokenRotationTimer || (this.tokenRotationTimer = setTimeout(() => {
         this.tokenRotationTimer = null, this.proactiveRefresh();
       }, 30000), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && ("unref" in this.tokenRotationTimer) && this.tokenRotationTimer.unref()));
     let n2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * t2, a2 = n2 > 0 ? t2 / n2 : 1;
-    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < Ie && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(t2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
+    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < Le && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(t2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
       this.tokenRotationTimer = null, this.proactiveRefresh();
     }, r2), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
   }
@@ -39668,13 +39723,13 @@ var ze = class {
         let e3 = await this.credentialStore.read();
         if (e3 && !(Date.now() + Ne >= e3.expiresAt)) {
           let t3 = e3.expiresAt - Date.now();
-          if (t3 >= Le)
+          if (t3 >= Pe)
             return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
           this.dbg(`proactive refresh: disk token has only ${Math.round(t3 / 60000)}min left (need ${Math.round(20)}min) \u2014 waiting for cooldown`);
         }
       } catch {}
       if (this.dbg("proactive refresh skipped: global cooldown active, no fresh token found"), !this.tokenRotationTimer) {
-        let e3 = Math.max(xe, 60000);
+        let e3 = Math.max(Fe, 60000);
         this.tokenRotationTimer = setTimeout(() => {
           this.tokenRotationTimer = null, this.proactiveRefresh();
         }, e3), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
@@ -39682,13 +39737,13 @@ var ze = class {
       return;
     }
     let e2 = Date.now();
-    if (e2 - this.lastRefreshAttemptAt < xe)
+    if (e2 - this.lastRefreshAttemptAt < Fe)
       return void this.dbg("proactive refresh skipped: too recent");
     this.lastRefreshAttemptAt = e2, this.dbg("proactive rotation: refreshing token silently...");
-    let t2 = await Ke();
+    let t2 = await ze();
     if (!t2) {
       this.dbg("proactive rotation: lock unavailable (another PID refreshing) \u2014 polling disk");
-      let e3 = await qe(this.credentialStore, 45000, Le);
+      let e3 = await Ge(this.credentialStore, 45000, Pe);
       if (e3) {
         this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0;
         let t3 = e3.expiresAt - Date.now();
@@ -39701,7 +39756,7 @@ var ze = class {
       let e3 = await this.credentialStore.read();
       if (e3 && !(Date.now() + Ne >= e3.expiresAt)) {
         let t4 = e3.expiresAt - Date.now();
-        if (t4 >= Le)
+        if (t4 >= Pe)
           return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(t4 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t4 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
       }
       let t3 = this.expiresAt ?? 0;
@@ -39713,11 +39768,11 @@ var ze = class {
       let t3 = e3?.message ?? String(e3);
       if (this.dbg(`proactive rotation FAILED (#${this.proactiveRefreshFailures}): ${t3}`), t3.includes("429") || t3.includes("rate limit")) {
         this.refreshConsecutive429s++;
-        let e4 = Math.min(xe * Math.pow(2, this.refreshConsecutive429s), Pe);
+        let e4 = Math.min(Fe * Math.pow(2, this.refreshConsecutive429s), Be);
         this.setRefreshCooldown(e4), this.dbg(`proactive rotation: 429 cooldown ${Math.round(e4 / 1000)}s (attempt #${this.refreshConsecutive429s})`);
       }
       let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = this.tokenIssuedAt > 0 && this.expiresAt ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? i2 / s2 : 0;
-      i2 <= Ne ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${t3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}. Consider forceReLogin()`) : r2 < Ie && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}`), this.expiresAt && this.expiresAt > Date.now() + Ne ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
+      i2 <= Ne ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${t3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}. Consider forceReLogin()`) : r2 < Le && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}`), this.expiresAt && this.expiresAt > Date.now() + Ne ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
     } finally {
       t2 && t2();
     }
@@ -39728,34 +39783,34 @@ var ze = class {
   }
   isRefreshOnCooldown() {
     try {
-      let e2 = L(Fe, "utf8"), t2 = parseInt(e2.trim());
+      let e2 = L(Ue, "utf8"), t2 = parseInt(e2.trim());
       if (Date.now() < t2)
         return true;
       try {
-        W(Fe);
+        J(Ue);
       } catch {}
     } catch {}
     return false;
   }
   setRefreshCooldown(e2) {
     try {
-      let t2 = j(K(), ".claude");
+      let t2 = K(j(), ".claude");
       try {
         U(t2, { recursive: true });
       } catch {}
-      F(Fe, `${Date.now() + e2}
+      F(Ue, `${Date.now() + e2}
 `);
     } catch {}
   }
   clearRefreshCooldown() {
     try {
-      W(Fe);
+      J(Ue);
     } catch {}
     this.refreshConsecutive429s = 0;
   }
   dbg(e2) {
     try {
-      H(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${e2}
+      W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${e2}
 `);
     } catch {}
   }
@@ -39763,10 +39818,10 @@ var ze = class {
     let e2 = await this.credentialStore.read();
     if (e2 && !(Date.now() + Ne >= e2.expiresAt))
       return this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, void (this.expiresAt = e2.expiresAt);
-    let t2 = await Ke();
+    let t2 = await ze();
     if (!t2) {
       this.dbg("refresh: lock unavailable (another PID refreshing) \u2014 polling disk");
-      let e3 = await qe(this.credentialStore, 45000, Ne);
+      let e3 = await Ge(this.credentialStore, 45000, Ne);
       return e3 ? (this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, void this.dbg(`refresh: picked up fresh token from disk (${Math.round((e3.expiresAt - Date.now()) / 60000)}min remaining)`)) : (this.dbg("refresh: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh as last resort"), void await this.doTokenRefresh());
     }
     try {
@@ -39784,10 +39839,10 @@ var ze = class {
       let t2 = await this.credentialStore.read();
       if (t2 && t2.accessToken !== e2)
         return this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, true;
-      let i2 = await Ke();
+      let i2 = await ze();
       if (!i2) {
         this.dbg("handleAuth401: lock unavailable \u2014 polling disk for fresh token");
-        let t3 = await qe(this.credentialStore, 45000, Ne);
+        let t3 = await Ge(this.credentialStore, 45000, Ne);
         return t3 && t3.accessToken !== e2 ? (this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.dbg(`handleAuth401: picked up fresh token from disk (${Math.round((t3.expiresAt - Date.now()) / 60000)}min remaining)`), true) : (this.dbg("handleAuth401: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh"), await this.doTokenRefresh(), true);
       }
       try {
@@ -39814,14 +39869,14 @@ var ze = class {
         throw new z("Token refresh on cooldown due to rate limiting. Will retry later.");
       this.dbg("refresh: ignoring cooldown \u2014 token critically close to expiry");
     }
-    let t2 = [500, 1500, 3000, 5000, 8000], i2 = this.credentialStore.path ?? j(K(), ".claude", ".credentials.json");
+    let t2 = [500, 1500, 3000, 5000, 8000], i2 = this.credentialStore.path ?? K(j(), ".claude", ".credentials.json");
     try {
-      let t3 = J(i2).mtimeMs, s3 = Date.now() - t3;
+      let t3 = H(i2).mtimeMs, s3 = Date.now() - t3;
       if (s3 < 60000) {
         let t4 = await this.credentialStore.read();
         if (t4 && !(Date.now() + Ne >= t4.expiresAt)) {
           let i3 = t4.expiresAt - Date.now(), r2 = t4.accessToken !== this.accessToken;
-          if (!e2 || r2 && i3 >= Le)
+          if (!e2 || r2 && i3 >= Pe)
             return this.accessToken = t4.accessToken, this.refreshToken = t4.refreshToken, this.expiresAt = t4.expiresAt, this.tokenIssuedAt = Date.now(), this.dbg(`refresh: skipped (mtime fresh ${Math.round(s3 / 1000)}s ago, ${Math.round(i3 / 60000)}min remaining) \u2014 picked up sibling/CLI write`), void this.scheduleProactiveRotation();
         }
       }
@@ -39832,7 +39887,7 @@ var ze = class {
         if (!e2)
           return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process already refreshed (attempt ${i3})`);
         let t3 = s3.expiresAt - Date.now();
-        if (s3.accessToken !== this.accessToken && t3 >= Le)
+        if (s3.accessToken !== this.accessToken && t3 >= Pe)
           return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(t3 / 60000)}min remaining) (attempt ${i3})`);
         s3.accessToken !== this.accessToken ? (this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(t3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
       }
@@ -39844,7 +39899,7 @@ var ze = class {
         return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK \u2014 expires in ${Math.round(e3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
       }
       if (r2.status === 429) {
-        let e3 = Math.min(60000, Pe);
+        let e3 = Math.min(60000, Be);
         throw this.setRefreshCooldown(e3), this.dbg(`TOKEN_REFRESH_RETRY status=429 attempt=${i3 + 1}/5 \u2014 bailing out, cooldown ${e3}ms (per-token rate limit)`), new z("Token refresh rate-limited (429) \u2014 will pickup from disk or retry after cooldown");
       }
       if (r2.status >= 500 && i3 < 4) {
@@ -39859,7 +39914,7 @@ var ze = class {
       throw new z("Token refresh failed after all retries and race recovery");
     this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt;
     try {
-      H(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
+      W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
 `);
     } catch {}
   }
@@ -39939,19 +39994,19 @@ var ze = class {
         }
       }
     }
-    let i2 = `59cf53e54c78${[4, 7, 20].map((e3) => t2[e3] || "0").join("")}${Ue}`;
-    return N("sha256").update(i2).digest("hex").slice(0, 3);
+    let i2 = `59cf53e54c78${[4, 7, 20].map((e3) => t2[e3] || "0").join("")}${He}`;
+    return x("sha256").update(i2).digest("hex").slice(0, 3);
   }
   readAccountUuid() {
     try {
-      let e2 = j(K(), ".claude", "claude_code_config.json");
+      let e2 = K(j(), ".claude", "claude_code_config.json");
       return JSON.parse(L(e2, "utf8")).oauthAccount?.accountUuid ?? "";
     } catch {
       return "";
     }
   }
 };
-var Ge = class {
+var Ye = class {
   constructor(e2) {
     this.path = e2;
   }
@@ -39973,7 +40028,7 @@ var Ge = class {
       t2 = JSON.parse(L(this.path, "utf8"));
     } catch {}
     t2.claudeAiOauth = e2;
-    let i2 = j(this.path, "..");
+    let i2 = K(this.path, "..");
     try {
       U(i2, { recursive: true });
     } catch {}
@@ -39985,13 +40040,13 @@ var Ge = class {
   }
   getMtime() {
     try {
-      return J(this.path).mtimeMs;
+      return H(this.path).mtimeMs;
     } catch {
       return 0;
     }
   }
 };
-var Qe = class {
+var Xe = class {
   static {
     i(this, "MemoryCredentialStore");
   }
@@ -40006,7 +40061,7 @@ var Qe = class {
     this.credentials = { ...e2 };
   }
 };
-var Ye = class _Conversation {
+var Ve = class _Conversation {
   static {
     i(this, "Conversation");
   }
@@ -40133,19 +40188,19 @@ var Ye = class _Conversation {
     this.M.inputTokens += e2.inputTokens, this.M.outputTokens += e2.outputTokens, this.M.cacheCreationInputTokens = (this.M.cacheCreationInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), this.M.cacheReadInputTokens = (this.M.cacheReadInputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0);
   }
 };
-function it(e2, t2) {
-  Ze(et(e2), { recursive: true });
+function rt(e2, t2) {
+  tt(it(e2), { recursive: true });
   let i2 = null, s2 = [];
   for (let e3 of t2) {
-    let t3 = tt(), r2 = { type: e3.role === "user" ? "user" : "assistant", uuid: t3, parentUuid: i2, timestamp: Date.now(), content: e3.content };
+    let t3 = st(), r2 = { type: e3.role === "user" ? "user" : "assistant", uuid: t3, parentUuid: i2, timestamp: Date.now(), content: e3.content };
     s2.push(JSON.stringify(r2)), i2 = t3;
   }
-  Xe(e2, s2.join(`
+  et(e2, s2.join(`
 `) + `
 `, "utf8");
 }
-function st(e2) {
-  let t2 = Ve(e2, "utf8"), i2 = [];
+function nt(e2) {
+  let t2 = Ze(e2, "utf8"), i2 = [];
   for (let e3 of t2.split(`
 `)) {
     if (!e3.trim())
@@ -40160,8 +40215,8 @@ function st(e2) {
   }
   return i2;
 }
-i(it, "saveSession"), i(st, "loadSession");
-var rt = class {
+i(rt, "saveSession"), i(nt, "loadSession");
+var at = class {
   static {
     i(this, "CacheMetricsCollector");
   }
@@ -40203,7 +40258,7 @@ var rt = class {
     return this.samples;
   }
 };
-var ot = class {
+var ht = class {
   static {
     i(this, "FileCredentialsProvider");
   }
@@ -40212,7 +40267,7 @@ var ot = class {
   cached = null;
   lastMtimeMs = 0;
   constructor(e2 = {}) {
-    this.path = e2.path ?? lt(), this.expiryBufferMs = e2.expiryBufferMs ?? 300000;
+    this.path = e2.path ?? ct(), this.expiryBufferMs = e2.expiryBufferMs ?? 300000;
   }
   async getAccessToken() {
     if (this.mtimeChanged() && (this.cached = null), (!this.cached || this.isExpired(this.cached)) && (this.cached = this.readFromDisk()), !this.cached?.accessToken)
@@ -40224,7 +40279,7 @@ var ot = class {
   }
   readFromDisk() {
     try {
-      let e2 = nt(this.path, "utf8");
+      let e2 = ot(this.path, "utf8");
       return this.lastMtimeMs = this.getMtime(), JSON.parse(e2).claudeAiOauth ?? null;
     } catch {
       return null;
@@ -40235,7 +40290,7 @@ var ot = class {
   }
   getMtime() {
     try {
-      return at(this.path).mtimeMs;
+      return lt(this.path).mtimeMs;
     } catch {
       return 0;
     }
@@ -40244,13 +40299,13 @@ var ot = class {
     return !!e2.expiresAt && Date.now() + this.expiryBufferMs >= e2.expiresAt;
   }
 };
-function lt() {
+function ct() {
   let e2 = process.env.HOME || process.env.USERPROFILE || "";
   return `${process.env.CLAUDE_CONFIG_DIR || `${e2}/.claude`}/.credentials.json`;
 }
-i(lt, "defaultCredentialsPath");
-var ht = { error: 0, info: 1, debug: 2 };
-var ct = class {
+i(ct, "defaultCredentialsPath");
+var ut = { error: 0, info: 1, debug: 2 };
+var dt = class {
   static {
     i(this, "ConsoleEventEmitter");
   }
@@ -40258,12 +40313,12 @@ var ct = class {
   format;
   write;
   constructor(e2 = {}) {
-    this.minRank = ht[e2.minLevel ?? "info"] ?? 1, this.format = e2.format ?? "human", this.write = e2.writeTarget ?? ((e3) => process.stderr.write(e3 + `
+    this.minRank = ut[e2.minLevel ?? "info"] ?? 1, this.format = e2.format ?? "human", this.write = e2.writeTarget ?? ((e3) => process.stderr.write(e3 + `
 `));
   }
   emit(e2) {
     try {
-      if ((ht[e2.level] ?? 1) > this.minRank)
+      if ((ut[e2.level] ?? 1) > this.minRank)
         return;
       let t2 = e2.ts ?? new Date().toISOString();
       if (this.format === "json")
@@ -40280,19 +40335,19 @@ var ct = class {
     } catch {}
   }
 };
-var ut = class {
+var ft = class {
   static {
     i(this, "NullEventEmitter");
   }
   emit(e2) {}
 };
-var dt = class {
+var pt = class {
   static {
     i(this, "InMemorySessionStore");
   }
   sessions = new Map;
   liveness;
-  constructor(e2 = new ft) {
+  constructor(e2 = new mt) {
     this.liveness = e2;
   }
   getOrCreate(e2, t2, i2) {
@@ -40334,7 +40389,7 @@ var dt = class {
     this.sessions.clear();
   }
 };
-var ft = class {
+var mt = class {
   static {
     i(this, "DefaultLivenessChecker");
   }
@@ -40348,7 +40403,7 @@ var ft = class {
     }
   }
 };
-var pt = class {
+var yt = class {
   static {
     i(this, "NativeFetchUpstream");
   }
@@ -40356,8 +40411,8 @@ var pt = class {
     return fetch(e2, t2);
   }
 };
-var mt = { anthropicBaseUrl: "https://api.anthropic.com", kaIntervalSec: undefined, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
-var yt = class {
+var gt = { anthropicBaseUrl: "https://api.anthropic.com", kaIntervalSec: undefined, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
+var wt = class {
   static {
     i(this, "ProxyClient");
   }
@@ -40371,7 +40426,7 @@ var yt = class {
   reaperTimer;
   lastRateLimit = { status: null, resetAt: null, claim: null, retryAfter: null, utilization5h: null, utilization7d: null };
   constructor(e2) {
-    this.config = { ...mt, ...e2.config }, this.credentials = e2.credentialsProvider, this.events = e2.eventEmitter ?? new ct, this.liveness = e2.livenessChecker ?? new ft, this.store = e2.sessionStore ?? new dt(this.liveness), this.upstream = e2.upstreamFetcher ?? new pt, this.metrics = new rt({ windowMs: 60000, reportIntervalMs: 60000, onSummary: i((e3) => this.events.emit({ level: "info", kind: "CACHE_METRICS_SUMMARY", ...e3 }), "onSummary"), onRegression: i((e3) => this.events.emit({ level: "error", kind: "CACHE_REGRESSION_DETECTED", ...e3 }), "onRegression") }), this.reaperTimer = setInterval(() => {
+    this.config = { ...gt, ...e2.config }, this.credentials = e2.credentialsProvider, this.events = e2.eventEmitter ?? new dt, this.liveness = e2.livenessChecker ?? new mt, this.store = e2.sessionStore ?? new pt(this.liveness), this.upstream = e2.upstreamFetcher ?? new yt, this.metrics = new at({ windowMs: 60000, reportIntervalMs: 60000, onSummary: i((e3) => this.events.emit({ level: "info", kind: "CACHE_METRICS_SUMMARY", ...e3 }), "onSummary"), onRegression: i((e3) => this.events.emit({ level: "error", kind: "CACHE_REGRESSION_DETECTED", ...e3 }), "onRegression") }), this.reaperTimer = setInterval(() => {
       let e3 = this.store.reapDead();
       for (let t2 of e3)
         this.events.emit({ level: "info", kind: "SESSION_DEAD", sessionId: t2, reason: "pid_gone" });
@@ -40402,21 +40457,21 @@ var yt = class {
     try {
       a2 = JSON.parse(o2);
     } catch {
-      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), Tt(400, { error: "Invalid JSON" });
+      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), Et(400, { error: "Invalid JSON" });
     }
     let h2 = a2.model ?? "unknown";
     n2.model = h2;
     let c2 = {};
     for (let [e3, i3] of Object.entries(t2)) {
       let t3 = e3.toLowerCase();
-      gt.includes(t3) || (c2[e3] = i3);
+      kt.includes(t3) || (c2[e3] = i3);
     }
     c2["accept-encoding"] = "identity";
     try {
       let e3 = await this.credentials.getAccessToken();
       c2.Authorization = `Bearer ${e3}`;
     } catch (e3) {
-      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: e3?.message ?? "No OAuth credentials" }), Tt(401, { error: { type: "authentication_error", message: e3?.message ?? "No OAuth credentials" } });
+      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: e3?.message ?? "No OAuth credentials" }), Et(401, { error: { type: "authentication_error", message: e3?.message ?? "No OAuth credentials" } });
     }
     let u2 = c2["anthropic-beta"] ?? c2["Anthropic-Beta"] ?? "";
     if (!u2.includes("oauth-2025-04-20")) {
@@ -40428,7 +40483,7 @@ var yt = class {
       n2.engine.checkRewriteGuard(h2);
     } catch (e3) {
       if (e3?.code === "CACHE_REWRITE_BLOCKED")
-        return Tt(429, { error: { type: "cache_rewrite_blocked", message: e3.message } });
+        return Et(429, { error: { type: "cache_rewrite_blocked", message: e3.message } });
       throw e3;
     }
     let d2, f2, p2, m2 = Date.now();
@@ -40437,7 +40492,7 @@ var yt = class {
     } catch (e3) {
       return this.handleNetworkError(s2, e3);
     }
-    if (this.lastRateLimit = kt(d2.headers), !d2.ok) {
+    if (this.lastRateLimit = Tt(d2.headers), !d2.ok) {
       let e3 = await d2.text().catch(() => "");
       return d2.status === 401 && this.credentials.invalidate(), this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, status: d2.status, msg: e3.slice(0, 200) }), new Response(e3, { status: d2.status, headers: d2.headers });
     }
@@ -40457,7 +40512,7 @@ var yt = class {
   }
   createEngine(e2) {
     let t2 = this.config;
-    return new Ae({ config: { intervalMs: t2.kaIntervalSec !== undefined ? 1000 * t2.kaIntervalSec : undefined, idleTimeoutMs: t2.kaIdleTimeoutSec > 0 ? 1000 * t2.kaIdleTimeoutSec : 1 / 0, minTokens: t2.kaMinTokens, rewriteWarnIdleMs: 1000 * t2.kaRewriteWarnIdleSec, rewriteWarnTokens: t2.kaRewriteWarnTokens, rewriteBlockIdleMs: t2.kaRewriteBlockIdleSec > 0 ? 1000 * t2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: t2.kaRewriteBlockEnabled, onHeartbeat: i((t3) => {
+    return new Ie({ config: { intervalMs: t2.kaIntervalSec !== undefined ? 1000 * t2.kaIntervalSec : undefined, idleTimeoutMs: t2.kaIdleTimeoutSec > 0 ? 1000 * t2.kaIdleTimeoutSec : 1 / 0, minTokens: t2.kaMinTokens, rewriteWarnIdleMs: 1000 * t2.kaRewriteWarnIdleSec, rewriteWarnTokens: t2.kaRewriteWarnTokens, rewriteBlockIdleMs: t2.kaRewriteBlockIdleSec > 0 ? 1000 * t2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: t2.kaRewriteBlockEnabled, onHeartbeat: i((t3) => {
       this.metrics.recordRequest({ kind: "ka", cacheRead: t3.usage.cacheReadInputTokens ?? 0, cacheWrite: t3.usage.cacheCreationInputTokens ?? 0, input: t3.usage.inputTokens ?? 0, model: t3.model }), this.events.emit({ level: "info", kind: "KA_FIRE_COMPLETE", sessionId: e2, model: t3.model, durationMs: t3.durationMs, idleMs: t3.idleMs, usage: { inputTokens: t3.usage.inputTokens, outputTokens: t3.usage.outputTokens, cacheReadInputTokens: t3.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: t3.usage.cacheCreationInputTokens ?? 0 }, rateLimit: t3.rateLimit });
     }, "onHeartbeat"), onTick: i((i2) => {
       let s2 = 1000 * (t2.kaIntervalSec ?? 120);
@@ -40472,7 +40527,7 @@ var yt = class {
     }
     if (!r2.body)
       throw new Error("No response body");
-    yield* _t(r2.body, i2);
+    yield* vt(r2.body, i2);
   }
   async parseSSEAndNotify(e2, t2, i2, s2, r2) {
     try {
@@ -40521,19 +40576,19 @@ var yt = class {
     }
   }
   handleNetworkError(e2, t2) {
-    let i2 = t2?.code ?? t2?.cause?.code ?? "", s2 = String(t2?.message ?? "").toLowerCase(), r2 = wt.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
+    let i2 = t2?.code ?? t2?.cause?.code ?? "", s2 = String(t2?.message ?? "").toLowerCase(), r2 = _t.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
     return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: e2, status: r2 ? 503 : 502, msg: `upstream fetch threw: ${i2 || ""} ${s2}`.trim().slice(0, 200) }), r2 ? new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Upstream network error \u2014 proxy cannot reach Anthropic. Retrying will help once network is restored." } }), { status: 503, headers: { "content-type": "application/json", "retry-after": "2" } }) : new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: `Upstream request failed: ${s2 || i2 || "unknown"}` } }), { status: 502, headers: { "content-type": "application/json" } });
   }
 };
-var gt = ["host", "content-length", "connection", "authorization", "accept-encoding"];
-var wt = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
-function kt(e2) {
+var kt = ["host", "content-length", "connection", "authorization", "accept-encoding"];
+var _t = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
+function Tt(e2) {
   return { status: e2.get("anthropic-ratelimit-unified-status"), resetAt: e2.get("anthropic-ratelimit-unified-reset") ? Number(e2.get("anthropic-ratelimit-unified-reset")) : null, claim: e2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: e2.get("retry-after") ? parseFloat(e2.get("retry-after")) : null, utilization5h: e2.get("anthropic-ratelimit-unified-5h-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-5h-utilization")) : null, utilization7d: e2.get("anthropic-ratelimit-unified-7d-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-7d-utilization")) : null };
 }
-function Tt(e2, t2) {
+function Et(e2, t2) {
   return new Response(JSON.stringify(t2), { status: e2, headers: { "content-type": "application/json" } });
 }
-async function* _t(e2, t2) {
+async function* vt(e2, t2) {
   let i2 = new TextDecoder, s2 = e2.getReader(), r2 = "", n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
   try {
     for (;; ) {
@@ -40568,22 +40623,22 @@ async function* _t(e2, t2) {
     s2.releaseLock();
   }
 }
-i(kt, "parseRateLimitHeaders"), i(Tt, "jsonResponse"), i(_t, "parseSSEToEvents"), A(), A();
-var $t = '{"type":"KeepAlive"}';
-var Mt = 16000;
-var Dt = Math.floor(3200);
-async function Ct(e2, t2, s2) {
-  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(Mt), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
+i(Tt, "parseRateLimitHeaders"), i(Et, "jsonResponse"), i(vt, "parseSSEToEvents"), A(), A();
+var Dt = '{"type":"KeepAlive"}';
+var Ct = 16000;
+var Ot = Math.floor(3200);
+async function At(e2, t2, s2) {
+  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(Ct), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
   if (s2?.keyterms?.length)
     for (let e3 of s2.keyterms)
       n2.append("keyterms", e3);
-  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = St(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, f2 = null, p2 = "", m2 = await new Promise((t3, i2) => {
+  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = bt(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, f2 = null, p2 = "", m2 = await new Promise((t3, i2) => {
     let s3 = setTimeout(() => {
       i2(new Error("voice_stream WebSocket connection timeout (10s)"));
-    }, 1e4), n3 = new URL(r2), l3 = Rt({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${e2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
+    }, 1e4), n3 = new URL(r2), l3 = $t({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${e2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
     l3.on("upgrade", (e3, r3, n4) => {
       clearTimeout(s3);
-      let a3 = bt("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
+      let a3 = Mt("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
       if (e3.headers["sec-websocket-accept"] !== a3)
         return r3.destroy(), void i2(new Error("WebSocket handshake failed: invalid accept header"));
       t3(r3);
@@ -40607,46 +40662,46 @@ async function Ct(e2, t2, s2) {
   function k2(e3, t3) {
     if (m2.destroyed)
       return;
-    let i2, s3 = St(4), r3 = Buffer.alloc(e3.length);
+    let i2, s3 = bt(4), r3 = Buffer.alloc(e3.length);
     for (let t4 = 0;t4 < e3.length; t4++)
       r3[t4] = e3[t4] ^ s3[t4 % 4];
     e3.length < 126 ? (i2 = Buffer.alloc(6), i2[0] = 128 | t3, i2[1] = 128 | e3.length, s3.copy(i2, 2)) : e3.length < 65536 ? (i2 = Buffer.alloc(8), i2[0] = 128 | t3, i2[1] = 254, i2.writeUInt16BE(e3.length, 2), s3.copy(i2, 4)) : (i2 = Buffer.alloc(14), i2[0] = 128 | t3, i2[1] = 255, i2.writeBigUInt64BE(BigInt(e3.length), 2), s3.copy(i2, 10)), m2.write(Buffer.concat([i2, r3]));
   }
   h2 = true, i(y2, "wsSendText"), i(g2, "wsSendBinary"), i(w2, "wsSendClose"), i(k2, "wsSendFrame");
-  let T2 = Buffer.alloc(0);
-  function _2() {
-    for (;T2.length >= 2; ) {
-      let e3 = T2[0], t3 = T2[1], i2 = 15 & e3, s3 = !!(128 & t3), r3 = 127 & t3, n3 = 2;
+  let _2 = Buffer.alloc(0);
+  function T2() {
+    for (;_2.length >= 2; ) {
+      let e3 = _2[0], t3 = _2[1], i2 = 15 & e3, s3 = !!(128 & t3), r3 = 127 & t3, n3 = 2;
       if (r3 === 126) {
-        if (T2.length < 4)
+        if (_2.length < 4)
           return;
-        r3 = T2.readUInt16BE(2), n3 = 4;
+        r3 = _2.readUInt16BE(2), n3 = 4;
       } else if (r3 === 127) {
-        if (T2.length < 10)
+        if (_2.length < 10)
           return;
-        r3 = Number(T2.readBigUInt64BE(2)), n3 = 10;
+        r3 = Number(_2.readBigUInt64BE(2)), n3 = 10;
       }
       s3 && (n3 += 4);
       let a3 = n3 + r3;
-      if (T2.length < a3)
+      if (_2.length < a3)
         return;
-      let o3 = T2.subarray(n3, a3);
+      let o3 = _2.subarray(n3, a3);
       if (s3) {
-        let e4 = T2.subarray(n3 - 4, n3);
+        let e4 = _2.subarray(n3 - 4, n3);
         o3 = Buffer.from(o3);
         for (let t4 = 0;t4 < o3.length; t4++)
           o3[t4] = o3[t4] ^ e4[t4 % 4];
       }
-      if (T2 = T2.subarray(a3), i2 === 1)
-        v2(o3.toString("utf8"));
+      if (_2 = _2.subarray(a3), i2 === 1)
+        E2(o3.toString("utf8"));
       else {
         if (i2 === 8)
-          return void E2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
+          return void v2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
         i2 === 9 && k2(o3, 10);
       }
     }
   }
-  function v2(e3) {
+  function E2(e3) {
     let i2;
     try {
       i2 = JSON.parse(e3);
@@ -40676,21 +40731,21 @@ async function Ct(e2, t2, s2) {
       }
     }
   }
-  function E2(e3, i2) {
+  function v2(e3, i2) {
     if (h2 = false, l2 && (clearInterval(l2), l2 = null), p2) {
       let e4 = p2;
       p2 = "", t2.onTranscript(e4, true);
     }
     d2?.("ws_close"), !u2 && e3 !== 1000 && e3 !== 1005 && t2.onError(`Connection closed: code ${e3}${i2 ? ` \u2014 ${i2}` : ""}`), t2.onClose(), m2.destroy();
   }
-  return i(_2, "processFrames"), i(v2, "handleMessage"), i(E2, "handleClose"), m2.on("data", (e3) => {
-    T2 = Buffer.concat([T2, e3]), _2();
+  return i(T2, "processFrames"), i(E2, "handleMessage"), i(v2, "handleClose"), m2.on("data", (e3) => {
+    _2 = Buffer.concat([_2, e3]), T2();
   }), m2.on("close", () => {
-    h2 && E2(1006, "connection lost");
+    h2 && v2(1006, "connection lost");
   }), m2.on("error", (e3) => {
     u2 || t2.onError(`Socket error: ${e3.message}`);
-  }), y2($t), l2 = setInterval(() => {
-    h2 && y2($t);
+  }), y2(Dt), l2 = setInterval(() => {
+    h2 && y2(Dt);
   }, 8000), { send(e3) {
     !h2 || c2 || g2(Buffer.from(e3));
   }, finalize: () => u2 || c2 ? Promise.resolve("already_closed") : (u2 = true, new Promise((e3) => {
@@ -40710,19 +40765,19 @@ async function Ct(e2, t2, s2) {
     c2 = true, l2 && (clearInterval(l2), l2 = null), h2 = false, m2.destroyed || (w2(), m2.destroy());
   }, isConnected: () => h2 && !m2.destroyed };
 }
-async function Ot(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await Ct(e2, { onTranscript: i((e3, t3) => {
+async function xt(e2, t2, s2) {
+  let r2 = [], n2 = null, a2 = await At(e2, { onTranscript: i((e3, t3) => {
     t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
   }, "onTranscript"), onError: i((e3) => {
     n2 = e3;
   }, "onError"), onClose: i(() => {}, "onClose") }, s2);
   try {
-    let e3 = await Ft(t2), i2 = e3;
+    let e3 = await Ut(t2), i2 = e3;
     e3.length > 44 && e3[0] === 82 && e3[1] === 73 && e3[2] === 70 && e3[3] === 70 && (i2 = e3.subarray(44));
     let r3 = s2?.realtime !== false;
-    for (let e4 = 0;e4 < i2.length && a2.isConnected(); e4 += Dt) {
-      let t3 = i2.subarray(e4, Math.min(e4 + Dt, i2.length));
-      a2.send(t3), r3 && e4 + Dt < i2.length && await Lt(80);
+    for (let e4 = 0;e4 < i2.length && a2.isConnected(); e4 += Ot) {
+      let t3 = i2.subarray(e4, Math.min(e4 + Ot, i2.length));
+      a2.send(t3), r3 && e4 + Ot < i2.length && await Pt(80);
     }
     await a2.finalize();
   } finally {
@@ -40732,17 +40787,17 @@ async function Ot(e2, t2, s2) {
     throw new Error(`Transcription error: ${n2}`);
   return r2.join(" ");
 }
-async function At(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await Ct(e2, { onTranscript: i((e3, t3) => {
+async function It(e2, t2, s2) {
+  let r2 = [], n2 = null, a2 = await At(e2, { onTranscript: i((e3, t3) => {
     t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
   }, "onTranscript"), onError: i((e3) => {
     n2 = e3;
   }, "onError"), onClose: i(() => {}, "onClose") }, s2);
   try {
-    let e3 = Pt();
+    let e3 = Bt();
     if (!e3)
       throw new Error("No audio converter found. Install ffmpeg or sox.");
-    await Ut(a2, t2, e3, s2?.realtime !== false), await a2.finalize();
+    await Ht(a2, t2, e3, s2?.realtime !== false), await a2.finalize();
   } finally {
     a2.close();
   }
@@ -40751,45 +40806,45 @@ async function At(e2, t2, s2) {
   return r2.join(" ");
 }
 function Nt(e2, t2) {
-  if (xt("rec")) {
-    let i2 = vt("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(Mt), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
+  if (Ft("rec")) {
+    let i2 = Rt("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(Ct), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
     return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
-  if (xt("arecord")) {
-    let i2 = vt("arecord", ["-f", "S16_LE", "-r", String(Mt), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
+  if (Ft("arecord")) {
+    let i2 = Rt("arecord", ["-f", "S16_LE", "-r", String(Ct), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
     return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
   return null;
 }
-function It() {
-  return xt("rec") ? { available: true, tool: "sox", installHint: null } : xt("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
+function Lt() {
+  return Ft("rec") ? { available: true, tool: "sox", installHint: null } : Ft("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
 }
-function xt(e2) {
-  return Et(e2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
+function Ft(e2) {
+  return St(e2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
 }
-function Lt(e2) {
+function Pt(e2) {
   return new Promise((t2) => setTimeout(t2, e2));
 }
-async function Ft(e2) {
+async function Ut(e2) {
   let { readFile: t2 } = await import("fs/promises");
   return t2(e2);
 }
-function Pt() {
-  return xt("ffmpeg") ? "ffmpeg" : xt("sox") ? "sox" : null;
+function Bt() {
+  return Ft("ffmpeg") ? "ffmpeg" : Ft("sox") ? "sox" : null;
 }
-async function Ut(e2, t2, i2, s2) {
-  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(Mt), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(Mt), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = vt(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
+async function Ht(e2, t2, i2, s2) {
+  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(Ct), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(Ct), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = Rt(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
   return new Promise((t3, r3) => {
     let a2 = Date.now();
     n2.stdout?.on("data", async (t4) => {
       if (e2.isConnected()) {
         if (e2.send(t4), s2) {
           let e3 = t4.length / 32000 * 1000, i3 = Date.now() - a2, s3 = Math.max(0, 0.8 * e3 - i3);
-          s3 > 10 && (n2.stdout?.pause(), await Lt(s3), n2.stdout?.resume()), a2 = Date.now();
+          s3 > 10 && (n2.stdout?.pause(), await Pt(s3), n2.stdout?.resume()), a2 = Date.now();
         }
       } else
         n2.kill("SIGTERM");
@@ -40798,7 +40853,7 @@ async function Ut(e2, t2, i2, s2) {
     }), n2.on("error", r3);
   });
 }
-i(Ct, "connectVoiceStream"), i(Ot, "transcribeFile"), i(At, "transcribeAudioFile"), i(Nt, "startMicRecording"), i(It, "checkVoiceDeps"), i(xt, "hasCommand"), i(Lt, "sleep"), i(Ft, "readFileAsBuffer"), i(Pt, "findConverter"), i(Ut, "streamConvertedAudio");
+i(At, "connectVoiceStream"), i(xt, "transcribeFile"), i(It, "transcribeAudioFile"), i(Nt, "startMicRecording"), i(Lt, "checkVoiceDeps"), i(Ft, "hasCommand"), i(Pt, "sleep"), i(Ut, "readFileAsBuffer"), i(Bt, "findConverter"), i(Ht, "streamConvertedAudio");
 
 // provider.ts
 import { appendFileSync } from "fs";
@@ -41783,7 +41838,7 @@ function createClaudeMax(options = {}) {
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? "1800", 10) || 1800) * 1000;
   let cacheConfigSnapshot = {};
   try {
-    const c2 = Se();
+    const c2 = be();
     cacheConfigSnapshot = {
       cacheTtlMs: c2.cacheTtlMs,
       cacheTtlMin: Math.round(c2.cacheTtlMs / 60000),
@@ -41806,7 +41861,7 @@ function createClaudeMax(options = {}) {
     rewriteBlockEnabled,
     cacheConfig: cacheConfigSnapshot
   });
-  const sdk = new ze({
+  const sdk = new Qe({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
     expiresAt: options.expiresAt,

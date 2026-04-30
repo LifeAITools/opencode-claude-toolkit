@@ -396,6 +396,15 @@ export default {
       dbg('Not logged in — run: opencode providers login -p claude-max')
     }
 
+    // Note: quota-consumer moved to @life-ai-tools/opencode-signal-wire/
+    // quota-watcher.ts on 2026-04-30 as part of the architectural cleanup
+    // (signal-wire-architecture-v3 closure). This package no longer owns
+    // any context-injection paths — those are all dispatched through the
+    // signal-wire engine via injectContextEvent / injectWakeEvent. See:
+    //   - claude-code-sdk/packages/opencode-signal-wire/quota-watcher.ts
+    //   - kiberos-platform/PRPs/signal-wire-architecture-v3/AUDIT-FULL.md
+    //   - handovers/2026-04-30-quota-system-phase1-deployed.md (Quota stage Q)
+
     return {
       // ─── Config: register Claude Max as a provider ───────
       config: async (config: any) => {

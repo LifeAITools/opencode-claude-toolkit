@@ -371,6 +371,27 @@ export class SignalWire {
     return legacy
   }
 
+  /**
+   * Hook-event evaluation for in-process opencode plugin hooks
+   * (chat.message, tool.execute.before/after, …).
+   *
+   * Returns raw EmitResult[] so the caller can apply hint/block/exec
+   * results with full fidelity (multiple hints, block reasons, etc.).
+   * Unlike `evaluate()`/`evaluateAsync()` which collapse to a single
+   * legacy SignalWireResult, this preserves the full pipeline output.
+   *
+   * The caller is responsible for constructing `SignalWireEvent`
+   * (typically via the `normalize*` helpers in `hook-listener.ts`).
+   */
+  async evaluateHook(event: SignalWireEvent): Promise<EmitResult[]> {
+    this.rulesStore.maybeReload()
+    this.logInvoke('evaluate-hook', event)
+    const results = await this.pipeline.process(event)
+    // Cache so legacy sync evaluate() (if anyone still calls it) sees something
+    this.lastAsyncResult = this.toLegacy(results)
+    return results
+  }
+
   /** External wake-event evaluation (wake-listener.ts consumer). */
   async evaluateExternal(wakeEvent: WakeEvent): Promise<{ matched: CoreRule[]; results: EmitResult[] }> {
     this.rulesStore.maybeReload()

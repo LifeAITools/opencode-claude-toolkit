@@ -30,7 +30,7 @@
  *     current cacheTtlMs at construction (legacy: [60s, 240s] for 5m TTL)
  */
 
-import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -177,12 +177,19 @@ export class KeepaliveEngine {
   // write { "cacheTtlSec": 3600, "intervalSec": 1800, ... } to keepalive.json.
   // See: src/keepalive-config.ts for full schema and recommended values.
   //
-  // Resolved values are cached per-instance at construction time. Hot-reload of
-  // keepalive.json: callers can construct a new engine, or rely on per-tick
-  // re-resolution (TODO: future enhancement). For now, restart of the consumer
-  // process picks up new config.
-  private readonly cacheTtlMs: number
-  private readonly safetyMarginMs: number
+  // Resolved values are cached per-instance at construction time and
+  // **selectively** refreshed in tick() when keepalive.json mtime changes.
+  // Specifically `cacheTtlMs`, `safetyMarginMs`, `intervalMs`,
+  // `idleTimeoutMs`, `minTokens` are live-reloadable. Other params are
+  // fixed at construction.
+  //
+  // Bug fixed 2026-04-30: `cacheTtlMs` was previously `readonly` and only
+  // set in constructor. Long-lived pids that started with the legacy
+  // 5-minute default never saw the SSOT update to 1h, causing
+  // `cache_expired_during_sleep` disarms every 5 minutes despite the
+  // file being correct. Removed `readonly` and added live-reload below.
+  private cacheTtlMs: number
+  private safetyMarginMs: number
   private readonly retryDelaysMs: readonly number[]
   private readonly healthProbeIntervalsMs: readonly number[]
   private readonly healthProbeTimeoutMs: number
@@ -446,6 +453,15 @@ export class KeepaliveEngine {
     if (this.cacheWrittenAt > 0) {
       const cacheAge = Date.now() - this.cacheWrittenAt
       if (cacheAge > this.cacheTtlMs) {
+        // Visible audit trail — log the EXACT values that triggered disarm
+        // so operators can distinguish:
+        //   - Genuine cache-TTL expiry (cacheAge slightly > cacheTtlMs)
+        //   - Stale-config bug (cacheAge tiny, cacheTtlMs is from old default)
+        //   - Sleep/wake edge case (cacheAge huge from machine sleep)
+        try {
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((cacheAge - this.cacheTtlMs) / 1000)}\n`)
+        } catch { /* logging best-effort */ }
         this.registry.clear()
         this.onDisarmed('cache_expired_during_sleep')
         return
@@ -454,13 +470,41 @@ export class KeepaliveEngine {
 
     // Live-reload config from SSOT (~/.claude/keepalive.json via keepalive-config.ts).
     // Cheap: mtime cache inside loadKeepaliveConfig(). Reflects intervalSec /
-    // idleTimeoutSec changes without restart.
+    // idleTimeoutSec / cacheTtlSec changes without restart.
     const liveConfig = loadKeepaliveConfig()
     if (!liveConfig.enabled) {
       this.registry.clear()
       this.stop()
       return
     }
+
+    // ── Critical: cache TTL live-reload ─────────────────────────────
+    // Without this, long-lived pids that started before the SSOT update
+    // keep using the construction-time TTL. Symptom (observed 2026-04-30):
+    // `cache_expired_during_sleep` disarms every 5min despite SSOT now
+    // declaring 3600s, because `this.cacheTtlMs` was `readonly` and frozen.
+    if (liveConfig.cacheTtlMs !== this.cacheTtlMs) {
+      const oldTtl = this.cacheTtlMs
+      this.cacheTtlMs = liveConfig.cacheTtlMs
+      // Visible audit trail — operators tail claude-max-debug.log to see
+      // long-lived pids picking up SSOT changes mid-flight without restart.
+      // Critical for verifying that the live-reload mechanism actually
+      // works (was previously silent on the readonly field — bug visible
+      // only via observed disarm pattern).
+      try {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] CACHE_TTL_RELOADED pid=${process.pid} oldMs=${oldTtl} newMs=${liveConfig.cacheTtlMs} oldMin=${Math.round(oldTtl / 60000)} newMin=${Math.round(liveConfig.cacheTtlMs / 60000)}\n`)
+      } catch { /* logging best-effort */ }
+    }
+    if (liveConfig.safetyMarginMs !== this.safetyMarginMs) {
+      const oldMargin = this.safetyMarginMs
+      this.safetyMarginMs = liveConfig.safetyMarginMs
+      try {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] SAFETY_MARGIN_RELOADED pid=${process.pid} oldMs=${oldMargin} newMs=${liveConfig.safetyMarginMs}\n`)
+      } catch { /* logging best-effort */ }
+    }
+
     // Only apply if values actually differ — keeps behavior identical when
     // file unchanged. Clamp to current intervalClamp range.
     const newInterval = Math.max(liveConfig.intervalClampMin,

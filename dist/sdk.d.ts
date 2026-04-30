@@ -70,10 +70,25 @@ export declare class ClaudeCodeSDK {
      * Ensure valid auth token before API call.
      * Mirrors checkAndRefreshOAuthTokenIfNeeded() from auth.ts:1427.
      *
-     * Triple-check pattern:
-     * 1. Check cached token in memory
-     * 2. If expired, check store (another process may have refreshed)
-     * 3. If still expired, do the refresh
+     * Quad-check pattern (Defect 1 fix completed 2026-04-30):
+     * 1. Check disk mtime FIRST — catches `claude /login` while session running
+     *    so the in-memory token doesn't pin the process to OLD account/org for
+     *    its remaining lifetime.
+     * 2. Check cached token in memory (fast path).
+     * 3. If expired, check store (another process may have refreshed).
+     * 4. If still expired, do the refresh.
+     *
+     * Why mtime-check is in fast path now: previously sat inside _doEnsureAuth
+     * which only ran on token expiry. Tokens live ~8h, so during a normal
+     * working day a re-login was completely invisible to running pids until
+     * natural expiry. Real cost of statSync from page-cache is sub-microsecond
+     * — bounded by the ENTIRE network round-trip cost, ~5 orders of magnitude
+     * cheaper. Negligible per-request overhead.
+     *
+     * Verified bug 2026-04-30T19:43Z: pid 3964910 stayed on OLD-org token
+     * (sk-ant-oat01-e2QfoE17R...) for 11+ minutes after `claude /login` to
+     * NEW org wrote sk-ant-oat01-FDdX0... to disk, while burning OLD-org
+     * quota at util5h=1.0 critical. This fix prevents that scenario.
      */
     private ensureAuth;
     private _doEnsureAuth;

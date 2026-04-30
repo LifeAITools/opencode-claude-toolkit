@@ -23,6 +23,15 @@ import {
 } from './wake-listener'
 import type { WakeListenerHandle } from './wake-listener'
 import { computeSubscribe, loadPreferences } from './wake-preferences'
+import {
+  normalizeChatMessage,
+  normalizeToolBefore,
+  normalizeToolAfter,
+  applyHintResults,
+  applyChatHintResults,
+  applyBlockResults,
+} from './hook-listener'
+import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -250,12 +259,32 @@ export default {
       ? {
           evaluateExternal: async (event: any) => {
             const result = await signalWire.evaluateExternal(event)
+            // Extract hint texts from emitter results so wake-listener can
+            // route them through injectHintText (the canonical context-
+            // injection path). Patch (systematic fix): without this, hint
+            // actions emitted by matched rules were swallowed at the
+            // evaluator boundary, which is why the 18 loaded rules fired
+            // into the void since signal-wire-architecture-v3.
+            const hintTexts: string[] = []
+            for (const r of result.results) {
+              const ar = r as { type?: string; success?: boolean; hintText?: string }
+              if ((ar.type === 'hint' || ar.type === 'respond') && ar.success && ar.hintText) {
+                hintTexts.push(ar.hintText)
+              }
+            }
             return {
               matched: result.matched.length > 0,
+              matchedCount: result.matched.length,
               actionsExecuted: result.results.map(r => ({ type: r.type, wakeTriggered: Boolean((r as any).wakeTriggered) })),
               wakeTriggered: result.results.some(r => Boolean((r as any).wakeTriggered)),
+              hintTexts,
             }
           },
+          // Direct in-process pipeline access for hook normalizers
+          // (chat.message, tool.execute.before/after). Returns raw
+          // EmitResult[] so the hook caller can apply hint/block results
+          // with full fidelity.
+          evaluateHook: (event: any) => signalWire.evaluateHook(event),
         }
       : null
     let wakeHandle: WakeListenerHandle | null = null
@@ -306,6 +335,8 @@ export default {
       }
     }
 
+    let quotaHandle: QuotaWatcherHandle | null = null
+
     if (serverUrl) {
       try {
         logStep('WAKE_LISTENER_STARTING', { sessionId, agentInstanceId })
@@ -344,6 +375,22 @@ export default {
       logStep('WAKE_LISTENER_SKIPPED', { reason: 'serverUrl_absent', sessionId })
     }
 
+    // ─── Quota Watcher ─────────────────────────────────────────────
+    // Independent of wake-listener (file-watcher, not HTTP). Starts even
+    // when serverUrl is absent — quota-status.json is local and only needs
+    // signalWire engine for routing. Will degrade gracefully (direct-
+    // inject via injectContextEvent) if signalWire is null.
+    try {
+      quotaHandle = startQuotaWatcher({
+        signalWire: signalWireEngine,
+        resolveSessionId: () => boundSessionId ?? (sessionId !== 'unknown' ? sessionId : null),
+        log: (msg) => dbg(msg),
+      })
+      logStep('QUOTA_WATCHER_STARTED', { pid: process.pid })
+    } catch (e: any) {
+      logStep('QUOTA_WATCHER_FAILED_OPEN', { error: e?.message ?? String(e) })
+    }
+
     return {
       event: async ({ event }: { event: any }) => {
         const eventType = eventTypeOf(event)
@@ -373,10 +420,102 @@ export default {
           } catch (e: any) {
             logStep('WAKE_LISTENER_STOP_FAILED_OPEN', { error: e?.message ?? String(e) })
           }
+          try {
+            if (quotaHandle) {
+              quotaHandle.stop()
+              logStep('QUOTA_WATCHER_STOPPED', { eventType })
+            }
+          } catch (e: any) {
+            logStep('QUOTA_WATCHER_STOP_FAILED_OPEN', { error: e?.message ?? String(e) })
+          }
         }
       },
       pre_tool_use: async ({ toolName, input }: { toolName: string; input?: any }) => {
         return await handlePreToolUseSpawnCheck(toolName, boundSessionId ?? sessionId, input)
+      },
+
+      // ─── In-process rule-engine hooks (signal-wire-architecture-v3 Stage 2) ─
+      // Closes the "НЕ мигрировал opencode-claude" item from
+      // PRPs/signal-wire-architecture-v3/AUDIT-FULL.md. The hook normalizers,
+      // appliers, and signalWire.evaluateHook() route all rule-driven
+      // injection (hint/block/exec) through the canonical
+      // @kiberos/signal-wire-core engine — same engine wake-listener already
+      // uses via evaluateExternal, but for in-process events.
+
+      'chat.message': async (input: any, output: any) => {
+        if (!signalWireEngine) return
+        try {
+          const event = normalizeChatMessage(input ?? {}, output ?? { parts: [] })
+          // Use bound session if available — input.sessionID is authoritative
+          // but boundSessionId fallback handles the rare case where opencode
+          // delivers the hook before session.created bookkeeping settles.
+          if (!event.sessionId && boundSessionId) {
+            ;(event as any).sessionId = boundSessionId
+          }
+          const results = await signalWireEngine.evaluateHook(event)
+          const matched = results.length
+          if (matched > 0) {
+            const injected = applyChatHintResults(results, output ?? { parts: [] })
+            logStep('HOOK_FIRED', {
+              hook: 'chat.message',
+              sessionId: event.sessionId ?? 'unbound',
+              matched,
+              hintsInjected: injected,
+            })
+          }
+        } catch (e: any) {
+          logStep('HOOK_FAILED_OPEN', { hook: 'chat.message', error: e?.message ?? String(e) })
+        }
+      },
+
+      'tool.execute.before': async (input: any, output: any) => {
+        if (!signalWireEngine) return
+        try {
+          const event = normalizeToolBefore(input ?? { tool: 'unknown', sessionID: '', callID: '' }, output ?? { args: {} })
+          if (!event.sessionId && boundSessionId) {
+            ;(event as any).sessionId = boundSessionId
+          }
+          const results = await signalWireEngine.evaluateHook(event)
+          if (results.length > 0) {
+            const blockReason = applyBlockResults(results, output ?? { args: {} }, input?.tool)
+            logStep('HOOK_FIRED', {
+              hook: 'tool.execute.before',
+              tool: input?.tool,
+              sessionId: event.sessionId ?? 'unbound',
+              matched: results.length,
+              blocked: Boolean(blockReason),
+              blockReason: blockReason ?? undefined,
+            })
+          }
+        } catch (e: any) {
+          logStep('HOOK_FAILED_OPEN', { hook: 'tool.execute.before', error: e?.message ?? String(e) })
+        }
+      },
+
+      'tool.execute.after': async (input: any, output: any) => {
+        if (!signalWireEngine) return
+        try {
+          const event = normalizeToolAfter(
+            input ?? { tool: 'unknown', sessionID: '', callID: '', args: {} },
+            output ?? { title: '', output: '', metadata: {} },
+          )
+          if (!event.sessionId && boundSessionId) {
+            ;(event as any).sessionId = boundSessionId
+          }
+          const results = await signalWireEngine.evaluateHook(event)
+          if (results.length > 0) {
+            const injected = applyHintResults(results, output ?? { output: '', title: '', metadata: {} })
+            logStep('HOOK_FIRED', {
+              hook: 'tool.execute.after',
+              tool: input?.tool,
+              sessionId: event.sessionId ?? 'unbound',
+              matched: results.length,
+              hintsInjected: injected,
+            })
+          }
+        } catch (e: any) {
+          logStep('HOOK_FAILED_OPEN', { hook: 'tool.execute.after', error: e?.message ?? String(e) })
+        }
       },
     }
   },

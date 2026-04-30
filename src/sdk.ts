@@ -902,13 +902,63 @@ export class ClaudeCodeSDK {
    * Ensure valid auth token before API call.
    * Mirrors checkAndRefreshOAuthTokenIfNeeded() from auth.ts:1427.
    *
-   * Triple-check pattern:
-   * 1. Check cached token in memory
-   * 2. If expired, check store (another process may have refreshed)
-   * 3. If still expired, do the refresh
+   * Quad-check pattern (Defect 1 fix completed 2026-04-30):
+   * 1. Check disk mtime FIRST — catches `claude /login` while session running
+   *    so the in-memory token doesn't pin the process to OLD account/org for
+   *    its remaining lifetime.
+   * 2. Check cached token in memory (fast path).
+   * 3. If expired, check store (another process may have refreshed).
+   * 4. If still expired, do the refresh.
+   *
+   * Why mtime-check is in fast path now: previously sat inside _doEnsureAuth
+   * which only ran on token expiry. Tokens live ~8h, so during a normal
+   * working day a re-login was completely invisible to running pids until
+   * natural expiry. Real cost of statSync from page-cache is sub-microsecond
+   * — bounded by the ENTIRE network round-trip cost, ~5 orders of magnitude
+   * cheaper. Negligible per-request overhead.
+   *
+   * Verified bug 2026-04-30T19:43Z: pid 3964910 stayed on OLD-org token
+   * (sk-ant-oat01-e2QfoE17R...) for 11+ minutes after `claude /login` to
+   * NEW org wrote sk-ant-oat01-FDdX0... to disk, while burning OLD-org
+   * quota at util5h=1.0 critical. This fix prevents that scenario.
    */
   private async ensureAuth(): Promise<void> {
-    // Fast path: token valid in memory
+    // Pre-fast-path: cheap disk mtime check. If credentials.json changed
+    // since our last load, drop in-memory token so the slow path picks up
+    // the fresh one. statSync from page cache is ~0.1µs — free.
+    if (this.accessToken && this.credentialStore.hasChanged) {
+      try {
+        const changed = await this.credentialStore.hasChanged()
+        if (changed) {
+          // Visible audit trail — operators tail this log to see token
+          // rotations actually being detected (ungated by token expiry).
+          // Hint = first 8 chars of the OLD access token, enough to
+          // correlate with API_REQ Authorization headers without leaking
+          // the token. Fresh token gets logged on next loadFromStore via
+          // TOKEN_LOADED.
+          try {
+            const oldHint = (this.accessToken ?? '').slice(13, 21)  // skip "sk-ant-oat01-"
+            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+              `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${oldHint} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token\n`)
+          } catch { /* logging best-effort */ }
+
+          // Force re-load on next request. Don't load synchronously here
+          // to keep ensureAuth fast and to share the loadFromStore path.
+          this.accessToken = null
+          this.refreshToken = null
+          this.expiresAt = 0
+        }
+      } catch (e: any) {
+        // hasChanged errored (race on rename?) — fall through to fast path,
+        // any real failure will surface on next loadFromStore.
+        try {
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] TOKEN_MTIME_CHECK_FAILED pid=${process.pid} error=${e?.message ?? String(e)}\n`)
+        } catch {}
+      }
+    }
+
+    // Fast path: token valid in memory and disk hasn't changed
     if (this.accessToken && !this.isTokenExpired()) return
     // Dedup: concurrent calls within same process share one promise
     if (this.pendingAuth) return this.pendingAuth
@@ -948,6 +998,7 @@ export class ClaudeCodeSDK {
 
   /** Load credentials from the credential store */
   private async loadFromStore(): Promise<void> {
+    const prevToken = this.accessToken
     const creds = await this.credentialStore.read()
     if (!creds?.accessToken) {
       throw new AuthError('No OAuth tokens found. Run "claude login" first or provide credentials.')
@@ -962,6 +1013,29 @@ export class ClaudeCodeSDK {
     }
     // Schedule proactive rotation whenever we load fresh tokens
     this.scheduleProactiveRotation()
+
+    // Visible audit trail — log every token load. Distinguishes:
+    //   - Initial bootstrap (prevToken null): TOKEN_LOADED reason=initial
+    //   - Mid-session rotation pickup: TOKEN_LOADED reason=rotation oldHint=… newHint=…
+    //   - Same-token reload (no-op cache refresh): TOKEN_LOADED reason=reload
+    // Hint = first 8 chars of accessToken AFTER the "sk-ant-oat01-" prefix.
+    // Enough to correlate with API_REQ Authorization headers without
+    // leaking the full token. Operators tail this log to verify rotation
+    // is being detected and applied (Defect 1 visibility requirement).
+    try {
+      const newHint = creds.accessToken.slice(13, 21)
+      if (!prevToken) {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${newHint} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}\n`)
+      } else if (prevToken !== creds.accessToken) {
+        const oldHint = prevToken.slice(13, 21)
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${oldHint} newHint=${newHint} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}\n`)
+      } else {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=reload hint=${newHint}\n`)
+      }
+    } catch { /* logging best-effort */ }
   }
 
   /** 5-minute buffer before actual expiry — from oauth/client.ts:344-353 */

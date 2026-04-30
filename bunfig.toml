@@ -1,0 +1,4 @@
+[test]
+# Preload runs once before any test module is imported. Sets
+# CLAUDE_KEEPALIVE_CONFIG_PATH so SSOT reads a fixture, not host config.
+preload = ["./test/_setup-keepalive-fixture.ts"]

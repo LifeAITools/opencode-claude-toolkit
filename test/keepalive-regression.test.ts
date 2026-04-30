@@ -11,6 +11,8 @@
  * without changes.
  */
 
+// Test isolation via bunfig.toml preload (see test/_setup-keepalive-fixture.ts).
+
 import { describe, test, expect } from 'bun:test'
 import { ClaudeCodeSDK, MemoryCredentialStore } from '../src/sdk.js'
 import { CacheRewriteBlockedError } from '../src/types.js'

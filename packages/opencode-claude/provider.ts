@@ -955,11 +955,18 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
             providerMetadata: (block as any).signature ? { 'claude-max': { signature: (block as any).signature } } : undefined,
           })
         } else if (block.type === 'tool_use') {
+          const finalName = TOOL_NAME_UNREMAP[(block as any).name] ?? (block as any).name
+          let toolInput: any = (block as any).input ?? {}
+          // Same shape-repair as in doStream — see tool_use_end case for rationale.
+          if (finalName === 'todowrite' && Array.isArray(toolInput)) {
+            toolInput = { todos: toolInput }
+            dbg(`tool_input_repair: todowrite (doGenerate) — wrapped bare array into {todos:[...]}`)
+          }
           content.push({
             type: 'tool-call',
             toolCallId: (block as any).id,
-            toolName: TOOL_NAME_UNREMAP[(block as any).name] ?? (block as any).name,
-            input: JSON.stringify((block as any).input ?? {}),
+            toolName: finalName,
+            input: JSON.stringify(toolInput),
           })
         }
       }
@@ -1105,12 +1112,34 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
 
                 case 'tool_use_end': {
                   controller.enqueue({ type: 'tool-input-end', id: toolId })
+                  const finalToolName = TOOL_NAME_UNREMAP[event.name] ?? event.name
+                  let inputStr = currentToolInput || JSON.stringify(event.input ?? {})
+
+                  // Schema-shape repair for todowrite: model occasionally drops the
+                  // top-level {todos: [...]} wrapper and emits a bare array
+                  // [{content,status,priority}, ...]. Wrap it back so the opencode
+                  // tool's K.Struct({todos: K.mutable(K.Array(...))}) validator passes.
+                  // Symptom: "SchemaError(Expected array, got '[{...}]')" in TUI.
+                  if (finalToolName === 'todowrite') {
+                    try {
+                      const parsed = JSON.parse(inputStr)
+                      if (Array.isArray(parsed)) {
+                        inputStr = JSON.stringify({ todos: parsed })
+                        dbg(`tool_input_repair: todowrite — wrapped bare array into {todos:[...]} (model drift workaround)`)
+                      } else if (parsed && typeof parsed === 'object' && !('todos' in parsed)) {
+                        // Some other shape — log but don't mutate
+                        dbg(`tool_input_repair: todowrite — unexpected shape, keys=[${Object.keys(parsed).join(',')}]`)
+                      }
+                    } catch (e: any) {
+                      dbg(`tool_input_repair: todowrite — JSON parse failed: ${e?.message}`)
+                    }
+                  }
+
                   // Emit complete tool-call
-                  const inputStr = currentToolInput || JSON.stringify(event.input ?? {})
                   controller.enqueue({
                     type: 'tool-call',
                     toolCallId: event.id,
-                    toolName: TOOL_NAME_UNREMAP[event.name] ?? event.name,
+                    toolName: finalToolName,
                     input: inputStr,
                   })
                   toolId = ''

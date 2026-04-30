@@ -41546,11 +41546,17 @@ function createLanguageModel(sdk, modelId, providerId) {
             providerMetadata: block.signature ? { "claude-max": { signature: block.signature } } : undefined
           });
         } else if (block.type === "tool_use") {
+          const finalName = TOOL_NAME_UNREMAP[block.name] ?? block.name;
+          let toolInput = block.input ?? {};
+          if (finalName === "todowrite" && Array.isArray(toolInput)) {
+            toolInput = { todos: toolInput };
+            dbg(`tool_input_repair: todowrite (doGenerate) \u2014 wrapped bare array into {todos:[...]}`);
+          }
           content.push({
             type: "tool-call",
             toolCallId: block.id,
-            toolName: TOOL_NAME_UNREMAP[block.name] ?? block.name,
-            input: JSON.stringify(block.input ?? {})
+            toolName: finalName,
+            input: JSON.stringify(toolInput)
           });
         }
       }
@@ -41688,11 +41694,25 @@ function createLanguageModel(sdk, modelId, providerId) {
                 }
                 case "tool_use_end": {
                   controller.enqueue({ type: "tool-input-end", id: toolId });
-                  const inputStr = currentToolInput || JSON.stringify(event.input ?? {});
+                  const finalToolName = TOOL_NAME_UNREMAP[event.name] ?? event.name;
+                  let inputStr = currentToolInput || JSON.stringify(event.input ?? {});
+                  if (finalToolName === "todowrite") {
+                    try {
+                      const parsed = JSON.parse(inputStr);
+                      if (Array.isArray(parsed)) {
+                        inputStr = JSON.stringify({ todos: parsed });
+                        dbg(`tool_input_repair: todowrite \u2014 wrapped bare array into {todos:[...]} (model drift workaround)`);
+                      } else if (parsed && typeof parsed === "object" && !("todos" in parsed)) {
+                        dbg(`tool_input_repair: todowrite \u2014 unexpected shape, keys=[${Object.keys(parsed).join(",")}]`);
+                      }
+                    } catch (e2) {
+                      dbg(`tool_input_repair: todowrite \u2014 JSON parse failed: ${e2?.message}`);
+                    }
+                  }
                   controller.enqueue({
                     type: "tool-call",
                     toolCallId: event.id,
-                    toolName: TOOL_NAME_UNREMAP[event.name] ?? event.name,
+                    toolName: finalToolName,
                     input: inputStr
                   });
                   toolId = "";

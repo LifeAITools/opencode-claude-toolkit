@@ -55,7 +55,7 @@ import { startHeartbeat } from './heartbeat.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient } from '@life-ai-tools/claude-code-sdk'
 
-const PROXY_VERSION = '0.5.2'
+const PROXY_VERSION = '0.6.0'
 
 // ═══ Mode detection ═══════════════════════════════════════════════
 
@@ -279,6 +279,30 @@ function statsJson() {
       kaIntervalSec: cfg.kaIntervalSec,
       kaRewriteBlockEnabled: cfg.kaRewriteBlockEnabled,
     },
+    cacheConfig: (() => {
+      try {
+        // Hot-read of ~/.claude/keepalive.json — useful to verify hot-reload took effect.
+        const c = (require('@life-ai-tools/claude-code-sdk') as typeof import('@life-ai-tools/claude-code-sdk')).loadKeepaliveConfig()
+        return {
+          cacheTtlMs: c.cacheTtlMs,
+          safetyMarginMs: c.safetyMarginMs,
+          intervalMs: c.intervalMs,
+          intervalClampMin: c.intervalClampMin,
+          intervalClampMax: c.intervalClampMax,
+          retryDelaysMs: c.retryDelaysMs,
+          source: c._source,
+        }
+      } catch (e: any) {
+        return { error: e?.message }
+      }
+    })(),
+    cacheMetrics: (() => {
+      try {
+        return proxyClient.cacheMetricsSnapshot
+      } catch (e: any) {
+        return { error: e?.message }
+      }
+    })(),
   }
 }
 

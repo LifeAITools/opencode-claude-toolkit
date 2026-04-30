@@ -168,7 +168,7 @@ export declare class ClaudeCodeSDK {
  * Mirrors CLI's plainTextStorage.ts + invalidateOAuthCacheIfDiskChanged().
  */
 export declare class FileCredentialStore implements CredentialStore {
-    private path;
+    readonly path: string;
     private lastMtimeMs;
     constructor(path: string);
     read(): Promise<StoredCredentials | null>;

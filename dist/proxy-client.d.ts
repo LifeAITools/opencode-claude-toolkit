@@ -59,7 +59,13 @@ import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionSto
 export interface ProxyClientConfig {
     /** Anthropic API base URL. Default: https://api.anthropic.com */
     anthropicBaseUrl?: string;
-    /** Keepalive interval in seconds. Engine clamps to [60, 240]. Default: 120 */
+    /**
+     * Keepalive interval in seconds. Engine clamps to [intervalClampMin, intervalClampMax]
+     * derived from the active cacheTtlMs (read from ~/.claude/keepalive.json SSOT).
+     *
+     * If undefined, engine uses SSOT.intervalMs (auto-scales: ~5m TTL → 150s, ~1h TTL → 1800s).
+     * Explicit value overrides SSOT.
+     */
     kaIntervalSec?: number;
     /**
      * Idle timeout in seconds — how long without real requests before engine
@@ -109,6 +115,7 @@ export interface RateLimitSnapshot {
 }
 export declare class ProxyClient {
     private readonly config;
+    private readonly metrics;
     private readonly credentials;
     private readonly events;
     private readonly store;
@@ -124,8 +131,12 @@ export declare class ProxyClient {
     /** Total session count. */
     sessionCount(): number;
     /** Config used by this client (read-only). */
-    get configSnapshot(): Readonly<Required<ProxyClientConfig>>;
-    /** Clean shutdown — stops reaper + all KA engines in store. */
+    get configSnapshot(): Readonly<Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
+        kaIntervalSec: number | undefined;
+    }>;
+    /** Snapshot of current rolling cache-metrics window. */
+    get cacheMetricsSnapshot(): import("./cache-metrics.js").MetricsSummary;
+    /** Clean shutdown — stops reaper, metrics collector, and all KA engines in store. */
     stop(): void;
     /**
      * Handle one /v1/messages request end-to-end. Returns a Response whose

@@ -26,7 +26,8 @@
  *   - Heaviest snapshot wins (subagent calls cannot steal main chat's slot)
  *   - Disarm does not kill timer — auto-resumes on next real request
  *   - Retry chain tracks exact TTL from cacheWrittenAt — never overshoots
- *   - intervalMs clamped to [60s, 240s] at construction
+ *   - intervalMs clamped to [intervalClampMin, intervalClampMax] derived from
+ *     current cacheTtlMs at construction (legacy: [60s, 240s] for 5m TTL)
  */
 
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs'
@@ -78,26 +79,9 @@ export interface KeepaliveEngineOptions {
   isOwnerAlive?: () => boolean
 }
 
-// ============================================================
-// Live-reload config — ~/.claude/keepalive.json
-// ============================================================
-
-const KEEPALIVE_CONFIG_PATH = join(homedir(), '.claude', 'keepalive.json')
-let _kaConfigMtimeMs = 0
-let _kaConfigCache: Record<string, unknown> | null = null
-
-function readKeepaliveConfig(): Record<string, unknown> | null {
-  try {
-    const st = statSync(KEEPALIVE_CONFIG_PATH)
-    if (st.mtimeMs === _kaConfigMtimeMs && _kaConfigCache) return _kaConfigCache
-    _kaConfigMtimeMs = st.mtimeMs
-    const { readFileSync } = require('fs') as typeof import('fs')
-    _kaConfigCache = JSON.parse(readFileSync(KEEPALIVE_CONFIG_PATH, 'utf8'))
-    return _kaConfigCache
-  } catch {
-    return null
-  }
-}
+// Live-reload config is now centralized in src/keepalive-config.ts (SSOT).
+// We call loadKeepaliveConfig() inside tick() — it returns the cached
+// resolved config (cheap mtime check) and we apply changes to this.config.
 
 // ============================================================
 // Errors
@@ -105,6 +89,7 @@ function readKeepaliveConfig(): Record<string, unknown> | null {
 
 // Re-exported from types.ts — engine throws this on guard block
 import { CacheRewriteBlockedError } from './types.js'
+import { loadKeepaliveConfig } from './keepalive-config.js'
 
 /**
  * Classify an error thrown during doFetch into actionable categories.
@@ -125,7 +110,13 @@ import { CacheRewriteBlockedError } from './types.js'
 type ErrorCategory = 'network' | 'server_transient' | 'auth' | 'permanent'
 
 function classifyError(err: unknown): ErrorCategory {
-  const e = err as { status?: number; code?: string; cause?: { code?: string }; message?: string } | undefined
+  const e = err as {
+    status?: number
+    code?: string
+    name?: string
+    cause?: { code?: string; name?: string; message?: string }
+    message?: string
+  } | undefined
   if (!e) return 'permanent'
 
   // HTTP status always wins if present (we saw a real response)
@@ -134,21 +125,41 @@ function classifyError(err: unknown): ErrorCategory {
   if (status === 429 || status === 503 || status === 529 || (status && status >= 500)) return 'server_transient'
   if (status && status >= 400 && status < 500) return 'permanent'
 
-  // No status → transport-level. Check known network error codes.
+  // No status → transport-level. Walk the full error chain (the SDK wraps
+  // fetch errors in `ClaudeCodeSDKError('Network error', err)`, so the real
+  // info lives in .cause). Aggregate every observable field.
   const code = e.code ?? e.cause?.code ?? ''
+  const name = e.name ?? e.cause?.name ?? ''
   const msg = (e.message ?? '').toLowerCase()
+  const causeMsg = (e.cause?.message ?? '').toLowerCase()
+  const allMsg = `${msg} ${causeMsg}`.trim()
+
+  // Aborts due to our own timeoutId firing show up as DOMException AbortError.
+  // This is the dominant real-world failure mode — request_timeout (default
+  // 10 min in sdk.ts:234) → controller.abort() → fetch rejects with AbortError.
+  // Without this branch, classify falls through to 'server_transient' →
+  // retryChain → cache_ttl_exhausted (the lying reason that misled diagnosis
+  // in the 18:44Z incident).
+  if (name === 'AbortError' || name === 'TimeoutError') return 'network'
+  if (allMsg.includes('aborted') || allMsg.includes('the operation timed out') ||
+      allMsg.includes('request timed out')) return 'network'
+
   const networkCodes = new Set([
     'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH',
     'ENETDOWN', 'EHOSTUNREACH', 'EHOSTDOWN', 'ENOTFOUND',
     'EAI_AGAIN', 'EPIPE', 'ERR_SOCKET_CONNECTION_TIMEOUT',
     'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_ABORTED',
+    'ABORT_ERR', 'ERR_NETWORK',
     'ConnectionRefused', 'FailedToOpenSocket', // Bun-style
   ])
   if (code && networkCodes.has(code)) return 'network'
-  // Heuristic on message for Bun/Undici variants
-  if (msg.includes('unable to connect') || msg.includes('failed to open socket') ||
-      msg.includes('connection refused') || msg.includes('network is unreachable') ||
-      msg.includes('timeout') || msg.includes('dns')) return 'network'
+  // Heuristic on message for Bun/Undici variants. Includes 'network error'
+  // because that's exactly what the SDK wraps any fetch failure as.
+  if (allMsg.includes('unable to connect') || allMsg.includes('failed to open socket') ||
+      allMsg.includes('connection refused') || allMsg.includes('network is unreachable') ||
+      allMsg.includes('network error') || allMsg.includes('fetch failed') ||
+      allMsg.includes('timeout') || allMsg.includes('dns') ||
+      allMsg.includes('socket hang up') || allMsg.includes('terminated')) return 'network'
 
   // Unknown → treat as transient (safer than permanent — we'd prefer to
   // attempt recovery than disarm on an unrecognized error).
@@ -160,35 +171,27 @@ function classifyError(err: unknown): ErrorCategory {
 // ============================================================
 
 export class KeepaliveEngine {
-  // Anthropic cache TTL — API silently downgrades our ttl:'1h' to 5 minutes
-  // (ephemeral_1h_input_tokens=0 in response). We're not on the 1h allowlist.
-  private static readonly CACHE_TTL_MS = 5 * 60 * 1000
-
-  // Safety margin when deciding whether a KA fire can complete before TTL
-  // expiry. Network latency + DNS + TLS handshake can add 1-10s unpredictably.
-  // Firing too close to expiry risks landing AFTER expiry, where Anthropic
-  // treats our request as cache-miss → cache_write burst. 15s is conservative
-  // headroom (previously was 5s, which was insufficient on slow networks).
-  private static readonly CACHE_SAFETY_MARGIN_MS = 15 * 1000
-
-  // Retry backoff: start fast (2s), ramp to 20s max. 13 attempts fit in ~180s margin.
-  // Fire at ~120s, cache expires at 300s → 180s window for retries.
-  private static readonly KEEPALIVE_RETRY_DELAYS = [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20]
+  // ── Cache + KA parameters — read from SSOT (~/.claude/keepalive.json) ──
+  //
+  // Defaults to legacy 5m TTL for backward compatibility. To enable 1h cache,
+  // write { "cacheTtlSec": 3600, "intervalSec": 1800, ... } to keepalive.json.
+  // See: src/keepalive-config.ts for full schema and recommended values.
+  //
+  // Resolved values are cached per-instance at construction time. Hot-reload of
+  // keepalive.json: callers can construct a new engine, or rely on per-tick
+  // re-resolution (TODO: future enhancement). For now, restart of the consumer
+  // process picks up new config.
+  private readonly cacheTtlMs: number
+  private readonly safetyMarginMs: number
+  private readonly retryDelaysMs: readonly number[]
+  private readonly healthProbeIntervalsMs: readonly number[]
+  private readonly healthProbeTimeoutMs: number
 
   // Snapshot TTL — set via CLAUDE_SDK_SNAPSHOT_TTL_MIN env var. Default: 1440 (24h).
   private static readonly SNAPSHOT_TTL_MS = (parseInt(process.env.CLAUDE_SDK_SNAPSHOT_TTL_MIN ?? '1440', 10) || 1440) * 60 * 1000
 
   // Full body dump for debugging. Set CLAUDE_SDK_DUMP_BODY=1 to enable.
   private static readonly DUMP_BODY = process.env.CLAUDE_SDK_DUMP_BODY === '1'
-
-  // Layer 2 — Network health probe.
-  // Aggressive escalating intervals, CAPPED at 10s so network-revival is
-  // detected fast (within ≤10s of TCP reachability returning). Rationale:
-  // unbounded backoff could miss a window where cache is still salvageable;
-  // 10s cap guarantees we'll notice recovery within one probe interval.
-  // Schedule: 3s → 5s → 7s → 10s → 10s → 10s (repeats at 10s up to cap).
-  private static readonly HEALTH_PROBE_INTERVALS_MS = [3_000, 5_000, 7_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000]
-  private static readonly HEALTH_PROBE_TIMEOUT_MS = 3_000
 
   // ── Config ──────────────────────────────────────────────────
   private config: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens' | 'rewriteWarnIdleMs' | 'rewriteWarnTokens' | 'rewriteBlockIdleMs' | 'rewriteBlockEnabled'>> & {
@@ -246,26 +249,35 @@ export class KeepaliveEngine {
 
     const ka = opts.config ?? {}
 
-    // Layer 4: Clamp interval to safe bounds.
-    let intervalMs = ka.intervalMs ?? 120_000
-    if (intervalMs < 60_000) {
-      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} below safe min (60000); clamped`)
-      intervalMs = 60_000
+    // SSOT: read cache+KA parameters from ~/.claude/keepalive.json (with safe defaults).
+    const ssot = loadKeepaliveConfig()
+    this.cacheTtlMs = ssot.cacheTtlMs
+    this.safetyMarginMs = ssot.safetyMarginMs
+    this.retryDelaysMs = ssot.retryDelaysMs
+    this.healthProbeIntervalsMs = ssot.healthProbeIntervalsMs
+    this.healthProbeTimeoutMs = ssot.healthProbeTimeoutMs
+
+    // Layer 4: Clamp interval to safe bounds derived from current cache TTL.
+    // Caller-provided ka.intervalMs takes priority over SSOT default.
+    let intervalMs = ka.intervalMs ?? ssot.intervalMs
+    if (intervalMs < ssot.intervalClampMin) {
+      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} below safe min (${ssot.intervalClampMin}); clamped`)
+      intervalMs = ssot.intervalClampMin
     }
-    if (intervalMs > 240_000) {
-      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} above safe max (240000, cache TTL - 60s); clamped`)
-      intervalMs = 240_000
+    if (intervalMs > ssot.intervalClampMax) {
+      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} above safe max (${ssot.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`)
+      intervalMs = ssot.intervalClampMax
     }
 
     this.config = {
-      enabled: ka.enabled ?? true,
+      enabled: ka.enabled ?? ssot.enabled,
       intervalMs,
-      idleTimeoutMs: ka.idleTimeoutMs ?? Infinity,
-      minTokens: ka.minTokens ?? 2000,
-      rewriteWarnIdleMs: ka.rewriteWarnIdleMs ?? 300_000,
-      rewriteWarnTokens: ka.rewriteWarnTokens ?? 50_000,
+      idleTimeoutMs: ka.idleTimeoutMs ?? ssot.idleTimeoutMs,
+      minTokens: ka.minTokens ?? ssot.minTokens,
+      rewriteWarnIdleMs: ka.rewriteWarnIdleMs ?? ssot.rewriteWarnIdleMs,
+      rewriteWarnTokens: ka.rewriteWarnTokens ?? ssot.rewriteWarnTokens,
       rewriteBlockIdleMs: ka.rewriteBlockIdleMs ?? Infinity,
-      rewriteBlockEnabled: ka.rewriteBlockEnabled ?? false,
+      rewriteBlockEnabled: ka.rewriteBlockEnabled ?? ssot.rewriteBlockEnabled,
       onHeartbeat: ka.onHeartbeat,
       onTick: ka.onTick,
       onDisarmed: ka.onDisarmed,
@@ -343,13 +355,26 @@ export class KeepaliveEngine {
   /**
    * Layer 3 — Cache rewrite burst protection.
    * Call at the top of every real request BEFORE sending.
-   *   - If gap > warnIdleMs AND estimated cache size > warnTokens → warning callback
+   *
+   * Measures idle time against `cacheWrittenAt` — the timestamp of the last
+   * cache-touching event (real request OR successful KA fire). This correctly
+   * accounts for KA keeping the prompt cache warm: even if the user has been
+   * idle for hours, KA fires every ~2min refresh the cache (cache_read_input_tokens
+   * keeps growing in RAW_USAGE), so cacheWrittenAt stays recent.
+   *
+   * Previous version compared against `lastRealActivityAt` (only updated by real
+   * user requests) — this fired false warnings every 5min of user idleness even
+   * when KA was healthily firing. Symptom: TUI banner "Cache likely dead — idle=350s,
+   * next request will cost ~150k cache_write tokens" while RAW_USAGE simultaneously
+   * showed cache_creation_input_tokens < 2k (cache was actually warm).
+   *
+   *   - If gap since cacheWrittenAt > warnIdleMs AND cache size > warnTokens → warning
    *   - If gap > blockIdleMs AND blockEnabled → throws CacheRewriteBlockedError
    */
   checkRewriteGuard(model: string): void {
-    const lastReal = this.lastRealActivityAt
-    if (lastReal === 0) return  // First-ever request; no baseline yet.
-    const idleMs = Date.now() - lastReal
+    const lastCacheTouch = this.cacheWrittenAt
+    if (lastCacheTouch === 0) return  // First-ever request; no baseline yet.
+    const idleMs = Date.now() - lastCacheTouch
     const warnIdle = this.config.rewriteWarnIdleMs
     const blockIdle = this.config.rewriteBlockIdleMs
     if (idleMs < warnIdle) return  // Normal working cadence.
@@ -420,29 +445,34 @@ export class KeepaliveEngine {
     // user request to prime a fresh snapshot.
     if (this.cacheWrittenAt > 0) {
       const cacheAge = Date.now() - this.cacheWrittenAt
-      if (cacheAge > KeepaliveEngine.CACHE_TTL_MS) {
+      if (cacheAge > this.cacheTtlMs) {
         this.registry.clear()
         this.onDisarmed('cache_expired_during_sleep')
         return
       }
     }
 
-    // Live-reload config from ~/.claude/keepalive.json (mtime-cached, cheap)
-    const liveConfig = readKeepaliveConfig()
-    if (liveConfig) {
-      if (liveConfig.enabled === false) {
-        this.registry.clear()
-        this.stop()
-        return
-      }
-      if (typeof liveConfig.intervalSec === 'number' && liveConfig.intervalSec > 0)
-        this.config.intervalMs = liveConfig.intervalSec * 1000
-      if (typeof liveConfig.idleTimeoutSec === 'number' && liveConfig.idleTimeoutSec > 0)
-        this.config.idleTimeoutMs = liveConfig.idleTimeoutSec * 1000
-      else if (liveConfig.idleTimeoutSec === null || liveConfig.idleTimeoutSec === 0)
-        this.config.idleTimeoutMs = Infinity
-      if (typeof liveConfig.minTokens === 'number')
-        this.config.minTokens = liveConfig.minTokens
+    // Live-reload config from SSOT (~/.claude/keepalive.json via keepalive-config.ts).
+    // Cheap: mtime cache inside loadKeepaliveConfig(). Reflects intervalSec /
+    // idleTimeoutSec changes without restart.
+    const liveConfig = loadKeepaliveConfig()
+    if (!liveConfig.enabled) {
+      this.registry.clear()
+      this.stop()
+      return
+    }
+    // Only apply if values actually differ — keeps behavior identical when
+    // file unchanged. Clamp to current intervalClamp range.
+    const newInterval = Math.max(liveConfig.intervalClampMin,
+      Math.min(liveConfig.intervalMs, liveConfig.intervalClampMax))
+    if (newInterval !== this.config.intervalMs) {
+      this.config.intervalMs = newInterval
+    }
+    if (liveConfig.idleTimeoutMs !== this.config.idleTimeoutMs) {
+      this.config.idleTimeoutMs = liveConfig.idleTimeoutMs
+    }
+    if (liveConfig.minTokens !== this.config.minTokens) {
+      this.config.minTokens = liveConfig.minTokens
     }
 
     // Idle timeout
@@ -523,10 +553,10 @@ export class KeepaliveEngine {
         // and doesn't help. Jump straight to aggressive TCP probe (cheap).
         // Probe will auto-fire KA once network returns and cache is still alive.
         const cacheAge = Date.now() - this.cacheWrittenAt
-        const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - cacheAge
-        // If cache effectively dead (< 15s of safety margin), go to revive-mode
+        const ttlRemaining = this.cacheTtlMs - cacheAge
+        // If cache effectively dead (< safety margin), go to revive-mode
         // so we know when net is back without attempting KA on dead cache.
-        const reviveMode = ttlRemaining <= 15_000
+        const reviveMode = ttlRemaining <= this.safetyMarginMs
         this.onDisarmed('network_error')
         this.startHealthProbe({ reviveMode })
       } else if (category === 'server_transient') {
@@ -558,15 +588,15 @@ export class KeepaliveEngine {
     entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number },
     attemptIndex = 0,
   ): void {
-    if (attemptIndex >= KeepaliveEngine.KEEPALIVE_RETRY_DELAYS.length) {
+    if (attemptIndex >= this.retryDelaysMs.length) {
       this.registry.clear()
       this.onDisarmed('retry_exhausted')
       return
     }
 
     const cacheAge = Date.now() - this.cacheWrittenAt
-    const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - cacheAge
-    const nextDelay = KeepaliveEngine.KEEPALIVE_RETRY_DELAYS[attemptIndex]! * 1000
+    const ttlRemaining = this.cacheTtlMs - cacheAge
+    const nextDelay = this.retryDelaysMs[attemptIndex]! * 1000
 
     // CACHE SAFETY MARGIN: increased from 5s → 15s (2025-04).
     // Rationale: network latency on KA request can add 1-10s unpredictably.
@@ -574,10 +604,23 @@ export class KeepaliveEngine {
     // expiry → Anthropic would treat our request as cache-miss and create
     // a fresh one (~70k tokens cache_write = wasted quota).
     // 15s margin gives headroom for slow networks + DNS lookup + handshake.
-    if (ttlRemaining < nextDelay + KeepaliveEngine.CACHE_SAFETY_MARGIN_MS) {
+    if (ttlRemaining < nextDelay + this.safetyMarginMs) {
       // CRITICAL INVARIANT: KA must NEVER cache_write.
+      //
+      // The reason here is honest *only* when cache truly aged out via TTL.
+      // For the common case where retry was scheduled because of a transient
+      // server failure (5xx/AbortError fall-through) and we already burned
+      // most of the TTL waiting for retries, emit a more accurate reason so
+      // diagnosis isn't misled into thinking the cache silently expired.
+      //
+      // Heuristic: if cacheAge > TTL/2 the user-visible behaviour is the
+      // same (KA stops), but the *cause* is the retry budget colliding with
+      // the natural TTL boundary, not idle expiry. We tag it distinctly.
       this.registry.clear()
-      this.onDisarmed('cache_ttl_exhausted')
+      const reason = cacheAge < this.cacheTtlMs / 2
+        ? 'retry_budget_exceeds_ttl'  // server failures consumed too much of the window
+        : 'cache_ttl_exhausted'        // genuine TTL boundary hit
+      this.onDisarmed(reason)
       return
     }
 
@@ -601,7 +644,7 @@ export class KeepaliveEngine {
       }
 
       const ageNow = Date.now() - this.cacheWrittenAt
-      if (ageNow > KeepaliveEngine.CACHE_TTL_MS - KeepaliveEngine.CACHE_SAFETY_MARGIN_MS) {
+      if (ageNow > this.cacheTtlMs - this.safetyMarginMs) {
         this.registry.clear()
         this.onDisarmed('cache_ttl_expired_mid_retry')
         return
@@ -632,8 +675,8 @@ export class KeepaliveEngine {
           // to TCP probe, don't waste more HTTPS attempts on a dead link.
           this.inFlight = false
           this.abortController = null
-          const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - (Date.now() - this.cacheWrittenAt)
-          const reviveMode = ttlRemaining <= KeepaliveEngine.CACHE_SAFETY_MARGIN_MS
+          const ttlRemaining = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt)
+          const reviveMode = ttlRemaining <= this.safetyMarginMs
           this.onDisarmed('network_error_mid_retry')
           this.startHealthProbe({ reviveMode })
           return
@@ -689,11 +732,12 @@ export class KeepaliveEngine {
       'retry_exhausted',
       'cache_ttl_exhausted',
       'cache_ttl_expired_mid_retry',
+      'retry_budget_exceeds_ttl',
     ])
     if (networkReasons.has(reason) && !this.healthProbeTimer) {
       const cacheAge = Date.now() - this.cacheWrittenAt
-      const ttlRemaining = KeepaliveEngine.CACHE_TTL_MS - cacheAge
-      const reviveMode = ttlRemaining <= KeepaliveEngine.CACHE_SAFETY_MARGIN_MS
+      const ttlRemaining = this.cacheTtlMs - cacheAge
+      const reviveMode = ttlRemaining <= this.safetyMarginMs
       this.startHealthProbe({ reviveMode })
     }
   }
@@ -726,7 +770,7 @@ export class KeepaliveEngine {
     }
 
     const scheduleNext = () => {
-      const intervals = KeepaliveEngine.HEALTH_PROBE_INTERVALS_MS
+      const intervals = this.healthProbeIntervalsMs
       const idx = Math.min(this.healthProbeAttempt, intervals.length - 1)
       const delay = intervals[idx]!
       this.healthProbeTimer = setTimeout(probe, delay)
@@ -743,7 +787,7 @@ export class KeepaliveEngine {
       // "Dead" = cache is past TTL - safety margin. Even if technically
       // still alive for a few seconds, firing would risk landing AFTER
       // expiry (network latency adds unpredictable 1-10s).
-      const cacheDead = cacheAge >= (KeepaliveEngine.CACHE_TTL_MS - KeepaliveEngine.CACHE_SAFETY_MARGIN_MS)
+      const cacheDead = cacheAge >= (this.cacheTtlMs - this.safetyMarginMs)
 
       // Stop probing when cache is dead AND we're not in revive-mode
       // (revive-mode wants to know ASAP when network returns so next real
@@ -755,7 +799,7 @@ export class KeepaliveEngine {
 
       // Hard stop: 10+ failed probes even in revive-mode = give up, wait
       // for user-initiated real request to break the silence.
-      if (this.healthProbeAttempt > KeepaliveEngine.HEALTH_PROBE_INTERVALS_MS.length) {
+      if (this.healthProbeAttempt > this.healthProbeIntervalsMs.length) {
         this.stopHealthProbe()
         return
       }
@@ -768,7 +812,7 @@ export class KeepaliveEngine {
           const t = setTimeout(() => {
             sock.destroy()
             reject(new Error('timeout'))
-          }, KeepaliveEngine.HEALTH_PROBE_TIMEOUT_MS)
+          }, this.healthProbeTimeoutMs)
           sock.once('connect', () => {
             clearTimeout(t)
             sock.end()
@@ -795,9 +839,9 @@ export class KeepaliveEngine {
       this.networkState = 'healthy'
       try { this.config.onNetworkStateChange?.({ from: prev, to: 'healthy', at: Date.now() }) } catch {}
 
-      const ttlLeft = KeepaliveEngine.CACHE_TTL_MS - (Date.now() - this.cacheWrittenAt)
+      const ttlLeft = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt)
 
-      if (this.registry.size > 0 && ttlLeft > KeepaliveEngine.CACHE_SAFETY_MARGIN_MS) {
+      if (this.registry.size > 0 && ttlLeft > this.safetyMarginMs) {
         // Cache still alive with safety margin → fire KA immediately.
         // Note: we check SAFETY_MARGIN (not just >0) because fire itself
         // takes time — if we're within margin, tick() would just disarm anyway.
@@ -907,6 +951,8 @@ export class KeepaliveEngine {
 
   /** @internal — mutable internal state getters/setters for test inspection */
   _setLastRealActivityAt(v: number): void { this.lastRealActivityAt = v }
+  _setCacheWrittenAt(v: number): void { this.cacheWrittenAt = v }
+  get _cacheWrittenAt(): number { return this.cacheWrittenAt }
   _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
     this._pendingSnapshotModel = model
     this._pendingSnapshotBody = body

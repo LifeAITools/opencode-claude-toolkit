@@ -56,9 +56,15 @@ const MAX_DELAY_MS = 5_000
 const EXPIRY_BUFFER_MS = 300_000 // 5 min before actual expiry
 
 // ── Proactive token rotation ──────────────────────────────────
-// Refresh at 50% of token lifetime — gives maximum margin for retries.
-// With ~11h tokens: first refresh at ~5.5h, leaving 5.5h for retries.
-const PROACTIVE_REFRESH_RATIO = 0.50
+// Refresh at 20% of token lifetime remaining (= 80% of life consumed).
+// Was 0.50 (refresh at 50% life remaining) — too aggressive: triggered
+// 6 fetch/day per refresh_token, hitting Anthropic's per-refresh_token
+// rate limit and producing 429 storms. Standard OAuth clients refresh at
+// 5-15% remaining (akin to "expires_in - 5min"). Original Claude Code CLI
+// refreshes reactively on 401. Compromise: 20% gives ~96 min headroom on
+// an 8h token (480min × 0.20 = 96min) before expiry, more than enough for
+// retries, while cutting fetch frequency from ~6/day to ~1.2/day per token.
+const PROACTIVE_REFRESH_RATIO = 0.20
 // Escalation thresholds (fraction of lifetime remaining)
 const TOKEN_WARNING_THRESHOLD = 0.25   // 25% left → WARNING
 const TOKEN_CRITICAL_THRESHOLD = 0.10  // 10% left → CRITICAL
@@ -115,9 +121,16 @@ function unremapToolName(name: string): string {
 // ============================================================
 const TOKEN_LOCK_DIR = join(homedir(), '.claude', '.token-refresh-lock')
 const TOKEN_LOCK_STALE_MS = 30_000  // 30s stale timeout
+// Lock acquisition budget: 30 attempts × ~1.5s = up to ~45s of patient waiting.
+// Sized to comfortably cover the worst-case real refresh: 5 fetch attempts with
+// backoff [500, 1500, 3000, 5000, 8000]ms + network RTT ≈ 25-30s.
+// Previous value (5 attempts ≈ 10s) was too short — losing processes timed out
+// while the winner was still mid-refresh, then proceeded to fetch without lock,
+// triggering 429 storms on the OAuth endpoint (3+ PIDs hammering simultaneously).
+const TOKEN_LOCK_MAX_ATTEMPTS = 30
 
 async function acquireTokenRefreshLock(): Promise<(() => void) | null> {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < TOKEN_LOCK_MAX_ATTEMPTS; attempt++) {
     try {
       mkdirSync(TOKEN_LOCK_DIR)
       // Write PID + timestamp for stale detection
@@ -142,7 +155,35 @@ async function acquireTokenRefreshLock(): Promise<(() => void) | null> {
       return null  // Unexpected error — proceed without lock
     }
   }
-  return null  // Could not acquire after 5 attempts — proceed without lock (degraded)
+  return null  // Could not acquire after all attempts — see fail-closed handling at call sites
+}
+
+/**
+ * Wait for another process to publish a fresh token to the credential store.
+ *
+ * Used as the "we couldn't get the lock" fallback path: we poll the disk
+ * because the lock holder will write fresh creds when refresh succeeds.
+ *
+ * Returns the fresh credentials when found, or null on timeout.
+ * `minRemainingMs` filters out stale or barely-fresh tokens.
+ */
+async function pollDiskForFreshToken(
+  store: CredentialStore,
+  timeoutMs: number,
+  minRemainingMs: number,
+): Promise<{ accessToken: string; refreshToken: string; expiresAt: number } | null> {
+  const deadline = Date.now() + timeoutMs
+  const pollInterval = 500
+  while (Date.now() < deadline) {
+    try {
+      const creds = await store.read()
+      if (creds && (creds.expiresAt - Date.now()) >= minRemainingMs) {
+        return { accessToken: creds.accessToken, refreshToken: creds.refreshToken, expiresAt: creds.expiresAt }
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, pollInterval))
+  }
+  return null
 }
 
 // ============================================================
@@ -876,18 +917,22 @@ export class ClaudeCodeSDK {
   }
 
   private async _doEnsureAuth(): Promise<void> {
-    // Step 1: check in-memory cache
-    if (this.accessToken && !this.isTokenExpired()) return
-
-    // Step 2: check store — another process may have refreshed
-    // Mirrors invalidateOAuthCacheIfDiskChanged() from auth.ts:1313
+    // Step 1: check disk for external updates FIRST (cheap mtime check).
+    // This catches the user-relogin-during-session case where the in-memory
+    // token would otherwise stay alive ~8h after the user re-logged in,
+    // pinning this process to the OLD account/org and ignoring the new
+    // credentials sitting on disk. Was previously only checked AFTER expiry
+    // — too late for live sessions.
     if (this.credentialStore.hasChanged) {
       const changed = await this.credentialStore.hasChanged()
       if (changed) {
         await this.loadFromStore()
-        if (this.accessToken && !this.isTokenExpired()) return
+        // Fall through to normal expiry check with possibly-new token.
       }
     }
+
+    // Step 2: in-memory cache is now up-to-date relative to disk.
+    if (this.accessToken && !this.isTokenExpired()) return
 
     // First load if no token at all
     if (!this.accessToken) {
@@ -1160,24 +1205,48 @@ export class ClaudeCodeSDK {
     // when proactive rotation fires at similar times.
     const release = await acquireTokenRefreshLock()
 
+    // FAIL-CLOSED: if we could not acquire the lock, another PID is currently
+    // refreshing. Do NOT proceed to fetch — that's exactly what causes 429
+    // storms. Instead, poll the disk for the fresh token the winner will write.
+    if (!release) {
+      this.dbg('proactive rotation: lock unavailable (another PID refreshing) — polling disk')
+      const fresh = await pollDiskForFreshToken(
+        this.credentialStore,
+        45_000,                            // generous timeout: refresh worst case ≈ 25-30s
+        PROACTIVE_FRESH_MIN_REMAINING_MS,  // accept only genuinely fresh tokens
+      )
+      if (fresh) {
+        this.accessToken = fresh.accessToken
+        this.refreshToken = fresh.refreshToken
+        this.expiresAt = fresh.expiresAt
+        this.tokenIssuedAt = Date.now()
+        this.proactiveRefreshFailures = 0
+        const remaining = fresh.expiresAt - Date.now()
+        this.dbg(`proactive rotation: picked up fresh token from disk (${Math.round(remaining / 60000)}min remaining)`)
+        this.emitTokenStatus('rotated', `Token refreshed by another process (${Math.round(remaining / 60000)}min remaining)`)
+      } else {
+        this.dbg('proactive rotation: lock unavailable and no fresh token appeared — will retry on next schedule')
+      }
+      this.scheduleProactiveRotation()
+      return
+    }
+
     try {
       // Post-lock check: another process may have refreshed while we waited for lock
-      if (release) {
-        const postLockCreds = await this.credentialStore.read()
-        if (postLockCreds && !(Date.now() + EXPIRY_BUFFER_MS >= postLockCreds.expiresAt)) {
-          const diskRemaining = postLockCreds.expiresAt - Date.now()
-          if (diskRemaining >= PROACTIVE_FRESH_MIN_REMAINING_MS) {
-            // Fresh token appeared while waiting for lock — another process just refreshed
-            this.accessToken = postLockCreds.accessToken
-            this.refreshToken = postLockCreds.refreshToken
-            this.expiresAt = postLockCreds.expiresAt
-            this.tokenIssuedAt = Date.now()
-            this.proactiveRefreshFailures = 0
-            this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(diskRemaining / 60000)}min remaining)`)
-            this.emitTokenStatus('rotated', `Token refreshed by another process (${Math.round(diskRemaining / 60000)}min remaining)`)
-            this.scheduleProactiveRotation()
-            return
-          }
+      const postLockCreds = await this.credentialStore.read()
+      if (postLockCreds && !(Date.now() + EXPIRY_BUFFER_MS >= postLockCreds.expiresAt)) {
+        const diskRemaining = postLockCreds.expiresAt - Date.now()
+        if (diskRemaining >= PROACTIVE_FRESH_MIN_REMAINING_MS) {
+          // Fresh token appeared while waiting for lock — another process just refreshed
+          this.accessToken = postLockCreds.accessToken
+          this.refreshToken = postLockCreds.refreshToken
+          this.expiresAt = postLockCreds.expiresAt
+          this.tokenIssuedAt = Date.now()
+          this.proactiveRefreshFailures = 0
+          this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(diskRemaining / 60000)}min remaining)`)
+          this.emitTokenStatus('rotated', `Token refreshed by another process (${Math.round(diskRemaining / 60000)}min remaining)`)
+          this.scheduleProactiveRotation()
+          return
         }
       }
 
@@ -1312,22 +1381,45 @@ export class ClaudeCodeSDK {
     // Acquire filesystem lock — only one process refreshes at a time
     const release = await acquireTokenRefreshLock()
 
+    // FAIL-CLOSED: if lock unavailable, another PID is refreshing right now.
+    // Poll the disk instead of joining the 429 storm. Use lower minRemainingMs
+    // here than proactive rotation — this is reactive (we already know we need
+    // a token soon), so any non-expired token from disk is acceptable.
+    if (!release) {
+      this.dbg('refresh: lock unavailable (another PID refreshing) — polling disk')
+      const fresh = await pollDiskForFreshToken(
+        this.credentialStore,
+        45_000,
+        EXPIRY_BUFFER_MS,  // any token with > buffer remaining is fine for reactive use
+      )
+      if (fresh) {
+        this.accessToken = fresh.accessToken
+        this.refreshToken = fresh.refreshToken
+        this.expiresAt = fresh.expiresAt
+        this.dbg(`refresh: picked up fresh token from disk (${Math.round((fresh.expiresAt - Date.now()) / 60000)}min remaining)`)
+        return
+      }
+      // No fresh token appeared — last-resort attempt without lock.
+      // (Better to risk 429 than leave the caller without a token.)
+      this.dbg('refresh: no fresh token from disk after 45s wait — attempting unlocked refresh as last resort')
+      await this.doTokenRefresh()
+      return
+    }
+
     try {
       // Check 3: post-lock re-read (someone else refreshed while we waited for lock)
-      if (release) {
-        const postLockCreds = await this.credentialStore.read()
-        if (postLockCreds && !(Date.now() + EXPIRY_BUFFER_MS >= postLockCreds.expiresAt)) {
-          this.accessToken = postLockCreds.accessToken
-          this.refreshToken = postLockCreds.refreshToken
-          this.expiresAt = postLockCreds.expiresAt
-          return
-        }
+      const postLockCreds = await this.credentialStore.read()
+      if (postLockCreds && !(Date.now() + EXPIRY_BUFFER_MS >= postLockCreds.expiresAt)) {
+        this.accessToken = postLockCreds.accessToken
+        this.refreshToken = postLockCreds.refreshToken
+        this.expiresAt = postLockCreds.expiresAt
+        return
       }
 
       // Actually refresh (under lock)
       await this.doTokenRefresh()
     } finally {
-      if (release) release()
+      release()
     }
   }
 
@@ -1357,8 +1449,43 @@ export class ClaudeCodeSDK {
         return true
       }
 
-      // Still same bad token — force refresh
-      await this.doTokenRefresh()
+      // Still same bad token — acquire lock before refresh to avoid 429 storm
+      // when multiple PIDs hit 401 simultaneously (e.g. all sharing same dead token).
+      const release = await acquireTokenRefreshLock()
+      if (!release) {
+        // FAIL-CLOSED: another PID is refreshing — wait for them via disk poll
+        this.dbg('handleAuth401: lock unavailable — polling disk for fresh token')
+        const fresh = await pollDiskForFreshToken(
+          this.credentialStore,
+          45_000,
+          EXPIRY_BUFFER_MS,
+        )
+        if (fresh && fresh.accessToken !== failedToken) {
+          this.accessToken = fresh.accessToken
+          this.refreshToken = fresh.refreshToken
+          this.expiresAt = fresh.expiresAt
+          this.dbg(`handleAuth401: picked up fresh token from disk (${Math.round((fresh.expiresAt - Date.now()) / 60000)}min remaining)`)
+          return true
+        }
+        // No fresh token from disk — last-resort unlocked refresh
+        this.dbg('handleAuth401: no fresh token from disk after 45s wait — attempting unlocked refresh')
+        await this.doTokenRefresh()
+        return true
+      }
+      try {
+        // Post-lock re-check: winner may have refreshed while we waited
+        const postLockCreds = await this.credentialStore.read()
+        if (postLockCreds && postLockCreds.accessToken !== failedToken &&
+            !(Date.now() + EXPIRY_BUFFER_MS >= postLockCreds.expiresAt)) {
+          this.accessToken = postLockCreds.accessToken
+          this.refreshToken = postLockCreds.refreshToken
+          this.expiresAt = postLockCreds.expiresAt
+          return true
+        }
+        await this.doTokenRefresh()
+      } finally {
+        release()
+      }
       return true
     })().finally(() => {
       this.pending401 = null
@@ -1403,6 +1530,41 @@ export class ClaudeCodeSDK {
 
     const MAX_REFRESH_RETRIES = 5
     const REFRESH_DELAYS = [500, 1500, 3000, 5000, 8000]  // wider spread to reduce 429 storms
+
+    // PRE-FETCH MTIME CHECK — coordinate with non-SDK refreshers (e.g. original
+    // Claude Code CLI) that share ~/.claude/.credentials.json but don't know
+    // about our cross-process lock. If the file was modified within the last
+    // 60 seconds, *somebody* (CLI, another PID, etc.) just refreshed —
+    // re-read instead of competing for the same per-refresh_token rate window.
+    //
+    // Production incident 2026-04-27 04:51:32Z: original CLI succeeded 25s
+    // after our 5×429 burst. With this check, on our next rotation attempt we
+    // would notice mtime fresh and pickup instead of POSTing.
+    const credPath = (this.credentialStore as { path?: string }).path ?? join(homedir(), '.claude', '.credentials.json')
+    try {
+      const mtimeMs = statSync(credPath).mtimeMs
+      const ageMs = Date.now() - mtimeMs
+      const RECENT_WRITE_WINDOW_MS = 60_000
+      if (ageMs < RECENT_WRITE_WINDOW_MS) {
+        const recentCreds = await this.credentialStore.read()
+        if (recentCreds && !(Date.now() + EXPIRY_BUFFER_MS >= recentCreds.expiresAt)) {
+          const diskRemaining = recentCreds.expiresAt - Date.now()
+          const isDifferent = recentCreds.accessToken !== this.accessToken
+          // Accept if: not force OR token has enough life
+          if (!force || (isDifferent && diskRemaining >= PROACTIVE_FRESH_MIN_REMAINING_MS)) {
+            this.accessToken = recentCreds.accessToken
+            this.refreshToken = recentCreds.refreshToken
+            this.expiresAt = recentCreds.expiresAt
+            this.tokenIssuedAt = Date.now()
+            this.dbg(`refresh: skipped (mtime fresh ${Math.round(ageMs / 1000)}s ago, ${Math.round(diskRemaining / 60000)}min remaining) — picked up sibling/CLI write`)
+            this.scheduleProactiveRotation()
+            return
+          }
+        }
+      }
+    } catch {
+      // statSync may fail if file doesn't exist yet — fall through to normal refresh
+    }
 
     for (let attempt = 0; attempt < MAX_REFRESH_RETRIES; attempt++) {
       // Before each attempt, check if another process already refreshed
@@ -1484,19 +1646,34 @@ export class ClaudeCodeSDK {
         return
       }
 
-      // On 429/5xx: wait and retry — another process may succeed first
-      if ((response.status === 429 || response.status >= 500) && attempt < MAX_REFRESH_RETRIES - 1) {
+      // On 429: STOP retrying immediately. The OAuth endpoint rate-limits per
+      // refresh_token, not per IP — repeating POSTs in quick succession just
+      // *extends* the rate-limit window. Set a cross-process cooldown so other
+      // PIDs (and our future scheduled rotations) back off, then bail out.
+      // The next disk poll (proactiveRefresh / refreshTokenWithTripleCheck)
+      // will pick up whoever did succeed (CLI, another PID, or our own next
+      // attempt after cooldown).
+      //
+      // Production incident 2026-04-27 04:50:54Z: pid=248235 saw 429 on attempt 0
+      // and continued retrying (1/2/3/4) for ~13s, all 429. Original CLI then
+      // succeeded at 04:51:32 (25s after our first 429). If we had bailed
+      // immediately, the CLI would still have won the race, but we'd have made
+      // 1 POST instead of 5 — reducing our share of the 429 storm 5×.
+      if (response.status === 429) {
+        // 60s cooldown — covers Anthropic's typical per-refresh_token window
+        // and is short enough to not block forever if it was a transient blip.
+        const cooldownMs = Math.min(60_000, REFRESH_COOLDOWN_MAX_MS)
+        this.setRefreshCooldown(cooldownMs)
+        this.dbg(`TOKEN_REFRESH_RETRY status=429 attempt=${attempt + 1}/${MAX_REFRESH_RETRIES} — bailing out, cooldown ${cooldownMs}ms (per-token rate limit)`)
+        throw new AuthError(`Token refresh rate-limited (429) — will pickup from disk or retry after cooldown`)
+      }
+
+      // On 5xx: still retry with backoff (these are transient server errors,
+      // not rate-limits). Same retry budget as before.
+      if (response.status >= 500 && attempt < MAX_REFRESH_RETRIES - 1) {
         const delay = REFRESH_DELAYS[attempt] ?? 8000
         const jitter = Math.random() * delay * 0.5
         this.dbg(`TOKEN_REFRESH_RETRY status=${response.status} attempt=${attempt + 1}/${MAX_REFRESH_RETRIES} delay=${Math.round(delay + jitter)}ms`)
-        // On 429: set cross-process cooldown so other PIDs back off too
-        if (response.status === 429) {
-          const cooldownMs = Math.min(
-            (delay + jitter) * 3, // 3x the retry delay
-            REFRESH_COOLDOWN_MAX_MS,
-          )
-          this.setRefreshCooldown(cooldownMs)
-        }
         await new Promise(r => setTimeout(r, delay + jitter))
         continue
       }
@@ -1695,7 +1872,9 @@ export class ClaudeCodeSDK {
 export class FileCredentialStore implements CredentialStore {
   private lastMtimeMs = 0
 
-  constructor(private path: string) {}
+  // public readonly: lets ClaudeMaxClient.doTokenRefresh() do the pre-fetch
+  // mtime check without a back-channel. Path is non-secret (just a file path).
+  constructor(public readonly path: string) {}
 
   async read(): Promise<StoredCredentials | null> {
     try {

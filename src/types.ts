@@ -78,7 +78,12 @@ export interface TokenStatusEvent {
 
 export interface KeepaliveConfig {
   enabled?: boolean          // default: true
-  intervalMs?: number        // default: 120_000 (clamped to [60_000, 240_000])
+  /**
+   * KA interval in ms. If undefined, engine reads from SSOT (~/.claude/keepalive.json).
+   * Auto-scaled by cacheTtlMs: legacy 5m TTL → 150s, 1h TTL → 1800s.
+   * Clamped to [intervalClampMin, intervalClampMax] where max = cacheTtlMs - safetyMarginMs - 60s.
+   */
+  intervalMs?: number
   idleTimeoutMs?: number     // default: Infinity (never auto-stop on idle)
   minTokens?: number         // default: 2000
 

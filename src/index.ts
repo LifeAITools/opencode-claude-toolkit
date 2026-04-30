@@ -39,6 +39,28 @@ export type { SessionEntry } from './session.js'
 export { KeepaliveEngine } from './keepalive-engine.js'
 export type { KeepaliveEngineOptions } from './keepalive-engine.js'
 
+// Keepalive SSOT — read/manage cache TTL + KA params from ~/.claude/keepalive.json.
+// Consumers should NOT hardcode TTL or interval values; use this instead.
+export {
+  loadKeepaliveConfig,
+  reloadKeepaliveConfig,
+  getCacheTtlMs,
+  getSafetyMarginMs,
+  getConfigPath as getKeepaliveConfigPath,
+  RECOMMENDED_1H_CONFIG,
+} from './keepalive-config.js'
+export type { ResolvedKeepaliveConfig } from './keepalive-config.js'
+
+// Cache metrics + regression detector — rolling-window summary and alerts on
+// hit-rate degradation (catches silent Anthropic-side cache changes).
+export { CacheMetricsCollector } from './cache-metrics.js'
+export type {
+  RecordedRequest,
+  MetricsSummary,
+  RegressionInfo,
+  CacheMetricsOptions,
+} from './cache-metrics.js'
+
 // ═══ Proxy ports + default adapters (Hybrid Architecture / Hex) ═════
 //
 // ProxyClient (not yet exported — added in Step 3) is the core orchestrator

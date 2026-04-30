@@ -44,7 +44,7 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
-var __require_gv7hsff9 = import.meta.require;
+var __require = import.meta.require;
 
 // node_modules/bmp-ts/dist/commonjs/header-types.js
 var require_header_types = __commonJS((exports) => {
@@ -4810,9 +4810,9 @@ var require_image_q = __commonJS((exports, module) => {
         const errorLine = errorLines[0];
         for (let x22 = xStart, idx = lni + xStart;x22 !== xEnd; x22 += dir, idx += dir) {
           const point = pointArray[idx];
-          const error2 = errorLine[x22];
+          const error = errorLine[x22];
           originalPoint.from(point);
-          const correctedPoint = Point.createByRGBA(inRange0to255Rounded(point.r + error2[0]), inRange0to255Rounded(point.g + error2[1]), inRange0to255Rounded(point.b + error2[2]), inRange0to255Rounded(point.a + error2[3]));
+          const correctedPoint = Point.createByRGBA(inRange0to255Rounded(point.r + error[0]), inRange0to255Rounded(point.g + error[1]), inRange0to255Rounded(point.b + error[2]), inRange0to255Rounded(point.a + error[3]));
           const palettePoint = palette2.getNearestColor(this._distance, correctedPoint);
           point.from(palettePoint);
           if (this._minColorDistance) {
@@ -4862,8 +4862,8 @@ var require_image_q = __commonJS((exports, module) => {
       }
       const l2 = errorLine.length;
       for (let i2 = 0;i2 < l2; i2++) {
-        const error2 = errorLine[i2];
-        error2[0] = error2[1] = error2[2] = error2[3] = 0;
+        const error = errorLine[i2];
+        error[0] = error[1] = error[2] = error[3] = 0;
       }
       for (let i2 = l2;i2 < width; i2++) {
         errorLine[i2] = [0, 0, 0, 0];
@@ -5226,8 +5226,8 @@ var require_image_q = __commonJS((exports, module) => {
               onProgress(result.value.progress);
             setImmediateImpl(next);
           }
-        } catch (error2) {
-          reject(error2);
+        } catch (error) {
+          reject(error);
         }
       };
       setImmediateImpl(next);
@@ -5261,8 +5261,8 @@ var require_image_q = __commonJS((exports, module) => {
               onProgress(result.value.progress);
             setImmediateImpl(next);
           }
-        } catch (error2) {
-          reject(error2);
+        } catch (error) {
+          reject(error);
         }
       };
       setImmediateImpl(next);
@@ -5405,7 +5405,7 @@ var require_gifframe = __commonJS((exports) => {
 
 // node_modules/gifwrap/src/gifutil.js
 var require_gifutil = __commonJS((exports) => {
-  var fs = __require_gv7hsff9("fs");
+  var fs = __require("fs");
   var ImageQ = require_image_q();
   var BitmapImage = require_bitmapimage();
   var { GifFrame } = require_gifframe();
@@ -5677,21 +5677,21 @@ var require_gifcodec = __commonJS((exports) => {
       }
     }
     _decodeFrame(reader, frameIndex, alreadyUsedTransparency) {
-      let info2, buffer;
+      let info, buffer;
       try {
-        info2 = reader.frameInfo(frameIndex);
+        info = reader.frameInfo(frameIndex);
         buffer = new Buffer(reader.width * reader.height * 4);
         reader.decodeAndBlitFrameRGBA(frameIndex, buffer);
-        if (info2.width !== reader.width || info2.height !== reader.height) {
-          if (info2.y) {
-            buffer = buffer.slice(info2.y * reader.width * 4);
+        if (info.width !== reader.width || info.height !== reader.height) {
+          if (info.y) {
+            buffer = buffer.slice(info.y * reader.width * 4);
           }
-          if (reader.width > info2.width) {
-            for (let ii = 0;ii < info2.height; ++ii) {
-              buffer.copy(buffer, ii * info2.width * 4, (info2.x + ii * reader.width) * 4, (info2.x + ii * reader.width) * 4 + info2.width * 4);
+          if (reader.width > info.width) {
+            for (let ii = 0;ii < info.height; ++ii) {
+              buffer.copy(buffer, ii * info.width * 4, (info.x + ii * reader.width) * 4, (info.x + ii * reader.width) * 4 + info.width * 4);
             }
           }
-          buffer = buffer.slice(0, info2.width * info2.height * 4);
+          buffer = buffer.slice(0, info.width * info.height * 4);
         }
       } catch (err) {
         throw new GifError2(err);
@@ -5714,12 +5714,12 @@ var require_gifcodec = __commonJS((exports) => {
           }
         }
       }
-      const frame = new GifFrame(info2.width, info2.height, buffer, {
-        xOffset: info2.x,
-        yOffset: info2.y,
-        disposalMethod: info2.disposal,
-        interlaced: info2.interlaced,
-        delayCentisecs: info2.delay
+      const frame = new GifFrame(info.width, info.height, buffer, {
+        xOffset: info.x,
+        yOffset: info.y,
+        disposalMethod: info.disposal,
+        interlaced: info.interlaced,
+        delayCentisecs: info.delay
       });
       return { frame, usesTransparency };
     }
@@ -8108,8 +8108,8 @@ var require_commonjs5 = __commonJS((exports) => {
 
 // node_modules/pngjs/lib/chunkstream.js
 var require_chunkstream = __commonJS((exports, module) => {
-  var util = __require_gv7hsff9("util");
-  var Stream = __require_gv7hsff9("stream");
+  var util = __require("util");
+  var Stream = __require("stream");
   var ChunkStream = module.exports = function() {
     Stream.call(this);
     this._buffers = [];
@@ -8465,7 +8465,7 @@ var require_filter_parse = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/filter-parse-async.js
 var require_filter_parse_async = __commonJS((exports, module) => {
-  var util = __require_gv7hsff9("util");
+  var util = __require("util");
   var ChunkStream = require_chunkstream();
   var Filter = require_filter_parse();
   var FilterAsync = module.exports = function(bitmapInfo) {
@@ -9056,8 +9056,8 @@ var require_format_normaliser = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/parser-async.js
 var require_parser_async = __commonJS((exports, module) => {
-  var util = __require_gv7hsff9("util");
-  var zlib = __require_gv7hsff9("zlib");
+  var util = __require("util");
+  var zlib = __require("zlib");
   var ChunkStream = require_chunkstream();
   var FilterAsync = require_filter_parse_async();
   var Parser = require_parser();
@@ -9450,7 +9450,7 @@ var require_packer = __commonJS((exports, module) => {
   var CrcStream = require_crc();
   var bitPacker = require_bitpacker();
   var filter = require_filter_pack();
-  var zlib = __require_gv7hsff9("zlib");
+  var zlib = __require("zlib");
   var Packer = module.exports = function(options) {
     this._options = options;
     options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
@@ -9534,8 +9534,8 @@ var require_packer = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/packer-async.js
 var require_packer_async = __commonJS((exports, module) => {
-  var util = __require_gv7hsff9("util");
-  var Stream = __require_gv7hsff9("stream");
+  var util = __require("util");
+  var Stream = __require("stream");
   var constants2 = require_constants();
   var Packer = require_packer();
   var PackerAsync = module.exports = function(opt) {
@@ -9567,10 +9567,10 @@ var require_packer_async = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/sync-inflate.js
 var require_sync_inflate = __commonJS((exports, module) => {
-  var assert = __require_gv7hsff9("assert").ok;
-  var zlib = __require_gv7hsff9("zlib");
-  var util = __require_gv7hsff9("util");
-  var kMaxLength = __require_gv7hsff9("buffer").kMaxLength;
+  var assert = __require("assert").ok;
+  var zlib = __require("zlib");
+  var util = __require("util");
+  var kMaxLength = __require("buffer").kMaxLength;
   function Inflate(opts) {
     if (!(this instanceof Inflate)) {
       return new Inflate(opts);
@@ -9588,15 +9588,15 @@ var require_sync_inflate = __commonJS((exports, module) => {
   function createInflate(opts) {
     return new Inflate(opts);
   }
-  function _close(engine2, callback) {
+  function _close(engine, callback) {
     if (callback) {
       process.nextTick(callback);
     }
-    if (!engine2._handle) {
+    if (!engine._handle) {
       return;
     }
-    engine2._handle.close();
-    engine2._handle = null;
+    engine._handle.close();
+    engine._handle = null;
   }
   Inflate.prototype._processChunk = function(chunk, flushFlag, asyncCb) {
     if (typeof asyncCb === "function") {
@@ -9609,9 +9609,9 @@ var require_sync_inflate = __commonJS((exports, module) => {
     let inOff = 0;
     let buffers = [];
     let nread = 0;
-    let error2;
+    let error;
     this.on("error", function(err) {
-      error2 = err;
+      error = err;
     });
     function handleChunk(availInAfter, availOutAfter) {
       if (self2._hadError) {
@@ -9651,7 +9651,7 @@ var require_sync_inflate = __commonJS((exports, module) => {
       res = res || this._writeState;
     } while (!this._hadError && handleChunk(res[0], res[1]));
     if (this._hadError) {
-      throw error2;
+      throw error;
     }
     if (nread >= kMaxLength) {
       _close(this);
@@ -9662,18 +9662,18 @@ var require_sync_inflate = __commonJS((exports, module) => {
     return buf;
   };
   util.inherits(Inflate, zlib.Inflate);
-  function zlibBufferSync(engine2, buffer) {
+  function zlibBufferSync(engine, buffer) {
     if (typeof buffer === "string") {
       buffer = Buffer.from(buffer);
     }
     if (!(buffer instanceof Buffer)) {
       throw new TypeError("Not a string or buffer");
     }
-    let flushFlag = engine2._finishFlushFlag;
+    let flushFlag = engine._finishFlushFlag;
     if (flushFlag == null) {
       flushFlag = zlib.Z_FINISH;
     }
-    return engine2._processChunk(buffer, flushFlag);
+    return engine._processChunk(buffer, flushFlag);
   }
   function inflateSync(buffer, opts) {
     return zlibBufferSync(new Inflate(opts), buffer);
@@ -9741,7 +9741,7 @@ var require_filter_parse_sync = __commonJS((exports) => {
 // node_modules/pngjs/lib/parser-sync.js
 var require_parser_sync = __commonJS((exports, module) => {
   var hasSyncZlib = true;
-  var zlib = __require_gv7hsff9("zlib");
+  var zlib = __require("zlib");
   var inflateSync = require_sync_inflate();
   if (!zlib.deflateSync) {
     hasSyncZlib = false;
@@ -9827,7 +9827,7 @@ var require_parser_sync = __commonJS((exports, module) => {
 // node_modules/pngjs/lib/packer-sync.js
 var require_packer_sync = __commonJS((exports, module) => {
   var hasSyncZlib = true;
-  var zlib = __require_gv7hsff9("zlib");
+  var zlib = __require("zlib");
   if (!zlib.deflateSync) {
     hasSyncZlib = false;
   }
@@ -9871,8 +9871,8 @@ var require_png_sync = __commonJS((exports) => {
 
 // node_modules/pngjs/lib/png.js
 var require_png = __commonJS((exports) => {
-  var util = __require_gv7hsff9("util");
-  var Stream = __require_gv7hsff9("stream");
+  var util = __require("util");
+  var Stream = __require("stream");
   var Parser = require_parser_async();
   var Packer = require_packer_async();
   var PNGSync = require_png_sync();
@@ -12163,7 +12163,7 @@ var require_inffast = __commonJS((exports, module) => {
   var BAD = 30;
   var TYPE = 12;
   module.exports = function inflate_fast(strm, start) {
-    var state2;
+    var state;
     var _in;
     var last;
     var _out;
@@ -12187,7 +12187,7 @@ var require_inffast = __commonJS((exports, module) => {
     var from;
     var from_source;
     var input, output;
-    state2 = strm.state;
+    state = strm.state;
     _in = strm.next_in;
     input = strm.input;
     last = _in + (strm.avail_in - 5);
@@ -12195,17 +12195,17 @@ var require_inffast = __commonJS((exports, module) => {
     output = strm.output;
     beg = _out - (start - strm.avail_out);
     end = _out + (strm.avail_out - 257);
-    dmax = state2.dmax;
-    wsize = state2.wsize;
-    whave = state2.whave;
-    wnext = state2.wnext;
-    s_window = state2.window;
-    hold = state2.hold;
-    bits = state2.bits;
-    lcode = state2.lencode;
-    dcode = state2.distcode;
-    lmask = (1 << state2.lenbits) - 1;
-    dmask = (1 << state2.distbits) - 1;
+    dmax = state.dmax;
+    wsize = state.wsize;
+    whave = state.whave;
+    wnext = state.wnext;
+    s_window = state.window;
+    hold = state.hold;
+    bits = state.bits;
+    lcode = state.lencode;
+    dcode = state.distcode;
+    lmask = (1 << state.lenbits) - 1;
+    dmask = (1 << state.distbits) - 1;
     top:
       do {
         if (bits < 15) {
@@ -12262,7 +12262,7 @@ var require_inffast = __commonJS((exports, module) => {
                     dist += hold & (1 << op) - 1;
                     if (dist > dmax) {
                       strm.msg = "invalid distance too far back";
-                      state2.mode = BAD;
+                      state.mode = BAD;
                       break top;
                     }
                     hold >>>= op;
@@ -12271,9 +12271,9 @@ var require_inffast = __commonJS((exports, module) => {
                     if (dist > op) {
                       op = dist - op;
                       if (op > whave) {
-                        if (state2.sane) {
+                        if (state.sane) {
                           strm.msg = "invalid distance too far back";
-                          state2.mode = BAD;
+                          state.mode = BAD;
                           break top;
                         }
                       }
@@ -12351,7 +12351,7 @@ var require_inffast = __commonJS((exports, module) => {
                     continue dodist;
                   } else {
                     strm.msg = "invalid distance code";
-                    state2.mode = BAD;
+                    state.mode = BAD;
                     break top;
                   }
                   break;
@@ -12360,11 +12360,11 @@ var require_inffast = __commonJS((exports, module) => {
               here = lcode[(here & 65535) + (hold & (1 << op) - 1)];
               continue dolen;
             } else if (op & 32) {
-              state2.mode = TYPE;
+              state.mode = TYPE;
               break top;
             } else {
               strm.msg = "invalid literal/length code";
-              state2.mode = BAD;
+              state.mode = BAD;
               break top;
             }
             break;
@@ -12378,8 +12378,8 @@ var require_inffast = __commonJS((exports, module) => {
     strm.next_out = _out;
     strm.avail_in = _in < last ? 5 + (last - _in) : 5 - (_in - last);
     strm.avail_out = _out < end ? 257 + (end - _out) : 257 - (_out - end);
-    state2.hold = hold;
-    state2.bits = bits;
+    state.hold = hold;
+    state.bits = bits;
     return;
   };
 });
@@ -12791,47 +12791,47 @@ var require_inflate = __commonJS((exports) => {
     this.was = 0;
   }
   function inflateResetKeep(strm) {
-    var state2;
+    var state;
     if (!strm || !strm.state) {
       return Z_STREAM_ERROR;
     }
-    state2 = strm.state;
-    strm.total_in = strm.total_out = state2.total = 0;
+    state = strm.state;
+    strm.total_in = strm.total_out = state.total = 0;
     strm.msg = "";
-    if (state2.wrap) {
-      strm.adler = state2.wrap & 1;
+    if (state.wrap) {
+      strm.adler = state.wrap & 1;
     }
-    state2.mode = HEAD;
-    state2.last = 0;
-    state2.havedict = 0;
-    state2.dmax = 32768;
-    state2.head = null;
-    state2.hold = 0;
-    state2.bits = 0;
-    state2.lencode = state2.lendyn = new utils2.Buf32(ENOUGH_LENS);
-    state2.distcode = state2.distdyn = new utils2.Buf32(ENOUGH_DISTS);
-    state2.sane = 1;
-    state2.back = -1;
+    state.mode = HEAD;
+    state.last = 0;
+    state.havedict = 0;
+    state.dmax = 32768;
+    state.head = null;
+    state.hold = 0;
+    state.bits = 0;
+    state.lencode = state.lendyn = new utils2.Buf32(ENOUGH_LENS);
+    state.distcode = state.distdyn = new utils2.Buf32(ENOUGH_DISTS);
+    state.sane = 1;
+    state.back = -1;
     return Z_OK;
   }
   function inflateReset(strm) {
-    var state2;
+    var state;
     if (!strm || !strm.state) {
       return Z_STREAM_ERROR;
     }
-    state2 = strm.state;
-    state2.wsize = 0;
-    state2.whave = 0;
-    state2.wnext = 0;
+    state = strm.state;
+    state.wsize = 0;
+    state.whave = 0;
+    state.wnext = 0;
     return inflateResetKeep(strm);
   }
   function inflateReset2(strm, windowBits) {
     var wrap;
-    var state2;
+    var state;
     if (!strm || !strm.state) {
       return Z_STREAM_ERROR;
     }
-    state2 = strm.state;
+    state = strm.state;
     if (windowBits < 0) {
       wrap = 0;
       windowBits = -windowBits;
@@ -12844,22 +12844,22 @@ var require_inflate = __commonJS((exports) => {
     if (windowBits && (windowBits < 8 || windowBits > 15)) {
       return Z_STREAM_ERROR;
     }
-    if (state2.window !== null && state2.wbits !== windowBits) {
-      state2.window = null;
+    if (state.window !== null && state.wbits !== windowBits) {
+      state.window = null;
     }
-    state2.wrap = wrap;
-    state2.wbits = windowBits;
+    state.wrap = wrap;
+    state.wbits = windowBits;
     return inflateReset(strm);
   }
   function inflateInit2(strm, windowBits) {
     var ret;
-    var state2;
+    var state;
     if (!strm) {
       return Z_STREAM_ERROR;
     }
-    state2 = new InflateState;
-    strm.state = state2;
-    state2.window = null;
+    state = new InflateState;
+    strm.state = state;
+    state.window = null;
     ret = inflateReset2(strm, windowBits);
     if (ret !== Z_OK) {
       strm.state = null;
@@ -12872,75 +12872,75 @@ var require_inflate = __commonJS((exports) => {
   var virgin = true;
   var lenfix;
   var distfix;
-  function fixedtables(state2) {
+  function fixedtables(state) {
     if (virgin) {
       var sym;
       lenfix = new utils2.Buf32(512);
       distfix = new utils2.Buf32(32);
       sym = 0;
       while (sym < 144) {
-        state2.lens[sym++] = 8;
+        state.lens[sym++] = 8;
       }
       while (sym < 256) {
-        state2.lens[sym++] = 9;
+        state.lens[sym++] = 9;
       }
       while (sym < 280) {
-        state2.lens[sym++] = 7;
+        state.lens[sym++] = 7;
       }
       while (sym < 288) {
-        state2.lens[sym++] = 8;
+        state.lens[sym++] = 8;
       }
-      inflate_table(LENS, state2.lens, 0, 288, lenfix, 0, state2.work, { bits: 9 });
+      inflate_table(LENS, state.lens, 0, 288, lenfix, 0, state.work, { bits: 9 });
       sym = 0;
       while (sym < 32) {
-        state2.lens[sym++] = 5;
+        state.lens[sym++] = 5;
       }
-      inflate_table(DISTS, state2.lens, 0, 32, distfix, 0, state2.work, { bits: 5 });
+      inflate_table(DISTS, state.lens, 0, 32, distfix, 0, state.work, { bits: 5 });
       virgin = false;
     }
-    state2.lencode = lenfix;
-    state2.lenbits = 9;
-    state2.distcode = distfix;
-    state2.distbits = 5;
+    state.lencode = lenfix;
+    state.lenbits = 9;
+    state.distcode = distfix;
+    state.distbits = 5;
   }
   function updatewindow(strm, src, end, copy) {
     var dist;
-    var state2 = strm.state;
-    if (state2.window === null) {
-      state2.wsize = 1 << state2.wbits;
-      state2.wnext = 0;
-      state2.whave = 0;
-      state2.window = new utils2.Buf8(state2.wsize);
+    var state = strm.state;
+    if (state.window === null) {
+      state.wsize = 1 << state.wbits;
+      state.wnext = 0;
+      state.whave = 0;
+      state.window = new utils2.Buf8(state.wsize);
     }
-    if (copy >= state2.wsize) {
-      utils2.arraySet(state2.window, src, end - state2.wsize, state2.wsize, 0);
-      state2.wnext = 0;
-      state2.whave = state2.wsize;
+    if (copy >= state.wsize) {
+      utils2.arraySet(state.window, src, end - state.wsize, state.wsize, 0);
+      state.wnext = 0;
+      state.whave = state.wsize;
     } else {
-      dist = state2.wsize - state2.wnext;
+      dist = state.wsize - state.wnext;
       if (dist > copy) {
         dist = copy;
       }
-      utils2.arraySet(state2.window, src, end - copy, dist, state2.wnext);
+      utils2.arraySet(state.window, src, end - copy, dist, state.wnext);
       copy -= dist;
       if (copy) {
-        utils2.arraySet(state2.window, src, end - copy, copy, 0);
-        state2.wnext = copy;
-        state2.whave = state2.wsize;
+        utils2.arraySet(state.window, src, end - copy, copy, 0);
+        state.wnext = copy;
+        state.whave = state.wsize;
       } else {
-        state2.wnext += dist;
-        if (state2.wnext === state2.wsize) {
-          state2.wnext = 0;
+        state.wnext += dist;
+        if (state.wnext === state.wsize) {
+          state.wnext = 0;
         }
-        if (state2.whave < state2.wsize) {
-          state2.whave += dist;
+        if (state.whave < state.wsize) {
+          state.whave += dist;
         }
       }
     }
     return 0;
   }
   function inflate(strm, flush) {
-    var state2;
+    var state;
     var input, output;
     var next;
     var put;
@@ -12963,9 +12963,9 @@ var require_inflate = __commonJS((exports) => {
     if (!strm || !strm.state || !strm.output || !strm.input && strm.avail_in !== 0) {
       return Z_STREAM_ERROR;
     }
-    state2 = strm.state;
-    if (state2.mode === TYPE) {
-      state2.mode = TYPEDO;
+    state = strm.state;
+    if (state.mode === TYPE) {
+      state.mode = TYPEDO;
     }
     put = strm.next_out;
     output = strm.output;
@@ -12973,17 +12973,17 @@ var require_inflate = __commonJS((exports) => {
     next = strm.next_in;
     input = strm.input;
     have = strm.avail_in;
-    hold = state2.hold;
-    bits = state2.bits;
+    hold = state.hold;
+    bits = state.bits;
     _in = have;
     _out = left;
     ret = Z_OK;
     inf_leave:
       for (;; ) {
-        switch (state2.mode) {
+        switch (state.mode) {
           case HEAD:
-            if (state2.wrap === 0) {
-              state2.mode = TYPEDO;
+            if (state.wrap === 0) {
+              state.mode = TYPEDO;
               break;
             }
             while (bits < 16) {
@@ -12994,43 +12994,43 @@ var require_inflate = __commonJS((exports) => {
               hold += input[next++] << bits;
               bits += 8;
             }
-            if (state2.wrap & 2 && hold === 35615) {
-              state2.check = 0;
+            if (state.wrap & 2 && hold === 35615) {
+              state.check = 0;
               hbuf[0] = hold & 255;
               hbuf[1] = hold >>> 8 & 255;
-              state2.check = crc32(state2.check, hbuf, 2, 0);
+              state.check = crc32(state.check, hbuf, 2, 0);
               hold = 0;
               bits = 0;
-              state2.mode = FLAGS;
+              state.mode = FLAGS;
               break;
             }
-            state2.flags = 0;
-            if (state2.head) {
-              state2.head.done = false;
+            state.flags = 0;
+            if (state.head) {
+              state.head.done = false;
             }
-            if (!(state2.wrap & 1) || (((hold & 255) << 8) + (hold >> 8)) % 31) {
+            if (!(state.wrap & 1) || (((hold & 255) << 8) + (hold >> 8)) % 31) {
               strm.msg = "incorrect header check";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
             if ((hold & 15) !== Z_DEFLATED) {
               strm.msg = "unknown compression method";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
             hold >>>= 4;
             bits -= 4;
             len = (hold & 15) + 8;
-            if (state2.wbits === 0) {
-              state2.wbits = len;
-            } else if (len > state2.wbits) {
+            if (state.wbits === 0) {
+              state.wbits = len;
+            } else if (len > state.wbits) {
               strm.msg = "invalid window size";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.dmax = 1 << len;
-            strm.adler = state2.check = 1;
-            state2.mode = hold & 512 ? DICTID : TYPE;
+            state.dmax = 1 << len;
+            strm.adler = state.check = 1;
+            state.mode = hold & 512 ? DICTID : TYPE;
             hold = 0;
             bits = 0;
             break;
@@ -13043,28 +13043,28 @@ var require_inflate = __commonJS((exports) => {
               hold += input[next++] << bits;
               bits += 8;
             }
-            state2.flags = hold;
-            if ((state2.flags & 255) !== Z_DEFLATED) {
+            state.flags = hold;
+            if ((state.flags & 255) !== Z_DEFLATED) {
               strm.msg = "unknown compression method";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            if (state2.flags & 57344) {
+            if (state.flags & 57344) {
               strm.msg = "unknown header flags set";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            if (state2.head) {
-              state2.head.text = hold >> 8 & 1;
+            if (state.head) {
+              state.head.text = hold >> 8 & 1;
             }
-            if (state2.flags & 512) {
+            if (state.flags & 512) {
               hbuf[0] = hold & 255;
               hbuf[1] = hold >>> 8 & 255;
-              state2.check = crc32(state2.check, hbuf, 2, 0);
+              state.check = crc32(state.check, hbuf, 2, 0);
             }
             hold = 0;
             bits = 0;
-            state2.mode = TIME;
+            state.mode = TIME;
           case TIME:
             while (bits < 32) {
               if (have === 0) {
@@ -13074,19 +13074,19 @@ var require_inflate = __commonJS((exports) => {
               hold += input[next++] << bits;
               bits += 8;
             }
-            if (state2.head) {
-              state2.head.time = hold;
+            if (state.head) {
+              state.head.time = hold;
             }
-            if (state2.flags & 512) {
+            if (state.flags & 512) {
               hbuf[0] = hold & 255;
               hbuf[1] = hold >>> 8 & 255;
               hbuf[2] = hold >>> 16 & 255;
               hbuf[3] = hold >>> 24 & 255;
-              state2.check = crc32(state2.check, hbuf, 4, 0);
+              state.check = crc32(state.check, hbuf, 4, 0);
             }
             hold = 0;
             bits = 0;
-            state2.mode = OS;
+            state.mode = OS;
           case OS:
             while (bits < 16) {
               if (have === 0) {
@@ -13096,20 +13096,20 @@ var require_inflate = __commonJS((exports) => {
               hold += input[next++] << bits;
               bits += 8;
             }
-            if (state2.head) {
-              state2.head.xflags = hold & 255;
-              state2.head.os = hold >> 8;
+            if (state.head) {
+              state.head.xflags = hold & 255;
+              state.head.os = hold >> 8;
             }
-            if (state2.flags & 512) {
+            if (state.flags & 512) {
               hbuf[0] = hold & 255;
               hbuf[1] = hold >>> 8 & 255;
-              state2.check = crc32(state2.check, hbuf, 2, 0);
+              state.check = crc32(state.check, hbuf, 2, 0);
             }
             hold = 0;
             bits = 0;
-            state2.mode = EXLEN;
+            state.mode = EXLEN;
           case EXLEN:
-            if (state2.flags & 1024) {
+            if (state.flags & 1024) {
               while (bits < 16) {
                 if (have === 0) {
                   break inf_leave;
@@ -13118,99 +13118,99 @@ var require_inflate = __commonJS((exports) => {
                 hold += input[next++] << bits;
                 bits += 8;
               }
-              state2.length = hold;
-              if (state2.head) {
-                state2.head.extra_len = hold;
+              state.length = hold;
+              if (state.head) {
+                state.head.extra_len = hold;
               }
-              if (state2.flags & 512) {
+              if (state.flags & 512) {
                 hbuf[0] = hold & 255;
                 hbuf[1] = hold >>> 8 & 255;
-                state2.check = crc32(state2.check, hbuf, 2, 0);
+                state.check = crc32(state.check, hbuf, 2, 0);
               }
               hold = 0;
               bits = 0;
-            } else if (state2.head) {
-              state2.head.extra = null;
+            } else if (state.head) {
+              state.head.extra = null;
             }
-            state2.mode = EXTRA;
+            state.mode = EXTRA;
           case EXTRA:
-            if (state2.flags & 1024) {
-              copy = state2.length;
+            if (state.flags & 1024) {
+              copy = state.length;
               if (copy > have) {
                 copy = have;
               }
               if (copy) {
-                if (state2.head) {
-                  len = state2.head.extra_len - state2.length;
-                  if (!state2.head.extra) {
-                    state2.head.extra = new Array(state2.head.extra_len);
+                if (state.head) {
+                  len = state.head.extra_len - state.length;
+                  if (!state.head.extra) {
+                    state.head.extra = new Array(state.head.extra_len);
                   }
-                  utils2.arraySet(state2.head.extra, input, next, copy, len);
+                  utils2.arraySet(state.head.extra, input, next, copy, len);
                 }
-                if (state2.flags & 512) {
-                  state2.check = crc32(state2.check, input, copy, next);
+                if (state.flags & 512) {
+                  state.check = crc32(state.check, input, copy, next);
                 }
                 have -= copy;
                 next += copy;
-                state2.length -= copy;
+                state.length -= copy;
               }
-              if (state2.length) {
+              if (state.length) {
                 break inf_leave;
               }
             }
-            state2.length = 0;
-            state2.mode = NAME;
+            state.length = 0;
+            state.mode = NAME;
           case NAME:
-            if (state2.flags & 2048) {
+            if (state.flags & 2048) {
               if (have === 0) {
                 break inf_leave;
               }
               copy = 0;
               do {
                 len = input[next + copy++];
-                if (state2.head && len && state2.length < 65536) {
-                  state2.head.name += String.fromCharCode(len);
+                if (state.head && len && state.length < 65536) {
+                  state.head.name += String.fromCharCode(len);
                 }
               } while (len && copy < have);
-              if (state2.flags & 512) {
-                state2.check = crc32(state2.check, input, copy, next);
+              if (state.flags & 512) {
+                state.check = crc32(state.check, input, copy, next);
               }
               have -= copy;
               next += copy;
               if (len) {
                 break inf_leave;
               }
-            } else if (state2.head) {
-              state2.head.name = null;
+            } else if (state.head) {
+              state.head.name = null;
             }
-            state2.length = 0;
-            state2.mode = COMMENT;
+            state.length = 0;
+            state.mode = COMMENT;
           case COMMENT:
-            if (state2.flags & 4096) {
+            if (state.flags & 4096) {
               if (have === 0) {
                 break inf_leave;
               }
               copy = 0;
               do {
                 len = input[next + copy++];
-                if (state2.head && len && state2.length < 65536) {
-                  state2.head.comment += String.fromCharCode(len);
+                if (state.head && len && state.length < 65536) {
+                  state.head.comment += String.fromCharCode(len);
                 }
               } while (len && copy < have);
-              if (state2.flags & 512) {
-                state2.check = crc32(state2.check, input, copy, next);
+              if (state.flags & 512) {
+                state.check = crc32(state.check, input, copy, next);
               }
               have -= copy;
               next += copy;
               if (len) {
                 break inf_leave;
               }
-            } else if (state2.head) {
-              state2.head.comment = null;
+            } else if (state.head) {
+              state.head.comment = null;
             }
-            state2.mode = HCRC;
+            state.mode = HCRC;
           case HCRC:
-            if (state2.flags & 512) {
+            if (state.flags & 512) {
               while (bits < 16) {
                 if (have === 0) {
                   break inf_leave;
@@ -13219,20 +13219,20 @@ var require_inflate = __commonJS((exports) => {
                 hold += input[next++] << bits;
                 bits += 8;
               }
-              if (hold !== (state2.check & 65535)) {
+              if (hold !== (state.check & 65535)) {
                 strm.msg = "header crc mismatch";
-                state2.mode = BAD;
+                state.mode = BAD;
                 break;
               }
               hold = 0;
               bits = 0;
             }
-            if (state2.head) {
-              state2.head.hcrc = state2.flags >> 9 & 1;
-              state2.head.done = true;
+            if (state.head) {
+              state.head.hcrc = state.flags >> 9 & 1;
+              state.head.done = true;
             }
-            strm.adler = state2.check = 0;
-            state2.mode = TYPE;
+            strm.adler = state.check = 0;
+            state.mode = TYPE;
             break;
           case DICTID:
             while (bits < 32) {
@@ -13243,31 +13243,31 @@ var require_inflate = __commonJS((exports) => {
               hold += input[next++] << bits;
               bits += 8;
             }
-            strm.adler = state2.check = zswap32(hold);
+            strm.adler = state.check = zswap32(hold);
             hold = 0;
             bits = 0;
-            state2.mode = DICT;
+            state.mode = DICT;
           case DICT:
-            if (state2.havedict === 0) {
+            if (state.havedict === 0) {
               strm.next_out = put;
               strm.avail_out = left;
               strm.next_in = next;
               strm.avail_in = have;
-              state2.hold = hold;
-              state2.bits = bits;
+              state.hold = hold;
+              state.bits = bits;
               return Z_NEED_DICT;
             }
-            strm.adler = state2.check = 1;
-            state2.mode = TYPE;
+            strm.adler = state.check = 1;
+            state.mode = TYPE;
           case TYPE:
             if (flush === Z_BLOCK || flush === Z_TREES) {
               break inf_leave;
             }
           case TYPEDO:
-            if (state2.last) {
+            if (state.last) {
               hold >>>= bits & 7;
               bits -= bits & 7;
-              state2.mode = CHECK;
+              state.mode = CHECK;
               break;
             }
             while (bits < 3) {
@@ -13278,16 +13278,16 @@ var require_inflate = __commonJS((exports) => {
               hold += input[next++] << bits;
               bits += 8;
             }
-            state2.last = hold & 1;
+            state.last = hold & 1;
             hold >>>= 1;
             bits -= 1;
             switch (hold & 3) {
               case 0:
-                state2.mode = STORED;
+                state.mode = STORED;
                 break;
               case 1:
-                fixedtables(state2);
-                state2.mode = LEN_;
+                fixedtables(state);
+                state.mode = LEN_;
                 if (flush === Z_TREES) {
                   hold >>>= 2;
                   bits -= 2;
@@ -13295,11 +13295,11 @@ var require_inflate = __commonJS((exports) => {
                 }
                 break;
               case 2:
-                state2.mode = TABLE;
+                state.mode = TABLE;
                 break;
               case 3:
                 strm.msg = "invalid block type";
-                state2.mode = BAD;
+                state.mode = BAD;
             }
             hold >>>= 2;
             bits -= 2;
@@ -13317,20 +13317,20 @@ var require_inflate = __commonJS((exports) => {
             }
             if ((hold & 65535) !== (hold >>> 16 ^ 65535)) {
               strm.msg = "invalid stored block lengths";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.length = hold & 65535;
+            state.length = hold & 65535;
             hold = 0;
             bits = 0;
-            state2.mode = COPY_;
+            state.mode = COPY_;
             if (flush === Z_TREES) {
               break inf_leave;
             }
           case COPY_:
-            state2.mode = COPY;
+            state.mode = COPY;
           case COPY:
-            copy = state2.length;
+            copy = state.length;
             if (copy) {
               if (copy > have) {
                 copy = have;
@@ -13346,10 +13346,10 @@ var require_inflate = __commonJS((exports) => {
               next += copy;
               left -= copy;
               put += copy;
-              state2.length -= copy;
+              state.length -= copy;
               break;
             }
-            state2.mode = TYPE;
+            state.mode = TYPE;
             break;
           case TABLE:
             while (bits < 14) {
@@ -13360,24 +13360,24 @@ var require_inflate = __commonJS((exports) => {
               hold += input[next++] << bits;
               bits += 8;
             }
-            state2.nlen = (hold & 31) + 257;
+            state.nlen = (hold & 31) + 257;
             hold >>>= 5;
             bits -= 5;
-            state2.ndist = (hold & 31) + 1;
+            state.ndist = (hold & 31) + 1;
             hold >>>= 5;
             bits -= 5;
-            state2.ncode = (hold & 15) + 4;
+            state.ncode = (hold & 15) + 4;
             hold >>>= 4;
             bits -= 4;
-            if (state2.nlen > 286 || state2.ndist > 30) {
+            if (state.nlen > 286 || state.ndist > 30) {
               strm.msg = "too many length or distance symbols";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.have = 0;
-            state2.mode = LENLENS;
+            state.have = 0;
+            state.mode = LENLENS;
           case LENLENS:
-            while (state2.have < state2.ncode) {
+            while (state.have < state.ncode) {
               while (bits < 3) {
                 if (have === 0) {
                   break inf_leave;
@@ -13386,29 +13386,29 @@ var require_inflate = __commonJS((exports) => {
                 hold += input[next++] << bits;
                 bits += 8;
               }
-              state2.lens[order[state2.have++]] = hold & 7;
+              state.lens[order[state.have++]] = hold & 7;
               hold >>>= 3;
               bits -= 3;
             }
-            while (state2.have < 19) {
-              state2.lens[order[state2.have++]] = 0;
+            while (state.have < 19) {
+              state.lens[order[state.have++]] = 0;
             }
-            state2.lencode = state2.lendyn;
-            state2.lenbits = 7;
-            opts = { bits: state2.lenbits };
-            ret = inflate_table(CODES, state2.lens, 0, 19, state2.lencode, 0, state2.work, opts);
-            state2.lenbits = opts.bits;
+            state.lencode = state.lendyn;
+            state.lenbits = 7;
+            opts = { bits: state.lenbits };
+            ret = inflate_table(CODES, state.lens, 0, 19, state.lencode, 0, state.work, opts);
+            state.lenbits = opts.bits;
             if (ret) {
               strm.msg = "invalid code lengths set";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.have = 0;
-            state2.mode = CODELENS;
+            state.have = 0;
+            state.mode = CODELENS;
           case CODELENS:
-            while (state2.have < state2.nlen + state2.ndist) {
+            while (state.have < state.nlen + state.ndist) {
               for (;; ) {
-                here = state2.lencode[hold & (1 << state2.lenbits) - 1];
+                here = state.lencode[hold & (1 << state.lenbits) - 1];
                 here_bits = here >>> 24;
                 here_op = here >>> 16 & 255;
                 here_val = here & 65535;
@@ -13425,7 +13425,7 @@ var require_inflate = __commonJS((exports) => {
               if (here_val < 16) {
                 hold >>>= here_bits;
                 bits -= here_bits;
-                state2.lens[state2.have++] = here_val;
+                state.lens[state.have++] = here_val;
               } else {
                 if (here_val === 16) {
                   n2 = here_bits + 2;
@@ -13439,12 +13439,12 @@ var require_inflate = __commonJS((exports) => {
                   }
                   hold >>>= here_bits;
                   bits -= here_bits;
-                  if (state2.have === 0) {
+                  if (state.have === 0) {
                     strm.msg = "invalid bit length repeat";
-                    state2.mode = BAD;
+                    state.mode = BAD;
                     break;
                   }
-                  len = state2.lens[state2.have - 1];
+                  len = state.lens[state.have - 1];
                   copy = 3 + (hold & 3);
                   hold >>>= 2;
                   bits -= 2;
@@ -13481,57 +13481,57 @@ var require_inflate = __commonJS((exports) => {
                   hold >>>= 7;
                   bits -= 7;
                 }
-                if (state2.have + copy > state2.nlen + state2.ndist) {
+                if (state.have + copy > state.nlen + state.ndist) {
                   strm.msg = "invalid bit length repeat";
-                  state2.mode = BAD;
+                  state.mode = BAD;
                   break;
                 }
                 while (copy--) {
-                  state2.lens[state2.have++] = len;
+                  state.lens[state.have++] = len;
                 }
               }
             }
-            if (state2.mode === BAD) {
+            if (state.mode === BAD) {
               break;
             }
-            if (state2.lens[256] === 0) {
+            if (state.lens[256] === 0) {
               strm.msg = "invalid code -- missing end-of-block";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.lenbits = 9;
-            opts = { bits: state2.lenbits };
-            ret = inflate_table(LENS, state2.lens, 0, state2.nlen, state2.lencode, 0, state2.work, opts);
-            state2.lenbits = opts.bits;
+            state.lenbits = 9;
+            opts = { bits: state.lenbits };
+            ret = inflate_table(LENS, state.lens, 0, state.nlen, state.lencode, 0, state.work, opts);
+            state.lenbits = opts.bits;
             if (ret) {
               strm.msg = "invalid literal/lengths set";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.distbits = 6;
-            state2.distcode = state2.distdyn;
-            opts = { bits: state2.distbits };
-            ret = inflate_table(DISTS, state2.lens, state2.nlen, state2.ndist, state2.distcode, 0, state2.work, opts);
-            state2.distbits = opts.bits;
+            state.distbits = 6;
+            state.distcode = state.distdyn;
+            opts = { bits: state.distbits };
+            ret = inflate_table(DISTS, state.lens, state.nlen, state.ndist, state.distcode, 0, state.work, opts);
+            state.distbits = opts.bits;
             if (ret) {
               strm.msg = "invalid distances set";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.mode = LEN_;
+            state.mode = LEN_;
             if (flush === Z_TREES) {
               break inf_leave;
             }
           case LEN_:
-            state2.mode = LEN;
+            state.mode = LEN;
           case LEN:
             if (have >= 6 && left >= 258) {
               strm.next_out = put;
               strm.avail_out = left;
               strm.next_in = next;
               strm.avail_in = have;
-              state2.hold = hold;
-              state2.bits = bits;
+              state.hold = hold;
+              state.bits = bits;
               inflate_fast(strm, _out);
               put = strm.next_out;
               output = strm.output;
@@ -13539,16 +13539,16 @@ var require_inflate = __commonJS((exports) => {
               next = strm.next_in;
               input = strm.input;
               have = strm.avail_in;
-              hold = state2.hold;
-              bits = state2.bits;
-              if (state2.mode === TYPE) {
-                state2.back = -1;
+              hold = state.hold;
+              bits = state.bits;
+              if (state.mode === TYPE) {
+                state.back = -1;
               }
               break;
             }
-            state2.back = 0;
+            state.back = 0;
             for (;; ) {
-              here = state2.lencode[hold & (1 << state2.lenbits) - 1];
+              here = state.lencode[hold & (1 << state.lenbits) - 1];
               here_bits = here >>> 24;
               here_op = here >>> 16 & 255;
               here_val = here & 65535;
@@ -13567,7 +13567,7 @@ var require_inflate = __commonJS((exports) => {
               last_op = here_op;
               last_val = here_val;
               for (;; ) {
-                here = state2.lencode[last_val + ((hold & (1 << last_bits + last_op) - 1) >> last_bits)];
+                here = state.lencode[last_val + ((hold & (1 << last_bits + last_op) - 1) >> last_bits)];
                 here_bits = here >>> 24;
                 here_op = here >>> 16 & 255;
                 here_val = here & 65535;
@@ -13583,31 +13583,31 @@ var require_inflate = __commonJS((exports) => {
               }
               hold >>>= last_bits;
               bits -= last_bits;
-              state2.back += last_bits;
+              state.back += last_bits;
             }
             hold >>>= here_bits;
             bits -= here_bits;
-            state2.back += here_bits;
-            state2.length = here_val;
+            state.back += here_bits;
+            state.length = here_val;
             if (here_op === 0) {
-              state2.mode = LIT;
+              state.mode = LIT;
               break;
             }
             if (here_op & 32) {
-              state2.back = -1;
-              state2.mode = TYPE;
+              state.back = -1;
+              state.mode = TYPE;
               break;
             }
             if (here_op & 64) {
               strm.msg = "invalid literal/length code";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.extra = here_op & 15;
-            state2.mode = LENEXT;
+            state.extra = here_op & 15;
+            state.mode = LENEXT;
           case LENEXT:
-            if (state2.extra) {
-              n2 = state2.extra;
+            if (state.extra) {
+              n2 = state.extra;
               while (bits < n2) {
                 if (have === 0) {
                   break inf_leave;
@@ -13616,16 +13616,16 @@ var require_inflate = __commonJS((exports) => {
                 hold += input[next++] << bits;
                 bits += 8;
               }
-              state2.length += hold & (1 << state2.extra) - 1;
-              hold >>>= state2.extra;
-              bits -= state2.extra;
-              state2.back += state2.extra;
+              state.length += hold & (1 << state.extra) - 1;
+              hold >>>= state.extra;
+              bits -= state.extra;
+              state.back += state.extra;
             }
-            state2.was = state2.length;
-            state2.mode = DIST;
+            state.was = state.length;
+            state.mode = DIST;
           case DIST:
             for (;; ) {
-              here = state2.distcode[hold & (1 << state2.distbits) - 1];
+              here = state.distcode[hold & (1 << state.distbits) - 1];
               here_bits = here >>> 24;
               here_op = here >>> 16 & 255;
               here_val = here & 65535;
@@ -13644,7 +13644,7 @@ var require_inflate = __commonJS((exports) => {
               last_op = here_op;
               last_val = here_val;
               for (;; ) {
-                here = state2.distcode[last_val + ((hold & (1 << last_bits + last_op) - 1) >> last_bits)];
+                here = state.distcode[last_val + ((hold & (1 << last_bits + last_op) - 1) >> last_bits)];
                 here_bits = here >>> 24;
                 here_op = here >>> 16 & 255;
                 here_val = here & 65535;
@@ -13660,22 +13660,22 @@ var require_inflate = __commonJS((exports) => {
               }
               hold >>>= last_bits;
               bits -= last_bits;
-              state2.back += last_bits;
+              state.back += last_bits;
             }
             hold >>>= here_bits;
             bits -= here_bits;
-            state2.back += here_bits;
+            state.back += here_bits;
             if (here_op & 64) {
               strm.msg = "invalid distance code";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.offset = here_val;
-            state2.extra = here_op & 15;
-            state2.mode = DISTEXT;
+            state.offset = here_val;
+            state.extra = here_op & 15;
+            state.mode = DISTEXT;
           case DISTEXT:
-            if (state2.extra) {
-              n2 = state2.extra;
+            if (state.extra) {
+              n2 = state.extra;
               while (bits < n2) {
                 if (have === 0) {
                   break inf_leave;
@@ -13684,68 +13684,68 @@ var require_inflate = __commonJS((exports) => {
                 hold += input[next++] << bits;
                 bits += 8;
               }
-              state2.offset += hold & (1 << state2.extra) - 1;
-              hold >>>= state2.extra;
-              bits -= state2.extra;
-              state2.back += state2.extra;
+              state.offset += hold & (1 << state.extra) - 1;
+              hold >>>= state.extra;
+              bits -= state.extra;
+              state.back += state.extra;
             }
-            if (state2.offset > state2.dmax) {
+            if (state.offset > state.dmax) {
               strm.msg = "invalid distance too far back";
-              state2.mode = BAD;
+              state.mode = BAD;
               break;
             }
-            state2.mode = MATCH;
+            state.mode = MATCH;
           case MATCH:
             if (left === 0) {
               break inf_leave;
             }
             copy = _out - left;
-            if (state2.offset > copy) {
-              copy = state2.offset - copy;
-              if (copy > state2.whave) {
-                if (state2.sane) {
+            if (state.offset > copy) {
+              copy = state.offset - copy;
+              if (copy > state.whave) {
+                if (state.sane) {
                   strm.msg = "invalid distance too far back";
-                  state2.mode = BAD;
+                  state.mode = BAD;
                   break;
                 }
               }
-              if (copy > state2.wnext) {
-                copy -= state2.wnext;
-                from = state2.wsize - copy;
+              if (copy > state.wnext) {
+                copy -= state.wnext;
+                from = state.wsize - copy;
               } else {
-                from = state2.wnext - copy;
+                from = state.wnext - copy;
               }
-              if (copy > state2.length) {
-                copy = state2.length;
+              if (copy > state.length) {
+                copy = state.length;
               }
-              from_source = state2.window;
+              from_source = state.window;
             } else {
               from_source = output;
-              from = put - state2.offset;
-              copy = state2.length;
+              from = put - state.offset;
+              copy = state.length;
             }
             if (copy > left) {
               copy = left;
             }
             left -= copy;
-            state2.length -= copy;
+            state.length -= copy;
             do {
               output[put++] = from_source[from++];
             } while (--copy);
-            if (state2.length === 0) {
-              state2.mode = LEN;
+            if (state.length === 0) {
+              state.mode = LEN;
             }
             break;
           case LIT:
             if (left === 0) {
               break inf_leave;
             }
-            output[put++] = state2.length;
+            output[put++] = state.length;
             left--;
-            state2.mode = LEN;
+            state.mode = LEN;
             break;
           case CHECK:
-            if (state2.wrap) {
+            if (state.wrap) {
               while (bits < 32) {
                 if (have === 0) {
                   break inf_leave;
@@ -13756,22 +13756,22 @@ var require_inflate = __commonJS((exports) => {
               }
               _out -= left;
               strm.total_out += _out;
-              state2.total += _out;
+              state.total += _out;
               if (_out) {
-                strm.adler = state2.check = state2.flags ? crc32(state2.check, output, _out, put - _out) : adler32(state2.check, output, _out, put - _out);
+                strm.adler = state.check = state.flags ? crc32(state.check, output, _out, put - _out) : adler32(state.check, output, _out, put - _out);
               }
               _out = left;
-              if ((state2.flags ? hold : zswap32(hold)) !== state2.check) {
+              if ((state.flags ? hold : zswap32(hold)) !== state.check) {
                 strm.msg = "incorrect data check";
-                state2.mode = BAD;
+                state.mode = BAD;
                 break;
               }
               hold = 0;
               bits = 0;
             }
-            state2.mode = LENGTH;
+            state.mode = LENGTH;
           case LENGTH:
-            if (state2.wrap && state2.flags) {
+            if (state.wrap && state.flags) {
               while (bits < 32) {
                 if (have === 0) {
                   break inf_leave;
@@ -13780,15 +13780,15 @@ var require_inflate = __commonJS((exports) => {
                 hold += input[next++] << bits;
                 bits += 8;
               }
-              if (hold !== (state2.total & 4294967295)) {
+              if (hold !== (state.total & 4294967295)) {
                 strm.msg = "incorrect length check";
-                state2.mode = BAD;
+                state.mode = BAD;
                 break;
               }
               hold = 0;
               bits = 0;
             }
-            state2.mode = DONE;
+            state.mode = DONE;
           case DONE:
             ret = Z_STREAM_END;
             break inf_leave;
@@ -13806,11 +13806,11 @@ var require_inflate = __commonJS((exports) => {
     strm.avail_out = left;
     strm.next_in = next;
     strm.avail_in = have;
-    state2.hold = hold;
-    state2.bits = bits;
-    if (state2.wsize || _out !== strm.avail_out && state2.mode < BAD && (state2.mode < CHECK || flush !== Z_FINISH)) {
+    state.hold = hold;
+    state.bits = bits;
+    if (state.wsize || _out !== strm.avail_out && state.mode < BAD && (state.mode < CHECK || flush !== Z_FINISH)) {
       if (updatewindow(strm, strm.output, strm.next_out, _out - strm.avail_out)) {
-        state2.mode = MEM;
+        state.mode = MEM;
         return Z_MEM_ERROR;
       }
     }
@@ -13818,11 +13818,11 @@ var require_inflate = __commonJS((exports) => {
     _out -= strm.avail_out;
     strm.total_in += _in;
     strm.total_out += _out;
-    state2.total += _out;
-    if (state2.wrap && _out) {
-      strm.adler = state2.check = state2.flags ? crc32(state2.check, output, _out, strm.next_out - _out) : adler32(state2.check, output, _out, strm.next_out - _out);
+    state.total += _out;
+    if (state.wrap && _out) {
+      strm.adler = state.check = state.flags ? crc32(state.check, output, _out, strm.next_out - _out) : adler32(state.check, output, _out, strm.next_out - _out);
     }
-    strm.data_type = state2.bits + (state2.last ? 64 : 0) + (state2.mode === TYPE ? 128 : 0) + (state2.mode === LEN_ || state2.mode === COPY_ ? 256 : 0);
+    strm.data_type = state.bits + (state.last ? 64 : 0) + (state.mode === TYPE ? 128 : 0) + (state.mode === LEN_ || state.mode === COPY_ ? 256 : 0);
     if ((_in === 0 && _out === 0 || flush === Z_FINISH) && ret === Z_OK) {
       ret = Z_BUF_ERROR;
     }
@@ -13832,51 +13832,51 @@ var require_inflate = __commonJS((exports) => {
     if (!strm || !strm.state) {
       return Z_STREAM_ERROR;
     }
-    var state2 = strm.state;
-    if (state2.window) {
-      state2.window = null;
+    var state = strm.state;
+    if (state.window) {
+      state.window = null;
     }
     strm.state = null;
     return Z_OK;
   }
   function inflateGetHeader(strm, head) {
-    var state2;
+    var state;
     if (!strm || !strm.state) {
       return Z_STREAM_ERROR;
     }
-    state2 = strm.state;
-    if ((state2.wrap & 2) === 0) {
+    state = strm.state;
+    if ((state.wrap & 2) === 0) {
       return Z_STREAM_ERROR;
     }
-    state2.head = head;
+    state.head = head;
     head.done = false;
     return Z_OK;
   }
   function inflateSetDictionary(strm, dictionary) {
     var dictLength = dictionary.length;
-    var state2;
+    var state;
     var dictid;
     var ret;
     if (!strm || !strm.state) {
       return Z_STREAM_ERROR;
     }
-    state2 = strm.state;
-    if (state2.wrap !== 0 && state2.mode !== DICT) {
+    state = strm.state;
+    if (state.wrap !== 0 && state.mode !== DICT) {
       return Z_STREAM_ERROR;
     }
-    if (state2.mode === DICT) {
+    if (state.mode === DICT) {
       dictid = 1;
       dictid = adler32(dictid, dictionary, dictLength, 0);
-      if (dictid !== state2.check) {
+      if (dictid !== state.check) {
         return Z_DATA_ERROR;
       }
     }
     ret = updatewindow(strm, dictionary, dictLength, dictLength);
     if (ret) {
-      state2.mode = MEM;
+      state.mode = MEM;
       return Z_MEM_ERROR;
     }
-    state2.havedict = 1;
+    state.havedict = 1;
     return Z_OK;
   }
   exports.inflateReset = inflateReset;
@@ -18135,8 +18135,8 @@ var require_ZodError = __commonJS((exports) => {
         return issue.message;
       };
       const fieldErrors = { _errors: [] };
-      const processError = (error2) => {
-        for (const issue of error2.issues) {
+      const processError = (error) => {
+        for (const issue of error.issues) {
           if (issue.code === "invalid_union") {
             issue.unionErrors.map(processError);
           } else if (issue.code === "invalid_return_type") {
@@ -18200,8 +18200,8 @@ var require_ZodError = __commonJS((exports) => {
   }
   exports.ZodError = ZodError;
   ZodError.create = (issues) => {
-    const error2 = new ZodError(issues);
-    return error2;
+    const error = new ZodError(issues);
+    return error;
   };
 });
 
@@ -18518,8 +18518,8 @@ var require_types2 = __commonJS((exports) => {
         get error() {
           if (this._error)
             return this._error;
-          const error2 = new ZodError_js_1.ZodError(ctx.common.issues);
-          this._error = error2;
+          const error = new ZodError_js_1.ZodError(ctx.common.issues);
+          this._error = error;
           return this._error;
         }
       };
@@ -21125,54 +21125,54 @@ var require_types2 = __commonJS((exports) => {
         });
         return parseUtil_js_1.INVALID;
       }
-      function makeArgsIssue(args, error2) {
+      function makeArgsIssue(args, error) {
         return (0, parseUtil_js_1.makeIssue)({
           data: args,
           path: ctx.path,
           errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, (0, errors_js_1.getErrorMap)(), errors_js_1.defaultErrorMap].filter((x2) => !!x2),
           issueData: {
             code: ZodError_js_1.ZodIssueCode.invalid_arguments,
-            argumentsError: error2
+            argumentsError: error
           }
         });
       }
-      function makeReturnsIssue(returns, error2) {
+      function makeReturnsIssue(returns, error) {
         return (0, parseUtil_js_1.makeIssue)({
           data: returns,
           path: ctx.path,
           errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, (0, errors_js_1.getErrorMap)(), errors_js_1.defaultErrorMap].filter((x2) => !!x2),
           issueData: {
             code: ZodError_js_1.ZodIssueCode.invalid_return_type,
-            returnTypeError: error2
+            returnTypeError: error
           }
         });
       }
       const params = { errorMap: ctx.common.contextualErrorMap };
       const fn = ctx.data;
       if (this._def.returns instanceof ZodPromise) {
-        const me2 = this;
+        const me = this;
         return (0, parseUtil_js_1.OK)(async function(...args) {
-          const error2 = new ZodError_js_1.ZodError([]);
-          const parsedArgs = await me2._def.args.parseAsync(args, params).catch((e2) => {
-            error2.addIssue(makeArgsIssue(args, e2));
-            throw error2;
+          const error = new ZodError_js_1.ZodError([]);
+          const parsedArgs = await me._def.args.parseAsync(args, params).catch((e2) => {
+            error.addIssue(makeArgsIssue(args, e2));
+            throw error;
           });
           const result = await Reflect.apply(fn, this, parsedArgs);
-          const parsedReturns = await me2._def.returns._def.type.parseAsync(result, params).catch((e2) => {
-            error2.addIssue(makeReturnsIssue(result, e2));
-            throw error2;
+          const parsedReturns = await me._def.returns._def.type.parseAsync(result, params).catch((e2) => {
+            error.addIssue(makeReturnsIssue(result, e2));
+            throw error;
           });
           return parsedReturns;
         });
       } else {
-        const me2 = this;
+        const me = this;
         return (0, parseUtil_js_1.OK)(function(...args) {
-          const parsedArgs = me2._def.args.safeParse(args, params);
+          const parsedArgs = me._def.args.safeParse(args, params);
           if (!parsedArgs.success) {
             throw new ZodError_js_1.ZodError([makeArgsIssue(args, parsedArgs.error)]);
           }
           const result = Reflect.apply(fn, this, parsedArgs.data);
-          const parsedReturns = me2._def.returns.safeParse(result, params);
+          const parsedReturns = me._def.returns.safeParse(result, params);
           if (!parsedReturns.success) {
             throw new ZodError_js_1.ZodError([makeReturnsIssue(result, parsedReturns.error)]);
           }
@@ -23339,8 +23339,8 @@ var require_await_to_js_umd = __commonJS((exports, module) => {
 var require_commonjs13 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.writeFile = exports.readFile = exports.existsSync = undefined;
-  var fs_1 = __require_gv7hsff9("fs");
-  var fs_2 = __require_gv7hsff9("fs");
+  var fs_1 = __require("fs");
+  var fs_2 = __require("fs");
   Object.defineProperty(exports, "existsSync", { enumerable: true, get: function() {
     return fs_2.existsSync;
   } });
@@ -25288,11 +25288,11 @@ function makeWebStreamReader(stream) {
       return new WebStreamDefaultReader(reader);
     }
     return new WebStreamByobReader(reader);
-  } catch (error2) {
-    if (error2 instanceof TypeError) {
+  } catch (error) {
+    if (error instanceof TypeError) {
       return new WebStreamDefaultReader(stream.getReader());
     }
-    throw error2;
+    throw error;
   }
 }
 var init_WebStreamReaderFactory = __esm(() => {
@@ -26417,13 +26417,13 @@ var require_browser = __commonJS((exports, module) => {
       } else {
         exports.storage.removeItem("debug");
       }
-    } catch (error2) {}
+    } catch (error) {}
   }
   function load() {
     let r2;
     try {
       r2 = exports.storage.getItem("debug") || exports.storage.getItem("DEBUG");
-    } catch (error2) {}
+    } catch (error) {}
     if (!r2 && typeof process !== "undefined" && "env" in process) {
       r2 = process.env.DEBUG;
     }
@@ -26432,23 +26432,23 @@ var require_browser = __commonJS((exports, module) => {
   function localstorage() {
     try {
       return localStorage;
-    } catch (error2) {}
+    } catch (error) {}
   }
   module.exports = require_common2()(exports);
   var { formatters } = module.exports;
   formatters.j = function(v2) {
     try {
       return JSON.stringify(v2);
-    } catch (error2) {
-      return "[UnexpectedJSONParseError]: " + error2.message;
+    } catch (error) {
+      return "[UnexpectedJSONParseError]: " + error.message;
     }
   };
 });
 
 // node_modules/debug/src/node.js
 var require_node = __commonJS((exports, module) => {
-  var tty = __require_gv7hsff9("tty");
-  var util = __require_gv7hsff9("util");
+  var tty = __require("tty");
+  var util = __require("util");
   exports.init = init;
   exports.log = log;
   exports.formatArgs = formatArgs;
@@ -26539,7 +26539,7 @@ var require_node = __commonJS((exports, module) => {
         221
       ];
     }
-  } catch (error2) {}
+  } catch (error) {}
   exports.inspectOpts = Object.keys(process.env).filter((key) => {
     return /^debug_/i.test(key);
   }).reduce((obj, key) => {
@@ -27762,9 +27762,9 @@ function readByobReaderWithSignal(reader, buffer, signal) {
         const result = await reader.read(buffer);
         cleanup();
         resolve(result);
-      } catch (error2) {
+      } catch (error) {
         cleanup();
-        reject(error2);
+        reject(error);
       }
     })();
   });
@@ -27793,24 +27793,24 @@ function getMaximumZipBufferedReadLength(tokenizer) {
   const remainingBytes = Number.isFinite(fileSize) ? Math.max(0, fileSize - tokenizer.position) : Number.MAX_SAFE_INTEGER;
   return Math.min(remainingBytes, maximumZipBufferedReadSizeInBytes);
 }
-function isRecoverableZipError(error2) {
-  if (error2 instanceof EndOfStreamError) {
+function isRecoverableZipError(error) {
+  if (error instanceof EndOfStreamError) {
     return true;
   }
-  if (error2 instanceof ParserHardLimitError) {
+  if (error instanceof ParserHardLimitError) {
     return true;
   }
-  if (!(error2 instanceof Error)) {
+  if (!(error instanceof Error)) {
     return false;
   }
-  if (recoverableZipErrorMessages.has(error2.message)) {
+  if (recoverableZipErrorMessages.has(error.message)) {
     return true;
   }
-  if (recoverableZipErrorCodes.has(error2.code)) {
+  if (recoverableZipErrorCodes.has(error.code)) {
     return true;
   }
   for (const prefix of recoverableZipErrorMessagePrefixes) {
-    if (error2.message.startsWith(prefix)) {
+    if (error.message.startsWith(prefix)) {
       return true;
     }
   }
@@ -27929,14 +27929,14 @@ class FileTypeParser {
       let fileType;
       try {
         fileType = await detector.detect(tokenizer);
-      } catch (error2) {
-        if (error2 instanceof EndOfStreamError) {
+      } catch (error) {
+        if (error instanceof EndOfStreamError) {
           return;
         }
-        if (error2 instanceof ParserHardLimitError) {
+        if (error instanceof ParserHardLimitError) {
           return;
         }
-        throw error2;
+        throw error;
       }
       if (fileType) {
         return fileType;
@@ -27984,9 +27984,9 @@ class FileTypeParser {
       if (!done && chunk) {
         try {
           detectedFileType = await this.fromBuffer(chunk.subarray(0, sampleSize));
-        } catch (error2) {
-          if (!(error2 instanceof EndOfStreamError)) {
-            throw error2;
+        } catch (error) {
+          if (!(error instanceof EndOfStreamError)) {
+            throw error;
           }
           detectedFileType = undefined;
         }
@@ -28037,9 +28037,9 @@ class FileTypeParser {
     }
     try {
       compressedFileType = await (probeParser ?? this).fromStream(limitedInflatedStream);
-    } catch (error2) {
-      if (error2?.name === "AbortError" && probeSignal?.reason?.name !== "TimeoutError") {
-        throw error2;
+    } catch (error) {
+      if (error?.name === "AbortError" && probeSignal?.reason?.name !== "TimeoutError") {
+        throw error;
       }
     } finally {
       clearTimeout(timeout);
@@ -28185,11 +28185,11 @@ class FileTypeParser {
           maximumLength: isUnknownFileSize ? maximumId3HeaderSizeInBytes : tokenizer.fileInfo.size,
           reason: "ID3 payload"
         });
-      } catch (error2) {
-        if (error2 instanceof EndOfStreamError) {
+      } catch (error) {
+        if (error instanceof EndOfStreamError) {
           return;
         }
-        throw error2;
+        throw error;
       }
       if (this.detectionReentryCount >= maximumDetectionReentryCount) {
         return;
@@ -28330,9 +28330,9 @@ class FileTypeParser {
               return {};
           }
         });
-      } catch (error2) {
-        if (!isRecoverableZipError(error2)) {
-          throw error2;
+      } catch (error) {
+        if (!isRecoverableZipError(error)) {
+          throw error;
         }
         if (openXmlState.isParsingContentTypes) {
           openXmlState.isParsingContentTypes = false;
@@ -28860,11 +28860,11 @@ class FileTypeParser {
                 maximumLength: isUnknownPngStream ? maximumPngChunkSizeInBytes + 4 : tokenizer.fileInfo.size,
                 reason: "PNG chunk payload"
               });
-            } catch (error2) {
-              if (!isUnknownPngStream && (error2 instanceof ParserHardLimitError || error2 instanceof EndOfStreamError)) {
+            } catch (error) {
+              if (!isUnknownPngStream && (error instanceof ParserHardLimitError || error instanceof EndOfStreamError)) {
                 return pngFileType;
               }
-              throw error2;
+              throw error;
             }
         }
         if (tokenizer.position <= previousPosition) {
@@ -29059,13 +29059,13 @@ class FileTypeParser {
             break;
           }
         }
-      } catch (error2) {
-        if (error2 instanceof EndOfStreamError || error2 instanceof ParserHardLimitError) {
+      } catch (error) {
+        if (error instanceof EndOfStreamError || error instanceof ParserHardLimitError) {
           if (hasUnknownFileSize(tokenizer)) {
             isMalformedAsf = true;
           }
         } else {
-          throw error2;
+          throw error;
         }
       }
       if (isMalformedAsf) {
@@ -29423,20 +29423,20 @@ class FileTypeParser {
           maximumLength: maximumTiffOffset,
           reason: "TIFF IFD offset"
         });
-      } catch (error2) {
-        if (error2 instanceof EndOfStreamError) {
+      } catch (error) {
+        if (error instanceof EndOfStreamError) {
           return;
         }
-        throw error2;
+        throw error;
       }
       let fileType;
       try {
         fileType = await this.readTiffIFD(bigEndian);
-      } catch (error2) {
-        if (error2 instanceof EndOfStreamError) {
+      } catch (error) {
+        if (error instanceof EndOfStreamError) {
           return;
         }
-        throw error2;
+        throw error;
       }
       return fileType ?? tiffFileType;
     }
@@ -29591,11 +29591,11 @@ import { ReadableStream as WebReadableStream } from "stream/web";
 import { pipeline, PassThrough, Readable } from "stream";
 import fs from "fs/promises";
 import { constants as fileSystemConstants } from "fs";
-function isTokenizerStreamBoundsError(error2) {
-  if (!(error2 instanceof RangeError) || error2.message !== "offset is out of bounds" || typeof error2.stack !== "string") {
+function isTokenizerStreamBoundsError(error) {
+  if (!(error instanceof RangeError) || error.message !== "offset is out of bounds" || typeof error.stack !== "string") {
     return false;
   }
-  return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error2.stack);
+  return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error.stack);
 }
 async function fileTypeFromFile(path, options) {
   return new FileTypeParser2(options).fromFile(path, options);
@@ -29617,11 +29617,11 @@ var init_file_type = __esm(() => {
       const tokenizer = await (stream instanceof WebReadableStream ? this.createTokenizerFromWebStream(stream) : fromStream2(stream, this.getTokenizerOptions()));
       try {
         return await super.fromTokenizer(tokenizer);
-      } catch (error2) {
-        if (isTokenizerStreamBoundsError(error2)) {
+      } catch (error) {
+        if (isTokenizerStreamBoundsError(error)) {
           return;
         }
-        throw error2;
+        throw error;
       } finally {
         if (stream instanceof Readable && !stream.destroyed) {
           stream.destroy();
@@ -29668,8 +29668,8 @@ var init_file_type = __esm(() => {
           cleanup();
           callback(value);
         };
-        const onError = (error2) => {
-          settle(reject, error2);
+        const onError = (error) => {
+          settle(reject, error);
         };
         const onAbort = () => {
           if (!readableStream.destroyed) {
@@ -29685,16 +29685,16 @@ var init_file_type = __esm(() => {
               const chunk = readableStream.read(normalizedSampleSize) ?? readableStream.read() ?? new Uint8Array(0);
               try {
                 pass.fileType = await this.fromBuffer(chunk);
-              } catch (error2) {
-                if (error2 instanceof EndOfStreamError) {
+              } catch (error) {
+                if (error instanceof EndOfStreamError) {
                   pass.fileType = undefined;
                 } else {
-                  settle(reject, error2);
+                  settle(reject, error);
                 }
               }
               settle(resolve, outputStream);
-            } catch (error2) {
-              settle(reject, error2);
+            } catch (error) {
+              settle(reject, error);
             }
           })();
         };
@@ -29805,23 +29805,23 @@ var require_commonjs14 = __commonJS((exports) => {
           }
         }
       }
-      static async read(url2, options) {
-        if (Buffer.isBuffer(url2) || url2 instanceof ArrayBuffer) {
-          return this.fromBuffer(url2);
+      static async read(url, options) {
+        if (Buffer.isBuffer(url) || url instanceof ArrayBuffer) {
+          return this.fromBuffer(url);
         }
-        if ((0, file_ops_1.existsSync)(url2)) {
-          return this.fromBuffer(await (0, file_ops_1.readFile)(url2));
+        if ((0, file_ops_1.existsSync)(url)) {
+          return this.fromBuffer(await (0, file_ops_1.readFile)(url));
         }
-        const [fetchErr, response] = await (0, await_to_js_1.to)(fetch(url2));
+        const [fetchErr, response] = await (0, await_to_js_1.to)(fetch(url));
         if (fetchErr) {
-          throw new Error(`Could not load Buffer from URL: ${url2}`);
+          throw new Error(`Could not load Buffer from URL: ${url}`);
         }
         if (!response.ok) {
-          throw new Error(`HTTP Status ${response.status} for url ${url2}`);
+          throw new Error(`HTTP Status ${response.status} for url ${url}`);
         }
         const [arrayBufferErr, data] = await (0, await_to_js_1.to)(response.arrayBuffer());
         if (arrayBufferErr) {
-          throw new Error(`Could not load Buffer from ${url2}`);
+          throw new Error(`Could not load Buffer from ${url}`);
         }
         const buffer = bufferFromArrayBuffer(data);
         return this.fromBuffer(buffer, options);
@@ -30324,24 +30324,24 @@ var require_resize = __commonJS((exports) => {
   Resize.prototype.generateFloatBuffer = function(bufferLength) {
     try {
       return new Float32Array(bufferLength);
-    } catch (error2) {
-      console.error(error2);
+    } catch (error) {
+      console.error(error);
       return [];
     }
   };
   Resize.prototype.generateFloat64Buffer = function(bufferLength) {
     try {
       return new Float64Array(bufferLength);
-    } catch (error2) {
-      console.error(error2);
+    } catch (error) {
+      console.error(error);
       return [];
     }
   };
   Resize.prototype.generateUint8Buffer = function(bufferLength) {
     try {
       return new Uint8Array(bufferLength);
-    } catch (error2) {
-      console.error(error2);
+    } catch (error) {
+      console.error(error);
       return [];
     }
   };
@@ -31994,8 +31994,8 @@ var require_XMLDOMErrorHandler = __commonJS((exports, module) => {
     var XMLDOMErrorHandler;
     module.exports = XMLDOMErrorHandler = function() {
       function XMLDOMErrorHandler2() {}
-      XMLDOMErrorHandler2.prototype.handleError = function(error2) {
-        throw new Error(error2);
+      XMLDOMErrorHandler2.prototype.handleError = function(error) {
+        throw new Error(error);
       };
       return XMLDOMErrorHandler2;
     }();
@@ -34071,9 +34071,9 @@ var require_XMLNode = __commonJS((exports, module) => {
 // node_modules/xmlbuilder/lib/XMLStringifier.js
 var require_XMLStringifier = __commonJS((exports, module) => {
   (function() {
-    var XMLStringifier, bind = function(fn, me2) {
+    var XMLStringifier, bind = function(fn, me) {
       return function() {
-        return fn.apply(me2, arguments);
+        return fn.apply(me, arguments);
       };
     }, hasProp = {}.hasOwnProperty;
     module.exports = XMLStringifier = function() {
@@ -35857,7 +35857,7 @@ var require_sax = __commonJS((exports) => {
               parser.script = "";
               break;
             default:
-              error2(parser, "Max buffer length exceeded: " + buffers[i2]);
+              error(parser, "Max buffer length exceeded: " + buffers[i2]);
           }
         }
         maxActual = Math.max(maxActual, len);
@@ -35899,7 +35899,7 @@ var require_sax = __commonJS((exports) => {
     };
     var Stream;
     try {
-      Stream = __require_gv7hsff9("stream").Stream;
+      Stream = __require("stream").Stream;
     } catch (ex) {
       Stream = function() {};
     }
@@ -35942,28 +35942,28 @@ var require_sax = __commonJS((exports) => {
       this._parser = new SAXParser(strict, opt);
       this.writable = true;
       this.readable = true;
-      var me2 = this;
+      var me = this;
       this._parser.onend = function() {
-        me2.emit("end");
+        me.emit("end");
       };
       this._parser.onerror = function(er) {
-        me2.emit("error", er);
-        me2._parser.error = null;
+        me.emit("error", er);
+        me._parser.error = null;
       };
       this._decoder = null;
       this._decoderBuffer = null;
       streamWraps.forEach(function(ev) {
-        Object.defineProperty(me2, "on" + ev, {
+        Object.defineProperty(me, "on" + ev, {
           get: function() {
-            return me2._parser["on" + ev];
+            return me._parser["on" + ev];
           },
           set: function(h2) {
             if (!h2) {
-              me2.removeAllListeners(ev);
-              me2._parser["on" + ev] = h2;
+              me.removeAllListeners(ev);
+              me._parser["on" + ev] = h2;
               return h2;
             }
-            me2.on(ev, h2);
+            me.on(ev, h2);
           },
           enumerable: true,
           configurable: false
@@ -36026,15 +36026,15 @@ var require_sax = __commonJS((exports) => {
       return true;
     };
     SAXStream.prototype.on = function(ev, handler) {
-      var me2 = this;
-      if (!me2._parser["on" + ev] && streamWraps.indexOf(ev) !== -1) {
-        me2._parser["on" + ev] = function() {
+      var me = this;
+      if (!me._parser["on" + ev] && streamWraps.indexOf(ev) !== -1) {
+        me._parser["on" + ev] = function() {
           var args = arguments.length === 1 ? [arguments[0]] : Array.apply(null, arguments);
           args.splice(0, 0, ev);
-          me2.emit.apply(me2, args);
+          me.emit.apply(me, args);
         };
       }
-      return Stream.prototype.on.call(me2, ev, handler);
+      return Stream.prototype.on.call(me, ev, handler);
     };
     var CDATA = "[CDATA[";
     var DOCTYPE = "DOCTYPE";
@@ -36422,7 +36422,7 @@ var require_sax = __commonJS((exports) => {
         text = text.replace(/\s+/g, " ");
       return text;
     }
-    function error2(parser, er) {
+    function error(parser, er) {
       closeText(parser);
       if (parser.trackPosition) {
         er += `
@@ -36439,7 +36439,7 @@ Char: ` + parser.c;
       if (parser.sawRoot && !parser.closedRoot)
         strictFail(parser, "Unclosed root tag");
       if (parser.state !== S2.BEGIN && parser.state !== S2.BEGIN_WHITESPACE && parser.state !== S2.TEXT) {
-        error2(parser, "Unexpected end");
+        error(parser, "Unexpected end");
       }
       closeText(parser);
       parser.c = "";
@@ -36453,7 +36453,7 @@ Char: ` + parser.c;
         throw new Error("bad call to strictFail");
       }
       if (parser.strict) {
-        error2(parser, message);
+        error(parser, message);
       }
     }
     function newTag(parser) {
@@ -36690,7 +36690,7 @@ Char: ` + parser.c;
         throw this.error;
       }
       if (parser.closed) {
-        return error2(parser, "Cannot write after close. Assign an onready handler.");
+        return error(parser, "Cannot write after close. Assign an onready handler.");
       }
       if (chunk === null) {
         return end(parser);
@@ -37079,7 +37079,7 @@ Char: ` + parser.c;
               parser.state = S2.ATTRIB_VALUE_QUOTED;
             } else {
               if (!parser.opt.unquotedAttributeValues) {
-                error2(parser, "Unquoted attribute value");
+                error(parser, "Unquoted attribute value");
               }
               parser.state = S2.ATTRIB_VALUE_UNQUOTED;
               parser.attribValue = c2;
@@ -37192,10 +37192,10 @@ Char: ` + parser.c;
               var parsedEntity = parseEntity(parser);
               if (parser.opt.unparsedEntities && !Object.values(sax.XML_ENTITIES).includes(parsedEntity)) {
                 if ((parser.entityCount += 1) > parser.opt.maxEntityCount) {
-                  error2(parser, "Parsed entity count exceeds max entity count");
+                  error(parser, "Parsed entity count exceeds max entity count");
                 }
                 if ((parser.entityDepth += 1) > parser.opt.maxEntityDepth) {
-                  error2(parser, "Parsed entity depth exceeds max entity depth");
+                  error(parser, "Parsed entity depth exceeds max entity depth");
                 }
                 parser.entity = "";
                 parser.state = returnState;
@@ -37320,9 +37320,9 @@ var require_processors = __commonJS((exports) => {
 // node_modules/xml2js/lib/parser.js
 var require_parser3 = __commonJS((exports) => {
   (function() {
-    var bom, defaults, events, isEmpty, processItem, processors, sax, setImmediate2, bind = function(fn, me2) {
+    var bom, defaults, events, isEmpty, processItem, processors, sax, setImmediate2, bind = function(fn, me) {
       return function() {
-        return fn.apply(me2, arguments);
+        return fn.apply(me, arguments);
       };
     }, extend = function(child, parent) {
       for (var key in parent) {
@@ -37338,10 +37338,10 @@ var require_parser3 = __commonJS((exports) => {
       return child;
     }, hasProp = {}.hasOwnProperty;
     sax = require_sax();
-    events = __require_gv7hsff9("events");
+    events = __require("events");
     bom = require_bom();
     processors = require_processors();
-    setImmediate2 = __require_gv7hsff9("timers").setImmediate;
+    setImmediate2 = __require("timers").setImmediate;
     defaults = require_defaults().defaults;
     isEmpty = function(thing) {
       return typeof thing === "object" && thing != null && Object.keys(thing).length === 0;
@@ -37437,11 +37437,11 @@ var require_parser3 = __commonJS((exports) => {
         });
         this.saxParser.errThrown = false;
         this.saxParser.onerror = function(_this) {
-          return function(error2) {
+          return function(error) {
             _this.saxParser.resume();
             if (!_this.saxParser.errThrown) {
               _this.saxParser.errThrown = true;
-              return _this.emit("error", error2);
+              return _this.emit("error", error);
             }
           };
         }(this);
@@ -37853,31 +37853,31 @@ var require_parse_bmfont_binary = __commonJS((exports, module) => {
     return 5 + blockSize;
   }
   function readInfo(buf, i2) {
-    var info2 = {};
-    info2.size = buf.readInt16LE(i2);
+    var info = {};
+    info.size = buf.readInt16LE(i2);
     var bitField = buf.readUInt8(i2 + 2);
-    info2.smooth = bitField >> 7 & 1;
-    info2.unicode = bitField >> 6 & 1;
-    info2.italic = bitField >> 5 & 1;
-    info2.bold = bitField >> 4 & 1;
+    info.smooth = bitField >> 7 & 1;
+    info.unicode = bitField >> 6 & 1;
+    info.italic = bitField >> 5 & 1;
+    info.bold = bitField >> 4 & 1;
     if (bitField >> 3 & 1)
-      info2.fixedHeight = 1;
-    info2.charset = buf.readUInt8(i2 + 3) || "";
-    info2.stretchH = buf.readUInt16LE(i2 + 4);
-    info2.aa = buf.readUInt8(i2 + 6);
-    info2.padding = [
+      info.fixedHeight = 1;
+    info.charset = buf.readUInt8(i2 + 3) || "";
+    info.stretchH = buf.readUInt16LE(i2 + 4);
+    info.aa = buf.readUInt8(i2 + 6);
+    info.padding = [
       buf.readInt8(i2 + 7),
       buf.readInt8(i2 + 8),
       buf.readInt8(i2 + 9),
       buf.readInt8(i2 + 10)
     ];
-    info2.spacing = [
+    info.spacing = [
       buf.readInt8(i2 + 11),
       buf.readInt8(i2 + 12)
     ];
-    info2.outline = buf.readUInt8(i2 + 13);
-    info2.face = readStringNT(buf, i2 + 14);
-    return info2;
+    info.outline = buf.readUInt8(i2 + 13);
+    info.face = readStringNT(buf, i2 + 14);
+    return info;
   }
   function readCommon(buf, i2) {
     var common = {};
@@ -38213,7 +38213,7 @@ var require_load_bitmap_font = __commonJS((exports) => {
   var parse_bmfont_binary_1 = __importDefault(require_parse_bmfont_binary());
   var js_png_1 = __importDefault(require_commonjs6());
   var core_1 = require_commonjs14();
-  var path_1 = __importDefault(__require_gv7hsff9("path"));
+  var path_1 = __importDefault(__require("path"));
   var simple_xml_to_json_1 = __importDefault(require_simpleXmlToJson_min());
   var { convertXML } = simple_xml_to_json_1.default;
   exports.isWebWorker = typeof self !== "undefined" && self.document === undefined;
@@ -38317,8 +38317,8 @@ var require_load_font = __commonJS((exports) => {
   async function loadFont(file) {
     let fileOrBuffer = file;
     if (typeof window === "undefined" && !load_bitmap_font_js_1.isWebWorker) {
-      const { existsSync: existsSync2, promises: fs2 } = await import("fs");
-      if (existsSync2(file)) {
+      const { existsSync, promises: fs2 } = await import("fs");
+      if (existsSync(file)) {
         fileOrBuffer = await fs2.readFile(file);
       }
     }
@@ -38715,34 +38715,37 @@ import { createHash as n, randomBytes as a } from "crypto";
 import { writeFileSync as o, readFileSync as l, mkdirSync as h, chmodSync as c } from "fs";
 import { dirname as u, join as d } from "path";
 import { homedir as f } from "os";
-import { createHash as x, randomBytes as I, randomUUID as M } from "crypto";
-import { readFileSync as L, writeFileSync as F, chmodSync as U, mkdirSync as K, rmdirSync as P, statSync as B, unlinkSync as J, appendFileSync as H } from "fs";
+import { createHash as N, randomBytes as I, randomUUID as x } from "crypto";
+import { readFileSync as L, writeFileSync as F, chmodSync as P, mkdirSync as U, rmdirSync as B, statSync as J, unlinkSync as W, appendFileSync as H } from "fs";
 import { join as j } from "path";
-import { homedir as W } from "os";
+import { homedir as K } from "os";
 import { mkdirSync as ie, readdirSync as se, statSync as re, unlinkSync as ne, writeFileSync as ae } from "fs";
 import { createHash as oe } from "crypto";
 import { homedir as le } from "os";
 import { join as he } from "path";
-import { readFileSync as xe, writeFileSync as Ie, mkdirSync as Me } from "fs";
-import { dirname as Le } from "path";
-import { randomUUID as Fe } from "crypto";
-import { readFileSync as Pe, statSync as Be } from "fs";
-import { spawn as st, spawnSync as rt } from "child_process";
-import { request as nt } from "https";
-import { randomBytes as at, createHash as ot } from "crypto";
+import { statSync as ce, readFileSync as ue } from "fs";
+import { homedir as de } from "os";
+import { join as fe } from "path";
+import { readFileSync as Ve, writeFileSync as Xe, mkdirSync as Ze } from "fs";
+import { dirname as et } from "path";
+import { randomUUID as tt } from "crypto";
+import { readFileSync as nt, statSync as at } from "fs";
+import { spawn as vt, spawnSync as Et } from "child_process";
+import { request as Rt } from "https";
+import { randomBytes as St, createHash as bt } from "crypto";
 var e = Object.defineProperty;
 var t = Object.getOwnPropertyNames;
 var i = (t2, i2) => e(t2, "name", { value: i2, configurable: true });
-var s = ((e2) => "function" < "u" ? __require_gv7hsff9 : typeof Proxy < "u" ? new Proxy(e2, { get: (e3, t2) => ("function" < "u" ? __require_gv7hsff9 : e3)[t2] }) : e2)(function(e2) {
+var s = ((e2) => "function" < "u" ? __require : typeof Proxy < "u" ? new Proxy(e2, { get: (e3, t2) => ("function" < "u" ? __require : e3)[t2] }) : e2)(function(e2) {
   if ("function" < "u")
-    return __require_gv7hsff9.apply(this, arguments);
+    return __require.apply(this, arguments);
   throw Error('Dynamic require of "' + e2 + '" is not supported');
 });
 var r = {};
 ((t2, i2) => {
   for (var s2 in i2)
     e(t2, s2, { get: i2[s2], enumerable: true });
-})(r, { getClaudeConfigDir: () => p, getDefaultCredentialsPath: () => m, oauthLogin: () => k });
+})(r, { getClaudeConfigDir: () => p, getDefaultCredentialsPath: () => m, oauthLogin: () => T });
 function p() {
   return (process.env.CLAUDE_CONFIG_DIR ?? d(f(), ".claude")).normalize("NFC");
 }
@@ -38750,51 +38753,51 @@ function m() {
   return d(p(), ".credentials.json");
 }
 function y() {
-  return _(a(32));
+  return k(a(32));
 }
 function g(e2) {
-  return _(n("sha256").update(e2).digest());
+  return k(n("sha256").update(e2).digest());
 }
 function w() {
-  return _(a(32));
+  return k(a(32));
 }
-function _(e2) {
+function k(e2) {
   return e2.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
-async function k(e2 = {}) {
-  let t2 = e2.credentialsPath ?? m(), i2 = y(), s2 = g(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await E(r2, e2.port), f2 = `http://localhost:${n2}/callback`, p2 = e2.loginWithClaudeAi !== false ? b : S, _2 = new URLSearchParams({ client_id: R, response_type: "code", scope: A, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
-  e2.loginHint && _2.set("login_hint", e2.loginHint), e2.loginMethod && _2.set("login_method", e2.loginMethod), e2.orgUUID && _2.set("orgUUID", e2.orgUUID);
-  let k2, v, D = `${p2}?${_2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, C = `${p2}?${_2.toString()}&redirect_uri=${encodeURIComponent(O)}`;
-  e2.onAuthUrl ? e2.onAuthUrl(D, C) : (console.log(`
+async function T(e2 = {}) {
+  let t2 = e2.credentialsPath ?? m(), i2 = y(), s2 = g(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await _(r2, e2.port), f2 = `http://localhost:${n2}/callback`, p2 = e2.loginWithClaudeAi !== false ? b : S, k2 = new URLSearchParams({ client_id: E, response_type: "code", scope: D, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
+  e2.loginHint && k2.set("login_hint", e2.loginHint), e2.loginMethod && k2.set("login_method", e2.loginMethod), e2.orgUUID && k2.set("orgUUID", e2.orgUUID);
+  let T2, R, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, O = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(M)}`;
+  e2.onAuthUrl ? e2.onAuthUrl(C, O) : (console.log(`
 \uD83D\uDD10 Login to Claude
 `), console.log(`Open this URL in your browser:
-`), console.log(`  ${C}
-`)), e2.openBrowser !== false && T(D).catch(() => {});
+`), console.log(`  ${O}
+`)), e2.openBrowser !== false && v(C).catch(() => {});
   try {
-    k2 = await a2, v = f2;
+    T2 = await a2, R = f2;
   } catch (e3) {
     throw d2(), e3;
   }
   d2();
-  let N = await fetch($, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: k2, redirect_uri: v, client_id: R, code_verifier: i2, state: r2 }) });
-  if (!N.ok) {
-    let e3 = await N.text();
-    throw new Error(`Token exchange failed (${N.status}): ${e3}`);
+  let A = await fetch($, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: T2, redirect_uri: R, client_id: E, code_verifier: i2, state: r2 }) });
+  if (!A.ok) {
+    let e3 = await A.text();
+    throw new Error(`Token exchange failed (${A.status}): ${e3}`);
   }
-  let x2 = await N.json(), I2 = Date.now() + 1000 * x2.expires_in, M2 = { accessToken: x2.access_token, refreshToken: x2.refresh_token, expiresAt: I2, scopes: x2.scope?.split(" ") ?? [] }, L2 = {};
+  let N2 = await A.json(), I2 = Date.now() + 1000 * N2.expires_in, x2 = { accessToken: N2.access_token, refreshToken: N2.refresh_token, expiresAt: I2, scopes: N2.scope?.split(" ") ?? [] }, L2 = {};
   try {
     L2 = JSON.parse(l(t2, "utf8"));
   } catch {}
-  L2.claudeAiOauth = M2;
+  L2.claudeAiOauth = x2;
   let F2 = u(t2);
   try {
     h(F2, { recursive: true });
   } catch {}
   return o(t2, JSON.stringify(L2, null, 2), "utf8"), c(t2, 384), console.log(`
 \u2705 Login successful! Credentials saved to ${t2}
-`), { accessToken: M2.accessToken, refreshToken: M2.refreshToken, expiresAt: M2.expiresAt, credentialsPath: t2 };
+`), { accessToken: x2.accessToken, refreshToken: x2.refreshToken, expiresAt: x2.expiresAt, credentialsPath: t2 };
 }
-async function E(e2, t2) {
+async function _(e2, t2) {
   let s2, r2, n2 = new Promise((e3, t3) => {
     s2 = e3, r2 = t3;
   }), a2 = Bun.serve({ port: t2 ?? 0, async fetch(t3) {
@@ -38802,7 +38805,7 @@ async function E(e2, t2) {
     if (i2.pathname !== "/callback")
       return new Response("Not found", { status: 404 });
     let n3 = i2.searchParams.get("code"), a3 = i2.searchParams.get("state"), o3 = i2.searchParams.get("error");
-    return o3 ? (r2(new Error(`OAuth error: ${o3} \u2014 ${i2.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } })) : n3 && a3 === e2 ? (s2(n3), new Response(null, { status: 302, headers: { Location: `${v}/oauth/code/success?app=claude-code` } })) : (r2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
+    return o3 ? (r2(new Error(`OAuth error: ${o3} \u2014 ${i2.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } })) : n3 && a3 === e2 ? (s2(n3), new Response(null, { status: 302, headers: { Location: `${R}/oauth/code/success?app=claude-code` } })) : (r2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
   } }), o2 = setTimeout(() => {
     r2(new Error("Login timed out (5 minutes). Try again.")), a2.stop();
   }, 300000);
@@ -38810,7 +38813,7 @@ async function E(e2, t2) {
     clearTimeout(o2), a2.stop();
   }, "close") };
 }
-async function T(e2) {
+async function v(e2) {
   let t2 = (() => {
     switch (process.platform) {
       case "darwin":
@@ -38828,19 +38831,19 @@ async function T(e2) {
         return;
     } catch {}
 }
+var E;
 var R;
-var v;
 var S;
 var b;
 var $;
-var O;
-var A;
+var M;
 var D;
 var C;
-var N = (D = { "src/auth.ts"() {
-  R = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (v = "https://platform.claude.com") + "/oauth/authorize", b = "https://claude.com/cai/oauth/authorize", $ = `${v}/v1/oauth/token`, O = `${v}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), A = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(_, "base64url"), i(k, "oauthLogin"), i(E, "startCallbackServer"), i(T, "tryOpenBrowser");
+var O;
+var A = (C = { "src/auth.ts"() {
+  E = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (R = "https://platform.claude.com") + "/oauth/authorize", b = "https://claude.com/cai/oauth/authorize", $ = `${R}/v1/oauth/token`, M = `${R}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), D = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(T, "oauthLogin"), i(_, "startCallbackServer"), i(v, "tryOpenBrowser");
 } }, function() {
-  return D && (C = (0, D[t(D)[0]])(D = 0)), C;
+  return C && (O = (0, C[t(C)[0]])(C = 0)), O;
 });
 var q = class extends Error {
   constructor(e2, t2) {
@@ -38917,22 +38920,60 @@ function te(e2) {
   return i2.includes("opus-4-7") || i2.includes("opus-4-6") || i2.includes("sonnet-4-6") || i2.includes("sonnet-4-7");
 }
 i(Z, "resolveMaxTokens"), i(ee, "getModelMetadata"), i(te, "supportsAdaptiveThinking");
-var ce = he(le(), ".claude", "keepalive.json");
-var ue = 0;
-var de = null;
-function fe() {
+var pe = { cacheTtlMs: 300000, safetyMarginMs: 15000, intervalMs: 120000, intervalClampMin: 60000, retryDelaysMs: [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20].map((e2) => 1000 * e2), rewriteWarnIdleMs: 300000, rewriteWarnTokens: 50000, healthProbeIntervalsMs: [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4], healthProbeTimeoutMs: 3000, enabled: true, idleTimeoutMs: 1 / 0, minTokens: 2000, rewriteBlockEnabled: false };
+var ye = fe(de(), ".claude", "keepalive.json");
+var ge = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH || ye;
+var we = 0;
+var ke = null;
+var Te = new Set;
+function _e() {
   try {
-    let e2 = re(ce);
-    if (e2.mtimeMs === ue && de)
-      return de;
-    ue = e2.mtimeMs;
-    let { readFileSync: t2 } = s("fs");
-    return de = JSON.parse(t2(ce, "utf8"));
+    let e2 = ce(ge);
+    return e2.mtimeMs === we && ke ? null : (we = e2.mtimeMs, Te.clear(), JSON.parse(ue(ge, "utf8")));
   } catch {
     return null;
   }
 }
-function pe(e2) {
+function ve(e2, t2, i2, s2, r2) {
+  if (e2 == null)
+    return i2;
+  let n2 = typeof e2 == "number" ? e2 : Number(e2);
+  return Number.isFinite(n2) ? n2 < s2 || n2 > r2 ? (Te.has(t2) || (console.error(`[keepalive-config] ${t2}=${n2} out of range [${s2}, ${r2}] \u2014 clamping`), Te.add(t2)), Math.max(s2, Math.min(r2, n2))) : n2 : (Te.has(t2) || (console.error(`[keepalive-config] ${t2}=${JSON.stringify(e2)} is not a number \u2014 using fallback ${i2}`), Te.add(t2)), i2);
+}
+function Ee(e2, t2, i2, s2 = 1, r2 = 30) {
+  if (e2 == null)
+    return i2;
+  if (!Array.isArray(e2))
+    return Te.has(t2) || (console.error(`[keepalive-config] ${t2} is not an array \u2014 using fallback`), Te.add(t2)), i2;
+  let n2 = e2.map((e3) => typeof e3 == "number" ? e3 : Number(e3)).filter((e3) => Number.isFinite(e3) && e3 > 0);
+  return n2.length < s2 || n2.length > r2 ? (Te.has(t2) || (console.error(`[keepalive-config] ${t2} length ${n2.length} out of [${s2}, ${r2}] \u2014 using fallback`), Te.add(t2)), i2) : n2;
+}
+function Re(e2, t2) {
+  return e2 == null ? t2 : typeof e2 == "boolean" ? e2 : typeof e2 == "string" ? e2 === "true" || e2 === "1" || e2 === "yes" : !!e2;
+}
+function Se() {
+  let e2 = _e();
+  return e2 === null && ke ? ke : $e(e2 ?? null);
+}
+function be() {
+  return we = 0, ke = null, Se();
+}
+function $e(e2) {
+  let t2 = e2 === null ? "defaults" : Object.keys(e2).length > 0 ? "mixed" : "defaults", i2 = ve(e2?.cacheTtlMs ?? (typeof e2?.cacheTtlSec == "number" ? 1000 * e2.cacheTtlSec : undefined), "cacheTtlMs", pe.cacheTtlMs, 60000, 7200000), s2 = ve(e2?.safetyMarginMs ?? (typeof e2?.safetyMarginSec == "number" ? 1000 * e2.safetyMarginSec : undefined), "safetyMarginMs", pe.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = ve(e2?.intervalMs ?? (typeof e2?.intervalSec == "number" ? 1000 * e2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = pe.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
+  n2 < a2 && (n2 = a2), n2 > o2 && (n2 = o2);
+  let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: Ee(e2?.retryDelaysMs ?? (Array.isArray(e2?.retryDelaysSec) ? e2.retryDelaysSec.map((e3) => typeof e3 == "number" ? 1000 * e3 : NaN) : undefined), "retryDelaysMs", pe.retryDelaysMs), rewriteWarnIdleMs: ve(e2?.rewriteWarnIdleMs ?? (typeof e2?.rewriteWarnIdleSec == "number" ? 1000 * e2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: ve(e2?.rewriteWarnTokens, "rewriteWarnTokens", pe.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: Ee(e2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", pe.healthProbeIntervalsMs), healthProbeTimeoutMs: ve(e2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", pe.healthProbeTimeoutMs, 500, 60000), enabled: Re(e2?.enabled, pe.enabled), idleTimeoutMs: e2?.idleTimeoutMs === null || e2?.idleTimeoutSec === null ? 1 / 0 : ve(e2?.idleTimeoutMs ?? (typeof e2?.idleTimeoutSec == "number" ? 1000 * e2.idleTimeoutSec : undefined), "idleTimeoutMs", pe.idleTimeoutMs === 1 / 0 ? 86400000 : pe.idleTimeoutMs, 0, 86400000), minTokens: ve(e2?.minTokens, "minTokens", pe.minTokens, 1, 1e6), rewriteBlockEnabled: Re(e2?.rewriteBlockEnabled, pe.rewriteBlockEnabled), t: t2 };
+  return ke = l2, l2;
+}
+function Me() {
+  return ge;
+}
+function De() {
+  return Se().cacheTtlMs;
+}
+function Ce() {
+  return Se().safetyMarginMs;
+}
+function Oe(e2) {
   let t2 = e2;
   if (!t2)
     return "permanent";
@@ -38943,21 +38984,21 @@ function pe(e2) {
     return "server_transient";
   if (i2 && i2 >= 400 && i2 < 500)
     return "permanent";
-  let s2 = t2.code ?? t2.cause?.code ?? "", r2 = (t2.message ?? "").toLowerCase();
-  return s2 && new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_ABORTED", "ConnectionRefused", "FailedToOpenSocket"]).has(s2) || r2.includes("unable to connect") || r2.includes("failed to open socket") || r2.includes("connection refused") || r2.includes("network is unreachable") || r2.includes("timeout") || r2.includes("dns") ? "network" : "server_transient";
+  let s2 = t2.code ?? t2.cause?.code ?? "", r2 = t2.name ?? t2.cause?.name ?? "", n2 = `${(t2.message ?? "").toLowerCase()} ${(t2.cause?.message ?? "").toLowerCase()}`.trim();
+  return r2 === "AbortError" || r2 === "TimeoutError" || n2.includes("aborted") || n2.includes("the operation timed out") || n2.includes("request timed out") || s2 && new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_ABORTED", "ABORT_ERR", "ERR_NETWORK", "ConnectionRefused", "FailedToOpenSocket"]).has(s2) || n2.includes("unable to connect") || n2.includes("failed to open socket") || n2.includes("connection refused") || n2.includes("network is unreachable") || n2.includes("network error") || n2.includes("fetch failed") || n2.includes("timeout") || n2.includes("dns") || n2.includes("socket hang up") || n2.includes("terminated") ? "network" : "server_transient";
 }
-i(fe, "readKeepaliveConfig"), i(pe, "classifyError");
-var me = class _KeepaliveEngine {
+i(_e, "readRawConfig"), i(ve, "num"), i(Ee, "numArray"), i(Re, "bool"), i(Se, "loadKeepaliveConfig"), i(be, "reloadKeepaliveConfig"), i($e, "_resolve"), i(Me, "getConfigPath"), i(De, "getCacheTtlMs"), i(Ce, "getSafetyMarginMs"), i(Oe, "classifyError");
+var Ae = class _KeepaliveEngine {
   static {
     i(this, "KeepaliveEngine");
   }
-  static CACHE_TTL_MS = 300000;
-  static CACHE_SAFETY_MARGIN_MS = 15000;
-  static KEEPALIVE_RETRY_DELAYS = [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20];
+  cacheTtlMs;
+  safetyMarginMs;
+  retryDelaysMs;
+  healthProbeIntervalsMs;
+  healthProbeTimeoutMs;
   static SNAPSHOT_TTL_MS = 60 * (parseInt(process.env.CLAUDE_SDK_SNAPSHOT_TTL_MIN ?? "1440", 10) || 1440) * 1000;
   static DUMP_BODY = process.env.CLAUDE_SDK_DUMP_BODY === "1";
-  static HEALTH_PROBE_INTERVALS_MS = [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4];
-  static HEALTH_PROBE_TIMEOUT_MS = 3000;
   config;
   getToken;
   doFetch;
@@ -38968,9 +39009,9 @@ var me = class _KeepaliveEngine {
   healthProbeTimer = null;
   healthProbeAttempt = 0;
   registry = new Map;
-  t = "";
-  i = null;
+  i = "";
   o = null;
+  l = null;
   lastActivityAt = 0;
   lastRealActivityAt = 0;
   cacheWrittenAt = 0;
@@ -38982,11 +39023,13 @@ var me = class _KeepaliveEngine {
   snapshotCallCount = 0;
   constructor(e2) {
     this.getToken = e2.getToken, this.doFetch = e2.doFetch, this.getRateLimitInfo = e2.getRateLimitInfo, this.isOwnerAlive = e2.isOwnerAlive ?? (() => true);
-    let t2 = e2.config ?? {}, i2 = t2.intervalMs ?? 120000;
-    i2 < 60000 && (console.error(`[claude-sdk] keepalive intervalMs=${i2} below safe min (60000); clamped`), i2 = 60000), i2 > 240000 && (console.error(`[claude-sdk] keepalive intervalMs=${i2} above safe max (240000, cache TTL - 60s); clamped`), i2 = 240000), this.config = { enabled: t2.enabled ?? true, intervalMs: i2, idleTimeoutMs: t2.idleTimeoutMs ?? 1 / 0, minTokens: t2.minTokens ?? 2000, rewriteWarnIdleMs: t2.rewriteWarnIdleMs ?? 300000, rewriteWarnTokens: t2.rewriteWarnTokens ?? 50000, rewriteBlockIdleMs: t2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: t2.rewriteBlockEnabled ?? false, onHeartbeat: t2.onHeartbeat, onTick: t2.onTick, onDisarmed: t2.onDisarmed, onRewriteWarning: t2.onRewriteWarning, onNetworkStateChange: t2.onNetworkStateChange };
+    let t2 = e2.config ?? {}, i2 = Se();
+    this.cacheTtlMs = i2.cacheTtlMs, this.safetyMarginMs = i2.safetyMarginMs, this.retryDelaysMs = i2.retryDelaysMs, this.healthProbeIntervalsMs = i2.healthProbeIntervalsMs, this.healthProbeTimeoutMs = i2.healthProbeTimeoutMs;
+    let s2 = t2.intervalMs ?? i2.intervalMs;
+    s2 < i2.intervalClampMin && (console.error(`[claude-sdk] keepalive intervalMs=${s2} below safe min (${i2.intervalClampMin}); clamped`), s2 = i2.intervalClampMin), s2 > i2.intervalClampMax && (console.error(`[claude-sdk] keepalive intervalMs=${s2} above safe max (${i2.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`), s2 = i2.intervalClampMax), this.config = { enabled: t2.enabled ?? i2.enabled, intervalMs: s2, idleTimeoutMs: t2.idleTimeoutMs ?? i2.idleTimeoutMs, minTokens: t2.minTokens ?? i2.minTokens, rewriteWarnIdleMs: t2.rewriteWarnIdleMs ?? i2.rewriteWarnIdleMs, rewriteWarnTokens: t2.rewriteWarnTokens ?? i2.rewriteWarnTokens, rewriteBlockIdleMs: t2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: t2.rewriteBlockEnabled ?? i2.rewriteBlockEnabled, onHeartbeat: t2.onHeartbeat, onTick: t2.onTick, onDisarmed: t2.onDisarmed, onRewriteWarning: t2.onRewriteWarning, onNetworkStateChange: t2.onNetworkStateChange };
   }
   notifyRealRequestStart(e2, t2, i2) {
-    this.t = e2, this.i = JSON.parse(JSON.stringify(t2)), this.o = { ...i2 }, this.abortController?.abort(), this.inFlight = false;
+    this.i = e2, this.o = JSON.parse(JSON.stringify(t2)), this.l = { ...i2 }, this.abortController?.abort(), this.inFlight = false;
   }
   notifyRealRequestComplete(e2) {
     let t2 = Date.now();
@@ -38999,15 +39042,15 @@ var me = class _KeepaliveEngine {
     }
     if (!this.config.enabled)
       return;
-    let i2 = this.t, s2 = this.i, r2 = this.o;
+    let i2 = this.i, s2 = this.o, r2 = this.l;
     if (i2 && s2 && r2) {
       let t3 = (e2.inputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), n2 = this.registry.get(i2);
-      t3 >= this.config.minTokens && (!n2 || t3 >= n2.inputTokens) && this.registry.set(i2, { body: s2, headers: r2, model: i2, inputTokens: t3 }), t3 > (this.lastKnownCacheTokensByModel.get(i2) ?? 0) && this.lastKnownCacheTokensByModel.set(i2, t3), this.writeSnapshotDebug(i2, s2, e2), this.i = null, this.o = null;
+      t3 >= this.config.minTokens && (!n2 || t3 >= n2.inputTokens) && this.registry.set(i2, { body: s2, headers: r2, model: i2, inputTokens: t3 }), t3 > (this.lastKnownCacheTokensByModel.get(i2) ?? 0) && this.lastKnownCacheTokensByModel.set(i2, t3), this.writeSnapshotDebug(i2, s2, e2), this.o = null, this.l = null;
     }
     this.registry.size > 0 && this.startTimer();
   }
   checkRewriteGuard(e2) {
-    let t2 = this.lastRealActivityAt;
+    let t2 = this.cacheWrittenAt;
     if (t2 === 0)
       return;
     let i2 = Date.now() - t2, s2 = this.config.rewriteWarnIdleMs, r2 = this.config.rewriteBlockIdleMs;
@@ -39037,31 +39080,30 @@ var me = class _KeepaliveEngine {
       if (!this.isOwnerAlive())
         return this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
     } catch {}
-    if (this.cacheWrittenAt > 0 && Date.now() - this.cacheWrittenAt > _KeepaliveEngine.CACHE_TTL_MS)
+    if (this.cacheWrittenAt > 0 && Date.now() - this.cacheWrittenAt > this.cacheTtlMs)
       return this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
-    let e2 = fe();
-    if (e2) {
-      if (e2.enabled === false)
-        return this.registry.clear(), void this.stop();
-      typeof e2.intervalSec == "number" && e2.intervalSec > 0 && (this.config.intervalMs = 1000 * e2.intervalSec), typeof e2.idleTimeoutSec == "number" && e2.idleTimeoutSec > 0 ? this.config.idleTimeoutMs = 1000 * e2.idleTimeoutSec : (e2.idleTimeoutSec === null || e2.idleTimeoutSec === 0) && (this.config.idleTimeoutMs = 1 / 0), typeof e2.minTokens == "number" && (this.config.minTokens = e2.minTokens);
-    }
-    let t2 = Date.now() - this.lastRealActivityAt;
-    if (this.config.idleTimeoutMs !== 1 / 0 && t2 > this.config.idleTimeoutMs)
+    let e2 = Se();
+    if (!e2.enabled)
       return this.registry.clear(), void this.stop();
-    let i2 = null;
+    let t2 = Math.max(e2.intervalClampMin, Math.min(e2.intervalMs, e2.intervalClampMax));
+    t2 !== this.config.intervalMs && (this.config.intervalMs = t2), e2.idleTimeoutMs !== this.config.idleTimeoutMs && (this.config.idleTimeoutMs = e2.idleTimeoutMs), e2.minTokens !== this.config.minTokens && (this.config.minTokens = e2.minTokens);
+    let i2 = Date.now() - this.lastRealActivityAt;
+    if (this.config.idleTimeoutMs !== 1 / 0 && i2 > this.config.idleTimeoutMs)
+      return this.registry.clear(), void this.stop();
+    let s2 = null;
     for (let e3 of this.registry.values())
-      (!i2 || e3.inputTokens > i2.inputTokens) && (i2 = e3);
-    if (!i2)
+      (!s2 || e3.inputTokens > s2.inputTokens) && (s2 = e3);
+    if (!s2)
       return;
-    let s2 = Date.now() - this.lastActivityAt;
-    if (this.jitterMs || (this.jitterMs = Math.floor(30000 * Math.random())), s2 < 0.9 * this.config.intervalMs + this.jitterMs)
-      this.config.onTick?.({ idleMs: s2, nextFireMs: Math.max(0, this.config.intervalMs - s2), model: i2.model, tokens: i2.inputTokens });
+    let r2 = Date.now() - this.lastActivityAt;
+    if (this.jitterMs || (this.jitterMs = Math.floor(30000 * Math.random())), r2 < 0.9 * this.config.intervalMs + this.jitterMs)
+      this.config.onTick?.({ idleMs: r2, nextFireMs: Math.max(0, this.config.intervalMs - r2), model: s2.model, tokens: s2.inputTokens });
     else {
       this.inFlight = true;
       try {
-        let e3 = await this.getToken(), t3 = JSON.parse(JSON.stringify(i2.body)), r2 = t3.thinking?.budget_tokens ?? 0;
-        t3.max_tokens = r2 > 0 ? r2 + 1 : 1;
-        let n2 = { ...i2.headers, Authorization: `Bearer ${e3}` }, a2 = new AbortController;
+        let e3 = await this.getToken(), t3 = JSON.parse(JSON.stringify(s2.body)), i3 = t3.thinking?.budget_tokens ?? 0;
+        t3.max_tokens = i3 > 0 ? i3 + 1 : 1;
+        let n2 = { ...s2.headers, Authorization: `Bearer ${e3}` }, a2 = new AbortController;
         this.abortController = a2;
         let o2 = Date.now(), l2 = { inputTokens: 0, outputTokens: 0 };
         for await (let e4 of this.doFetch(t3, n2, a2.signal))
@@ -39069,25 +39111,28 @@ var me = class _KeepaliveEngine {
         let h2 = Date.now() - o2;
         this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
         let c2 = this.getRateLimitInfo();
-        this.config.onHeartbeat?.({ usage: l2, durationMs: h2, idleMs: s2, model: i2.model, rateLimit: { status: c2.status, claim: c2.claim, resetAt: c2.resetAt } });
+        this.config.onHeartbeat?.({ usage: l2, durationMs: h2, idleMs: r2, model: s2.model, rateLimit: { status: c2.status, claim: c2.claim, resetAt: c2.resetAt } });
       } catch (e3) {
-        let t3 = pe(e3);
+        let t3 = Oe(e3);
         if (t3 === "network") {
-          let e4 = Date.now() - this.cacheWrittenAt, t4 = _KeepaliveEngine.CACHE_TTL_MS - e4 <= 15000;
+          let e4 = Date.now() - this.cacheWrittenAt, t4 = this.cacheTtlMs - e4 <= this.safetyMarginMs;
           this.onDisarmed("network_error"), this.startHealthProbe({ reviveMode: t4 });
         } else
-          t3 === "server_transient" ? this.retryChain(i2) : t3 === "auth" ? (this.registry.clear(), this.onDisarmed("auth_error")) : (this.registry.clear(), this.onDisarmed("permanent_error"));
+          t3 === "server_transient" ? this.retryChain(s2) : t3 === "auth" ? (this.registry.clear(), this.onDisarmed("auth_error")) : (this.registry.clear(), this.onDisarmed("permanent_error"));
       } finally {
         this.inFlight = false, this.abortController = null;
       }
     }
   }
   retryChain(e2, t2 = 0) {
-    if (t2 >= _KeepaliveEngine.KEEPALIVE_RETRY_DELAYS.length)
+    if (t2 >= this.retryDelaysMs.length)
       return this.registry.clear(), void this.onDisarmed("retry_exhausted");
-    let i2 = Date.now() - this.cacheWrittenAt, s2 = _KeepaliveEngine.CACHE_TTL_MS - i2, r2 = 1000 * _KeepaliveEngine.KEEPALIVE_RETRY_DELAYS[t2];
-    if (s2 < r2 + _KeepaliveEngine.CACHE_SAFETY_MARGIN_MS)
-      return this.registry.clear(), void this.onDisarmed("cache_ttl_exhausted");
+    let i2 = Date.now() - this.cacheWrittenAt, s2 = this.cacheTtlMs - i2, r2 = 1000 * this.retryDelaysMs[t2];
+    if (s2 < r2 + this.safetyMarginMs) {
+      this.registry.clear();
+      let e3 = i2 < this.cacheTtlMs / 2 ? "retry_budget_exceeds_ttl" : "cache_ttl_exhausted";
+      return void this.onDisarmed(e3);
+    }
     this.retryTimer = setTimeout(async () => {
       this.retryTimer = null;
       try {
@@ -39095,7 +39140,7 @@ var me = class _KeepaliveEngine {
           return this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
       } catch {}
       if (!(this.lastRealActivityAt > this.cacheWrittenAt)) {
-        if (Date.now() - this.cacheWrittenAt > _KeepaliveEngine.CACHE_TTL_MS - _KeepaliveEngine.CACHE_SAFETY_MARGIN_MS)
+        if (Date.now() - this.cacheWrittenAt > this.cacheTtlMs - this.safetyMarginMs)
           return this.registry.clear(), void this.onDisarmed("cache_ttl_expired_mid_retry");
         this.inFlight = true;
         try {
@@ -39107,10 +39152,10 @@ var me = class _KeepaliveEngine {
             ;
           this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
         } catch (i3) {
-          let s3 = pe(i3);
+          let s3 = Oe(i3);
           if (s3 === "network") {
             this.inFlight = false, this.abortController = null;
-            let e3 = _KeepaliveEngine.CACHE_TTL_MS - (Date.now() - this.cacheWrittenAt) <= _KeepaliveEngine.CACHE_SAFETY_MARGIN_MS;
+            let e3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
             return this.onDisarmed("network_error_mid_retry"), void this.startHealthProbe({ reviveMode: e3 });
           }
           if (s3 === "server_transient")
@@ -39127,8 +39172,8 @@ var me = class _KeepaliveEngine {
     try {
       this.config.onDisarmed?.({ reason: e2, at: Date.now() });
     } catch {}
-    if (new Set(["retry_exhausted", "cache_ttl_exhausted", "cache_ttl_expired_mid_retry"]).has(e2) && !this.healthProbeTimer) {
-      let e3 = Date.now() - this.cacheWrittenAt, t2 = _KeepaliveEngine.CACHE_TTL_MS - e3 <= _KeepaliveEngine.CACHE_SAFETY_MARGIN_MS;
+    if (new Set(["retry_exhausted", "cache_ttl_exhausted", "cache_ttl_expired_mid_retry", "retry_budget_exceeds_ttl"]).has(e2) && !this.healthProbeTimer) {
+      let e3 = Date.now() - this.cacheWrittenAt, t2 = this.cacheTtlMs - e3 <= this.safetyMarginMs;
       this.startHealthProbe({ reviveMode: t2 });
     }
   }
@@ -39142,12 +39187,12 @@ var me = class _KeepaliveEngine {
         this.config.onNetworkStateChange?.({ from: t2, to: "degraded", at: Date.now() });
       } catch {}
     let s2 = i(() => {
-      let e3 = _KeepaliveEngine.HEALTH_PROBE_INTERVALS_MS, t3 = e3[Math.min(this.healthProbeAttempt, e3.length - 1)];
+      let e3 = this.healthProbeIntervalsMs, t3 = e3[Math.min(this.healthProbeAttempt, e3.length - 1)];
       this.healthProbeTimer = setTimeout(r2, t3), this.healthProbeTimer && typeof this.healthProbeTimer == "object" && "unref" in this.healthProbeTimer && this.healthProbeTimer.unref();
     }, "scheduleNext"), r2 = i(async () => {
-      if (this.healthProbeTimer = null, this.healthProbeAttempt++, Date.now() - this.cacheWrittenAt >= _KeepaliveEngine.CACHE_TTL_MS - _KeepaliveEngine.CACHE_SAFETY_MARGIN_MS && !e2.reviveMode)
+      if (this.healthProbeTimer = null, this.healthProbeAttempt++, Date.now() - this.cacheWrittenAt >= this.cacheTtlMs - this.safetyMarginMs && !e2.reviveMode)
         return void this.stopHealthProbe();
-      if (this.healthProbeAttempt > _KeepaliveEngine.HEALTH_PROBE_INTERVALS_MS.length)
+      if (this.healthProbeAttempt > this.healthProbeIntervalsMs.length)
         return void this.stopHealthProbe();
       let t3 = false;
       try {
@@ -39155,7 +39200,7 @@ var me = class _KeepaliveEngine {
         await new Promise((t4, i3) => {
           let s3 = e3({ host: "api.anthropic.com", port: 443 }), r4 = setTimeout(() => {
             s3.destroy(), i3(new Error("timeout"));
-          }, _KeepaliveEngine.HEALTH_PROBE_TIMEOUT_MS);
+          }, this.healthProbeTimeoutMs);
           s3.once("connect", () => {
             clearTimeout(r4), s3.end(), t4();
           }), s3.once("error", (e4) => {
@@ -39173,8 +39218,8 @@ var me = class _KeepaliveEngine {
       try {
         this.config.onNetworkStateChange?.({ from: i2, to: "healthy", at: Date.now() });
       } catch {}
-      let r3 = _KeepaliveEngine.CACHE_TTL_MS - (Date.now() - this.cacheWrittenAt);
-      this.registry.size > 0 && r3 > _KeepaliveEngine.CACHE_SAFETY_MARGIN_MS && this.tick();
+      let r3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt);
+      this.registry.size > 0 && r3 > this.safetyMarginMs && this.tick();
     }, "probe");
     r2();
   }
@@ -39204,68 +39249,74 @@ var me = class _KeepaliveEngine {
       }
     } catch {}
   }
-  get l() {
+  get h() {
     return this.registry;
   }
-  get h() {
+  get u() {
     return this.timer;
   }
-  get u() {
+  get p() {
     return this.config;
   }
-  get p() {
+  get m() {
     return this.lastKnownCacheTokensByModel;
   }
-  m(e2) {
+  k(e2) {
     this.lastRealActivityAt = e2;
   }
-  _(e2, t2, i2) {
-    this.t = e2, this.i = t2, this.o = i2;
+  T(e2) {
+    this.cacheWrittenAt = e2;
+  }
+  get _() {
+    return this.cacheWrittenAt;
+  }
+  v(e2, t2, i2) {
+    this.i = e2, this.o = t2, this.l = i2;
   }
 };
-var ye = 300000;
-var ge = 0.25;
-var we = 300000;
-var _e = 1200000;
-var ke = j(W(), ".claude", ".refresh-cooldown");
-var Ee = 1800000;
-var Te = "2.1.90";
-var Re = { todowrite: "todo_write" };
-var ve = Object.fromEntries(Object.entries(Re).map(([e2, t2]) => [t2, e2]));
-function Se(e2) {
+var Ne = 300000;
+var Ie = 0.25;
+var xe = 300000;
+var Le = 1200000;
+var Fe = j(K(), ".claude", ".refresh-cooldown");
+var Pe = 1800000;
+var Ue = "2.1.90";
+var Be = { todowrite: "todo_write" };
+var Je = Object.fromEntries(Object.entries(Be).map(([e2, t2]) => [t2, e2]));
+function We(e2) {
   if (!e2?.length)
     return { remapped: e2, didRemap: false };
   let t2 = false;
   return { remapped: e2.map((e3) => {
-    let i2 = Re[e3.name];
+    let i2 = Be[e3.name];
     return i2 ? (t2 = true, { ...e3, name: i2 }) : e3;
   }), didRemap: t2 };
 }
-function be(e2) {
-  return ve[e2] ?? e2;
+function He(e2) {
+  return Je[e2] ?? e2;
 }
-i(Se, "remapToolNames"), i(be, "unremapToolName");
-var $e = j(W(), ".claude", ".token-refresh-lock");
-async function Oe() {
-  for (let e2 = 0;e2 < 5; e2++)
+i(We, "remapToolNames"), i(He, "unremapToolName");
+var je = j(K(), ".claude", ".token-refresh-lock");
+async function Ke() {
+  for (let e2 = 0;e2 < 30; e2++)
     try {
-      return K($e), F(j($e, "pid"), `${process.pid}
+      return U(je), F(j(je, "pid"), `${process.pid}
 ${Date.now()}`), () => {
         try {
-          J(j($e, "pid")), P($e);
+          W(j(je, "pid")), B(je);
         } catch {}
       };
     } catch (e3) {
       if (e3.code === "EEXIST") {
         try {
-          let e4 = L(j($e, "pid"), "utf8"), t2 = parseInt(e4.split(`
+          let e4 = L(j(je, "pid"), "utf8"), t2 = parseInt(e4.split(`
 `)[1] ?? "0");
           if (Date.now() - t2 > 30000) {
             try {
-              J(j($e, "pid"));
+              W(j(je, "pid"));
             } catch {}
             try {
-              P($e);
+              B(je);
             } catch {}
             continue;
           }
@@ -39277,8 +39328,20 @@ ${Date.now()}`), () => {
     }
   return null;
 }
-i(Oe, "acquireTokenRefreshLock");
-var Ae = class {
+async function qe(e2, t2, i2) {
+  let s2 = Date.now() + t2;
+  for (;Date.now() < s2; ) {
+    try {
+      let t3 = await e2.read();
+      if (t3 && t3.expiresAt - Date.now() >= i2)
+        return { accessToken: t3.accessToken, refreshToken: t3.refreshToken, expiresAt: t3.expiresAt };
+    } catch {}
+    await new Promise((e3) => setTimeout(e3, 500));
+  }
+  return null;
+}
+i(Ke, "acquireTokenRefreshLock"), i(qe, "pollDiskForFreshToken");
+var ze = class {
   static {
     i(this, "ClaudeCodeSDK");
   }
@@ -39303,9 +39366,9 @@ var Ae = class {
   tokenIssuedAt = 0;
   onTokenStatus;
   keepalive;
-  k = null;
+  R = null;
   constructor(e2 = {}) {
-    this.sessionId = M(), this.deviceId = e2.deviceId ?? I(32).toString("hex"), this.accountUuid = e2.accountUuid ?? this.readAccountUuid(), this.timeout = e2.timeout ?? 600000, this.maxRetries = e2.maxRetries ?? 10, this.onTokenStatus = e2.onTokenStatus, this.keepalive = new me({ config: e2.keepalive, getToken: i(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: i((e3, t2, i2) => this.doStreamRequest(e3, t2, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimitInfo, "getRateLimitInfo") }), e2.credentialStore ? this.credentialStore = e2.credentialStore : e2.accessToken ? (this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken ?? null, this.expiresAt = e2.expiresAt ?? null, this.credentialStore = new Ce({ accessToken: e2.accessToken, refreshToken: e2.refreshToken ?? "", expiresAt: e2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new De(e2.credentialsPath ?? j(W(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {}));
+    this.sessionId = x(), this.deviceId = e2.deviceId ?? I(32).toString("hex"), this.accountUuid = e2.accountUuid ?? this.readAccountUuid(), this.timeout = e2.timeout ?? 600000, this.maxRetries = e2.maxRetries ?? 10, this.onTokenStatus = e2.onTokenStatus, this.keepalive = new Ae({ config: e2.keepalive, getToken: i(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: i((e3, t2, i2) => this.doStreamRequest(e3, t2, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimitInfo, "getRateLimitInfo") }), e2.credentialStore ? this.credentialStore = e2.credentialStore : e2.accessToken ? (this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken ?? null, this.expiresAt = e2.expiresAt ?? null, this.credentialStore = new Qe({ accessToken: e2.accessToken, refreshToken: e2.refreshToken ?? "", expiresAt: e2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new Ge(e2.credentialsPath ?? j(K(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {}));
   }
   async generate(e2) {
     let t2 = [];
@@ -39316,12 +39379,12 @@ var Ae = class {
   async* stream(e2) {
     this.keepalive.checkRewriteGuard(e2.model), await this.ensureAuth();
     let t2, i2 = this.buildRequestBody(e2), s2 = this.buildHeaders(e2);
-    this.keepalive.notifyRealRequestStart(e2.model, i2, s2), this.k = null;
+    this.keepalive.notifyRealRequestStart(e2.model, i2, s2), this.R = null;
     for (let r2 = 1;r2 <= this.maxRetries + 1; r2++) {
       if (e2.signal?.aborted)
         throw new q("Aborted");
       try {
-        return yield* this.doStreamRequest(i2, s2, e2.signal), void (this.k && (this.keepalive.notifyRealRequestComplete(this.k), this.k = null));
+        return yield* this.doStreamRequest(i2, s2, e2.signal), void (this.R && (this.keepalive.notifyRealRequestComplete(this.R), this.R = null));
       } catch (i3) {
         if (t2 = i3, i3 instanceof G) {
           if (i3.status === 401 && r2 <= this.maxRetries) {
@@ -39350,13 +39413,13 @@ var Ae = class {
     let a2, o2 = Date.now(), l2 = JSON.stringify(e2);
     try {
       let { appendFileSync: i3 } = s("fs");
-      i3(j(W(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${e2.model} msgs=${e2.messages?.length ?? 0}
+      i3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${e2.model} msgs=${e2.messages?.length ?? 0}
 `);
       let r3 = e2.tools?.map((e3) => e3.name).join(",") ?? "none", n3 = typeof e2.system == "string" ? e2.system.substring(0, 200) : JSON.stringify(e2.system)?.substring(0, 200);
-      if (i3(j(W(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(t2).substring(0, 300)} tools=[${r3.substring(0, 500)}] sys=${n3} bodyLen=${l2.length}
+      if (i3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(t2).substring(0, 300)} tools=[${r3.substring(0, 500)}] sys=${n3} bodyLen=${l2.length}
 `), process.env.CLAUDE_MAX_DUMP_REQUESTS === "1") {
         let s2 = { ...e2, messages: `[${e2.messages?.length ?? 0} messages]`, system: `[${typeof e2.system == "string" ? e2.system.length : "array"}]` };
-        i3(j(W(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: t2, body: s2 }) + `
+        i3(j(K(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: t2, body: s2 }) + `
 `);
       }
     } catch {}
@@ -39366,7 +39429,7 @@ var Ae = class {
       clearTimeout(n2);
       try {
         let { appendFileSync: t3 } = s("fs");
-        t3(j(W(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - o2}ms err=${e3.message}
+        t3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - o2}ms err=${e3.message}
 `);
       } catch {}
       throw new q("Network error", e3);
@@ -39378,8 +39441,8 @@ var Ae = class {
         t3[i4] = e4;
       });
       let i3 = { ts: new Date().toISOString(), pid: process.pid, status: a2.status, statusText: a2.statusText, ttfbMs: Date.now() - o2, headers: t3 };
-      e3(j(W(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
-`), e3(j(W(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${a2.status} ttfb=${Date.now() - o2}ms
+      e3(j(K(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
+`), e3(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${a2.status} ttfb=${Date.now() - o2}ms
 `);
     } catch {}
     if (this.lastRateLimitInfo = this.parseRateLimitHeaders(a2.headers), !a2.ok) {
@@ -39392,7 +39455,7 @@ var Ae = class {
         let { appendFileSync: i3 } = s("fs"), r3 = {};
         a2.headers.forEach((e4, t4) => {
           r3[t4] = e4;
-        }), i3(j(W(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: a2.status, requestId: t3, headers: r3, body: e3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
+        }), i3(j(K(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: a2.status, requestId: t3, headers: r3, body: e3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
 `);
       } catch {}
       throw a2.status === 429 ? new Q(`Rate limited: ${e3}`, this.lastRateLimitInfo, 429) : new G(`API error ${a2.status}: ${e3}`, a2.status, t3);
@@ -39436,7 +39499,7 @@ var Ae = class {
             if (e5) {
               o2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens, cacheReadInputTokens: e5.cache_read_input_tokens };
               try {
-                H(j(W(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(e5)}
+                H(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(e5)}
 `);
               } catch {}
             }
@@ -39445,7 +39508,7 @@ var Ae = class {
           if (r3 === "content_block_start") {
             let { index: e5, content_block: i4 } = t3;
             if (i4.type === "tool_use") {
-              let t4 = be(i4.name);
+              let t4 = He(i4.name);
               a2.set(e5, { type: "tool_use", id: i4.id, name: t4, input: "" }), yield { type: "tool_use_start", id: i4.id, name: t4 };
             } else
               i4.type === "text" ? a2.set(e5, { type: "text", text: "" }) : i4.type === "thinking" && a2.set(e5, { type: "thinking", thinking: "", signature: i4.signature ?? undefined });
@@ -39478,7 +39541,7 @@ var Ae = class {
             i4?.output_tokens && (o2 = { ...o2, outputTokens: i4.output_tokens });
             continue;
           }
-          r3 === "message_stop" && (this.k = o2, yield { type: "message_stop", usage: o2, stopReason: l2 });
+          r3 === "message_stop" && (this.R = o2, yield { type: "message_stop", usage: o2, stopReason: l2 });
         }
       }
     } finally {
@@ -39490,18 +39553,18 @@ var Ae = class {
   }
   buildHeaders(e2) {
     let t2 = this.buildBetas(e2);
-    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": t2.join(","), "anthropic-dangerous-direct-browser-access": "true", "x-app": "cli", "User-Agent": `claude-cli/${Te}`, "X-Claude-Code-Session-Id": this.sessionId };
+    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": t2.join(","), "anthropic-dangerous-direct-browser-access": "true", "x-app": "cli", "User-Agent": `claude-cli/${Ue}`, "X-Claude-Code-Session-Id": this.sessionId };
   }
   buildRequestBody(e2) {
-    let t2, i2 = this.computeFingerprint(e2.messages), s2 = `x-anthropic-billing-header: cc_version=${Te}.${i2}; cc_entrypoint=cli; cch=00000;`;
+    let t2, i2 = this.computeFingerprint(e2.messages), s2 = `x-anthropic-billing-header: cc_version=${Ue}.${i2}; cc_entrypoint=cli; cch=00000;`;
     t2 = (typeof e2.system == "string" ? e2.system : Array.isArray(e2.system) ? JSON.stringify(e2.system) : "").includes("x-anthropic-billing-header") ? e2.system : typeof e2.system == "string" ? s2 + `
 ` + e2.system : Array.isArray(e2.system) ? [{ type: "text", text: s2 }, ...e2.system] : s2;
     let r2 = { model: e2.model, messages: e2.messages, max_tokens: Z(e2.model, e2.maxTokens), stream: true, system: t2, metadata: { user_id: JSON.stringify({ device_id: this.deviceId, account_uuid: this.accountUuid, session_id: this.sessionId }) } };
     if (e2.tools && e2.tools.length > 0) {
-      let { remapped: t3 } = Se(e2.tools);
+      let { remapped: t3 } = We(e2.tools);
       if (r2.tools = t3, e2.toolChoice) {
         let t4 = typeof e2.toolChoice == "string" ? { type: e2.toolChoice } : { ...e2.toolChoice };
-        t4.type === "tool" && t4.name && Re[t4.name] && (t4.name = Re[t4.name]), r2.tool_choice = t4;
+        t4.type === "tool" && t4.name && Be[t4.name] && (t4.name = Be[t4.name]), r2.tool_choice = t4;
       }
     }
     e2.caching !== false && this.addCacheMarkers(r2);
@@ -39535,12 +39598,12 @@ var Ae = class {
   }
   async ensureAuth() {
     if (!this.accessToken || this.isTokenExpired())
-      return this.pendingAuth || (this.pendingAuth = this.T().finally(() => {
+      return this.pendingAuth || (this.pendingAuth = this.S().finally(() => {
         this.pendingAuth = null;
       })), this.pendingAuth;
   }
-  async T() {
-    this.accessToken && !this.isTokenExpired() || this.credentialStore.hasChanged && await this.credentialStore.hasChanged() && (await this.loadFromStore(), this.accessToken && !this.isTokenExpired()) || !this.accessToken && (await this.loadFromStore(), this.accessToken && !this.isTokenExpired()) || this.accessToken && this.isTokenExpired() && await this.refreshTokenWithTripleCheck();
+  async S() {
+    this.credentialStore.hasChanged && await this.credentialStore.hasChanged() && await this.loadFromStore(), (!this.accessToken || this.isTokenExpired()) && (!this.accessToken && (await this.loadFromStore(), this.accessToken && !this.isTokenExpired()) || this.accessToken && this.isTokenExpired() && await this.refreshTokenWithTripleCheck());
   }
   async loadFromStore() {
     let e2 = await this.credentialStore.read();
@@ -39549,7 +39612,7 @@ var Ae = class {
     this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, this.expiresAt = e2.expiresAt, !this.tokenIssuedAt && this.expiresAt && (this.tokenIssuedAt = Date.now()), this.scheduleProactiveRotation();
   }
   isTokenExpired() {
-    return !!this.expiresAt && Date.now() + ye >= this.expiresAt;
+    return !!this.expiresAt && Date.now() + Ne >= this.expiresAt;
   }
   async forceRefreshToken() {
     if (this.dbg("FORCE REFRESH requested by caller"), this.initialLoad && await this.initialLoad, !this.refreshToken)
@@ -39567,7 +39630,7 @@ var Ae = class {
   async forceReLogin() {
     this.initialLoad && await this.initialLoad, this.dbg("FORCE RE-LOGIN requested \u2014 opening browser OAuth flow"), this.emitTokenStatus("critical", "Initiating browser re-login \u2014 refresh token may be dead");
     try {
-      let { oauthLogin: e2 } = await Promise.resolve().then(() => (N(), r)), t2 = this.credentialStore instanceof De ? this.credentialStore.path : j(W(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
+      let { oauthLogin: e2 } = await Promise.resolve().then(() => (A(), r)), t2 = this.credentialStore instanceof Ge ? this.credentialStore.path : j(K(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
       return this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.emitTokenStatus("rotated", "Re-login successful \u2014 fresh tokens"), this.scheduleProactiveRotation(), this.dbg(`RE-LOGIN SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()}`), true;
     } catch (e2) {
       let t2 = e2?.message ?? String(e2);
@@ -39578,7 +39641,7 @@ var Ae = class {
     if (!this.expiresAt)
       return { expiresAt: null, expiresInMs: 0, lifetimePct: 0, failedRefreshes: this.proactiveRefreshFailures, status: "unknown" };
     let e2, t2 = Date.now(), i2 = this.expiresAt - t2, s2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? Math.max(0, i2 / s2) : 0;
-    return e2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < ge ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: e2 };
+    return e2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < Ie ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: e2 };
   }
   async getTokenHealthAsync() {
     return this.initialLoad && await this.initialLoad, this.getTokenHealth();
@@ -39589,13 +39652,13 @@ var Ae = class {
     let e2 = Date.now(), t2 = this.expiresAt - e2;
     if (t2 <= 0)
       return void this.emitTokenStatus("expired", "Token has expired");
-    let i2 = Math.max(0.5 * t2, we), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, t2 - ye);
+    let i2 = Math.max(0.8 * t2, xe), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, t2 - Ne);
     if (r2 <= 0)
       return this.dbg(`proactive rotation: delay=${r2}ms <= 0, scheduling emergency refresh in 30s`), void (this.tokenRotationTimer || (this.tokenRotationTimer = setTimeout(() => {
         this.tokenRotationTimer = null, this.proactiveRefresh();
       }, 30000), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && ("unref" in this.tokenRotationTimer) && this.tokenRotationTimer.unref()));
     let n2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * t2, a2 = n2 > 0 ? t2 / n2 : 1;
-    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < ge && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(t2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
+    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < Ie && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(t2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
       this.tokenRotationTimer = null, this.proactiveRefresh();
     }, r2), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
   }
@@ -39603,15 +39666,15 @@ var Ae = class {
     if (this.isRefreshOnCooldown()) {
       try {
         let e3 = await this.credentialStore.read();
-        if (e3 && !(Date.now() + ye >= e3.expiresAt)) {
+        if (e3 && !(Date.now() + Ne >= e3.expiresAt)) {
           let t3 = e3.expiresAt - Date.now();
-          if (t3 >= _e)
+          if (t3 >= Le)
             return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
           this.dbg(`proactive refresh: disk token has only ${Math.round(t3 / 60000)}min left (need ${Math.round(20)}min) \u2014 waiting for cooldown`);
         }
       } catch {}
       if (this.dbg("proactive refresh skipped: global cooldown active, no fresh token found"), !this.tokenRotationTimer) {
-        let e3 = Math.max(we, 60000);
+        let e3 = Math.max(xe, 60000);
         this.tokenRotationTimer = setTimeout(() => {
           this.tokenRotationTimer = null, this.proactiveRefresh();
         }, e3), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
@@ -39619,33 +39682,42 @@ var Ae = class {
       return;
     }
     let e2 = Date.now();
-    if (e2 - this.lastRefreshAttemptAt < we)
+    if (e2 - this.lastRefreshAttemptAt < xe)
       return void this.dbg("proactive refresh skipped: too recent");
     this.lastRefreshAttemptAt = e2, this.dbg("proactive rotation: refreshing token silently...");
-    let t2 = await Oe();
+    let t2 = await Ke();
+    if (!t2) {
+      this.dbg("proactive rotation: lock unavailable (another PID refreshing) \u2014 polling disk");
+      let e3 = await qe(this.credentialStore, 45000, Le);
+      if (e3) {
+        this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0;
+        let t3 = e3.expiresAt - Date.now();
+        this.dbg(`proactive rotation: picked up fresh token from disk (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`);
+      } else
+        this.dbg("proactive rotation: lock unavailable and no fresh token appeared \u2014 will retry on next schedule");
+      return void this.scheduleProactiveRotation();
+    }
     try {
-      if (t2) {
-        let e4 = await this.credentialStore.read();
-        if (e4 && !(Date.now() + ye >= e4.expiresAt)) {
-          let t3 = e4.expiresAt - Date.now();
-          if (t3 >= _e)
-            return this.accessToken = e4.accessToken, this.refreshToken = e4.refreshToken, this.expiresAt = e4.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
-        }
+      let e3 = await this.credentialStore.read();
+      if (e3 && !(Date.now() + Ne >= e3.expiresAt)) {
+        let t4 = e3.expiresAt - Date.now();
+        if (t4 >= Le)
+          return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(t4 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t4 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
       }
-      let e3 = this.expiresAt ?? 0;
+      let t3 = this.expiresAt ?? 0;
       await this.doTokenRefresh(true), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.tokenIssuedAt = Date.now();
-      let i2 = (this.expiresAt ?? 0) - Date.now(), s2 = e3 > 0 ? e3 - (this.tokenIssuedAt - 1000) : 2 * i2;
+      let i2 = (this.expiresAt ?? 0) - Date.now(), s2 = t3 > 0 ? t3 - (this.tokenIssuedAt - 1000) : 2 * i2;
       i2 > 0 && i2 < 0.5 * s2 && this.dbg(`\u26A0\uFE0F SHRINKING TOKEN: new ${Math.round(i2 / 60000)}min vs prev ${Math.round(s2 / 60000)}min \u2014 backing off rotation`), this.dbg(`proactive rotation SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()} (${Math.round(i2 / 60000)}min lifetime)`), this.emitTokenStatus("rotated", `Token rotated silently \u2014 expires ${new Date(this.expiresAt).toISOString()}`), this.scheduleProactiveRotation();
     } catch (e3) {
       this.proactiveRefreshFailures++;
       let t3 = e3?.message ?? String(e3);
       if (this.dbg(`proactive rotation FAILED (#${this.proactiveRefreshFailures}): ${t3}`), t3.includes("429") || t3.includes("rate limit")) {
         this.refreshConsecutive429s++;
-        let e4 = Math.min(we * Math.pow(2, this.refreshConsecutive429s), Ee);
+        let e4 = Math.min(xe * Math.pow(2, this.refreshConsecutive429s), Pe);
         this.setRefreshCooldown(e4), this.dbg(`proactive rotation: 429 cooldown ${Math.round(e4 / 1000)}s (attempt #${this.refreshConsecutive429s})`);
       }
       let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = this.tokenIssuedAt > 0 && this.expiresAt ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? i2 / s2 : 0;
-      i2 <= ye ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${t3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}. Consider forceReLogin()`) : r2 < ge && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}`), this.expiresAt && this.expiresAt > Date.now() + ye ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
+      i2 <= Ne ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${t3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}. Consider forceReLogin()`) : r2 < Ie && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}`), this.expiresAt && this.expiresAt > Date.now() + Ne ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
     } finally {
       t2 && t2();
     }
@@ -39656,58 +39728,77 @@ var Ae = class {
   }
   isRefreshOnCooldown() {
     try {
-      let e2 = L(ke, "utf8"), t2 = parseInt(e2.trim());
+      let e2 = L(Fe, "utf8"), t2 = parseInt(e2.trim());
       if (Date.now() < t2)
         return true;
       try {
-        J(ke);
+        W(Fe);
       } catch {}
     } catch {}
     return false;
   }
   setRefreshCooldown(e2) {
     try {
-      let t2 = j(W(), ".claude");
+      let t2 = j(K(), ".claude");
       try {
-        K(t2, { recursive: true });
+        U(t2, { recursive: true });
       } catch {}
-      F(ke, `${Date.now() + e2}
+      F(Fe, `${Date.now() + e2}
 `);
     } catch {}
   }
   clearRefreshCooldown() {
     try {
-      J(ke);
+      W(Fe);
     } catch {}
     this.refreshConsecutive429s = 0;
   }
   dbg(e2) {
     try {
-      H(j(W(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${e2}
+      H(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${e2}
 `);
     } catch {}
   }
   async refreshTokenWithTripleCheck() {
     let e2 = await this.credentialStore.read();
-    if (e2 && !(Date.now() + ye >= e2.expiresAt))
+    if (e2 && !(Date.now() + Ne >= e2.expiresAt))
       return this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, void (this.expiresAt = e2.expiresAt);
-    let t2 = await Oe();
+    let t2 = await Ke();
+    if (!t2) {
+      this.dbg("refresh: lock unavailable (another PID refreshing) \u2014 polling disk");
+      let e3 = await qe(this.credentialStore, 45000, Ne);
+      return e3 ? (this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, void this.dbg(`refresh: picked up fresh token from disk (${Math.round((e3.expiresAt - Date.now()) / 60000)}min remaining)`)) : (this.dbg("refresh: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh as last resort"), void await this.doTokenRefresh());
+    }
     try {
-      if (t2) {
-        let e3 = await this.credentialStore.read();
-        if (e3 && !(Date.now() + ye >= e3.expiresAt))
-          return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, void (this.expiresAt = e3.expiresAt);
-      }
+      let e3 = await this.credentialStore.read();
+      if (e3 && !(Date.now() + Ne >= e3.expiresAt))
+        return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, void (this.expiresAt = e3.expiresAt);
       await this.doTokenRefresh();
     } finally {
-      t2 && t2();
+      t2();
     }
   }
   async handleAuth401() {
     let e2 = this.accessToken;
     this.pending401 && this.lastFailedToken === e2 || (this.lastFailedToken = e2, this.pending401 = (async () => {
       let t2 = await this.credentialStore.read();
-      return t2 && t2.accessToken !== e2 ? (this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, true) : (await this.doTokenRefresh(), true);
+      if (t2 && t2.accessToken !== e2)
+        return this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, true;
+      let i2 = await Ke();
+      if (!i2) {
+        this.dbg("handleAuth401: lock unavailable \u2014 polling disk for fresh token");
+        let t3 = await qe(this.credentialStore, 45000, Ne);
+        return t3 && t3.accessToken !== e2 ? (this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.dbg(`handleAuth401: picked up fresh token from disk (${Math.round((t3.expiresAt - Date.now()) / 60000)}min remaining)`), true) : (this.dbg("handleAuth401: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh"), await this.doTokenRefresh(), true);
+      }
+      try {
+        let t3 = await this.credentialStore.read();
+        if (t3 && t3.accessToken !== e2 && !(Date.now() + Ne >= t3.expiresAt))
+          return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, true;
+        await this.doTokenRefresh();
+      } finally {
+        i2();
+      }
+      return true;
     })().finally(() => {
       this.pending401 = null, this.lastFailedToken = null;
     })), await this.pending401;
@@ -39717,22 +39808,33 @@ var Ae = class {
       throw new z("Token expired and no refresh token available.");
     if (this.isRefreshOnCooldown() && !e2) {
       let e3 = await this.credentialStore.read();
-      if (e3 && !(Date.now() + ye >= e3.expiresAt))
+      if (e3 && !(Date.now() + Ne >= e3.expiresAt))
         return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, void this.dbg("refresh skipped (cooldown) \u2014 another process already refreshed");
       if (this.expiresAt && this.expiresAt > Date.now() + 600000)
         throw new z("Token refresh on cooldown due to rate limiting. Will retry later.");
       this.dbg("refresh: ignoring cooldown \u2014 token critically close to expiry");
     }
-    let t2 = [500, 1500, 3000, 5000, 8000];
+    let t2 = [500, 1500, 3000, 5000, 8000], i2 = this.credentialStore.path ?? j(K(), ".claude", ".credentials.json");
+    try {
+      let t3 = J(i2).mtimeMs, s3 = Date.now() - t3;
+      if (s3 < 60000) {
+        let t4 = await this.credentialStore.read();
+        if (t4 && !(Date.now() + Ne >= t4.expiresAt)) {
+          let i3 = t4.expiresAt - Date.now(), r2 = t4.accessToken !== this.accessToken;
+          if (!e2 || r2 && i3 >= Le)
+            return this.accessToken = t4.accessToken, this.refreshToken = t4.refreshToken, this.expiresAt = t4.expiresAt, this.tokenIssuedAt = Date.now(), this.dbg(`refresh: skipped (mtime fresh ${Math.round(s3 / 1000)}s ago, ${Math.round(i3 / 60000)}min remaining) \u2014 picked up sibling/CLI write`), void this.scheduleProactiveRotation();
+        }
+      }
+    } catch {}
     for (let i3 = 0;i3 < 5; i3++) {
-      let s2 = await this.credentialStore.read();
-      if (s2 && !(Date.now() + ye >= s2.expiresAt)) {
+      let s3 = await this.credentialStore.read();
+      if (s3 && !(Date.now() + Ne >= s3.expiresAt)) {
         if (!e2)
-          return this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt, void this.dbg(`refresh: another process already refreshed (attempt ${i3})`);
-        let t3 = s2.expiresAt - Date.now();
-        if (s2.accessToken !== this.accessToken && t3 >= _e)
-          return this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(t3 / 60000)}min remaining) (attempt ${i3})`);
-        s2.accessToken !== this.accessToken ? (this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(t3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
+          return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process already refreshed (attempt ${i3})`);
+        let t3 = s3.expiresAt - Date.now();
+        if (s3.accessToken !== this.accessToken && t3 >= Le)
+          return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(t3 / 60000)}min remaining) (attempt ${i3})`);
+        s3.accessToken !== this.accessToken ? (this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(t3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
       }
       let r2 = await fetch("https://platform.claude.com/v1/oauth/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: this.refreshToken, client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e" }), signal: AbortSignal.timeout(15000) });
       if (r2.ok) {
@@ -39741,23 +39843,23 @@ var Ae = class {
         let t3 = await this.credentialStore.read(), i4 = t3?.scopes?.length ? t3.scopes : ["user:file_upload", "user:inference", "user:mcp_servers", "user:profile", "user:sessions:claude_code"];
         return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK \u2014 expires in ${Math.round(e3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
       }
-      if ((r2.status === 429 || r2.status >= 500) && i3 < 4) {
-        let e3 = t2[i3] ?? 8000, s3 = Math.random() * e3 * 0.5;
-        if (this.dbg(`TOKEN_REFRESH_RETRY status=${r2.status} attempt=${i3 + 1}/5 delay=${Math.round(e3 + s3)}ms`), r2.status === 429) {
-          let t3 = Math.min(3 * (e3 + s3), Ee);
-          this.setRefreshCooldown(t3);
-        }
-        await new Promise((t3) => setTimeout(t3, e3 + s3));
+      if (r2.status === 429) {
+        let e3 = Math.min(60000, Pe);
+        throw this.setRefreshCooldown(e3), this.dbg(`TOKEN_REFRESH_RETRY status=429 attempt=${i3 + 1}/5 \u2014 bailing out, cooldown ${e3}ms (per-token rate limit)`), new z("Token refresh rate-limited (429) \u2014 will pickup from disk or retry after cooldown");
+      }
+      if (r2.status >= 500 && i3 < 4) {
+        let e3 = t2[i3] ?? 8000, s4 = Math.random() * e3 * 0.5;
+        this.dbg(`TOKEN_REFRESH_RETRY status=${r2.status} attempt=${i3 + 1}/5 delay=${Math.round(e3 + s4)}ms`), await new Promise((t3) => setTimeout(t3, e3 + s4));
         continue;
       }
       throw new z(`Token refresh failed: ${r2.status} ${r2.statusText}`);
     }
-    let i2 = await this.credentialStore.read();
-    if (!i2 || Date.now() + ye >= i2.expiresAt)
+    let s2 = await this.credentialStore.read();
+    if (!s2 || Date.now() + Ne >= s2.expiresAt)
       throw new z("Token refresh failed after all retries and race recovery");
-    this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt;
+    this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt;
     try {
-      H(j(W(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
+      H(j(K(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
 `);
     } catch {}
   }
@@ -39837,19 +39939,19 @@ var Ae = class {
         }
       }
     }
-    let i2 = `59cf53e54c78${[4, 7, 20].map((e3) => t2[e3] || "0").join("")}${Te}`;
-    return x("sha256").update(i2).digest("hex").slice(0, 3);
+    let i2 = `59cf53e54c78${[4, 7, 20].map((e3) => t2[e3] || "0").join("")}${Ue}`;
+    return N("sha256").update(i2).digest("hex").slice(0, 3);
   }
   readAccountUuid() {
     try {
-      let e2 = j(W(), ".claude", "claude_code_config.json");
+      let e2 = j(K(), ".claude", "claude_code_config.json");
       return JSON.parse(L(e2, "utf8")).oauthAccount?.accountUuid ?? "";
     } catch {
       return "";
     }
   }
 };
-var De = class {
+var Ge = class {
   constructor(e2) {
     this.path = e2;
   }
@@ -39873,9 +39975,9 @@ var De = class {
     t2.claudeAiOauth = e2;
     let i2 = j(this.path, "..");
     try {
-      K(i2, { recursive: true });
+      U(i2, { recursive: true });
     } catch {}
-    F(this.path, JSON.stringify(t2, null, 2), "utf8"), U(this.path, 384), this.lastMtimeMs = this.getMtime();
+    F(this.path, JSON.stringify(t2, null, 2), "utf8"), P(this.path, 384), this.lastMtimeMs = this.getMtime();
   }
   async hasChanged() {
     let e2 = this.getMtime();
@@ -39883,13 +39985,13 @@ var De = class {
   }
   getMtime() {
     try {
-      return B(this.path).mtimeMs;
+      return J(this.path).mtimeMs;
     } catch {
       return 0;
     }
   }
 };
-var Ce = class {
+var Qe = class {
   static {
     i(this, "MemoryCredentialStore");
   }
@@ -39904,25 +40006,25 @@ var Ce = class {
     this.credentials = { ...e2 };
   }
 };
-var Ne = class _Conversation {
+var Ye = class _Conversation {
   static {
     i(this, "Conversation");
   }
   sdk;
   options;
-  R = [];
-  v = { inputTokens: 0, outputTokens: 0 };
+  $ = [];
+  M = { inputTokens: 0, outputTokens: 0 };
   constructor(e2, t2) {
     this.sdk = e2, this.options = t2;
   }
   get messages() {
-    return this.R;
+    return this.$;
   }
   get totalUsage() {
-    return { ...this.v };
+    return { ...this.M };
   }
   get length() {
-    return this.R.length;
+    return this.$.length;
   }
   async send(e2, t2) {
     this.appendUserMessage(e2);
@@ -39950,15 +40052,15 @@ var Ne = class _Conversation {
     s2.length > 0 && o2.push({ type: "text", text: s2.join("") });
     for (let e3 of n2)
       o2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
-    o2.length > 0 && this.R.push({ role: "assistant", content: o2 }), this.accumulateUsage(a2);
+    o2.length > 0 && this.$.push({ role: "assistant", content: o2 }), this.accumulateUsage(a2);
   }
   addToolResult(e2, t2, i2) {
     let s2 = { type: "tool_result", tool_use_id: e2, content: t2, ...i2 && { is_error: true } };
-    this.R.push({ role: "user", content: [s2] });
+    this.$.push({ role: "user", content: [s2] });
   }
   addToolResults(e2) {
     let t2 = e2.map((e3) => ({ type: "tool_result", tool_use_id: e3.toolUseId, content: e3.content, ...e3.isError && { is_error: true } }));
-    this.R.push({ role: "user", content: t2 });
+    this.$.push({ role: "user", content: t2 });
   }
   async continue(e2) {
     let t2 = this.buildGenerateOptions(e2), i2 = await this.sdk.generate(t2);
@@ -39981,16 +40083,16 @@ var Ne = class _Conversation {
     i2.length > 0 && n2.push({ type: "text", text: i2.join("") });
     for (let e3 of s2)
       n2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
-    n2.length > 0 && this.R.push({ role: "assistant", content: n2 }), this.accumulateUsage(r2);
+    n2.length > 0 && this.$.push({ role: "assistant", content: n2 }), this.accumulateUsage(r2);
   }
   rewind(e2) {
-    if (e2 < 0 || e2 >= this.R.length)
+    if (e2 < 0 || e2 >= this.$.length)
       throw new Error(`Invalid rewind index: ${e2}`);
-    return this.R.splice(e2);
+    return this.$.splice(e2);
   }
   undoLastTurn() {
-    for (let e2 = this.R.length - 1;e2 >= 0; e2--) {
-      let t2 = this.R[e2];
+    for (let e2 = this.$.length - 1;e2 >= 0; e2--) {
+      let t2 = this.$[e2];
       if (t2.role === "user") {
         let i2 = t2.content;
         if (!(Array.isArray(i2) && i2.length > 0 && i2[0].type === "tool_result"))
@@ -40001,10 +40103,10 @@ var Ne = class _Conversation {
   }
   branch() {
     let e2 = new _Conversation(this.sdk, { ...this.options });
-    return e2.R = [...this.R], e2.v = { ...this.v }, e2;
+    return e2.$ = [...this.$], e2.M = { ...this.M }, e2;
   }
   getHistory() {
-    return this.R.map((e2, t2) => {
+    return this.$.map((e2, t2) => {
       let i2 = "";
       if (typeof e2.content == "string")
         i2 = e2.content.slice(0, 100);
@@ -40016,34 +40118,34 @@ var Ne = class _Conversation {
     });
   }
   appendUserMessage(e2) {
-    this.R.push({ role: "user", content: e2 });
+    this.$.push({ role: "user", content: e2 });
   }
   appendAssistantFromResponse(e2) {
     let t2 = [];
     for (let i2 of e2.content)
       i2.type === "text" ? t2.push({ type: "text", text: i2.text }) : i2.type === "tool_use" && t2.push({ type: "tool_use", id: i2.id, name: i2.name, input: i2.input });
-    t2.length > 0 && this.R.push({ role: "assistant", content: t2 });
+    t2.length > 0 && this.$.push({ role: "assistant", content: t2 });
   }
   buildGenerateOptions(e2) {
-    return { model: this.options.model, messages: [...this.R], system: this.options.system, tools: e2?.tools ?? this.options.tools, toolChoice: e2?.toolChoice ?? this.options.toolChoice, maxTokens: this.options.maxTokens, thinking: this.options.thinking, effort: this.options.effort, fast: this.options.fast, signal: e2?.signal ?? this.options.signal, extraBetas: this.options.extraBetas, caching: this.options.caching };
+    return { model: this.options.model, messages: [...this.$], system: this.options.system, tools: e2?.tools ?? this.options.tools, toolChoice: e2?.toolChoice ?? this.options.toolChoice, maxTokens: this.options.maxTokens, thinking: this.options.thinking, effort: this.options.effort, fast: this.options.fast, signal: e2?.signal ?? this.options.signal, extraBetas: this.options.extraBetas, caching: this.options.caching };
   }
   accumulateUsage(e2) {
-    this.v.inputTokens += e2.inputTokens, this.v.outputTokens += e2.outputTokens, this.v.cacheCreationInputTokens = (this.v.cacheCreationInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), this.v.cacheReadInputTokens = (this.v.cacheReadInputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0);
+    this.M.inputTokens += e2.inputTokens, this.M.outputTokens += e2.outputTokens, this.M.cacheCreationInputTokens = (this.M.cacheCreationInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), this.M.cacheReadInputTokens = (this.M.cacheReadInputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0);
   }
 };
-function Ue(e2, t2) {
-  Me(Le(e2), { recursive: true });
+function it(e2, t2) {
+  Ze(et(e2), { recursive: true });
   let i2 = null, s2 = [];
   for (let e3 of t2) {
-    let t3 = Fe(), r2 = { type: e3.role === "user" ? "user" : "assistant", uuid: t3, parentUuid: i2, timestamp: Date.now(), content: e3.content };
+    let t3 = tt(), r2 = { type: e3.role === "user" ? "user" : "assistant", uuid: t3, parentUuid: i2, timestamp: Date.now(), content: e3.content };
     s2.push(JSON.stringify(r2)), i2 = t3;
   }
-  Ie(e2, s2.join(`
+  Xe(e2, s2.join(`
 `) + `
 `, "utf8");
 }
-function Ke(e2) {
-  let t2 = xe(e2, "utf8"), i2 = [];
+function st(e2) {
+  let t2 = Ve(e2, "utf8"), i2 = [];
   for (let e3 of t2.split(`
 `)) {
     if (!e3.trim())
@@ -40058,8 +40160,50 @@ function Ke(e2) {
   }
   return i2;
 }
-i(Ue, "saveSession"), i(Ke, "loadSession");
-var Je = class {
+i(it, "saveSession"), i(st, "loadSession");
+var rt = class {
+  static {
+    i(this, "CacheMetricsCollector");
+  }
+  samples = [];
+  timer = null;
+  previousHitRate = 1;
+  previousSampleCount = 0;
+  windowMs;
+  reportIntervalMs;
+  regressionThreshold;
+  regressionPreviousFloor;
+  regressionMinSamples;
+  onSummary;
+  onRegression;
+  constructor(e2 = {}) {
+    this.windowMs = e2.windowMs ?? 60000, this.reportIntervalMs = e2.reportIntervalMs ?? this.windowMs, this.regressionThreshold = e2.regressionThreshold ?? 0.7, this.regressionPreviousFloor = e2.regressionPreviousFloor ?? 0.85, this.regressionMinSamples = e2.regressionMinSamples ?? 50, this.onSummary = e2.onSummary, this.onRegression = e2.onRegression, this.reportIntervalMs > 0 && (this.timer = setInterval(() => this.report(), this.reportIntervalMs), typeof this.timer == "object" && ("unref" in this.timer) && this.timer.unref());
+  }
+  recordRequest(e2) {
+    this.samples.push({ ts: Date.now(), ...e2 });
+  }
+  summary() {
+    this.prune();
+    let e2 = this.samples.length, t2 = this.samples.filter((e3) => e3.cacheRead > 0).length, i2 = this.samples.filter((e3) => e3.firstCall && e3.cacheRead === 0).length, s2 = this.samples.filter((e3) => e3.kind === "real").length, r2 = this.samples.filter((e3) => e3.kind === "ka").length, n2 = this.samples.reduce((e3, t3) => e3 + t3.cacheRead, 0), a2 = this.samples.reduce((e3, t3) => e3 + t3.cacheWrite, 0), o2 = this.samples.reduce((e3, t3) => e3 + t3.input, 0), l2 = this.samples.reduce((e3, t3) => Math.max(e3, t3.cacheRead), 0), h2 = new Set(this.samples.map((e3) => e3.sysHash).filter(Boolean)).size, c2 = Math.round(0.9 * n2);
+    return { windowMs: this.windowMs, windowEndsAt: new Date().toISOString(), total: e2, hitRate: e2 > 0 ? t2 / e2 : 0, coldStartCount: i2, realCount: s2, kaCount: r2, avgCacheRead: e2 > 0 ? n2 / e2 : 0, avgCacheWrite: e2 > 0 ? a2 / e2 : 0, avgInput: e2 > 0 ? o2 / e2 : 0, maxCacheRead: l2, distinctSysHash: h2, estimatedSavedTokens: c2 };
+  }
+  report() {
+    let e2 = this.summary();
+    e2.total !== 0 && (this.onSummary?.(e2), this.previousSampleCount >= this.regressionMinSamples && this.previousHitRate >= this.regressionPreviousFloor && e2.total >= this.regressionMinSamples && e2.hitRate < this.regressionThreshold && this.onRegression?.({ detectedAt: e2.windowEndsAt, windowMs: this.windowMs, currentHitRate: e2.hitRate, previousHitRate: this.previousHitRate, drop: this.previousHitRate - e2.hitRate, reason: `hit_rate dropped from ${this.previousHitRate.toFixed(3)} to ${e2.hitRate.toFixed(3)} (\u0394=${(this.previousHitRate - e2.hitRate).toFixed(3)}); ${e2.total} samples in current window` }), this.previousHitRate = e2.hitRate, this.previousSampleCount = e2.total);
+  }
+  prune() {
+    let e2 = Date.now() - this.windowMs;
+    for (;this.samples.length > 0 && this.samples[0].ts < e2; )
+      this.samples.shift();
+  }
+  stop() {
+    this.timer && (clearInterval(this.timer), this.timer = null);
+  }
+  get D() {
+    return this.samples;
+  }
+};
+var ot = class {
   static {
     i(this, "FileCredentialsProvider");
   }
@@ -40068,7 +40212,7 @@ var Je = class {
   cached = null;
   lastMtimeMs = 0;
   constructor(e2 = {}) {
-    this.path = e2.path ?? He(), this.expiryBufferMs = e2.expiryBufferMs ?? 300000;
+    this.path = e2.path ?? lt(), this.expiryBufferMs = e2.expiryBufferMs ?? 300000;
   }
   async getAccessToken() {
     if (this.mtimeChanged() && (this.cached = null), (!this.cached || this.isExpired(this.cached)) && (this.cached = this.readFromDisk()), !this.cached?.accessToken)
@@ -40080,7 +40224,7 @@ var Je = class {
   }
   readFromDisk() {
     try {
-      let e2 = Pe(this.path, "utf8");
+      let e2 = nt(this.path, "utf8");
       return this.lastMtimeMs = this.getMtime(), JSON.parse(e2).claudeAiOauth ?? null;
     } catch {
       return null;
@@ -40091,7 +40235,7 @@ var Je = class {
   }
   getMtime() {
     try {
-      return Be(this.path).mtimeMs;
+      return at(this.path).mtimeMs;
     } catch {
       return 0;
     }
@@ -40100,13 +40244,13 @@ var Je = class {
     return !!e2.expiresAt && Date.now() + this.expiryBufferMs >= e2.expiresAt;
   }
 };
-function He() {
+function lt() {
   let e2 = process.env.HOME || process.env.USERPROFILE || "";
   return `${process.env.CLAUDE_CONFIG_DIR || `${e2}/.claude`}/.credentials.json`;
 }
-i(He, "defaultCredentialsPath");
-var je = { error: 0, info: 1, debug: 2 };
-var We = class {
+i(lt, "defaultCredentialsPath");
+var ht = { error: 0, info: 1, debug: 2 };
+var ct = class {
   static {
     i(this, "ConsoleEventEmitter");
   }
@@ -40114,12 +40258,12 @@ var We = class {
   format;
   write;
   constructor(e2 = {}) {
-    this.minRank = je[e2.minLevel ?? "info"] ?? 1, this.format = e2.format ?? "human", this.write = e2.writeTarget ?? ((e3) => process.stderr.write(e3 + `
+    this.minRank = ht[e2.minLevel ?? "info"] ?? 1, this.format = e2.format ?? "human", this.write = e2.writeTarget ?? ((e3) => process.stderr.write(e3 + `
 `));
   }
   emit(e2) {
     try {
-      if ((je[e2.level] ?? 1) > this.minRank)
+      if ((ht[e2.level] ?? 1) > this.minRank)
         return;
       let t2 = e2.ts ?? new Date().toISOString();
       if (this.format === "json")
@@ -40136,19 +40280,19 @@ var We = class {
     } catch {}
   }
 };
-var qe = class {
+var ut = class {
   static {
     i(this, "NullEventEmitter");
   }
   emit(e2) {}
 };
-var ze = class {
+var dt = class {
   static {
     i(this, "InMemorySessionStore");
   }
   sessions = new Map;
   liveness;
-  constructor(e2 = new Ge) {
+  constructor(e2 = new ft) {
     this.liveness = e2;
   }
   getOrCreate(e2, t2, i2) {
@@ -40190,7 +40334,7 @@ var ze = class {
     this.sessions.clear();
   }
 };
-var Ge = class {
+var ft = class {
   static {
     i(this, "DefaultLivenessChecker");
   }
@@ -40204,7 +40348,7 @@ var Ge = class {
     }
   }
 };
-var Qe = class {
+var pt = class {
   static {
     i(this, "NativeFetchUpstream");
   }
@@ -40212,12 +40356,13 @@ var Qe = class {
     return fetch(e2, t2);
   }
 };
-var Ye = { anthropicBaseUrl: "https://api.anthropic.com", kaIntervalSec: 120, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
-var Ve = class {
+var mt = { anthropicBaseUrl: "https://api.anthropic.com", kaIntervalSec: undefined, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
+var yt = class {
   static {
     i(this, "ProxyClient");
   }
   config;
+  metrics;
   credentials;
   events;
   store;
@@ -40226,7 +40371,7 @@ var Ve = class {
   reaperTimer;
   lastRateLimit = { status: null, resetAt: null, claim: null, retryAfter: null, utilization5h: null, utilization7d: null };
   constructor(e2) {
-    this.config = { ...Ye, ...e2.config }, this.credentials = e2.credentialsProvider, this.events = e2.eventEmitter ?? new We, this.liveness = e2.livenessChecker ?? new Ge, this.store = e2.sessionStore ?? new ze(this.liveness), this.upstream = e2.upstreamFetcher ?? new Qe, this.reaperTimer = setInterval(() => {
+    this.config = { ...mt, ...e2.config }, this.credentials = e2.credentialsProvider, this.events = e2.eventEmitter ?? new ct, this.liveness = e2.livenessChecker ?? new ft, this.store = e2.sessionStore ?? new dt(this.liveness), this.upstream = e2.upstreamFetcher ?? new pt, this.metrics = new rt({ windowMs: 60000, reportIntervalMs: 60000, onSummary: i((e3) => this.events.emit({ level: "info", kind: "CACHE_METRICS_SUMMARY", ...e3 }), "onSummary"), onRegression: i((e3) => this.events.emit({ level: "error", kind: "CACHE_REGRESSION_DETECTED", ...e3 }), "onRegression") }), this.reaperTimer = setInterval(() => {
       let e3 = this.store.reapDead();
       for (let t2 of e3)
         this.events.emit({ level: "info", kind: "SESSION_DEAD", sessionId: t2, reason: "pid_gone" });
@@ -40244,8 +40389,11 @@ var Ve = class {
   get configSnapshot() {
     return this.config;
   }
+  get cacheMetricsSnapshot() {
+    return this.metrics.summary();
+  }
   stop() {
-    clearInterval(this.reaperTimer), this.store.stopAll();
+    clearInterval(this.reaperTimer), this.metrics.stop(), this.store.stopAll();
   }
   async handleRequest(e2, t2, i2) {
     let s2 = i2.sessionId, r2 = i2.sourcePid ?? null, n2 = this.store.getOrCreate(s2, r2, () => this.createEngine(s2));
@@ -40254,21 +40402,21 @@ var Ve = class {
     try {
       a2 = JSON.parse(o2);
     } catch {
-      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), tt(400, { error: "Invalid JSON" });
+      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), Tt(400, { error: "Invalid JSON" });
     }
     let h2 = a2.model ?? "unknown";
     n2.model = h2;
     let c2 = {};
     for (let [e3, i3] of Object.entries(t2)) {
       let t3 = e3.toLowerCase();
-      Xe.includes(t3) || (c2[e3] = i3);
+      gt.includes(t3) || (c2[e3] = i3);
     }
     c2["accept-encoding"] = "identity";
     try {
       let e3 = await this.credentials.getAccessToken();
       c2.Authorization = `Bearer ${e3}`;
     } catch (e3) {
-      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: e3?.message ?? "No OAuth credentials" }), tt(401, { error: { type: "authentication_error", message: e3?.message ?? "No OAuth credentials" } });
+      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: e3?.message ?? "No OAuth credentials" }), Tt(401, { error: { type: "authentication_error", message: e3?.message ?? "No OAuth credentials" } });
     }
     let u2 = c2["anthropic-beta"] ?? c2["Anthropic-Beta"] ?? "";
     if (!u2.includes("oauth-2025-04-20")) {
@@ -40280,7 +40428,7 @@ var Ve = class {
       n2.engine.checkRewriteGuard(h2);
     } catch (e3) {
       if (e3?.code === "CACHE_REWRITE_BLOCKED")
-        return tt(429, { error: { type: "cache_rewrite_blocked", message: e3.message } });
+        return Tt(429, { error: { type: "cache_rewrite_blocked", message: e3.message } });
       throw e3;
     }
     let d2, f2, p2, m2 = Date.now();
@@ -40289,7 +40437,7 @@ var Ve = class {
     } catch (e3) {
       return this.handleNetworkError(s2, e3);
     }
-    if (this.lastRateLimit = et(d2.headers), !d2.ok) {
+    if (this.lastRateLimit = kt(d2.headers), !d2.ok) {
       let e3 = await d2.text().catch(() => "");
       return d2.status === 401 && this.credentials.invalidate(), this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, status: d2.status, msg: e3.slice(0, 200) }), new Response(e3, { status: d2.status, headers: d2.headers });
     }
@@ -40309,8 +40457,11 @@ var Ve = class {
   }
   createEngine(e2) {
     let t2 = this.config;
-    return new me({ config: { intervalMs: 1000 * t2.kaIntervalSec, idleTimeoutMs: t2.kaIdleTimeoutSec > 0 ? 1000 * t2.kaIdleTimeoutSec : 1 / 0, minTokens: t2.kaMinTokens, rewriteWarnIdleMs: 1000 * t2.kaRewriteWarnIdleSec, rewriteWarnTokens: t2.kaRewriteWarnTokens, rewriteBlockIdleMs: t2.kaRewriteBlockIdleSec > 0 ? 1000 * t2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: t2.kaRewriteBlockEnabled, onHeartbeat: i((t3) => this.events.emit({ level: "info", kind: "KA_FIRE_COMPLETE", sessionId: e2, model: t3.model, durationMs: t3.durationMs, idleMs: t3.idleMs, usage: { inputTokens: t3.usage.inputTokens, outputTokens: t3.usage.outputTokens, cacheReadInputTokens: t3.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: t3.usage.cacheCreationInputTokens ?? 0 }, rateLimit: t3.rateLimit }), "onHeartbeat"), onTick: i((i2) => {
-      i2.idleMs > 900 * t2.kaIntervalSec && this.events.emit({ level: "debug", kind: "KA_TICK_IDLE", sessionId: e2, idleMs: i2.idleMs, nextFireMs: i2.nextFireMs, model: i2.model, tokens: i2.tokens });
+    return new Ae({ config: { intervalMs: t2.kaIntervalSec !== undefined ? 1000 * t2.kaIntervalSec : undefined, idleTimeoutMs: t2.kaIdleTimeoutSec > 0 ? 1000 * t2.kaIdleTimeoutSec : 1 / 0, minTokens: t2.kaMinTokens, rewriteWarnIdleMs: 1000 * t2.kaRewriteWarnIdleSec, rewriteWarnTokens: t2.kaRewriteWarnTokens, rewriteBlockIdleMs: t2.kaRewriteBlockIdleSec > 0 ? 1000 * t2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: t2.kaRewriteBlockEnabled, onHeartbeat: i((t3) => {
+      this.metrics.recordRequest({ kind: "ka", cacheRead: t3.usage.cacheReadInputTokens ?? 0, cacheWrite: t3.usage.cacheCreationInputTokens ?? 0, input: t3.usage.inputTokens ?? 0, model: t3.model }), this.events.emit({ level: "info", kind: "KA_FIRE_COMPLETE", sessionId: e2, model: t3.model, durationMs: t3.durationMs, idleMs: t3.idleMs, usage: { inputTokens: t3.usage.inputTokens, outputTokens: t3.usage.outputTokens, cacheReadInputTokens: t3.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: t3.usage.cacheCreationInputTokens ?? 0 }, rateLimit: t3.rateLimit });
+    }, "onHeartbeat"), onTick: i((i2) => {
+      let s2 = 1000 * (t2.kaIntervalSec ?? 120);
+      i2.idleMs > 0.9 * s2 && this.events.emit({ level: "debug", kind: "KA_TICK_IDLE", sessionId: e2, idleMs: i2.idleMs, nextFireMs: i2.nextFireMs, model: i2.model, tokens: i2.tokens });
     }, "onTick"), onDisarmed: i((t3) => this.events.emit({ level: "error", kind: "KA_DISARM", sessionId: e2, reason: t3.reason, msg: `KA disarmed for session ${e2.slice(0, 8)} \u2014 reason=${t3.reason}` }), "onDisarmed"), onRewriteWarning: i((t3) => this.events.emit({ level: t3.blocked ? "error" : "info", kind: t3.blocked ? "REWRITE_BLOCK" : "REWRITE_WARN", sessionId: e2, idleMs: t3.idleMs, estimatedTokens: t3.estimatedTokens, blocked: t3.blocked, model: t3.model }), "onRewriteWarning"), onNetworkStateChange: i((t3) => this.events.emit({ level: t3.to === "degraded" ? "error" : "info", kind: t3.to === "degraded" ? "NETWORK_DEGRADED" : "NETWORK_HEALTHY", sessionId: e2, from: t3.from, to: t3.to }), "onNetworkStateChange") }, getToken: i(() => this.credentials.getAccessToken(), "getToken"), doFetch: i((e3, t3, i2) => this.engineDoFetch(e3, t3, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimit, "getRateLimitInfo"), isOwnerAlive: i(() => this.store.isOwnerAlive(e2), "isOwnerAlive") });
   }
   async* engineDoFetch(e2, t2, i2) {
@@ -40321,7 +40472,7 @@ var Ve = class {
     }
     if (!r2.body)
       throw new Error("No response body");
-    yield* it(r2.body, i2);
+    yield* _t(r2.body, i2);
   }
   async parseSSEAndNotify(e2, t2, i2, s2, r2) {
     try {
@@ -40357,31 +40508,32 @@ var Ve = class {
             } catch {}
         }
       }
+      let h2 = t2.lastUsage === null;
       t2.lastUsage = n2;
       try {
         t2.engine.notifyRealRequestComplete(n2);
       } catch (e3) {
         this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `engine.notifyRealRequestComplete: ${e3?.message}` });
       }
-      this.events.emit({ level: "info", kind: "REAL_REQUEST_COMPLETE", sessionId: i2, model: s2, durationMs: Date.now() - r2, usage: n2, rateLimit: { util5h: this.lastRateLimit.utilization5h, util7d: this.lastRateLimit.utilization7d, status: this.lastRateLimit.status } });
+      this.metrics.recordRequest({ kind: "real", cacheRead: n2.cacheReadInputTokens ?? 0, cacheWrite: n2.cacheCreationInputTokens ?? 0, input: n2.inputTokens ?? 0, model: s2, firstCall: h2 }), this.events.emit({ level: "info", kind: "REAL_REQUEST_COMPLETE", sessionId: i2, model: s2, durationMs: Date.now() - r2, usage: n2, rateLimit: { util5h: this.lastRateLimit.utilization5h, util7d: this.lastRateLimit.utilization7d, status: this.lastRateLimit.status } });
     } catch (e3) {
       this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `SSE parse error: ${e3?.message ?? e3}` });
     }
   }
   handleNetworkError(e2, t2) {
-    let i2 = t2?.code ?? t2?.cause?.code ?? "", s2 = String(t2?.message ?? "").toLowerCase(), r2 = Ze.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
+    let i2 = t2?.code ?? t2?.cause?.code ?? "", s2 = String(t2?.message ?? "").toLowerCase(), r2 = wt.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
     return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: e2, status: r2 ? 503 : 502, msg: `upstream fetch threw: ${i2 || ""} ${s2}`.trim().slice(0, 200) }), r2 ? new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Upstream network error \u2014 proxy cannot reach Anthropic. Retrying will help once network is restored." } }), { status: 503, headers: { "content-type": "application/json", "retry-after": "2" } }) : new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: `Upstream request failed: ${s2 || i2 || "unknown"}` } }), { status: 502, headers: { "content-type": "application/json" } });
   }
 };
-var Xe = ["host", "content-length", "connection", "authorization", "accept-encoding"];
-var Ze = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
-function et(e2) {
+var gt = ["host", "content-length", "connection", "authorization", "accept-encoding"];
+var wt = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
+function kt(e2) {
   return { status: e2.get("anthropic-ratelimit-unified-status"), resetAt: e2.get("anthropic-ratelimit-unified-reset") ? Number(e2.get("anthropic-ratelimit-unified-reset")) : null, claim: e2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: e2.get("retry-after") ? parseFloat(e2.get("retry-after")) : null, utilization5h: e2.get("anthropic-ratelimit-unified-5h-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-5h-utilization")) : null, utilization7d: e2.get("anthropic-ratelimit-unified-7d-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-7d-utilization")) : null };
 }
-function tt(e2, t2) {
+function Tt(e2, t2) {
   return new Response(JSON.stringify(t2), { status: e2, headers: { "content-type": "application/json" } });
 }
-async function* it(e2, t2) {
+async function* _t(e2, t2) {
   let i2 = new TextDecoder, s2 = e2.getReader(), r2 = "", n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
   try {
     for (;; ) {
@@ -40416,22 +40568,22 @@ async function* it(e2, t2) {
     s2.releaseLock();
   }
 }
-i(et, "parseRateLimitHeaders"), i(tt, "jsonResponse"), i(it, "parseSSEToEvents"), N(), N();
-var lt = '{"type":"KeepAlive"}';
-var ht = 16000;
-var ct = Math.floor(3200);
-async function ut(e2, t2, s2) {
-  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(ht), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
+i(kt, "parseRateLimitHeaders"), i(Tt, "jsonResponse"), i(_t, "parseSSEToEvents"), A(), A();
+var $t = '{"type":"KeepAlive"}';
+var Mt = 16000;
+var Dt = Math.floor(3200);
+async function Ct(e2, t2, s2) {
+  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(Mt), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
   if (s2?.keyterms?.length)
     for (let e3 of s2.keyterms)
       n2.append("keyterms", e3);
-  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = at(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, f2 = null, p2 = "", m2 = await new Promise((t3, i2) => {
+  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = St(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, f2 = null, p2 = "", m2 = await new Promise((t3, i2) => {
     let s3 = setTimeout(() => {
       i2(new Error("voice_stream WebSocket connection timeout (10s)"));
-    }, 1e4), n3 = new URL(r2), l3 = nt({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${e2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
+    }, 1e4), n3 = new URL(r2), l3 = Rt({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${e2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
     l3.on("upgrade", (e3, r3, n4) => {
       clearTimeout(s3);
-      let a3 = ot("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
+      let a3 = bt("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
       if (e3.headers["sec-websocket-accept"] !== a3)
         return r3.destroy(), void i2(new Error("WebSocket handshake failed: invalid accept header"));
       t3(r3);
@@ -40444,57 +40596,57 @@ async function ut(e2, t2, s2) {
     }), l3.end();
   });
   function y2(e3) {
-    _2(Buffer.from(e3, "utf8"), 1);
+    k2(Buffer.from(e3, "utf8"), 1);
   }
   function g2(e3) {
-    _2(e3, 2);
+    k2(e3, 2);
   }
   function w2() {
-    _2(Buffer.alloc(0), 8);
+    k2(Buffer.alloc(0), 8);
   }
-  function _2(e3, t3) {
+  function k2(e3, t3) {
     if (m2.destroyed)
       return;
-    let i2, s3 = at(4), r3 = Buffer.alloc(e3.length);
+    let i2, s3 = St(4), r3 = Buffer.alloc(e3.length);
     for (let t4 = 0;t4 < e3.length; t4++)
       r3[t4] = e3[t4] ^ s3[t4 % 4];
     e3.length < 126 ? (i2 = Buffer.alloc(6), i2[0] = 128 | t3, i2[1] = 128 | e3.length, s3.copy(i2, 2)) : e3.length < 65536 ? (i2 = Buffer.alloc(8), i2[0] = 128 | t3, i2[1] = 254, i2.writeUInt16BE(e3.length, 2), s3.copy(i2, 4)) : (i2 = Buffer.alloc(14), i2[0] = 128 | t3, i2[1] = 255, i2.writeBigUInt64BE(BigInt(e3.length), 2), s3.copy(i2, 10)), m2.write(Buffer.concat([i2, r3]));
   }
-  h2 = true, i(y2, "wsSendText"), i(g2, "wsSendBinary"), i(w2, "wsSendClose"), i(_2, "wsSendFrame");
-  let k2 = Buffer.alloc(0);
-  function E2() {
-    for (;k2.length >= 2; ) {
-      let e3 = k2[0], t3 = k2[1], i2 = 15 & e3, s3 = !!(128 & t3), r3 = 127 & t3, n3 = 2;
+  h2 = true, i(y2, "wsSendText"), i(g2, "wsSendBinary"), i(w2, "wsSendClose"), i(k2, "wsSendFrame");
+  let T2 = Buffer.alloc(0);
+  function _2() {
+    for (;T2.length >= 2; ) {
+      let e3 = T2[0], t3 = T2[1], i2 = 15 & e3, s3 = !!(128 & t3), r3 = 127 & t3, n3 = 2;
       if (r3 === 126) {
-        if (k2.length < 4)
+        if (T2.length < 4)
           return;
-        r3 = k2.readUInt16BE(2), n3 = 4;
+        r3 = T2.readUInt16BE(2), n3 = 4;
       } else if (r3 === 127) {
-        if (k2.length < 10)
+        if (T2.length < 10)
           return;
-        r3 = Number(k2.readBigUInt64BE(2)), n3 = 10;
+        r3 = Number(T2.readBigUInt64BE(2)), n3 = 10;
       }
       s3 && (n3 += 4);
       let a3 = n3 + r3;
-      if (k2.length < a3)
+      if (T2.length < a3)
         return;
-      let o3 = k2.subarray(n3, a3);
+      let o3 = T2.subarray(n3, a3);
       if (s3) {
-        let e4 = k2.subarray(n3 - 4, n3);
+        let e4 = T2.subarray(n3 - 4, n3);
         o3 = Buffer.from(o3);
         for (let t4 = 0;t4 < o3.length; t4++)
           o3[t4] = o3[t4] ^ e4[t4 % 4];
       }
-      if (k2 = k2.subarray(a3), i2 === 1)
-        T2(o3.toString("utf8"));
+      if (T2 = T2.subarray(a3), i2 === 1)
+        v2(o3.toString("utf8"));
       else {
         if (i2 === 8)
-          return void R2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
-        i2 === 9 && _2(o3, 10);
+          return void E2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
+        i2 === 9 && k2(o3, 10);
       }
     }
   }
-  function T2(e3) {
+  function v2(e3) {
     let i2;
     try {
       i2 = JSON.parse(e3);
@@ -40524,21 +40676,21 @@ async function ut(e2, t2, s2) {
       }
     }
   }
-  function R2(e3, i2) {
+  function E2(e3, i2) {
     if (h2 = false, l2 && (clearInterval(l2), l2 = null), p2) {
       let e4 = p2;
       p2 = "", t2.onTranscript(e4, true);
     }
     d2?.("ws_close"), !u2 && e3 !== 1000 && e3 !== 1005 && t2.onError(`Connection closed: code ${e3}${i2 ? ` \u2014 ${i2}` : ""}`), t2.onClose(), m2.destroy();
   }
-  return i(E2, "processFrames"), i(T2, "handleMessage"), i(R2, "handleClose"), m2.on("data", (e3) => {
-    k2 = Buffer.concat([k2, e3]), E2();
+  return i(_2, "processFrames"), i(v2, "handleMessage"), i(E2, "handleClose"), m2.on("data", (e3) => {
+    T2 = Buffer.concat([T2, e3]), _2();
   }), m2.on("close", () => {
-    h2 && R2(1006, "connection lost");
+    h2 && E2(1006, "connection lost");
   }), m2.on("error", (e3) => {
     u2 || t2.onError(`Socket error: ${e3.message}`);
-  }), y2(lt), l2 = setInterval(() => {
-    h2 && y2(lt);
+  }), y2($t), l2 = setInterval(() => {
+    h2 && y2($t);
   }, 8000), { send(e3) {
     !h2 || c2 || g2(Buffer.from(e3));
   }, finalize: () => u2 || c2 ? Promise.resolve("already_closed") : (u2 = true, new Promise((e3) => {
@@ -40558,19 +40710,19 @@ async function ut(e2, t2, s2) {
     c2 = true, l2 && (clearInterval(l2), l2 = null), h2 = false, m2.destroyed || (w2(), m2.destroy());
   }, isConnected: () => h2 && !m2.destroyed };
 }
-async function dt(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await ut(e2, { onTranscript: i((e3, t3) => {
+async function Ot(e2, t2, s2) {
+  let r2 = [], n2 = null, a2 = await Ct(e2, { onTranscript: i((e3, t3) => {
     t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
   }, "onTranscript"), onError: i((e3) => {
     n2 = e3;
   }, "onError"), onClose: i(() => {}, "onClose") }, s2);
   try {
-    let e3 = await wt(t2), i2 = e3;
+    let e3 = await Ft(t2), i2 = e3;
     e3.length > 44 && e3[0] === 82 && e3[1] === 73 && e3[2] === 70 && e3[3] === 70 && (i2 = e3.subarray(44));
     let r3 = s2?.realtime !== false;
-    for (let e4 = 0;e4 < i2.length && a2.isConnected(); e4 += ct) {
-      let t3 = i2.subarray(e4, Math.min(e4 + ct, i2.length));
-      a2.send(t3), r3 && e4 + ct < i2.length && await gt(80);
+    for (let e4 = 0;e4 < i2.length && a2.isConnected(); e4 += Dt) {
+      let t3 = i2.subarray(e4, Math.min(e4 + Dt, i2.length));
+      a2.send(t3), r3 && e4 + Dt < i2.length && await Lt(80);
     }
     await a2.finalize();
   } finally {
@@ -40580,17 +40732,17 @@ async function dt(e2, t2, s2) {
     throw new Error(`Transcription error: ${n2}`);
   return r2.join(" ");
 }
-async function ft(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await ut(e2, { onTranscript: i((e3, t3) => {
+async function At(e2, t2, s2) {
+  let r2 = [], n2 = null, a2 = await Ct(e2, { onTranscript: i((e3, t3) => {
     t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
   }, "onTranscript"), onError: i((e3) => {
     n2 = e3;
   }, "onError"), onClose: i(() => {}, "onClose") }, s2);
   try {
-    let e3 = _t();
+    let e3 = Pt();
     if (!e3)
       throw new Error("No audio converter found. Install ffmpeg or sox.");
-    await kt(a2, t2, e3, s2?.realtime !== false), await a2.finalize();
+    await Ut(a2, t2, e3, s2?.realtime !== false), await a2.finalize();
   } finally {
     a2.close();
   }
@@ -40598,46 +40750,46 @@ async function ft(e2, t2, s2) {
     throw new Error(`Transcription error: ${n2}`);
   return r2.join(" ");
 }
-function pt(e2, t2) {
-  if (yt("rec")) {
-    let i2 = st("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(ht), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
+function Nt(e2, t2) {
+  if (xt("rec")) {
+    let i2 = vt("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(Mt), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
     return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
-  if (yt("arecord")) {
-    let i2 = st("arecord", ["-f", "S16_LE", "-r", String(ht), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
+  if (xt("arecord")) {
+    let i2 = vt("arecord", ["-f", "S16_LE", "-r", String(Mt), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
     return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
   return null;
 }
-function mt() {
-  return yt("rec") ? { available: true, tool: "sox", installHint: null } : yt("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
+function It() {
+  return xt("rec") ? { available: true, tool: "sox", installHint: null } : xt("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
 }
-function yt(e2) {
-  return rt(e2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
+function xt(e2) {
+  return Et(e2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
 }
-function gt(e2) {
+function Lt(e2) {
   return new Promise((t2) => setTimeout(t2, e2));
 }
-async function wt(e2) {
+async function Ft(e2) {
   let { readFile: t2 } = await import("fs/promises");
   return t2(e2);
 }
-function _t() {
-  return yt("ffmpeg") ? "ffmpeg" : yt("sox") ? "sox" : null;
+function Pt() {
+  return xt("ffmpeg") ? "ffmpeg" : xt("sox") ? "sox" : null;
 }
-async function kt(e2, t2, i2, s2) {
-  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(ht), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(ht), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = st(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
+async function Ut(e2, t2, i2, s2) {
+  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(Mt), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(Mt), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = vt(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
   return new Promise((t3, r3) => {
     let a2 = Date.now();
     n2.stdout?.on("data", async (t4) => {
       if (e2.isConnected()) {
         if (e2.send(t4), s2) {
           let e3 = t4.length / 32000 * 1000, i3 = Date.now() - a2, s3 = Math.max(0, 0.8 * e3 - i3);
-          s3 > 10 && (n2.stdout?.pause(), await gt(s3), n2.stdout?.resume()), a2 = Date.now();
+          s3 > 10 && (n2.stdout?.pause(), await Lt(s3), n2.stdout?.resume()), a2 = Date.now();
         }
       } else
         n2.kill("SIGTERM");
@@ -40646,2244 +40798,42 @@ async function kt(e2, t2, i2, s2) {
     }), n2.on("error", r3);
   });
 }
-i(ut, "connectVoiceStream"), i(dt, "transcribeFile"), i(ft, "transcribeAudioFile"), i(pt, "startMicRecording"), i(mt, "checkVoiceDeps"), i(yt, "hasCommand"), i(gt, "sleep"), i(wt, "readFileAsBuffer"), i(_t, "findConverter"), i(kt, "streamConvertedAudio");
+i(Ct, "connectVoiceStream"), i(Ot, "transcribeFile"), i(At, "transcribeAudioFile"), i(Nt, "startMicRecording"), i(It, "checkVoiceDeps"), i(xt, "hasCommand"), i(Lt, "sleep"), i(Ft, "readFileAsBuffer"), i(Pt, "findConverter"), i(Ut, "streamConvertedAudio");
 
 // provider.ts
-import { appendFileSync as appendFileSync5 } from "fs";
+import { appendFileSync } from "fs";
 import { execSync } from "child_process";
-import { join as join8 } from "path";
-import { homedir as homedir8 } from "os";
-
-// node_modules/@life-ai-tools/opencode-signal-wire/signal-wire.ts
-import { appendFileSync as appendFileSync3, existsSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
-import { homedir as homedir4 } from "os";
-import { join as join4 } from "path";
-
-// ../../../../../packages/signal-wire-core/dist/domain/action.js
-var ACTION_ORDER = [
-  "block",
-  "exec",
-  "hint",
-  "wake",
-  "respond",
-  "notify",
-  "audit"
-];
-// ../../../../../packages/signal-wire-core/dist/engine/evaluator.js
-var TRUST_RANK = {
-  any: 0,
-  trusted: 1,
-  plugin: 2
-};
-function sourceToTrustLevel(source) {
-  switch (source) {
-    case "hook":
-      return "plugin";
-    case "wake":
-      return "trusted";
-    case "lifecycle":
-      return "any";
-    default:
-      return "any";
-  }
-}
-function trustSatisfied(ruleTrust, eventSource) {
-  const required = ruleTrust ?? "any";
-  const provided = sourceToTrustLevel(eventSource);
-  return (TRUST_RANK[provided] ?? 0) >= (TRUST_RANK[required] ?? 0);
-}
-function getByPath(obj, path) {
-  const parts = path.split(".");
-  let cur = obj;
-  for (const p2 of parts) {
-    if (cur && typeof cur === "object" && p2 in cur) {
-      cur = cur[p2];
-    } else {
-      return;
-    }
-  }
-  return cur;
-}
-function stringifyForMatch(v2) {
-  if (v2 == null)
-    return "";
-  if (typeof v2 === "string")
-    return v2;
-  if (typeof v2 === "number" || typeof v2 === "boolean")
-    return String(v2);
-  try {
-    return JSON.stringify(v2);
-  } catch {
-    return String(v2);
-  }
-}
-var regexCache = new Map;
-function extractInlineFlags(pattern) {
-  const m2 = pattern.match(/^\(\?([imsu]+)\)/);
-  if (!m2)
-    return { source: pattern, flags: "" };
-  const flags = m2[1].split("").filter((c2, i2, arr) => arr.indexOf(c2) === i2).join("");
-  return { source: pattern.slice(m2[0].length), flags };
-}
-function compileRegex(pattern) {
-  const cached = regexCache.get(pattern);
-  if (cached)
-    return cached;
-  try {
-    const { source, flags } = extractInlineFlags(pattern);
-    const re2 = new RegExp(source, flags);
-    regexCache.set(pattern, re2);
-    return re2;
-  } catch {
-    return null;
-  }
-}
-function matchCondition(match, event) {
-  const payload = event.payload ?? {};
-  const p2 = payload;
-  const groups = [];
-  if (match.tool !== undefined) {
-    const re2 = compileRegex(match.tool);
-    if (!re2)
-      return { matched: false, groups };
-    const tool = stringifyForMatch(p2.tool);
-    if (!re2.test(tool))
-      return { matched: false, groups };
-  }
-  if (match.exclude_tools && match.exclude_tools.length > 0) {
-    const tool = stringifyForMatch(p2.tool);
-    if (match.exclude_tools.includes(tool))
-      return { matched: false, groups };
-  }
-  if (match.input_contains) {
-    for (const [key, expected] of Object.entries(match.input_contains)) {
-      const value = getByPath(payload, key);
-      const strVal = stringifyForMatch(value);
-      if (!strVal.includes(expected))
-        return { matched: false, groups };
-    }
-  }
-  if (match.input_regex !== undefined) {
-    const re2 = compileRegex(match.input_regex);
-    if (!re2)
-      return { matched: false, groups };
-    let serialized;
-    try {
-      serialized = JSON.stringify(payload);
-    } catch {
-      serialized = "";
-    }
-    const m2 = serialized.match(re2);
-    if (!m2)
-      return { matched: false, groups };
-    if (m2.length > 1)
-      for (const g2 of m2.slice(1))
-        groups.push(g2 ?? "");
-  }
-  if (match.input_keywords && match.input_keywords.length > 0) {
-    let serialized;
-    try {
-      serialized = JSON.stringify(payload);
-    } catch {
-      serialized = "";
-    }
-    const alt = match.input_keywords.map((k2) => k2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-    const re2 = compileRegex(`\\b(${alt})\\b`);
-    if (!re2)
-      return { matched: false, groups };
-    if (!re2.test(serialized))
-      return { matched: false, groups };
-  }
-  if (match.response_regex !== undefined) {
-    const re2 = compileRegex(match.response_regex);
-    if (!re2)
-      return { matched: false, groups };
-    const response = stringifyForMatch(p2.response);
-    if (!re2.test(response))
-      return { matched: false, groups };
-  }
-  if (match.response_contains) {
-    const response = p2.response;
-    for (const [key, expected] of Object.entries(match.response_contains)) {
-      const v2 = getByPath(response, key);
-      if (!stringifyForMatch(v2).includes(expected))
-        return { matched: false, groups };
-    }
-  }
-  if (match.prompt_regex !== undefined || match.prompt_keywords && match.prompt_keywords.length > 0) {
-    const promptText = extractPromptText(payload);
-    if (match.prompt_regex !== undefined) {
-      const re2 = compileRegex(match.prompt_regex);
-      if (!re2)
-        return { matched: false, groups };
-      if (!re2.test(promptText))
-        return { matched: false, groups };
-    }
-    if (match.prompt_keywords && match.prompt_keywords.length > 0) {
-      const alt = match.prompt_keywords.map((k2) => k2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-      const re2 = compileRegex(`\\b(${alt})\\b`);
-      if (!re2)
-        return { matched: false, groups };
-      if (!re2.test(promptText))
-        return { matched: false, groups };
-    }
-  }
-  if (match.wake_source !== undefined) {
-    if (stringifyForMatch(p2.wakeSource) !== match.wake_source)
-      return { matched: false, groups };
-  }
-  if (match.wake_event_type !== undefined) {
-    if (stringifyForMatch(p2.wakeType) !== match.wake_event_type)
-      return { matched: false, groups };
-  }
-  return { matched: true, groups };
-}
-function extractPromptText(payload) {
-  const parts = payload.parts;
-  if (Array.isArray(parts)) {
-    const texts = [];
-    for (const part of parts) {
-      if (part && typeof part === "object") {
-        const p2 = part;
-        if (p2.type === "text" && typeof p2.text === "string")
-          texts.push(p2.text);
-      }
-    }
-    if (texts.length > 0)
-      return texts.join(`
-`);
-  }
-  if (typeof payload.prompt === "string")
-    return payload.prompt;
-  if (typeof payload.message === "string")
-    return payload.message;
-  return "";
-}
-var VAR_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
-function resolveVariables(template, vars) {
-  return template.replace(VAR_RE, (_2, name) => vars[name] ?? "");
-}
-function evaluate(event, rules) {
-  const matches = [];
-  for (const rule of rules) {
-    if (rule.enabled === false)
-      continue;
-    if (!rule.events.includes(event.type))
-      continue;
-    if (!trustSatisfied(rule.trust_level, event.source))
-      continue;
-    const match = rule.match ?? {};
-    const result = matchCondition(match, event);
-    if (!result.matched)
-      continue;
-    const vars = {
-      tool: stringifyForMatch(event.payload.tool),
-      sessionId: event.sessionId ?? "",
-      ruleId: rule.id,
-      targetMemberId: stringifyForMatch(event.payload.targetMemberId)
-    };
-    result.groups.forEach((g2, i2) => {
-      vars[String(i2 + 1)] = g2;
-    });
-    matches.push({ rule, variables: vars });
-  }
-  return matches;
-}
-// ../../../../../packages/signal-wire-core/dist/emitters/builtin/block.js
-class BlockEmitter {
-  type = "block";
-  async execute(action, ctx) {
-    const a2 = action;
-    const ruleId = ctx.rule?.id ?? "";
-    if (ctx.rule?.approvable && ctx.approvalGranted === true) {
-      if (ctx.approvalConsume)
-        ctx.approvalConsume(ruleId);
-      return {
-        type: "block",
-        success: true,
-        ruleId,
-        correlationId: ctx.correlationId,
-        blocked: false,
-        reason: "approved"
-      };
-    }
-    return {
-      type: "block",
-      success: true,
-      ruleId,
-      correlationId: ctx.correlationId,
-      blocked: true,
-      reason: resolveVariables(a2.reason, ctx.variables)
-    };
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/emitters/builtin/hint.js
-class HintEmitter {
-  type = "hint";
-  async execute(action, ctx) {
-    const a2 = action;
-    const ruleId = ctx.rule?.id ?? "";
-    return {
-      type: "hint",
-      success: true,
-      ruleId,
-      correlationId: ctx.correlationId,
-      hintText: resolveVariables(a2.text, ctx.variables)
-    };
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/emitters/builtin/respond.js
-class RespondEmitter {
-  type = "respond";
-  async execute(action, ctx) {
-    const a2 = action;
-    const ruleId = ctx.rule?.id ?? "";
-    if (a2.text) {
-      return {
-        type: "respond",
-        success: true,
-        ruleId,
-        correlationId: ctx.correlationId,
-        hintText: resolveVariables(a2.text, ctx.variables)
-      };
-    }
-    if (a2.channel) {
-      return {
-        type: "respond",
-        success: true,
-        ruleId,
-        correlationId: ctx.correlationId
-      };
-    }
-    return {
-      type: "respond",
-      success: false,
-      ruleId,
-      correlationId: ctx.correlationId,
-      error: "respond action missing both text and channel"
-    };
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/emitters/builtin/exec.js
-var DEFAULT_TIMEOUT_MS = 5000;
-var TRUNCATE_BYTES = 8192;
-
-class ExecEmitter {
-  type = "exec";
-  async execute(action, ctx) {
-    const a2 = action;
-    const ruleId = ctx.rule?.id ?? "";
-    const command = resolveVariables(a2.command, ctx.variables);
-    const timeoutMs = a2.timeout_ms ?? DEFAULT_TIMEOUT_MS;
-    try {
-      const bunGlobal = globalThis.Bun;
-      if (bunGlobal && typeof bunGlobal.spawn === "function") {
-        const proc = Bun.spawn(["sh", "-c", command], {
-          stdout: "pipe",
-          stderr: "pipe"
-        });
-        const controller = new AbortController;
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          const exitCode = await Promise.race([
-            proc.exited,
-            new Promise((_2, reject) => {
-              controller.signal.addEventListener("abort", () => {
-                try {
-                  proc.kill();
-                } catch {}
-                reject(new Error("timeout"));
-              });
-            })
-          ]);
-          clearTimeout(timer);
-          const out = await new Response(proc.stdout).text();
-          const truncated = out.length > TRUNCATE_BYTES ? out.slice(0, TRUNCATE_BYTES) : out;
-          if (exitCode !== 0) {
-            return {
-              type: "exec",
-              success: false,
-              ruleId,
-              correlationId: ctx.correlationId,
-              execOutput: truncated,
-              error: `exit code ${exitCode}`
-            };
-          }
-          return {
-            type: "exec",
-            success: true,
-            ruleId,
-            correlationId: ctx.correlationId,
-            execOutput: truncated
-          };
-        } catch (e2) {
-          clearTimeout(timer);
-          try {
-            proc.kill();
-          } catch {}
-          return {
-            type: "exec",
-            success: false,
-            ruleId,
-            correlationId: ctx.correlationId,
-            error: e2 instanceof Error ? e2.message : String(e2)
-          };
-        }
-      }
-      const { spawn } = await import("child_process");
-      return await new Promise((resolve) => {
-        const proc = spawn("sh", ["-c", command]);
-        let stdout = "";
-        let killed = false;
-        const timer = setTimeout(() => {
-          killed = true;
-          try {
-            proc.kill();
-          } catch {}
-        }, timeoutMs);
-        proc.stdout.on("data", (chunk) => {
-          if (stdout.length < TRUNCATE_BYTES * 2)
-            stdout += chunk.toString("utf8");
-        });
-        proc.on("close", (code) => {
-          clearTimeout(timer);
-          const truncated = stdout.length > TRUNCATE_BYTES ? stdout.slice(0, TRUNCATE_BYTES) : stdout;
-          if (killed) {
-            resolve({
-              type: "exec",
-              success: false,
-              ruleId,
-              correlationId: ctx.correlationId,
-              error: "timeout"
-            });
-          } else if (code !== 0) {
-            resolve({
-              type: "exec",
-              success: false,
-              ruleId,
-              correlationId: ctx.correlationId,
-              execOutput: truncated,
-              error: `exit code ${code}`
-            });
-          } else {
-            resolve({
-              type: "exec",
-              success: true,
-              ruleId,
-              correlationId: ctx.correlationId,
-              execOutput: truncated
-            });
-          }
-        });
-        proc.on("error", (e2) => {
-          clearTimeout(timer);
-          resolve({
-            type: "exec",
-            success: false,
-            ruleId,
-            correlationId: ctx.correlationId,
-            error: e2.message
-          });
-        });
-      });
-    } catch (e2) {
-      return {
-        type: "exec",
-        success: false,
-        ruleId,
-        correlationId: ctx.correlationId,
-        error: e2 instanceof Error ? e2.message : String(e2)
-      };
-    }
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/emitters/builtin/audit.js
-import { appendFileSync, mkdirSync } from "fs";
-import { dirname, join } from "path";
+import { join } from "path";
 import { homedir } from "os";
-var DEFAULT_AUDIT_PATH = join(homedir(), ".context", "hooks", "audit", "signal-wire-audit.jsonl");
-
-class AuditEmitter {
-  type = "audit";
-  async execute(action, ctx) {
-    const a2 = action;
-    const ruleId = ctx.rule?.id ?? "";
-    const path = a2.log_path ?? DEFAULT_AUDIT_PATH;
-    const record = {
-      ts: new Date().toISOString(),
-      correlation_id: ctx.correlationId,
-      rule_id: ruleId,
-      session_id: ctx.sessionId || null,
-      actions_taken: ctx.actionsTakenSoFar ?? []
-    };
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, JSON.stringify(record) + `
-`);
-      return {
-        type: "audit",
-        success: true,
-        ruleId,
-        correlationId: ctx.correlationId,
-        auditWritten: true
-      };
-    } catch (e2) {
-      return {
-        type: "audit",
-        success: false,
-        ruleId,
-        correlationId: ctx.correlationId,
-        error: e2 instanceof Error ? e2.message : String(e2)
-      };
-    }
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/emitters/builtin/wake.js
-class WakeEmitter {
-  type = "wake";
-  async execute(action, ctx) {
-    const a2 = action;
-    const ruleId = ctx.rule?.id ?? "";
-    const target = resolveVariables(a2.target, ctx.variables);
-    const eventType = resolveVariables(a2.event_type, ctx.variables);
-    try {
-      const isConformance = !ctx.serverUrl || /example\.com|localhost|127\.0\.0\.1/.test(ctx.serverUrl) || process.env.SIGNAL_WIRE_CONFORMANCE_MODE === "true" || false || false;
-      if (isConformance) {
-        return {
-          type: "wake",
-          success: true,
-          ruleId,
-          correlationId: ctx.correlationId,
-          wakeTriggered: true
-        };
-      }
-      const url2 = new URL("/wake", ctx.serverUrl).toString();
-      const res = await fetch(url2, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          target,
-          event_type: eventType,
-          priority: a2.priority ?? "batch",
-          payload: a2.payload ?? {},
-          correlation_id: ctx.correlationId
-        }),
-        signal: AbortSignal.timeout(5000)
-      });
-      if (!res.ok) {
-        return {
-          type: "wake",
-          success: false,
-          ruleId,
-          correlationId: ctx.correlationId,
-          error: `HTTP ${res.status}`
-        };
-      }
-      return {
-        type: "wake",
-        success: true,
-        ruleId,
-        correlationId: ctx.correlationId,
-        wakeTriggered: true
-      };
-    } catch (e2) {
-      return {
-        type: "wake",
-        success: false,
-        ruleId,
-        correlationId: ctx.correlationId,
-        error: e2 instanceof Error ? e2.message : String(e2)
-      };
-    }
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/emitters/builtin/notify.js
-var FORCED_FAIL_SENTINEL = "invalid-chat-id-FORCED-FAIL";
-
-class NotifyEmitter {
-  type = "notify";
-  async execute(action, ctx) {
-    const a2 = action;
-    const ruleId = ctx.rule?.id ?? "";
-    const message = resolveVariables(a2.message, ctx.variables);
-    const target = a2.target ? resolveVariables(a2.target, ctx.variables) : undefined;
-    if (target === FORCED_FAIL_SENTINEL) {
-      return {
-        type: "notify",
-        success: false,
-        ruleId,
-        correlationId: ctx.correlationId,
-        error: "forced failure (sentinel target)"
-      };
-    }
-    try {
-      switch (a2.channel) {
-        case "webhook": {
-          if (!target) {
-            return {
-              type: "notify",
-              success: false,
-              ruleId,
-              correlationId: ctx.correlationId,
-              error: "webhook notify requires target URL"
-            };
-          }
-          if (this.isConformanceMode(target)) {
-            return {
-              type: "notify",
-              success: true,
-              ruleId,
-              correlationId: ctx.correlationId,
-              notifyDelivered: true
-            };
-          }
-          const res = await fetch(target, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message, correlationId: ctx.correlationId, ruleId }),
-            signal: AbortSignal.timeout(5000)
-          });
-          return {
-            type: "notify",
-            success: res.ok,
-            ruleId,
-            correlationId: ctx.correlationId,
-            notifyDelivered: res.ok,
-            ...res.ok ? {} : { error: `HTTP ${res.status}` }
-          };
-        }
-        case "telegram": {
-          const token = process.env.SYNQTASK_TELEGRAM_BOT_TOKEN;
-          if (!token) {
-            return {
-              type: "notify",
-              success: true,
-              ruleId,
-              correlationId: ctx.correlationId,
-              notifyDelivered: true
-            };
-          }
-          if (!target) {
-            return {
-              type: "notify",
-              success: false,
-              ruleId,
-              correlationId: ctx.correlationId,
-              error: "telegram notify requires target chat id"
-            };
-          }
-          const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: target, text: message }),
-            signal: AbortSignal.timeout(5000)
-          });
-          return {
-            type: "notify",
-            success: res.ok,
-            ruleId,
-            correlationId: ctx.correlationId,
-            notifyDelivered: res.ok,
-            ...res.ok ? {} : { error: `HTTP ${res.status}` }
-          };
-        }
-        case "email": {
-          return {
-            type: "notify",
-            success: true,
-            ruleId,
-            correlationId: ctx.correlationId,
-            notifyDelivered: true
-          };
-        }
-        default:
-          return {
-            type: "notify",
-            success: false,
-            ruleId,
-            correlationId: ctx.correlationId,
-            error: `unknown channel ${a2.channel}`
-          };
-      }
-    } catch (e2) {
-      return {
-        type: "notify",
-        success: false,
-        ruleId,
-        correlationId: ctx.correlationId,
-        error: e2 instanceof Error ? e2.message : String(e2)
-      };
-    }
-  }
-  isConformanceMode(target) {
-    return /example\.com|localhost|127\.0\.0\.1/.test(target) || process.env.SIGNAL_WIRE_CONFORMANCE_MODE === "true";
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/emitters/registry.js
-var BUILTIN_TYPES = new Set([
-  "block",
-  "hint",
-  "respond",
-  "exec",
-  "audit",
-  "wake",
-  "notify"
-]);
-
-class EmitterRegistry {
-  map = new Map;
-  constructor() {
-    this.registerBuiltin(new BlockEmitter);
-    this.registerBuiltin(new HintEmitter);
-    this.registerBuiltin(new RespondEmitter);
-    this.registerBuiltin(new ExecEmitter);
-    this.registerBuiltin(new AuditEmitter);
-    this.registerBuiltin(new WakeEmitter);
-    this.registerBuiltin(new NotifyEmitter);
-  }
-  registerBuiltin(emitter) {
-    this.map.set(String(emitter.type), emitter);
-  }
-  register(emitter) {
-    const t2 = String(emitter.type);
-    if (BUILTIN_TYPES.has(t2)) {
-      throw new Error(`Cannot override built-in emitter type: ${t2}`);
-    }
-    if (this.map.has(t2)) {
-      throw new Error(`Emitter type already registered: ${t2}`);
-    }
-    if (!t2.includes(".")) {
-      throw new Error(`Third-party emitter type must be namespaced (contain '.'): ${t2}`);
-    }
-    this.map.set(t2, emitter);
-  }
-  get(type) {
-    return this.map.get(String(type));
-  }
-  types() {
-    return Array.from(this.map.keys());
-  }
-  hasType(type) {
-    return this.map.has(type);
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/state/approval-ledger.js
-var APPROVAL_REGEX = /(?:approved|sw-allow):\s*([\w-]+)(.*?)(?=[;!?\n]|$)/gi;
-var SUFFIX_PATTERN_RE = /\bfor\s+(.+?)(?=\s+(?:x\d+|within\s|$)|$)/i;
-var SUFFIX_USES_RE = /\bx(\d+)\b/i;
-var SUFFIX_DURATION_RE = /\bwithin\s+(\d+)\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?)\b/i;
-var SAFE_PATTERN_RE = /^[\w\s\-./*?[\]=:@+,]+$/;
-function parseSuffix(suffix, rule) {
-  const out = {};
-  if (!suffix)
-    return out;
-  const patMatch = suffix.match(SUFFIX_PATTERN_RE);
-  if (patMatch) {
-    let pattern = patMatch[1].trim();
-    pattern = pattern.replace(/\s+(x\d+|within\s+\d+.*)$/i, "").trim();
-    if (SAFE_PATTERN_RE.test(pattern))
-      out.pattern = pattern;
-  }
-  const usesMatch = suffix.match(SUFFIX_USES_RE);
-  if (usesMatch) {
-    const requested = Number.parseInt(usesMatch[1], 10);
-    if (Number.isFinite(requested)) {
-      const maxUses = rule.max_approval_uses ?? 20;
-      out.uses = Math.min(Math.max(1, requested), maxUses);
-    }
-  }
-  const durMatch = suffix.match(SUFFIX_DURATION_RE);
-  if (durMatch) {
-    const amount = Number.parseInt(durMatch[1], 10);
-    const unit = durMatch[2].toLowerCase();
-    if (Number.isFinite(amount)) {
-      let mult = 1;
-      if (unit.startsWith("h"))
-        mult = 3600;
-      else if (unit.startsWith("min"))
-        mult = 60;
-      else if (unit.startsWith("m") && !unit.startsWith("min"))
-        mult = 60;
-      const ttl = amount * mult;
-      const maxTtl = rule.max_approval_ttl_seconds ?? 7200;
-      out.ttl_seconds = Math.min(Math.max(1, ttl), maxTtl);
-    }
-  }
-  return out;
-}
-function patternMatches(pattern, target) {
-  if (!pattern || !target)
-    return false;
-  if (!pattern.includes("*"))
-    return target.includes(pattern);
-  const parts = pattern.split("*");
-  const escaped = parts.map((p2) => p2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const regex = escaped.join(".*");
-  try {
-    return new RegExp(regex).test(target);
-  } catch {
-    return false;
-  }
-}
-
-class ApprovalLedger {
-  backend;
-  now;
-  constructor(backend, now = () => Date.now()) {
-    this.backend = backend;
-    this.now = now;
-  }
-  async detectAndGrant(text, rules, sessionId) {
-    if (!text)
-      return [];
-    const matches = [...text.matchAll(APPROVAL_REGEX)];
-    if (matches.length === 0)
-      return [];
-    const byId = new Map;
-    for (const r2 of rules)
-      if (r2.approvable === true)
-        byId.set(r2.id, r2);
-    const granted = [];
-    const nowMs = this.now();
-    for (const m2 of matches) {
-      const ruleId = m2[1];
-      const suffix = m2[2] ?? "";
-      const rule = byId.get(ruleId);
-      if (!rule)
-        continue;
-      const overrides = parseSuffix(suffix, rule);
-      const uses = overrides.uses ?? rule.approval_uses ?? 1;
-      const ttl = overrides.ttl_seconds ?? rule.approval_ttl_seconds ?? 600;
-      const pattern = overrides.pattern;
-      let mode;
-      if (pattern)
-        mode = "pattern_scoped";
-      else if (rule.approval_mode === "time_window" && overrides.uses === undefined)
-        mode = "time_window";
-      else
-        mode = "bounded";
-      const entry = {
-        granted_at: nowMs,
-        uses_remaining: mode === "time_window" ? -1 : uses,
-        ttl_seconds: ttl,
-        mode
-      };
-      if (pattern)
-        entry.pattern = pattern;
-      await this.backend.set(`approvals:${sessionId}:${ruleId}`, entry);
-      granted.push(ruleId);
-    }
-    return granted;
-  }
-  async check(sessionId, ruleId, toolInput) {
-    const raw = await this.backend.get(`approvals:${sessionId}:${ruleId}`);
-    if (!raw)
-      return false;
-    const entry = raw;
-    const nowMs = this.now();
-    const ttlMs = entry.ttl_seconds * 1000;
-    if (nowMs - entry.granted_at > ttlMs) {
-      await this.backend.delete(`approvals:${sessionId}:${ruleId}`);
-      return false;
-    }
-    if (entry.mode !== "time_window" && entry.uses_remaining <= 0) {
-      await this.backend.delete(`approvals:${sessionId}:${ruleId}`);
-      return false;
-    }
-    if (entry.mode === "pattern_scoped") {
-      if (!entry.pattern || !toolInput)
-        return false;
-      let target = "";
-      if (toolInput && typeof toolInput === "object") {
-        const input = toolInput;
-        const cmd = input.command;
-        if (typeof cmd === "string")
-          target = cmd;
-        else {
-          try {
-            target = JSON.stringify(input);
-          } catch {
-            return false;
-          }
-        }
-      }
-      if (!patternMatches(entry.pattern, target))
-        return false;
-    }
-    return true;
-  }
-  async consume(sessionId, ruleId) {
-    const raw = await this.backend.get(`approvals:${sessionId}:${ruleId}`);
-    if (!raw)
-      return;
-    const entry = raw;
-    if (entry.mode === "time_window")
-      return;
-    entry.uses_remaining -= 1;
-    if (entry.uses_remaining <= 0) {
-      await this.backend.delete(`approvals:${sessionId}:${ruleId}`);
-    } else {
-      await this.backend.set(`approvals:${sessionId}:${ruleId}`, entry);
-    }
-  }
-  async clearSession(sessionId) {
-    for await (const [key] of this.backend.iterate(`approvals:${sessionId}:`)) {
-      await this.backend.delete(key);
-    }
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/state/cooldown.js
-class CooldownTracker {
-  backend;
-  now;
-  tokens = 0;
-  constructor(backend, now = () => Date.now()) {
-    this.backend = backend;
-    this.now = now;
-  }
-  updateTokens(newPosition) {
-    if (newPosition > this.tokens)
-      this.tokens = newPosition;
-  }
-  getTokens() {
-    return this.tokens;
-  }
-  resetTokens() {
-    this.tokens = 0;
-  }
-  bucketKey(sessionId, rule, scope, actionType) {
-    const sid = sessionId || "unknown";
-    if (scope === "session")
-      return `cooldown:${sid}:__session__`;
-    if (scope === "action" && actionType)
-      return `cooldown:${sid}:${rule.id}__${actionType}`;
-    return `cooldown:${sid}:${rule.id}`;
-  }
-  async allowed(sessionId, rule, actionType) {
-    const cdSecs = rule.cooldown_seconds ?? 0;
-    const cdTokens = rule.cooldown_tokens ?? 0;
-    if (cdSecs <= 0 && cdTokens <= 0)
-      return true;
-    const scope = rule.cooldown_scope ?? "rule";
-    const key = this.bucketKey(sessionId, rule, scope, actionType);
-    const raw = await this.backend.get(key);
-    if (!raw)
-      return true;
-    const entry = raw;
-    const nowMs = this.now();
-    if (cdSecs > 0) {
-      if (entry.last_fire_ms !== undefined) {
-        if (nowMs - entry.last_fire_ms < cdSecs * 1000)
-          return false;
-      }
-    }
-    if (cdTokens > 0) {
-      if (entry.last_fire_tokens !== undefined) {
-        if (this.tokens - entry.last_fire_tokens < cdTokens)
-          return false;
-      }
-    }
-    return true;
-  }
-  async record(sessionId, rule, actionType) {
-    const cdSecs = rule.cooldown_seconds ?? 0;
-    const cdTokens = rule.cooldown_tokens ?? 0;
-    if (cdSecs <= 0 && cdTokens <= 0)
-      return;
-    const scope = rule.cooldown_scope ?? "rule";
-    const key = this.bucketKey(sessionId, rule, scope, actionType);
-    const entry = {};
-    if (cdSecs > 0)
-      entry.last_fire_ms = this.now();
-    if (cdTokens > 0)
-      entry.last_fire_tokens = this.tokens;
-    await this.backend.set(key, entry);
-  }
-  async resetSession(sessionId) {
-    for await (const [key] of this.backend.iterate(`cooldown:${sessionId}:`)) {
-      await this.backend.delete(key);
-    }
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/state/memory.js
-class MemoryBackend {
-  store = new Map;
-  async get(key) {
-    return this.store.get(key) ?? null;
-  }
-  async set(key, value) {
-    this.store.set(key, value);
-  }
-  async delete(key) {
-    this.store.delete(key);
-  }
-  async* iterate(prefix) {
-    for (const [k2, v2] of this.store.entries()) {
-      if (k2.startsWith(prefix))
-        yield [k2, v2];
-    }
-  }
-  _snapshot() {
-    return Object.fromEntries(this.store.entries());
-  }
-  _clear() {
-    this.store.clear();
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/observability/trace.js
-import { randomUUID } from "crypto";
-
-class NoopTraceSink {
-  emit(_trace) {}
-}
-function newCorrelationId() {
-  try {
-    return randomUUID();
-  } catch {
-    return "cor_" + Math.random().toString(36).slice(2);
-  }
-}
-function newEventId() {
-  try {
-    return "evt_" + randomUUID();
-  } catch {
-    return "evt_" + Math.random().toString(36).slice(2);
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/observability/metrics.js
-class NoopMetricSink {
-  counter(_name, _tags) {}
-  histogram(_name, _v, _tags) {}
-}
-
-class InMemoryMetricSink {
-  counters = new Map;
-  histograms = new Map;
-  counter(name, tags) {
-    const key = this.key(name, tags);
-    this.counters.set(key, (this.counters.get(key) ?? 0) + 1);
-  }
-  histogram(name, value, tags) {
-    const key = this.key(name, tags);
-    const arr = this.histograms.get(key) ?? [];
-    arr.push(value);
-    this.histograms.set(key, arr);
-  }
-  key(name, tags) {
-    if (!tags)
-      return name;
-    const sorted = Object.entries(tags).sort((a2, b2) => a2[0].localeCompare(b2[0]));
-    return name + "|" + sorted.map(([k2, v2]) => `${k2}=${v2}`).join(",");
-  }
-  _clear() {
-    this.counters.clear();
-    this.histograms.clear();
-  }
-}
-
-// ../../../../../packages/signal-wire-core/dist/observability/logger.js
-import { appendFileSync as appendFileSync2 } from "fs";
-import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
-
-// ../../../../../packages/signal-wire-core/dist/version.js
-var CORE_VERSION = "0.1.0";
-var CORE_BUILD_TIME = new Date().toISOString();
-var CORE_SOURCE_HASH = (() => {
-  const timeTag = CORE_BUILD_TIME.replace(/[^\d]/g, "").slice(8, 14);
-  return `v${CORE_VERSION}@T${timeTag}`;
-})();
-function coreIdentityTag(extraPid) {
-  const pid = typeof extraPid === "number" ? extraPid : typeof process !== "undefined" ? process.pid : -1;
-  return `[sw-core ${CORE_SOURCE_HASH} pid=${pid}]`;
-}
-
-// ../../../../../packages/signal-wire-core/dist/observability/logger.js
-var LOG_FILE = process.env.SIGNAL_WIRE_CORE_LOG_FILE ?? process.env.SIGNAL_WIRE_LOG_FILE ?? join2(homedir2(), ".claude", "signal-wire-debug.log");
-var VERBOSE = process.env.SIGNAL_WIRE_CORE_VERBOSE === "1";
-var bannerEmitted = false;
-function writeLine(line) {
-  const ts = new Date().toISOString();
-  const full = `[${ts}] ${coreIdentityTag()} ${line}
-`;
-  try {
-    appendFileSync2(LOG_FILE, full);
-  } catch {}
-  if (VERBOSE) {
-    try {
-      process.stderr.write(full);
-    } catch {}
-  }
-}
-function emitBanner(context) {
-  if (bannerEmitted)
-    return;
-  bannerEmitted = true;
-  const ctx = context ? ` context=${JSON.stringify(context)}` : "";
-  writeLine(`BANNER sw-core online source=${CORE_SOURCE_HASH}${ctx}`);
-}
-function info(message, extra) {
-  if (!bannerEmitted)
-    emitBanner();
-  const suffix = extra ? ` ${JSON.stringify(extra)}` : "";
-  writeLine(`INFO ${message}${suffix}`);
-}
-
-// ../../../../../packages/signal-wire-core/dist/engine/pipeline.js
-function validateRuleSet(ruleSet, registry) {
-  const valid = [];
-  const rejected = [];
-  const seenIds = new Set;
-  for (const rule of ruleSet.rules) {
-    if (!rule || typeof rule !== "object") {
-      rejected.push({ reason: "not an object" });
-      continue;
-    }
-    if (!rule.id || typeof rule.id !== "string") {
-      rejected.push({ reason: "missing or invalid id" });
-      continue;
-    }
-    if (seenIds.has(rule.id)) {
-      rejected.push({ id: rule.id, reason: "duplicate id" });
-      continue;
-    }
-    if (!Array.isArray(rule.events) || rule.events.length === 0) {
-      rejected.push({ id: rule.id, reason: "empty or missing events" });
-      continue;
-    }
-    if (!Array.isArray(rule.actions) || rule.actions.length === 0) {
-      rejected.push({ id: rule.id, reason: "empty or missing actions" });
-      continue;
-    }
-    let actionsOk = true;
-    for (const action of rule.actions) {
-      if (!action || typeof action !== "object") {
-        actionsOk = false;
-        rejected.push({ id: rule.id, reason: "malformed action" });
-        break;
-      }
-      if (typeof action.type !== "string") {
-        actionsOk = false;
-        rejected.push({ id: rule.id, reason: "action missing type" });
-        break;
-      }
-      if (!registry.hasType(action.type)) {
-        actionsOk = false;
-        rejected.push({ id: rule.id, reason: `unknown action type: ${action.type}` });
-        break;
-      }
-      const t2 = action.type;
-      if (t2 === "block" && !action.reason) {
-        actionsOk = false;
-        rejected.push({ id: rule.id, reason: "block action missing reason" });
-        break;
-      }
-      if (t2 === "hint" && !action.text) {
-        actionsOk = false;
-        rejected.push({ id: rule.id, reason: "hint action missing text" });
-        break;
-      }
-      if (t2 === "respond") {
-        const respond = action;
-        if (!respond.text && !respond.channel) {
-          actionsOk = false;
-          rejected.push({ id: rule.id, reason: "respond action needs either text or channel" });
-          break;
-        }
-      }
-      if (t2 === "exec" && !action.command) {
-        actionsOk = false;
-        rejected.push({ id: rule.id, reason: "exec action missing command" });
-        break;
-      }
-    }
-    if (!actionsOk)
-      continue;
-    const m2 = rule.match ?? {};
-    let regexOk = true;
-    for (const field of ["tool", "input_regex", "response_regex", "prompt_regex"]) {
-      const v2 = m2[field];
-      if (typeof v2 === "string") {
-        try {
-          const flagMatch = v2.match(/^\(\?([imsu]+)\)/);
-          if (flagMatch) {
-            new RegExp(v2.slice(flagMatch[0].length), flagMatch[1]);
-          } else {
-            new RegExp(v2);
-          }
-        } catch {
-          rejected.push({ id: rule.id, reason: `invalid regex in match.${field}` });
-          regexOk = false;
-          break;
-        }
-      }
-    }
-    if (!regexOk)
-      continue;
-    seenIds.add(rule.id);
-    valid.push(rule);
-  }
-  return { rules: valid, rejectedCount: rejected.length, rejected };
-}
-
-class Pipeline {
-  rules;
-  registry;
-  backend;
-  approvals;
-  cooldowns;
-  defaultSessionId;
-  serverUrl;
-  sdkClient;
-  traceSink;
-  metricSink;
-  now;
-  _processing = false;
-  constructor(config) {
-    this.rules = config.rules;
-    this.registry = config.registry ?? new EmitterRegistry;
-    this.backend = config.stateBackend ?? new MemoryBackend;
-    this.now = config.now ?? (() => Date.now());
-    this.approvals = new ApprovalLedger(this.backend, this.now);
-    this.cooldowns = new CooldownTracker(this.backend, this.now);
-    this.defaultSessionId = config.sessionId ?? "default";
-    this.serverUrl = config.serverUrl ?? "";
-    this.sdkClient = config.sdkClient ?? null;
-    this.traceSink = config.traceSink ?? new NoopTraceSink;
-    this.metricSink = config.metricSink ?? new NoopMetricSink;
-    try {
-      emitBanner({
-        rules_loaded: this.rules.length,
-        session_id: this.defaultSessionId,
-        server_url: this.serverUrl ? this.serverUrl.slice(0, 32) : ""
-      });
-    } catch {}
-  }
-  getApprovalLedger() {
-    return this.approvals;
-  }
-  getCooldownTracker() {
-    return this.cooldowns;
-  }
-  getBackend() {
-    return this.backend;
-  }
-  updateTokens(position) {
-    this.cooldowns.updateTokens(position);
-  }
-  _setRules(rules) {
-    this.rules = rules;
-  }
-  async process(event) {
-    if (this._processing)
-      return [];
-    this._processing = true;
-    if (!event || typeof event !== "object") {
-      this._processing = false;
-      return [];
-    }
-    const startedAt = this.now();
-    const correlationId = newCorrelationId();
-    const eventId = event.eventId ?? newEventId();
-    const evtSessionId = typeof event.sessionId === "string" || event.sessionId === null ? event.sessionId : null;
-    const evtType = typeof event.type === "string" ? event.type : "";
-    const evtPayload = typeof event.payload === "object" && event.payload !== null ? event.payload : {};
-    const evtSource = typeof event.source === "string" ? event.source : "hook";
-    event = { source: evtSource, type: evtType, sessionId: evtSessionId, payload: evtPayload, timestamp: typeof event.timestamp === "number" ? event.timestamp : this.now(), eventId };
-    const sessionIdForState = event.sessionId ?? this.defaultSessionId;
-    const trace = {
-      correlationId,
-      eventId,
-      sessionId: event.sessionId ?? null,
-      startedAt,
-      endedAt: startedAt,
-      rulesEvaluated: this.rules.filter((r2) => r2.enabled !== false).length,
-      rulesMatched: 0,
-      actionsEmitted: 0,
-      outcome: "no_match",
-      results: []
-    };
-    try {
-      this.metricSink.counter("signal_wire.events.received", { source: event.source, type: event.type });
-      info("EVENT_RECEIVED", {
-        correlationId,
-        eventId,
-        source: event.source,
-        type: event.type,
-        sessionId: event.sessionId ?? null,
-        rulesConsidered: trace.rulesEvaluated
-      });
-      if (event.type === "session.compacted") {
-        try {
-          await this.cooldowns.resetSession(sessionIdForState);
-        } catch {}
-      }
-      if (event.type === "chat.message") {
-        const role = this.extractRole(event);
-        if (role === "user" || role === undefined) {
-          const text = this.extractUserText(event);
-          if (text) {
-            try {
-              const granted = await this.approvals.detectAndGrant(text, this.rules, sessionIdForState);
-              for (const r2 of granted) {
-                this.metricSink.counter("signal_wire.approvals.granted", { rule_id: r2 });
-              }
-            } catch {}
-          }
-        }
-      }
-      const matches = evaluate(event, this.rules);
-      const allResults = [];
-      let anyBlocked = false;
-      for (const match of matches) {
-        const rule = match.rule;
-        const scope = rule.cooldown_scope ?? "rule";
-        if (scope === "rule" || scope === "session") {
-          const allowed = await this.cooldowns.allowed(sessionIdForState, rule);
-          if (!allowed) {
-            this.metricSink.counter("signal_wire.cooldowns.skipped", { rule_id: rule.id });
-            continue;
-          }
-        }
-        trace.rulesMatched++;
-        this.metricSink.counter("signal_wire.rules.matched", { rule_id: rule.id });
-        const matchVarKeys = Object.keys(match.variables || {});
-        info("RULE_FIRED", {
-          correlationId,
-          eventId,
-          ruleId: rule.id,
-          eventType: event.type,
-          actions: rule.actions.map((a2) => a2.type),
-          matchVars: matchVarKeys,
-          cooldownScope: scope,
-          sessionId: sessionIdForState
-        });
-        const sortedActions = [...rule.actions].sort((a2, b2) => {
-          const idxA = ACTION_ORDER.indexOf(a2.type);
-          const idxB = ACTION_ORDER.indexOf(b2.type);
-          return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
-        });
-        const actionsTakenSoFar = [];
-        const ruleResults = [];
-        for (const action of sortedActions) {
-          if (scope === "action") {
-            const allowed = await this.cooldowns.allowed(sessionIdForState, rule, action.type);
-            if (!allowed) {
-              this.metricSink.counter("signal_wire.cooldowns.skipped", { rule_id: rule.id, action: String(action.type) });
-              continue;
-            }
-          }
-          const emitter = this.registry.get(action.type);
-          if (!emitter) {
-            ruleResults.push({
-              type: action.type,
-              success: false,
-              ruleId: rule.id,
-              correlationId,
-              error: `no emitter registered for type: ${action.type}`
-            });
-            continue;
-          }
-          const vars = { ...match.variables, actionsTaken: actionsTakenSoFar.join(",") };
-          let approvalGranted;
-          if (rule.approvable && action.type === "block") {
-            try {
-              approvalGranted = await this.approvals.check(sessionIdForState, rule.id, event.payload.args);
-            } catch {
-              approvalGranted = false;
-            }
-          }
-          const ctx = {
-            sessionId: sessionIdForState,
-            correlationId,
-            sdkClient: this.sdkClient,
-            serverUrl: this.serverUrl,
-            variables: vars,
-            approvalGranted,
-            approvalConsume: rule.approvable ? (ruleId) => {
-              this.approvals.consume(sessionIdForState, ruleId);
-            } : undefined,
-            toolInput: event.payload.args,
-            rule: { id: rule.id, approvable: rule.approvable },
-            actionsTakenSoFar: [...actionsTakenSoFar]
-          };
-          let result;
-          try {
-            result = await emitter.execute(action, ctx);
-          } catch (e2) {
-            result = {
-              type: action.type,
-              success: false,
-              ruleId: rule.id,
-              correlationId,
-              error: e2 instanceof Error ? e2.message : String(e2)
-            };
-          }
-          ruleResults.push(result);
-          actionsTakenSoFar.push(String(action.type));
-          if (result.type === "block" && result.blocked === true)
-            anyBlocked = true;
-          this.metricSink.counter("signal_wire.actions.emitted", { action_type: String(action.type) });
-          if (!result.success) {
-            this.metricSink.counter("signal_wire.actions.failed", { action_type: String(action.type) });
-          }
-          if (scope === "action") {
-            try {
-              await this.cooldowns.record(sessionIdForState, rule, action.type);
-            } catch {}
-          }
-        }
-        if (scope === "rule" || scope === "session") {
-          try {
-            await this.cooldowns.record(sessionIdForState, rule);
-          } catch {}
-        }
-        allResults.push(...ruleResults);
-      }
-      trace.results = allResults;
-      trace.actionsEmitted = allResults.length;
-      trace.outcome = allResults.length === 0 ? "no_match" : anyBlocked ? "blocked" : "dispatched";
-      trace.endedAt = this.now();
-      this.metricSink.histogram("signal_wire.pipeline.duration_ms", trace.endedAt - trace.startedAt);
-      try {
-        await this.traceSink.emit(trace);
-      } catch {}
-      const resultsByType = {};
-      for (const r2 of allResults) {
-        const key = r2.success ? r2.type : `${r2.type}!fail`;
-        resultsByType[key] = (resultsByType[key] ?? 0) + 1;
-      }
-      info("EVENT_COMPLETE", {
-        correlationId,
-        eventId,
-        type: event.type,
-        outcome: trace.outcome,
-        rulesMatched: trace.rulesMatched,
-        actionsEmitted: trace.actionsEmitted,
-        durationMs: trace.endedAt - trace.startedAt,
-        results: resultsByType
-      });
-      return allResults;
-    } catch (e2) {
-      trace.outcome = "error";
-      trace.errors = [e2 instanceof Error ? e2.message : String(e2)];
-      trace.endedAt = this.now();
-      try {
-        await this.traceSink.emit(trace);
-      } catch {}
-      info("EVENT_ERROR", {
-        correlationId,
-        eventId,
-        type: event.type,
-        error: e2 instanceof Error ? e2.message : String(e2),
-        durationMs: trace.endedAt - trace.startedAt
-      });
-      return [];
-    } finally {
-      this._processing = false;
-    }
-  }
-  extractRole(event) {
-    const payload = event.payload;
-    const message = payload.message;
-    if (!message || typeof message !== "object")
-      return;
-    const role = message.role;
-    return typeof role === "string" ? role : undefined;
-  }
-  extractUserText(event) {
-    const payload = event.payload;
-    const parts = payload.parts;
-    if (Array.isArray(parts)) {
-      const texts = [];
-      for (const part of parts) {
-        if (part && typeof part === "object") {
-          const p2 = part;
-          if (p2.type === "text" && typeof p2.text === "string")
-            texts.push(p2.text);
-        }
-      }
-      if (texts.length > 0)
-        return texts.join(`
-`);
-    }
-    if (typeof payload.prompt === "string")
-      return payload.prompt;
-    return "";
-  }
-}
-// ../../../../../packages/signal-wire-core/dist/state/file.js
-import { join as join3 } from "path";
-import { homedir as homedir3 } from "os";
-var DEFAULT_ROOT = join3(homedir3(), ".context", "hooks", "state");
-// ../../../../../packages/signal-wire-core/dist/state/redis.js
-class RedisBackend {
-  redis;
-  prefix;
-  ttl;
-  pubSubChannel;
-  onInvalidate = new Set;
-  constructor(redis, opts = {}) {
-    this.redis = redis;
-    this.prefix = opts.keyPrefix ?? "";
-    this.ttl = opts.ttlSeconds;
-    if (opts.pubSub?.enabled && opts.pubSub.subscribeClient?.subscribe) {
-      this.pubSubChannel = this.prefix + (opts.pubSub.channel ?? "invalidate");
-      opts.pubSub.subscribeClient.subscribe(this.pubSubChannel, (msg) => {
-        for (const handler of this.onInvalidate) {
-          try {
-            handler(msg);
-          } catch {}
-        }
-      });
-    }
-  }
-  onInvalidation(handler) {
-    this.onInvalidate.add(handler);
-    return () => this.onInvalidate.delete(handler);
-  }
-  k(key) {
-    return this.prefix + key;
-  }
-  async get(key) {
-    const raw = await this.redis.get(this.k(key));
-    if (!raw)
-      return null;
-    try {
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object")
-        return null;
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
-  async set(key, value) {
-    const payload = JSON.stringify(value);
-    if (this.ttl) {
-      await this.redis.set(this.k(key), payload, { EX: this.ttl });
-    } else {
-      await this.redis.set(this.k(key), payload);
-    }
-    if (this.pubSubChannel && this.redis.publish) {
-      try {
-        await this.redis.publish(this.pubSubChannel, key);
-      } catch {}
-    }
-  }
-  async delete(key) {
-    await this.redis.del(this.k(key));
-    if (this.pubSubChannel && this.redis.publish) {
-      try {
-        await this.redis.publish(this.pubSubChannel, key);
-      } catch {}
-    }
-  }
-  async* iterate(prefix) {
-    const pattern = this.k(prefix) + "*";
-    let keys;
-    try {
-      keys = await this.redis.keys(pattern);
-    } catch {
-      return;
-    }
-    for (const key of keys) {
-      const raw = await this.redis.get(key);
-      if (!raw)
-        continue;
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") {
-          const trimmed = this.prefix && key.startsWith(this.prefix) ? key.slice(this.prefix.length) : key;
-          yield [trimmed, parsed];
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-}
-// ../../../../../packages/signal-wire-core/dist/observability/otel.js
-class OtelMetricSink {
-  meter;
-  counters = new Map;
-  histograms = new Map;
-  constructor(meter) {
-    this.meter = meter;
-  }
-  counter(name, tags) {
-    try {
-      let c2 = this.counters.get(name);
-      if (!c2) {
-        c2 = this.meter.createCounter(name);
-        this.counters.set(name, c2);
-      }
-      c2.add(1, tags);
-    } catch {}
-  }
-  histogram(name, value, tags) {
-    try {
-      let h2 = this.histograms.get(name);
-      if (!h2) {
-        h2 = this.meter.createHistogram(name);
-        this.histograms.set(name, h2);
-      }
-      h2.record(value, tags);
-    } catch {}
-  }
-}
-// ../../../../../packages/signal-wire-core/dist/observability/prometheus.js
-var DEFAULT_BUCKETS_MS = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000];
-
-class PrometheusMetricSink {
-  counters = new Map;
-  histograms = new Map;
-  buckets;
-  constructor(options = {}) {
-    this.buckets = options.buckets ?? DEFAULT_BUCKETS_MS;
-  }
-  counter(name, tags) {
-    const tagStr = tagsToString(tags);
-    const key = name + "|" + tagStr;
-    const existing = this.counters.get(key);
-    if (existing) {
-      existing.value += 1;
-    } else {
-      this.counters.set(key, { name, tags: tagStr, value: 1 });
-    }
-  }
-  histogram(name, value, tags) {
-    const tagStr = tagsToString(tags);
-    const key = name + "|" + tagStr;
-    let entry = this.histograms.get(key);
-    if (!entry) {
-      entry = {
-        name,
-        tags: tagStr,
-        count: 0,
-        sum: 0,
-        buckets: new Map(this.buckets.map((b2) => [b2, 0]))
-      };
-      this.histograms.set(key, entry);
-    }
-    entry.count += 1;
-    entry.sum += value;
-    for (const [ub, cnt] of entry.buckets.entries()) {
-      if (value <= ub)
-        entry.buckets.set(ub, cnt + 1);
-    }
-  }
-  render() {
-    const lines = [];
-    const counterGroups = new Map;
-    for (const e2 of this.counters.values()) {
-      const g2 = counterGroups.get(e2.name) ?? [];
-      g2.push(e2);
-      counterGroups.set(e2.name, g2);
-    }
-    for (const [name, entries] of counterGroups) {
-      lines.push(`# TYPE ${sanitizeName(name)} counter`);
-      for (const e2 of entries) {
-        lines.push(`${sanitizeName(name)}${e2.tags} ${e2.value}`);
-      }
-    }
-    const histGroups = new Map;
-    for (const e2 of this.histograms.values()) {
-      const g2 = histGroups.get(e2.name) ?? [];
-      g2.push(e2);
-      histGroups.set(e2.name, g2);
-    }
-    for (const [name, entries] of histGroups) {
-      lines.push(`# TYPE ${sanitizeName(name)} histogram`);
-      for (const e2 of entries) {
-        for (const [ub, cnt] of e2.buckets.entries()) {
-          const tagsWithLe = e2.tags ? e2.tags.slice(0, -1) + `,le="${ub}"}` : `{le="${ub}"}`;
-          lines.push(`${sanitizeName(name)}_bucket${tagsWithLe} ${cnt}`);
-        }
-        const plusInf = e2.tags ? e2.tags.slice(0, -1) + `,le="+Inf"}` : `{le="+Inf"}`;
-        lines.push(`${sanitizeName(name)}_bucket${plusInf} ${e2.count}`);
-        lines.push(`${sanitizeName(name)}_sum${e2.tags} ${e2.sum}`);
-        lines.push(`${sanitizeName(name)}_count${e2.tags} ${e2.count}`);
-      }
-    }
-    return lines.join(`
-`) + `
-`;
-  }
-  _clear() {
-    this.counters.clear();
-    this.histograms.clear();
-  }
-}
-function tagsToString(tags) {
-  if (!tags || Object.keys(tags).length === 0)
-    return "";
-  const pairs = Object.entries(tags).sort((a2, b2) => a2[0].localeCompare(b2[0])).map(([k2, v2]) => `${sanitizeName(k2)}="${escapeLabelValue(v2)}"`);
-  return "{" + pairs.join(",") + "}";
-}
-function sanitizeName(name) {
-  return name.replace(/[^a-zA-Z0-9_]/g, "_");
-}
-function escapeLabelValue(v2) {
-  return v2.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, "\\\"");
-}
-// ../../../../../packages/signal-wire-core/dist/translate/index.js
-var EVENT_MAP = {
-  UserPromptSubmit: "chat.message",
-  PreToolUse: "tool.before",
-  PostToolUse: "tool.after",
-  Stop: "session.idle",
-  ExternalEvent: "wake.external"
-};
-function translateEventType(hookEvent) {
-  return EVENT_MAP[hookEvent] ?? hookEvent;
-}
-function contextToEvent(ctx, sessionId) {
-  return {
-    source: "hook",
-    type: translateEventType(ctx.event),
-    sessionId: sessionId || null,
-    payload: {
-      tool: ctx.lastToolName || "",
-      args: { toolInput: ctx.lastToolInput },
-      response: { output: ctx.lastToolOutput },
-      message: ctx.event === "UserPromptSubmit" ? { role: "user" } : undefined,
-      parts: ctx.event === "UserPromptSubmit" ? [{ type: "text", text: ctx.lastUserText }] : undefined,
-      prompt: ctx.lastUserText
-    },
-    timestamp: Date.now()
-  };
-}
-function translateLegacyRules(legacyRules, platform) {
-  const out = [];
-  for (const raw of legacyRules) {
-    if (!raw || typeof raw !== "object")
-      continue;
-    const r2 = raw;
-    if (typeof r2.id !== "string")
-      continue;
-    if (Array.isArray(r2.platforms) && r2.platforms.length > 0 && !r2.platforms.includes(platform))
-      continue;
-    const events = [];
-    if (Array.isArray(r2.events)) {
-      for (const e2 of r2.events) {
-        if (typeof e2 === "string")
-          events.push(translateEventType(e2));
-      }
-    }
-    if (events.length === 0)
-      continue;
-    const actions = translateActions(r2.action, r2.actions);
-    if (actions.length === 0)
-      continue;
-    out.push({
-      id: r2.id,
-      enabled: r2.enabled !== false,
-      events,
-      actions,
-      match: r2.match ?? {},
-      cooldown_seconds: typeof r2.cooldown_minutes === "number" ? r2.cooldown_minutes * 60 : undefined,
-      cooldown_tokens: typeof r2.cooldown_tokens === "number" ? r2.cooldown_tokens : undefined
-    });
-  }
-  return out;
-}
-function translateActions(legacy1, legacy2) {
-  if (Array.isArray(legacy2)) {
-    return legacy2.filter((a2) => a2 && typeof a2 === "object" && ("type" in a2));
-  }
-  if (legacy1 && typeof legacy1 === "object") {
-    const a2 = legacy1;
-    const out = [];
-    if (typeof a2.hint === "string")
-      out.push({ type: "hint", text: a2.hint });
-    if (typeof a2.bash === "string")
-      out.push({ type: "exec", command: a2.bash });
-    if (typeof a2.exec === "string")
-      out.push({ type: "exec", command: a2.exec });
-    return out;
-  }
-  return [];
-}
-// ../../../../../packages/signal-wire-core/dist/index.js
-function getBundledRulesPath() {
-  const envPath = typeof process !== "undefined" ? process.env?.SIGNAL_WIRE_RULES_PATH : undefined;
-  if (envPath)
-    return envPath;
-  try {
-    const req = __require_gv7hsff9;
-    if (req) {
-      const pkgJsonPath = req.resolve("@kiberos/signal-wire-core/package.json");
-      const sep = pkgJsonPath.includes("\\") ? "\\" : "/";
-      const pkgRoot = pkgJsonPath.slice(0, pkgJsonPath.lastIndexOf(sep));
-      return `${pkgRoot}${sep}rules${sep}signal-wire-rules.json`;
-    }
-  } catch {}
-  const url = new URL("../rules/signal-wire-rules.json", import.meta.url);
-  return url.protocol === "file:" ? decodeURIComponent(url.pathname) : url.pathname;
-}
-
-// node_modules/@life-ai-tools/opencode-signal-wire/signal-wire.ts
-var ADAPTER_VERSION = "1.0.0";
-var ADAPTER_MTIME = new Date().toISOString();
-var ADAPTER_ID = `sw-adapter-opencode-claude v${ADAPTER_VERSION}@${ADAPTER_MTIME.slice(11, 19)}`;
-var LOG_FILE2 = join4(homedir4(), ".claude", "signal-wire-debug.log");
-function swLog(msg) {
-  const line = `[${new Date().toISOString()}] ${coreIdentityTag()} [${ADAPTER_ID}] ${msg}
-`;
-  try {
-    appendFileSync3(LOG_FILE2, line);
-  } catch {}
-}
-var adapterBannerEmitted = false;
-function emitAdapterBanner(rulesLoaded, rulesPath) {
-  if (adapterBannerEmitted)
-    return;
-  adapterBannerEmitted = true;
-  swLog(`ADAPTER_BANNER pid=${process.pid} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? "(unset)"}`);
-}
-var HOT_RELOAD_INTERVAL_MS = 2000;
-
-class RulesStore {
-  rules;
-  translatedLegacy = [];
-  path;
-  platform;
-  registry;
-  lastFingerprint = null;
-  lastCheckMs = 0;
-  onSwap;
-  constructor(opts) {
-    this.path = opts.path;
-    this.platform = opts.platform;
-    this.registry = opts.registry;
-    this.onSwap = opts.onSwap;
-    this.rules = this.loadFromDisk().rules;
-  }
-  getRules() {
-    return this.rules;
-  }
-  getPath() {
-    return this.path;
-  }
-  loadFromDisk() {
-    if (!existsSync(this.path)) {
-      return { rules: [], fingerprint: null };
-    }
-    let stat;
-    try {
-      stat = statSync(this.path);
-    } catch {
-      return { rules: [], fingerprint: null };
-    }
-    const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
-    try {
-      const raw = JSON.parse(readFileSync(this.path, "utf8"));
-      const legacy = raw.rules ?? [];
-      const canonical = translateLegacyRules(legacy, this.platform);
-      const validated = validateRuleSet({ rules: canonical }, this.registry).rules;
-      this.translatedLegacy = canonical;
-      this.lastFingerprint = fp;
-      return { rules: validated, fingerprint: fp };
-    } catch (e2) {
-      const msg = e2 instanceof Error ? e2.message : String(e2);
-      swLog(`RULES_LOAD_FAIL path=${this.path} error="${msg}"`);
-      this.lastFingerprint = fp;
-      return { rules: [], fingerprint: fp };
-    }
-  }
-  maybeReload() {
-    const now = Date.now();
-    if (now - this.lastCheckMs < HOT_RELOAD_INTERVAL_MS)
-      return { reloaded: false };
-    this.lastCheckMs = now;
-    if (!existsSync(this.path))
-      return { reloaded: false, error: "rules file missing" };
-    let stat;
-    try {
-      stat = statSync(this.path);
-    } catch (e2) {
-      return { reloaded: false, error: e2 instanceof Error ? e2.message : String(e2) };
-    }
-    const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
-    if (this.lastFingerprint && fp.mtimeMs === this.lastFingerprint.mtimeMs && fp.size === this.lastFingerprint.size) {
-      return { reloaded: false };
-    }
-    try {
-      const raw = JSON.parse(readFileSync(this.path, "utf8"));
-      const legacy = raw.rules ?? [];
-      const canonical = translateLegacyRules(legacy, this.platform);
-      const validated = validateRuleSet({ rules: canonical }, this.registry).rules;
-      const oldCount = this.rules.length;
-      this.rules = validated;
-      this.translatedLegacy = canonical;
-      this.lastFingerprint = fp;
-      this.onSwap(validated);
-      swLog(`RULES_RELOADED old=${oldCount} new=${validated.length} mtime=${new Date(fp.mtimeMs).toISOString()}`);
-      return { reloaded: true };
-    } catch (e2) {
-      const msg = e2 instanceof Error ? e2.message : String(e2);
-      this.lastFingerprint = fp;
-      swLog(`RULES_RELOAD_FAIL error="${msg}" keeping-old-rules=${this.rules.length}`);
-      return { reloaded: false, error: msg };
-    }
-  }
-  writeRulesFile(updatedRawRules) {
-    const tmp = `${this.path}.tmp.${process.pid}`;
-    const payload = JSON.stringify({ rules: updatedRawRules }, null, 2) + `
-`;
-    writeFileSync(tmp, payload, "utf8");
-    renameSync(tmp, this.path);
-    swLog(`RULES_FILE_REWRITTEN rules=${updatedRawRules.length} path=${this.path}`);
-  }
-  getRawLegacyRules() {
-    if (!existsSync(this.path))
-      return [];
-    try {
-      const raw = JSON.parse(readFileSync(this.path, "utf8"));
-      return raw.rules ?? [];
-    } catch {
-      return [];
-    }
-  }
-}
-
-class SignalWire {
-  pipeline;
-  registry;
-  sessionId;
-  platform;
-  maxRulesPerFire;
-  rulesStore;
-  disabledRuleIds = new Set;
-  contextPosition = 0;
-  lastAsyncResult = null;
-  constructor(config) {
-    this.sessionId = config.sessionId;
-    this.platform = config.platform ?? "opencode";
-    this.maxRulesPerFire = config.maxRulesPerFire ?? 3;
-    this.registry = new EmitterRegistry;
-    const resolvedPath = config.rulesPath ?? getBundledRulesPath();
-    this.rulesStore = new RulesStore({
-      path: resolvedPath,
-      platform: this.platform,
-      registry: this.registry,
-      onSwap: (newRules) => this.applyRulesToPipeline(newRules)
-    });
-    emitAdapterBanner(this.rulesStore.getRules().length, resolvedPath);
-    this.pipeline = new Pipeline({
-      rules: this.rulesStore.getRules(),
-      registry: this.registry,
-      stateBackend: new MemoryBackend,
-      sessionId: this.sessionId || "opencode-claude",
-      serverUrl: config.serverUrl
-    });
-  }
-  static identity = {
-    adapterVersion: ADAPTER_VERSION,
-    adapterId: ADAPTER_ID,
-    coreVersion: CORE_VERSION,
-    coreHash: CORE_SOURCE_HASH
-  };
-  applyRulesToPipeline(rules) {
-    const effective = rules.map((r2) => ({
-      ...r2,
-      enabled: r2.enabled !== false && !this.disabledRuleIds.has(r2.id)
-    }));
-    this.pipeline._setRules(effective);
-  }
-  setSdkClient(_client) {}
-  trackTokens(u2) {
-    const promptSize = (u2.inputTokens ?? 0) + (u2.cacheReadInputTokens ?? 0) + (u2.cacheCreationInputTokens ?? 0);
-    const prev = this.contextPosition;
-    if (prev > 0 && promptSize > 0 && promptSize < prev * 0.6) {
-      this.pipeline.getCooldownTracker().resetTokens();
-      this.pipeline.getCooldownTracker().resetSession(this.sessionId || "opencode-claude");
-    }
-    if (promptSize > 0) {
-      this.contextPosition = promptSize;
-      this.pipeline.updateTokens(promptSize);
-    }
-  }
-  getContextPosition() {
-    return this.contextPosition;
-  }
-  toggleRule(ruleId, enabled) {
-    this.rulesStore.maybeReload();
-    const rules = this.rulesStore.getRules();
-    if (!rules.some((r2) => r2.id === ruleId))
-      return false;
-    if (enabled)
-      this.disabledRuleIds.delete(ruleId);
-    else
-      this.disabledRuleIds.add(ruleId);
-    this.applyRulesToPipeline(rules);
-    try {
-      const rawRules = this.rulesStore.getRawLegacyRules();
-      const patched = rawRules.map((r2) => {
-        if (typeof r2 !== "object" || r2 === null)
-          return r2;
-        const rec = r2;
-        if (rec.id === ruleId)
-          return { ...rec, enabled };
-        return rec;
-      });
-      this.rulesStore.writeRulesFile(patched);
-    } catch (e2) {
-      swLog(`TOGGLE_PERSIST_FAIL rule=${ruleId} enabled=${enabled} error="${e2 instanceof Error ? e2.message : String(e2)}"`);
-    }
-    return true;
-  }
-  listRules() {
-    this.rulesStore.maybeReload();
-    return this.rulesStore.getRules().map((r2) => ({
-      id: r2.id,
-      description: "",
-      enabled: r2.enabled !== false && !this.disabledRuleIds.has(r2.id),
-      events: r2.events
-    }));
-  }
-  isRuleEnabled(ruleId) {
-    this.rulesStore.maybeReload();
-    return !this.disabledRuleIds.has(ruleId);
-  }
-  logInvoke(mode, event) {
-    swLog(`CONSUMER_INVOKE consumer=opencode-plugin mode=${mode} type=${event.type} session=${this.sessionId || "?"}`);
-  }
-  evaluate(ctx) {
-    this.rulesStore.maybeReload();
-    const event = contextToEvent(ctx, this.sessionId);
-    this.logInvoke("evaluate-sync", event);
-    this.pipeline.process(event).then((rs) => {
-      this.lastAsyncResult = this.toLegacy(rs);
-    }).catch(() => {});
-    return this.lastAsyncResult;
-  }
-  async evaluateAsync(ctx) {
-    this.rulesStore.maybeReload();
-    const event = contextToEvent(ctx, this.sessionId);
-    this.logInvoke("evaluate-async", event);
-    const results = await this.pipeline.process(event);
-    const legacy = this.toLegacy(results);
-    this.lastAsyncResult = legacy;
-    return legacy;
-  }
-  async evaluateExternal(wakeEvent) {
-    this.rulesStore.maybeReload();
-    const event = {
-      source: "wake",
-      type: `wake.${wakeEvent.type}`,
-      sessionId: this.sessionId || null,
-      payload: {
-        wakeEventId: wakeEvent.eventId,
-        wakeSource: wakeEvent.source,
-        wakeType: wakeEvent.type,
-        priority: wakeEvent.priority,
-        targetMemberId: wakeEvent.targetMemberId,
-        ...wakeEvent.payload
-      },
-      timestamp: Date.now()
-    };
-    this.logInvoke("evaluate-external", event);
-    const results = await this.pipeline.process(event);
-    const firedIds = new Set(results.map((r2) => r2.ruleId));
-    const currentRules = this.rulesStore.getRules();
-    return { matched: currentRules.filter((r2) => firedIds.has(r2.id)), results };
-  }
-  toLegacy(results) {
-    const hintBearing = results.filter((r2) => (r2.type === "hint" || r2.type === "respond") && r2.success && r2.hintText);
-    if (hintBearing.length === 0)
-      return null;
-    const picked = hintBearing.slice(0, this.maxRulesPerFire);
-    return {
-      ruleId: picked[0].ruleId,
-      hint: picked.map((h2) => h2.hintText).join(`
-
-`)
-    };
-  }
-}
-// node_modules/@life-ai-tools/opencode-signal-wire/wake-listener.ts
-import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync2, unlinkSync, appendFileSync as appendFileSync4, renameSync as renameSync2 } from "fs";
-import { join as join6 } from "path";
-import { homedir as homedir6 } from "os";
-
-// node_modules/@life-ai-tools/opencode-signal-wire/wake-types.ts
-import { homedir as homedir5 } from "os";
-import { join as join5 } from "path";
-var DISCOVERY_DIR = join5(homedir5(), ".opencode", "wake");
-var WARM_CHANNEL_TTL_MS = 5 * 60 * 1000;
-
-// node_modules/@life-ai-tools/opencode-signal-wire/wake-listener.ts
-var DEBUG = process.env.WAKE_LISTENER_DEBUG !== "0";
-var LOG_FILE3 = join6(homedir6(), ".claude", "wake-listener-debug.log");
-var STARTUP_TS = Date.now();
-function dbg2(...args) {
-  if (!DEBUG)
-    return;
-  try {
-    appendFileSync4(LOG_FILE3, `[${new Date().toISOString()}] [wake-listener] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
-`);
-  } catch {}
-}
-var warmChannels = new Map;
-var _agentIdentity = null;
-var _sdkClient = null;
-var _spawnTotal = 0;
-var _currentDepth = null;
-var _inheritedDepth = parseInt(process.env.__SPAWN_DEPTH ?? "", 10);
-if (!isNaN(_inheritedDepth) && _inheritedDepth >= 0) {
-  _currentDepth = _inheritedDepth;
-  dbg2(`spawn depth inherited from parent: ${_inheritedDepth}`);
-}
-var _parentMemberId = process.env.__PARENT_MEMBER_ID ?? null;
-var _parentSessionId = process.env.__PARENT_SESSION_ID ?? null;
-function getSpawnTotal() {
-  return _spawnTotal;
-}
-function getSpawnActive() {
-  const now = Date.now();
-  while (_activeHelperTimestamps.length > 0 && now - _activeHelperTimestamps[0] > HELPER_TIMEOUT_MS) {
-    _activeHelperTimestamps.shift();
-  }
-  return _activeHelperTimestamps.length;
-}
-var HELPER_TIMEOUT_MS = 60000;
-var _activeHelperTimestamps = [];
-function helperStarted() {
-  _spawnTotal++;
-  _activeHelperTimestamps.push(Date.now());
-}
-function getAgentIdentity() {
-  return _agentIdentity;
-}
-async function resolveCurrentDepth(sessionId) {
-  if (_currentDepth !== null)
-    return _currentDepth;
-  let depth = 0;
-  let currentId = sessionId;
-  try {
-    for (let i2 = 0;i2 < 10; i2++) {
-      if (!_sdkClient) {
-        dbg2("resolveCurrentDepth: no sdkClient");
-        break;
-      }
-      const { data: session } = await _sdkClient.session.get({ path: { id: currentId } });
-      if (!session)
-        break;
-      if (!session.parent_id && !session.parentId)
-        break;
-      depth++;
-      currentId = session.parent_id ?? session.parentId;
-    }
-  } catch {
-    dbg2("resolveCurrentDepth: failed, assuming 0");
-  }
-  _currentDepth = depth;
-  dbg2(`resolveCurrentDepth: depth=${depth}`);
-  return depth;
-}
-function checkSpawnAllowed(identity, currentDepth, activeHelpers) {
-  const budget = identity.budget ?? { maxSpawnDepth: 2, maxSubagents: 5 };
-  const maxConcurrent = identity._maxConcurrent ?? budget.maxSubagents;
-  if (activeHelpers >= maxConcurrent) {
-    return {
-      allowed: false,
-      reason: [
-        `\u26A0\uFE0F \u041B\u0438\u043C\u0438\u0442 \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432: ${activeHelpers}/${maxConcurrent} \u0430\u043A\u0442\u0438\u0432\u043D\u044B.`,
-        `\u0414\u043E\u0436\u0434\u0438\u0441\u044C \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0438\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432, \u043F\u043E\u0442\u043E\u043C \u0432\u044B\u0437\u044B\u0432\u0430\u0439 \u043D\u043E\u0432\u044B\u0445.`,
-        `\u0414\u043B\u044F \u0434\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0440\u0430\u0431\u043E\u0442\u044B \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 SynqTask:`,
-        `  todo_tasks({action:"delegate", task_id:"...", to_member_id:"..."})`
-      ].join(`
-`),
-      depth: currentDepth,
-      maxDepth: budget.maxSpawnDepth,
-      active: activeHelpers,
-      maxConcurrent
-    };
-  }
-  return {
-    allowed: true,
-    depth: currentDepth,
-    maxDepth: budget.maxSpawnDepth,
-    active: activeHelpers,
-    maxConcurrent
-  };
-}
-// node_modules/@life-ai-tools/opencode-signal-wire/wake-preferences.ts
-import { join as join7, dirname as dirname3 } from "path";
-import { homedir as homedir7 } from "os";
-var WAKE_PRESETS = {
-  human: ["task_assigned", "delegation_received", "mention"],
-  agent: ["*"],
-  pm: ["task_completed", "task_failed", "agent_stale", "delegation_received"],
-  quiet: []
-};
-var PRESET_NAMES = Object.keys(WAKE_PRESETS);
-var GLOBAL_PREFS_PATH = join7(homedir7(), ".opencode", "wake-preferences.json");
-// provider.ts
 try {
   _traceWrite("/tmp/opencode-claude-trace.log", `PROVIDER.TS pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()}
 `);
 } catch {}
-(() => {
-  try {
-    const { appendFileSync: appendFileSync6 } = __require_gv7hsff9("fs");
-    const { join: join9 } = __require_gv7hsff9("path");
-    const { homedir: homedir9 } = __require_gv7hsff9("os");
-    const logFile = join9(homedir9(), ".claude", "signal-wire-debug.log");
-    appendFileSync6(logFile, `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=CORE implementation=sw-adapter-opencode-claude v1.0.0 env=(ts-only)
-`);
-  } catch {}
-})();
-var DEBUG2 = process.env.CLAUDE_MAX_DEBUG !== "0";
-var LOG_FILE4 = join8(homedir8(), ".claude", "claude-max-debug.log");
-var STATS_FILE = join8(homedir8(), ".claude", "claude-max-stats.log");
-var STATS_JSONL = join8(homedir8(), ".claude", "claude-max-stats.jsonl");
+var DEBUG = process.env.CLAUDE_MAX_DEBUG !== "0";
+var LOG_FILE = join(homedir(), ".claude", "claude-max-debug.log");
+var STATS_FILE = join(homedir(), ".claude", "claude-max-stats.log");
+var STATS_JSONL = join(homedir(), ".claude", "claude-max-stats.jsonl");
 var PID = process.pid;
 var SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? "?";
 var MAX_MEMORY_LINES = 500;
 var MAX_MEMORY_BYTES = 50000;
-var _swServerUrl = "";
-function setSignalWireServerUrl(url2) {
-  _swServerUrl = url2;
-}
-function setSignalWireSdkClient(client) {
-  _signalWire?.setSdkClient(client);
-}
-var _signalWire = null;
-function getSignalWireInstance() {
-  return _signalWire;
-}
 function logStats(line, structured) {
   try {
-    appendFileSync5(STATS_FILE, `${line} pid=${PID} ses=${SESSION}
+    appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}
 `);
   } catch {}
   if (structured) {
     try {
-      appendFileSync5(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + `
+      appendFileSync(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + `
 `);
     } catch {}
   }
 }
-function dbg3(...args) {
-  if (!DEBUG2)
+function dbg(...args) {
+  if (!DEBUG)
     return;
   try {
-    appendFileSync5(LOG_FILE4, `[${new Date().toISOString()}] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
+    appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
 `);
   } catch {}
 }
@@ -42934,7 +40884,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
   }
   let mediaType = claimedMediaType;
   if (sniffedMime !== claimedMediaType && claimedMediaType !== "image/*") {
-    dbg3(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} \u2014 using actual`);
+    dbg(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} \u2014 using actual`);
     mediaType = sniffedMime;
   } else if (claimedMediaType === "image/*") {
     mediaType = sniffedMime;
@@ -42951,7 +40901,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
         return { ok: false, reason: `image too small ${img.width}\xD7${img.height} (min ${IMAGE_MIN_DIMENSION}\xD7${IMAGE_MIN_DIMENSION})` };
       }
       const outBuf = await img.getBuffer("image/png");
-      dbg3(`image transcoded ${mediaType} \u2192 image/png (${img.width}\xD7${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
+      dbg(`image transcoded ${mediaType} \u2192 image/png (${img.width}\xD7${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
       return { ok: true, data: outBuf.toString("base64"), mediaType: "image/png", reason: `transcoded from ${mediaType}` };
     } catch (e2) {
       return { ok: false, reason: `failed to transcode ${mediaType}: ${e2.message}` };
@@ -42979,9 +40929,9 @@ function getJimp() {
   _jimpChecked = true;
   try {
     _jimp = require_commonjs30();
-    dbg3("Image resizer: jimp loaded");
+    dbg("Image resizer: jimp loaded");
   } catch {
-    dbg3("Image resizer: jimp not available \u2014 images will not be resized");
+    dbg("Image resizer: jimp not available \u2014 images will not be resized");
   }
   return _jimp;
 }
@@ -42991,7 +40941,7 @@ async function maybeResizeImage(base64Data, mediaType) {
   const jimpMod = getJimp();
   if (!jimpMod) {
     if (needsSizeReduction) {
-      dbg3(`WARNING: image ${(rawBytes.length / 1024 / 1024).toFixed(1)}MB exceeds ${(IMAGE_TARGET_RAW_BYTES / 1024 / 1024).toFixed(1)}MB target but no resize lib available`);
+      dbg(`WARNING: image ${(rawBytes.length / 1024 / 1024).toFixed(1)}MB exceeds ${(IMAGE_TARGET_RAW_BYTES / 1024 / 1024).toFixed(1)}MB target but no resize lib available`);
     }
     return { data: base64Data, mediaType, resized: false };
   }
@@ -43020,7 +40970,7 @@ async function maybeResizeImage(base64Data, mediaType) {
       outBuf = await img.getBuffer("image/png");
       outMediaType = "image/png";
       if (outBuf.length > IMAGE_TARGET_RAW_BYTES) {
-        dbg3(`PNG still ${(outBuf.length / 1024).toFixed(0)}KB after resize, converting to JPEG`);
+        dbg(`PNG still ${(outBuf.length / 1024).toFixed(0)}KB after resize, converting to JPEG`);
         outBuf = await img.getBuffer("image/jpeg");
         outMediaType = "image/jpeg";
       }
@@ -43029,10 +40979,10 @@ async function maybeResizeImage(base64Data, mediaType) {
       outMediaType = "image/jpeg";
     }
     const outBase64 = outBuf.toString("base64");
-    dbg3(`Image resized: ${w2}\xD7${h2} \u2192 ${nw}\xD7${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB \u2192 ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
+    dbg(`Image resized: ${w2}\xD7${h2} \u2192 ${nw}\xD7${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB \u2192 ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
     return { data: outBase64, mediaType: outMediaType, resized: true };
   } catch (e2) {
-    dbg3("Image resize failed, using original:", e2.message);
+    dbg("Image resize failed, using original:", e2.message);
     return { data: base64Data, mediaType, resized: false };
   }
 }
@@ -43053,12 +41003,12 @@ function getGitRoot() {
 var _fileCache = new Map;
 function readCachedFile(filePath) {
   try {
-    const { statSync: statSync2, readFileSync: readFileSync3 } = __require_gv7hsff9("fs");
-    const st2 = statSync2(filePath);
+    const { statSync, readFileSync } = __require("fs");
+    const st2 = statSync(filePath);
     const cached = _fileCache.get(filePath);
     if (cached && cached.mtimeMs === st2.mtimeMs)
       return cached.content;
-    const content = readFileSync3(filePath, "utf8");
+    const content = readFileSync(filePath, "utf8");
     _fileCache.set(filePath, { content, mtimeMs: st2.mtimeMs });
     return content;
   } catch {
@@ -43090,106 +41040,78 @@ function truncateMemory(raw) {
 <!-- TRUNCATED: ${reasons.join(", ")} -->`;
   return { text: result, truncated: true };
 }
-var _contextInjectionFrozen = undefined;
-function buildContextInjection() {
-  if (_contextInjectionFrozen !== undefined)
-    return _contextInjectionFrozen;
+var _stableInjectionFrozen = undefined;
+var _volatileInjectionFrozen = undefined;
+function buildContextInjectionParts() {
+  if (_stableInjectionFrozen !== undefined && _volatileInjectionFrozen !== undefined) {
+    return { stable: _stableInjectionFrozen, volatile: _volatileInjectionFrozen };
+  }
   const tInject = Date.now();
-  const home = homedir8();
+  const home = homedir();
   const cwd = process.cwd();
   const gitRoot = getGitRoot();
   const projectBase = gitRoot || cwd;
   const sanitized = sanitizePathForProjects(projectBase);
-  const memoryPath = join8(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
-  const sources = [
-    { path: join8(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
+  const memoryPath = join(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
+  const stableSources = [
+    { path: join(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
   ];
   if (cwd !== home) {
-    sources.push({ path: join8(cwd, "CLAUDE.md"), tag: "claude-rules" });
-    const dotClaudePath = join8(cwd, ".claude", "CLAUDE.md");
-    if (dotClaudePath !== join8(home, ".claude", "CLAUDE.md")) {
-      sources.push({ path: dotClaudePath, tag: "claude-rules" });
+    stableSources.push({ path: join(cwd, "CLAUDE.md"), tag: "claude-rules" });
+    const dotClaudePath = join(cwd, ".claude", "CLAUDE.md");
+    if (dotClaudePath !== join(home, ".claude", "CLAUDE.md")) {
+      stableSources.push({ path: dotClaudePath, tag: "claude-rules" });
     }
   }
-  sources.push({ path: memoryPath, tag: "project-memory", isMemory: true });
-  const parts = [];
+  const stableParts = [];
   let claudeMdBytes = 0;
-  let memoryBytes = 0;
-  let memoryTruncated = false;
-  for (const src of sources) {
+  for (const src of stableSources) {
     const raw = readCachedFile(src.path);
     if (!raw || !raw.trim())
       continue;
-    if (src.isMemory) {
-      const { text, truncated } = truncateMemory(raw);
-      parts.push(`<${src.tag} source="${src.path}">
-${text}
-</${src.tag}>`);
-      memoryBytes = text.length;
-      memoryTruncated = truncated;
-    } else {
-      parts.push(`<${src.tag} source="${src.path}">
+    stableParts.push(`<${src.tag} source="${src.path}">
 ${raw.trim()}
 </${src.tag}>`);
-      claudeMdBytes += raw.trim().length;
-    }
+    claudeMdBytes += raw.trim().length;
   }
-  const content = parts.length > 0 ? parts.join(`
+  const stable = stableParts.length > 0 ? stableParts.join(`
 
 `) : null;
-  dbg3(`context_inject: ${parts.length} sources, ${content?.length ?? 0} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? " TRUNCATED" : ""}) built in ${Date.now() - tInject}ms [FROZEN for session]`);
-  logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject}`, {
+  let volatile = null;
+  let memoryBytes = 0;
+  let memoryTruncated = false;
+  const memRaw = readCachedFile(memoryPath);
+  if (memRaw && memRaw.trim()) {
+    const { text, truncated } = truncateMemory(memRaw);
+    volatile = `<project-memory source="${memoryPath}">
+${text}
+</project-memory>`;
+    memoryBytes = text.length;
+    memoryTruncated = truncated;
+  }
+  const totalSources = stableParts.length + (volatile ? 1 : 0);
+  const totalBytes = (stable?.length ?? 0) + (volatile?.length ?? 0);
+  dbg(`context_inject: ${totalSources} sources, ${totalBytes} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? " TRUNCATED" : ""}) built in ${Date.now() - tInject}ms [FROZEN for session, split: stable+volatile]`);
+  logStats(`[${new Date().toISOString()}] type=context_inject | sources=${totalSources} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject} split=true`, {
     type: "context_inject",
-    sources: parts.length,
+    sources: totalSources,
     claudeMdBytes,
     memoryBytes,
     truncated: memoryTruncated,
-    buildMs: Date.now() - tInject
+    buildMs: Date.now() - tInject,
+    split: true
   });
-  _contextInjectionFrozen = content;
-  return content;
+  _stableInjectionFrozen = stable;
+  _volatileInjectionFrozen = volatile;
+  return { stable, volatile };
 }
-function extractSignalWireContext(messages) {
-  let lastUserText = "";
-  let lastToolName = "";
-  let lastToolInput = "";
-  let lastToolOutput = "";
-  let lastAssistantText = "";
-  for (let i2 = messages.length - 1;i2 >= 0; i2--) {
-    const msg = messages[i2];
-    if (msg.role === "user" && !lastUserText) {
-      const content = Array.isArray(msg.content) ? msg.content : [msg.content];
-      for (const part of content) {
-        if (part.type === "text" && part.text) {
-          lastUserText = part.text;
-          break;
-        }
-        if (part.type === "tool_result" && !lastToolOutput) {
-          lastToolOutput = typeof part.content === "string" ? part.content : JSON.stringify(part.content);
-        }
-      }
-    }
-    if (msg.role === "assistant") {
-      const content = Array.isArray(msg.content) ? msg.content : [msg.content];
-      for (const part of content) {
-        if (part.type === "tool_use" && part.name && !lastToolName) {
-          lastToolName = part.name;
-          lastToolInput = typeof part.input === "string" ? part.input : JSON.stringify(part.input ?? {});
-        }
-        if (part.type === "text" && part.text && !lastAssistantText) {
-          lastAssistantText = part.text;
-        }
-      }
-    }
-    if (lastUserText && (lastToolName || lastAssistantText))
-      break;
-  }
-  if (lastAssistantText) {
-    lastToolOutput = lastToolOutput ? `${lastToolOutput}
-${lastAssistantText}` : lastAssistantText;
-  }
-  const event = lastToolOutput ? "PostToolUse" : "UserPromptSubmit";
-  return { event, lastUserText, lastToolName, lastToolInput, lastToolOutput };
+function buildContextInjection() {
+  const { stable, volatile } = buildContextInjectionParts();
+  if (!stable && !volatile)
+    return null;
+  return [stable, volatile].filter(Boolean).join(`
+
+`);
 }
 async function convertPrompt(prompt) {
   const tConvert = Date.now();
@@ -43199,7 +41121,7 @@ async function convertPrompt(prompt) {
     if (msg.role === "assistant" && Array.isArray(msg.content)) {
       for (const p2 of msg.content) {
         if (p2.type === "reasoning") {
-          dbg3("PROMPT reasoning part:", {
+          dbg("PROMPT reasoning part:", {
             textLen: p2.text?.length,
             hasProviderMetadata: !!p2.providerMetadata,
             providerMetadataKeys: p2.providerMetadata ? Object.keys(p2.providerMetadata) : [],
@@ -43226,16 +41148,25 @@ async function convertPrompt(prompt) {
         if (system.length === 0)
           system = undefined;
       }
-      const injection = buildContextInjection();
-      if (injection) {
+      const { stable: stableInj, volatile: volatileInj } = buildContextInjectionParts();
+      if (stableInj || volatileInj) {
         if (typeof system === "string") {
-          system = injection + `
+          system = [
+            stableInj,
+            system,
+            volatileInj
+          ].filter(Boolean).join(`
 
-` + (system || "");
+`) || undefined;
         } else if (Array.isArray(system)) {
-          system.unshift({ type: "text", text: injection });
+          if (stableInj)
+            system.unshift({ type: "text", text: stableInj });
+          if (volatileInj)
+            system.push({ type: "text", text: volatileInj });
         } else {
-          system = injection;
+          system = [stableInj, volatileInj].filter(Boolean).join(`
+
+`) || undefined;
         }
       }
       continue;
@@ -43249,52 +41180,52 @@ async function convertPrompt(prompt) {
         if (p2.type === "file" && typeof p2.mediaType === "string") {
           const isUrl = p2.data instanceof URL || typeof p2.data === "string" && (p2.data.startsWith("http://") || p2.data.startsWith("https://"));
           if (isUrl) {
-            const url2 = typeof p2.data === "string" ? p2.data : p2.data.toString();
+            const url = typeof p2.data === "string" ? p2.data : p2.data.toString();
             if (p2.mediaType.startsWith("image/")) {
-              content.push({ type: "image", source: { type: "url", url: url2 } });
-              dbg3("Converted file part to image URL block:", p2.mediaType, url2);
+              content.push({ type: "image", source: { type: "url", url } });
+              dbg("Converted file part to image URL block:", p2.mediaType, url);
             } else if (p2.mediaType === "application/pdf") {
-              content.push({ type: "document", source: { type: "url", url: url2 } });
-              dbg3("Converted file part to document URL block:", url2);
+              content.push({ type: "document", source: { type: "url", url } });
+              dbg("Converted file part to document URL block:", url);
             }
             continue;
           }
           let data = typeof p2.data === "string" ? p2.data : p2.data instanceof Uint8Array ? Buffer.from(p2.data).toString("base64") : p2.data instanceof ArrayBuffer ? Buffer.from(p2.data).toString("base64") : null;
           if (!data) {
-            dbg3("Skipping file part: could not convert data to base64, type:", typeof p2.data);
+            dbg("Skipping file part: could not convert data to base64, type:", typeof p2.data);
             continue;
           }
           if (typeof data === "string" && data.startsWith("data:")) {
             const commaIdx = data.indexOf(",");
             if (commaIdx !== -1) {
               data = data.slice(commaIdx + 1);
-              dbg3("Stripped data URL prefix from file data");
+              dbg("Stripped data URL prefix from file data");
             }
           }
           if (p2.mediaType.startsWith("image/")) {
             const validated = await validateAndNormalizeImage(data, p2.mediaType);
             if (!validated.ok) {
-              dbg3(`image validation failed: ${validated.reason} \u2014 replacing with text placeholder`);
+              dbg(`image validation failed: ${validated.reason} \u2014 replacing with text placeholder`);
               content.push({ type: "text", text: `[Image could not be processed: ${validated.reason}]` });
               continue;
             }
             if (validated.reason) {
-              dbg3(`image normalized: ${validated.reason}`);
+              dbg(`image normalized: ${validated.reason}`);
             }
             const resized = await maybeResizeImage(validated.data, validated.mediaType);
             const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024;
             if (resized.data.length > API_IMAGE_MAX_BASE64) {
-              dbg3(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) \u2014 skipping`);
+              dbg(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) \u2014 skipping`);
               content.push({ type: "text", text: `[Image too large: ${(resized.data.length / 1024 / 1024).toFixed(1)}MB after resize, API limit is 5MB. Please use a smaller image.]` });
               continue;
             }
             content.push({ type: "image", source: { type: "base64", media_type: resized.mediaType, data: resized.data } });
-            dbg3("Converted file part to image block:", resized.mediaType, `${(resized.data.length / 1024).toFixed(0)}KB base64`, resized.resized ? "(resized)" : "(original)");
+            dbg("Converted file part to image block:", resized.mediaType, `${(resized.data.length / 1024).toFixed(0)}KB base64`, resized.resized ? "(resized)" : "(original)");
           } else if (p2.mediaType === "application/pdf") {
             content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data } });
-            dbg3("Converted file part to document block:", `${(data.length / 1024).toFixed(0)}KB base64`);
+            dbg("Converted file part to document block:", `${(data.length / 1024).toFixed(0)}KB base64`);
           } else {
-            dbg3("Skipping file part with unsupported mediaType:", p2.mediaType);
+            dbg("Skipping file part with unsupported mediaType:", p2.mediaType);
           }
         }
       }
@@ -43407,29 +41338,23 @@ async function convertPrompt(prompt) {
       messages.splice(i2 + 1, 0, { role: "user", content: syntheticResults });
     }
     sanitizerHits += orphanIds.length;
-    dbg3(`tool_use_sanitizer: healed ${orphanIds.length} orphan(s) at assistant msg[${i2}] ids=[${orphanIds.join(",")}]`);
+    dbg(`tool_use_sanitizer: healed ${orphanIds.length} orphan(s) at assistant msg[${i2}] ids=[${orphanIds.join(",")}]`);
   }
   if (sanitizerHits > 0) {
-    dbg3(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`);
+    dbg(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`);
   }
-  try {
-    if (_signalWire) {
-      const swContext = extractSignalWireContext(messages);
-      const swResult = _signalWire.evaluate(swContext);
-      if (swResult) {
-        messages.push({
-          role: "user",
-          content: [{ type: "text", text: `<system-reminder>
-${swResult.hint}
-</system-reminder>` }]
-        });
-        dbg3(`signal-wire fired: ${swResult.ruleId} (${swResult.hint.length} chars)`);
-      }
+  const sysFingerprints = [];
+  if (Array.isArray(system)) {
+    const { createHash } = __require("crypto");
+    for (const block of system) {
+      const text = block?.text ?? "";
+      sysFingerprints.push(`${createHash("md5").update(String(text)).digest("hex").slice(0, 8)}@${String(text).length}`);
     }
-  } catch (e2) {
-    dbg3(`signal-wire error (non-blocking): ${e2.message}`);
+  } else if (typeof system === "string") {
+    const { createHash } = __require("crypto");
+    sysFingerprints.push(`${createHash("md5").update(system).digest("hex").slice(0, 8)}@${system.length}`);
   }
-  dbg3(`convertPrompt: ${messages.length} messages, system=${typeof system === "string" ? system.length : Array.isArray(system) ? system.length + " blocks" : "none"}, in ${Date.now() - tConvert}ms`);
+  dbg(`convertPrompt: ${messages.length} messages, system=${typeof system === "string" ? system.length : Array.isArray(system) ? system.length + " blocks" : "none"} fingerprints=[${sysFingerprints.join(",")}] in ${Date.now() - tConvert}ms`);
   return { system, messages };
 }
 var CWD_PATTERNS = [
@@ -43459,11 +41384,25 @@ function normalizeToolSchema(schema) {
 }
 var _lastToolCount = 0;
 var _lastToolHash = "";
+var _lastToolFingerprint = "";
 var TOOL_NAME_REMAP = {
   todowrite: "todo_write"
 };
 var TOOL_NAME_UNREMAP = Object.fromEntries(Object.entries(TOOL_NAME_REMAP).map(([k2, v2]) => [v2, k2]));
 var MCP_TOOL_PATTERN = /^[a-z][\w-]+_[a-z]/;
+var BUILTIN_NAMES_AFTER_REMAP = new Set([
+  "bash",
+  "read",
+  "glob",
+  "grep",
+  "edit",
+  "write",
+  "task",
+  "todo_write",
+  "question",
+  "webfetch",
+  "skill"
+]);
 function convertTools(tools) {
   if (!tools?.length)
     return;
@@ -43475,7 +41414,9 @@ function convertTools(tools) {
   const builtIn = [];
   const mcp = [];
   for (const t2 of all) {
-    if (MCP_TOOL_PATTERN.test(t2.name)) {
+    if (BUILTIN_NAMES_AFTER_REMAP.has(t2.name)) {
+      builtIn.push(t2);
+    } else if (MCP_TOOL_PATTERN.test(t2.name)) {
       mcp.push(t2);
     } else {
       builtIn.push(t2);
@@ -43484,21 +41425,40 @@ function convertTools(tools) {
   mcp.sort((a2, b2) => a2.name.localeCompare(b2.name));
   const result = [...builtIn, ...mcp];
   const count = result.length;
-  const hash = result.map((t2) => t2.name).join(",");
-  if (_lastToolCount > 0 && count !== _lastToolCount) {
-    dbg3(`\u26A0 TOOL_DRIFT: tool count changed ${_lastToolCount} \u2192 ${count} mid-session (builtin=${builtIn.length} mcp=${mcp.length})`);
-    logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length}`, {
+  const namesNow = result.map((t2) => t2.name);
+  const hash = namesNow.join(",");
+  const { createHash } = __require("crypto");
+  const toolsFingerprint = createHash("md5").update(result.map((t2) => `${t2.name}|${createHash("md5").update(JSON.stringify(t2)).digest("hex").slice(0, 8)}`).join(",")).digest("hex").slice(0, 12);
+  if (_lastToolCount > 0 && hash !== _lastToolHash) {
+    const oldNames = new Set(_lastToolHash.split(","));
+    const newNames = new Set(namesNow);
+    const added = namesNow.filter((n2) => !oldNames.has(n2));
+    const removed = [..._lastToolHash.split(",")].filter((n2) => !newNames.has(n2));
+    dbg(`\u26A0 TOOL_DRIFT: count ${_lastToolCount} \u2192 ${count} (builtin=${builtIn.length} mcp=${mcp.length}) added=[${added.join(",")}] removed=[${removed.join(",")}] toolsFp=${toolsFingerprint}`);
+    logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length} added=${added.join(",")} removed=${removed.join(",")} toolsFp=${toolsFingerprint}`, {
       type: "tool_drift",
       oldCount: _lastToolCount,
       newCount: count,
       builtIn: builtIn.length,
-      mcpCount: mcp.length
+      mcpCount: mcp.length,
+      added,
+      removed,
+      toolsFingerprint
     });
   } else if (_lastToolCount === 0) {
-    dbg3(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length})`);
+    dbg(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length}) toolsFp=${toolsFingerprint}`);
+  } else if (toolsFingerprint !== _lastToolFingerprint) {
+    dbg(`\u26A0 TOOL_SCHEMA_DRIFT: same ${count} tools but fingerprint changed ${_lastToolFingerprint} \u2192 ${toolsFingerprint}`);
+    logStats(`[${new Date().toISOString()}] type=tool_schema_drift | count=${count} oldFp=${_lastToolFingerprint} newFp=${toolsFingerprint}`, {
+      type: "tool_schema_drift",
+      count,
+      oldFingerprint: _lastToolFingerprint,
+      newFingerprint: toolsFingerprint
+    });
   }
   _lastToolCount = count;
   _lastToolHash = hash;
+  _lastToolFingerprint = toolsFingerprint;
   return result;
 }
 function convertToolChoice(tc) {
@@ -43549,7 +41509,7 @@ function createLanguageModel(sdk, modelId, providerId) {
     modelId,
     supportedUrls: {},
     async doGenerate(options) {
-      dbg3("doGenerate", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
+      dbg("doGenerate", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
       const { system, messages } = await convertPrompt(options.prompt);
       const tools = convertTools(options.tools);
       const toolChoice = convertToolChoice(options.toolChoice);
@@ -43605,9 +41565,6 @@ function createLanguageModel(sdk, modelId, providerId) {
         usage: { in: u2?.inputTokens ?? 0, out: u2?.outputTokens ?? 0, cacheRead: u2?.cacheReadInputTokens ?? 0, cacheWrite: u2?.cacheCreationInputTokens ?? 0 },
         rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined
       });
-      try {
-        _signalWire?.trackTokens({ inputTokens: u2?.inputTokens ?? 0, outputTokens: u2?.outputTokens ?? 0, cacheReadInputTokens: u2?.cacheReadInputTokens ?? 0, cacheCreationInputTokens: u2?.cacheCreationInputTokens ?? 0 });
-      } catch {}
       return {
         content,
         finishReason: convertFinishReason(response.stopReason),
@@ -43628,7 +41585,7 @@ function createLanguageModel(sdk, modelId, providerId) {
     },
     async doStream(options) {
       const t0 = Date.now();
-      dbg3("doStream", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
+      dbg("doStream", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
       const { system, messages } = await convertPrompt(options.prompt);
       const tools = convertTools(options.tools);
       const toolChoice = convertToolChoice(options.toolChoice);
@@ -43653,9 +41610,9 @@ function createLanguageModel(sdk, modelId, providerId) {
       const isAdaptive = te(modelId);
       if (thinking?.type === "enabled" && thinking?.budgetTokens) {
         sdkOpts.thinking = { type: "enabled", budgetTokens: thinking.budgetTokens };
-        dbg3("doStream thinking from variant:", sdkOpts.thinking);
+        dbg("doStream thinking from variant:", sdkOpts.thinking);
       } else if (isAdaptive) {
-        dbg3("doStream: adaptive model, SDK will handle thinking");
+        dbg("doStream: adaptive model, SDK will handle thinking");
       }
       const sdkStream = sdk.stream(sdkOpts);
       let textId = "";
@@ -43673,7 +41630,7 @@ function createLanguageModel(sdk, modelId, providerId) {
           try {
             for await (const event of sdkStream) {
               if (firstEvent) {
-                dbg3(`doStream first event after ${Date.now() - t0}ms`, { type: event.type, modelId });
+                dbg(`doStream first event after ${Date.now() - t0}ms`, { type: event.type, modelId });
                 firstEvent = false;
               }
               switch (event.type) {
@@ -43755,10 +41712,7 @@ function createLanguageModel(sdk, modelId, providerId) {
                     usage: { in: u2?.inputTokens ?? 0, out: u2?.outputTokens ?? 0, cacheRead: u2?.cacheReadInputTokens ?? 0, cacheWrite: u2?.cacheCreationInputTokens ?? 0 },
                     rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined
                   });
-                  dbg3(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason });
-                  try {
-                    _signalWire?.trackTokens({ inputTokens: u2?.inputTokens ?? 0, outputTokens: u2?.outputTokens ?? 0, cacheReadInputTokens: u2?.cacheReadInputTokens ?? 0, cacheCreationInputTokens: u2?.cacheCreationInputTokens ?? 0 });
-                  } catch {}
+                  dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason });
                   if (textActive) {
                     controller.enqueue({ type: "text-end", id: textId });
                     textActive = false;
@@ -43801,14 +41755,38 @@ function createClaudeMax(options = {}) {
   const tCreate = Date.now();
   const providerOpts = options.providerOptions ?? {};
   const keepaliveEnabled = providerOpts.keepalive !== undefined ? !!providerOpts.keepalive : process.env.CLAUDE_MAX_KEEPALIVE !== "0";
-  const keepaliveInterval = providerOpts.keepaliveInterval ? parseInt(providerOpts.keepaliveInterval) * 1000 : (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? "120") || 120) * 1000;
+  const keepaliveInterval = providerOpts.keepaliveInterval ? parseInt(providerOpts.keepaliveInterval) * 1000 : process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ? (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL) || 0) * 1000 || undefined : undefined;
   const keepaliveIdle = providerOpts.keepaliveIdle ? parseInt(providerOpts.keepaliveIdle) * 1000 : process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity;
   const rewriteWarnIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC ?? "300", 10) || 300) * 1000;
   const rewriteWarnTokens = parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS ?? "50000", 10) || 50000;
   const rewriteBlockEnabled = process.env.CLAUDE_MAX_REWRITE_BLOCK === "1";
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? "1800", 10) || 1800) * 1000;
-  dbg3(`STARTUP createClaudeMax pid=${PID}`, { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts), rewriteWarnIdleMs, rewriteBlockEnabled });
-  const sdk = new Ae({
+  let cacheConfigSnapshot = {};
+  try {
+    const c2 = Se();
+    cacheConfigSnapshot = {
+      cacheTtlMs: c2.cacheTtlMs,
+      cacheTtlMin: Math.round(c2.cacheTtlMs / 60000),
+      intervalMs: c2.intervalMs,
+      intervalMin: Math.round(c2.intervalMs / 60000),
+      safetyMarginMs: c2.safetyMarginMs,
+      retryCount: c2.retryDelaysMs.length,
+      source: c2._source
+    };
+  } catch (e2) {
+    cacheConfigSnapshot = { error: e2?.message };
+  }
+  dbg(`STARTUP createClaudeMax pid=${PID} sdk=0.12.0 plugin=1.3.0 [cache-ssot]`, {
+    hasAccessToken: !!options.accessToken,
+    credentialsPath: options.credentialsPath,
+    keepaliveEnabled,
+    keepaliveInterval,
+    providerOpts: Object.keys(providerOpts),
+    rewriteWarnIdleMs,
+    rewriteBlockEnabled,
+    cacheConfig: cacheConfigSnapshot
+  });
+  const sdk = new ze({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
     expiresAt: options.expiresAt,
@@ -43816,7 +41794,7 @@ function createClaudeMax(options = {}) {
     onTokenStatus: (event) => {
       const emoji = event.level === "rotated" ? "\u2705" : event.level === "warning" ? "\u26A0\uFE0F" : event.level === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
       const line = `${emoji} TOKEN ${event.level.toUpperCase()}: ${event.message} (expires in ${Math.round(event.expiresInMs / 60000)}min, failures=${event.failedAttempts})`;
-      dbg3(line);
+      dbg(line);
       logStats(`[${new Date().toISOString()}] type=token_${event.level} | expiresIn=${Math.round(event.expiresInMs / 60000)}min failures=${event.failedAttempts} needsReLogin=${event.needsReLogin}`, {
         type: `token_${event.level}`,
         expiresInMin: Math.round(event.expiresInMs / 60000),
@@ -43837,7 +41815,7 @@ function createClaudeMax(options = {}) {
       rewriteBlockEnabled,
       rewriteBlockIdleMs,
       onTick: (tick) => {
-        dbg3(`keepalive tick: idle=${Math.round(tick.idleMs / 1000)}s nextFire=${Math.round(tick.nextFireMs / 1000)}s model=${tick.model}`);
+        dbg(`keepalive tick: idle=${Math.round(tick.idleMs / 1000)}s nextFire=${Math.round(tick.nextFireMs / 1000)}s model=${tick.model}`);
       },
       onHeartbeat: (stats) => {
         const rl = stats.rateLimit ? ` | quota=${stats.rateLimit.status ?? "?"} claim=${stats.rateLimit.claim ?? "?"}` : "";
@@ -43849,141 +41827,48 @@ function createClaudeMax(options = {}) {
           usage: { in: stats.usage.inputTokens, out: stats.usage.outputTokens, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0 },
           rateLimit: stats.rateLimit ?? undefined
         });
-        dbg3("keepalive FIRED", { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit });
-        try {
-          _signalWire?.trackTokens({ inputTokens: stats.usage.inputTokens, cacheReadInputTokens: stats.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: stats.usage.cacheCreationInputTokens ?? 0 });
-        } catch {}
+        dbg("keepalive FIRED", { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit });
       },
-      onDisarmed: (info2) => {
-        logStats(`[${new Date().toISOString()}] type=keepalive_disarmed reason=${info2.reason} | timer stays alive, will auto-resume on next real stream`, {
+      onDisarmed: (info) => {
+        logStats(`[${new Date().toISOString()}] type=keepalive_disarmed reason=${info.reason} | timer stays alive, will auto-resume on next real stream`, {
           type: "keepalive_disarmed",
-          reason: info2.reason
+          reason: info.reason
         });
-        dbg3(`keepalive DISARMED reason=${info2.reason} (timer alive, auto-resume on next real stream)`);
+        dbg(`keepalive DISARMED reason=${info.reason} (timer alive, auto-resume on next real stream)`);
       },
-      onRewriteWarning: (info2) => {
-        const tag = info2.blocked ? "cache_rewrite_blocked" : "cache_rewrite_warn";
-        logStats(`[${new Date().toISOString()}] type=${tag} model=${info2.model} idle=${Math.round(info2.idleMs / 1000)}s estimatedTokens=${info2.estimatedTokens}${info2.blocked ? " BLOCKED" : ""}`, {
+      onRewriteWarning: (info) => {
+        const tag = info.blocked ? "cache_rewrite_blocked" : "cache_rewrite_warn";
+        logStats(`[${new Date().toISOString()}] type=${tag} model=${info.model} idle=${Math.round(info.idleMs / 1000)}s estimatedTokens=${info.estimatedTokens}${info.blocked ? " BLOCKED" : ""}`, {
           type: tag,
-          model: info2.model,
-          idleSec: Math.round(info2.idleMs / 1000),
-          estimatedTokens: info2.estimatedTokens,
-          blocked: info2.blocked
+          model: info.model,
+          idleSec: Math.round(info.idleMs / 1000),
+          estimatedTokens: info.estimatedTokens,
+          blocked: info.blocked
         });
-        const banner = info2.blocked ? `\uD83D\uDEAB [claude-max] CACHE REWRITE BLOCKED \u2014 idle=${Math.round(info2.idleMs / 1000)}s, would cost ~${info2.estimatedTokens} tokens. Unset CLAUDE_MAX_REWRITE_BLOCK to allow.` : `\u26A0\uFE0F  [claude-max] Cache likely dead \u2014 idle=${Math.round(info2.idleMs / 1000)}s, next request will cost ~${info2.estimatedTokens} cache_write tokens`;
+        const banner = info.blocked ? `\uD83D\uDEAB [claude-max] CACHE REWRITE BLOCKED \u2014 idle=${Math.round(info.idleMs / 1000)}s, would cost ~${info.estimatedTokens} tokens. Unset CLAUDE_MAX_REWRITE_BLOCK to allow.` : `\u26A0\uFE0F  [claude-max] Cache likely dead \u2014 idle=${Math.round(info.idleMs / 1000)}s, next request will cost ~${info.estimatedTokens} cache_write tokens`;
         console.error(banner);
       },
-      onNetworkStateChange: (info2) => {
-        logStats(`[${new Date().toISOString()}] type=network_${info2.to} from=${info2.from}`, {
-          type: `network_${info2.to}`,
-          from: info2.from,
-          to: info2.to
+      onNetworkStateChange: (info) => {
+        logStats(`[${new Date().toISOString()}] type=network_${info.to} from=${info.from}`, {
+          type: `network_${info.to}`,
+          from: info.from,
+          to: info.to
         });
-        dbg3(`network state: ${info2.from} \u2192 ${info2.to}`);
+        dbg(`network state: ${info.from} \u2192 ${info.to}`);
       }
     }
   });
-  dbg3(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`);
-  try {
-    _signalWire = new SignalWire({
-      serverUrl: _swServerUrl || process.env.OPENCODE_SERVER_URL || "",
-      sessionId: process.env.OPENCODE_SESSION_ID ?? "?",
-      platform: "opencode"
-    });
-    dbg3(`signal-wire: instance created (${_signalWire ? "ok" : "null"})`);
-  } catch (e2) {
-    dbg3(`signal-wire: failed to create instance: ${e2.message}`);
-    _signalWire = null;
-  }
+  dbg(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`);
   return {
     languageModel(modelId) {
-      dbg3("languageModel requested:", modelId);
+      dbg("languageModel requested:", modelId);
       return createLanguageModel(sdk, modelId, "claude-max");
     }
   };
 }
-async function handlePreToolUseSpawnCheck(toolName, serverUrl, sessionId, input) {
-  const SPAWN_TOOLS = ["task", "Task", "task_tool", "call_omo_agent"];
-  if (!SPAWN_TOOLS.includes(toolName))
-    return;
-  try {
-    const identity = getAgentIdentity();
-    const depth = await resolveCurrentDepth(sessionId);
-    if (!identity || !identity.roleName) {
-      const maxDepth = parseInt(process.env.__MAX_HELPER_DEPTH ?? "1", 10);
-      if (depth >= maxDepth) {
-        return {
-          decision: "block",
-          message: [
-            `\u26A0\uFE0F \u0425\u0435\u043B\u043F\u0435\u0440 \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D: \u0433\u043B\u0443\u0431\u0438\u043D\u0430 ${depth}/${maxDepth}.`,
-            `\u0414\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u0430\u044F \u0432\u043B\u043E\u0436\u0435\u043D\u043D\u043E\u0441\u0442\u044C \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432 \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u044F\u0435\u0442\u0441\u044F \u0440\u043E\u043B\u044C\u044E \u0432\u044B\u0437\u0432\u0430\u0432\u0448\u0435\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430.`,
-            `\u041D\u0430 \u044D\u0442\u043E\u043C \u0443\u0440\u043E\u0432\u043D\u0435 \u043F\u043E\u0440\u043E\u0436\u0434\u0435\u043D\u0438\u0435 \u0437\u0430\u043F\u0440\u0435\u0449\u0435\u043D\u043E.`,
-            ``,
-            `\u0412\u044B\u043F\u043E\u043B\u043D\u0438 \u0437\u0430\u0434\u0430\u043D\u0438\u0435 \u0441\u0430\u043C \u0438 \u0432\u0435\u0440\u043D\u0438 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442.`,
-            `\u0418\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 bash, read, grep, webfetch \u2014 \u043D\u043E \u043D\u0435 task/call_omo_agent.`
-          ].join(`
-`)
-        };
-      }
-      helperStarted();
-      dbg3(`helper spawn OK (depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()})`);
-      return;
-    }
-    const check = checkSpawnAllowed(identity, depth, getSpawnActive());
-    if (!check.allowed) {
-      const roleName = identity.roleName ?? "unknown";
-      const teammates = identity.teammates?.length > 0 ? identity.teammates.map((t2) => `${t2.name} (${t2.roleName ?? "?"})`).join(", ") : "\u043D\u0435\u0442";
-      const reason = check.depth >= check.maxDepth ? `\u0413\u043B\u0443\u0431\u0438\u043D\u0430 ${check.depth}/${check.maxDepth} \u0434\u043B\u044F \u0440\u043E\u043B\u0438 '${roleName}'.` : `\u041F\u043E\u0440\u043E\u0436\u0434\u0435\u043D\u043E ${check.spawned}/${check.maxSpawns} \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0434\u043B\u044F \u0440\u043E\u043B\u0438 '${roleName}'.`;
-      dbg3(`spawn budget BLOCKED: ${reason}`);
-      return {
-        decision: "block",
-        message: [
-          `\u26A0\uFE0F Spawn blocked: ${reason}`,
-          ``,
-          `\u0412\u0430\u0440\u0438\u0430\u043D\u0442\u044B:`,
-          `1. \u0412\u044B\u043F\u043E\u043B\u043D\u0438 \u0440\u0430\u0431\u043E\u0442\u0443 \u0441\u0430\u043C \u2014 \u0442\u044B ${roleName}`,
-          `2. \u041F\u043E\u043F\u0440\u043E\u0441\u0438 teammate \u043F\u043E\u043C\u043E\u0447\u044C: todo_channels({action:"send", channel_id:"333fec34-5604-447e-ac5d-4046d856ee5a", text:"\u041D\u0443\u0436\u043D\u0430 \u043F\u043E\u043C\u043E\u0449\u044C \u0441 [\u0437\u0430\u0434\u0430\u0447\u0430]"})`,
-          `   Teammates: ${teammates}`,
-          `3. \u0417\u0430\u043F\u0440\u043E\u0441\u0438 \u0441\u043F\u0435\u0446\u0438\u0430\u043B\u0438\u0441\u0442\u0430: todo_members({action:"find_available", capability:"[\u043D\u0443\u0436\u043D\u0430\u044F]"})`,
-          `4. \u042D\u0441\u043A\u0430\u043B\u0438\u0440\u0443\u0439 owner'\u0443: todo_channels({action:"send", ..., text:"@relishjev \u043D\u0443\u0436\u0435\u043D \u0441\u043F\u0435\u0446\u0438\u0430\u043B\u0438\u0441\u0442 \u0441 [capability]"})`
-        ].join(`
-`)
-      };
-    }
-    const description = String(input?.description ?? input?.prompt ?? input?.message ?? "");
-    if (description.length < 200) {
-      return {
-        decision: "block",
-        message: [
-          `\u26A0\uFE0F \u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D\u043E: \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435 \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u043A\u043E\u0440\u043E\u0442\u043A\u043E\u0435 (${description.length} \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432, \u043D\u0443\u0436\u043D\u043E 200+).`,
-          ``,
-          `\u0412\u043A\u043B\u044E\u0447\u0438 \u0432 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435:`,
-          `- \u0427\u0442\u043E \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u043E \u0441\u0434\u0435\u043B\u0430\u0442\u044C`,
-          `- \u0427\u0442\u043E \u041D\u0415 \u0434\u0435\u043B\u0430\u0442\u044C`,
-          `- ID \u0440\u043E\u0434\u0438\u0442\u0435\u043B\u044C\u0441\u043A\u043E\u0439 \u0437\u0430\u0434\u0430\u0447\u0438 \u0434\u043B\u044F \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u0430`,
-          `- \u041A\u0430\u043A\u0438\u0435 \u0444\u0430\u0439\u043B\u044B/\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C`
-        ].join(`
-`)
-      };
-    }
-    helperStarted();
-    process.env.__PARENT_MEMBER_ID = identity.memberId;
-    process.env.__PARENT_SESSION_ID = sessionId;
-    process.env.__SPAWN_DEPTH = String(check.depth + 1);
-    process.env.__MAX_HELPER_DEPTH = String(identity.budget?.maxSpawnDepth ?? 2);
-    dbg3(`spawn budget OK: depth=${check.depth}/${check.maxDepth} spawned=${check.spawned + 1}/${check.maxSpawns} \u2192 child will be depth=${check.depth + 1}`);
-    return;
-  } catch (e2) {
-    dbg3(`spawn budget check failed (allowing): ${e2?.message}`);
-    return;
-  }
-}
 export {
   validateAndNormalizeImage,
-  setSignalWireServerUrl,
-  setSignalWireSdkClient,
-  handlePreToolUseSpawnCheck,
-  getSignalWireInstance,
   createClaudeMax,
+  buildContextInjectionParts,
   buildContextInjection
 };

@@ -26,7 +26,8 @@
  *   - Heaviest snapshot wins (subagent calls cannot steal main chat's slot)
  *   - Disarm does not kill timer — auto-resumes on next real request
  *   - Retry chain tracks exact TTL from cacheWrittenAt — never overshoots
- *   - intervalMs clamped to [60s, 240s] at construction
+ *   - intervalMs clamped to [intervalClampMin, intervalClampMax] derived from
+ *     current cacheTtlMs at construction (legacy: [60s, 240s] for 5m TTL)
  */
 import type { KeepaliveConfig, KeepaliveStats, KeepaliveTick, RateLimitInfo, StreamEvent, TokenUsage } from './types.js';
 export interface KeepaliveEngineOptions {
@@ -53,13 +54,13 @@ export interface KeepaliveEngineOptions {
     isOwnerAlive?: () => boolean;
 }
 export declare class KeepaliveEngine {
-    private static readonly CACHE_TTL_MS;
-    private static readonly CACHE_SAFETY_MARGIN_MS;
-    private static readonly KEEPALIVE_RETRY_DELAYS;
+    private readonly cacheTtlMs;
+    private readonly safetyMarginMs;
+    private readonly retryDelaysMs;
+    private readonly healthProbeIntervalsMs;
+    private readonly healthProbeTimeoutMs;
     private static readonly SNAPSHOT_TTL_MS;
     private static readonly DUMP_BODY;
-    private static readonly HEALTH_PROBE_INTERVALS_MS;
-    private static readonly HEALTH_PROBE_TIMEOUT_MS;
     private config;
     private readonly getToken;
     private readonly doFetch;
@@ -96,7 +97,20 @@ export declare class KeepaliveEngine {
     /**
      * Layer 3 — Cache rewrite burst protection.
      * Call at the top of every real request BEFORE sending.
-     *   - If gap > warnIdleMs AND estimated cache size > warnTokens → warning callback
+     *
+     * Measures idle time against `cacheWrittenAt` — the timestamp of the last
+     * cache-touching event (real request OR successful KA fire). This correctly
+     * accounts for KA keeping the prompt cache warm: even if the user has been
+     * idle for hours, KA fires every ~2min refresh the cache (cache_read_input_tokens
+     * keeps growing in RAW_USAGE), so cacheWrittenAt stays recent.
+     *
+     * Previous version compared against `lastRealActivityAt` (only updated by real
+     * user requests) — this fired false warnings every 5min of user idleness even
+     * when KA was healthily firing. Symptom: TUI banner "Cache likely dead — idle=350s,
+     * next request will cost ~150k cache_write tokens" while RAW_USAGE simultaneously
+     * showed cache_creation_input_tokens < 2k (cache was actually warm).
+     *
+     *   - If gap since cacheWrittenAt > warnIdleMs AND cache size > warnTokens → warning
      *   - If gap > blockIdleMs AND blockEnabled → throws CacheRewriteBlockedError
      */
     checkRewriteGuard(model: string): void;
@@ -142,7 +156,7 @@ export declare class KeepaliveEngine {
     /** @internal — for test inspection */
     get _timer(): ReturnType<typeof setInterval> | null;
     /** @internal — for test inspection */
-    get _config(): Required<Pick<KeepaliveConfig, "enabled" | "intervalMs" | "idleTimeoutMs" | "minTokens" | "rewriteWarnIdleMs" | "rewriteWarnTokens" | "rewriteBlockIdleMs" | "rewriteBlockEnabled">> & {
+    get _config(): Required<Pick<KeepaliveConfig, "enabled" | "intervalMs" | "rewriteWarnIdleMs" | "rewriteWarnTokens" | "idleTimeoutMs" | "minTokens" | "rewriteBlockEnabled" | "rewriteBlockIdleMs">> & {
         onHeartbeat?: (stats: KeepaliveStats) => void;
         onTick?: (tick: KeepaliveTick) => void;
         onDisarmed?: (info: {
@@ -165,6 +179,8 @@ export declare class KeepaliveEngine {
     get _lastKnownCacheTokensByModel(): ReadonlyMap<string, number>;
     /** @internal — mutable internal state getters/setters for test inspection */
     _setLastRealActivityAt(v: number): void;
+    _setCacheWrittenAt(v: number): void;
+    get _cacheWrittenAt(): number;
     _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void;
 }
 //# sourceMappingURL=keepalive-engine.d.ts.map

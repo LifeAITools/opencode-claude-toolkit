@@ -6,6 +6,10 @@ export { ClaudeCodeSDKError, AuthError, APIError, RateLimitError, CacheRewriteBl
 export type { SessionEntry } from './session.js';
 export { KeepaliveEngine } from './keepalive-engine.js';
 export type { KeepaliveEngineOptions } from './keepalive-engine.js';
+export { loadKeepaliveConfig, reloadKeepaliveConfig, getCacheTtlMs, getSafetyMarginMs, getConfigPath as getKeepaliveConfigPath, RECOMMENDED_1H_CONFIG, } from './keepalive-config.js';
+export type { ResolvedKeepaliveConfig } from './keepalive-config.js';
+export { CacheMetricsCollector } from './cache-metrics.js';
+export type { RecordedRequest, MetricsSummary, RegressionInfo, CacheMetricsOptions, } from './cache-metrics.js';
 export type { ICredentialsProvider, IEventEmitter, ISessionStore, IUpstreamFetcher, ILivenessChecker, ProxyEvent, Session, ProxyClientAdapters, } from './proxy-ports.js';
 export { FileCredentialsProvider, ConsoleEventEmitter, NullEventEmitter, InMemorySessionStore, DefaultLivenessChecker, NativeFetchUpstream, } from './proxy-adapters.js';
 export type { FileCredentialsProviderOptions, ConsoleEventEmitterOptions, } from './proxy-adapters.js';

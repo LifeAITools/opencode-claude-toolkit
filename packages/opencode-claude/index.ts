@@ -25,10 +25,6 @@ import { createHash, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, statSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
-import { setSignalWireServerUrl, setSignalWireSdkClient, getSignalWireInstance, handlePreToolUseSpawnCheck } from './provider.ts'
-import { startWakeListener, stopWakeListener } from '@life-ai-tools/opencode-signal-wire'
-import type { WakeListenerHandle } from '@life-ai-tools/opencode-signal-wire'
-import { loadPreferences, computeSubscribe } from '@life-ai-tools/opencode-signal-wire'
 
 // ─── OAuth Constants (matching Claude CLI exactly) ─────────
 // Source: src/constants/oauth.ts (PROD_OAUTH_CONFIG)
@@ -134,12 +130,22 @@ class CredentialManager {
     return !this.accessToken || (Date.now() + EXPIRY_BUFFER_MS >= this.expiresAt)
   }
 
-  /** Ensure we have a valid token. Refreshes if needed. */
+  /** Ensure we have a valid token. Refreshes if needed.
+   *
+   * IMPORTANT (2026-04-30): on every call we check if the credentials file
+   * has changed on disk and reload if so — even if our in-memory token is
+   * still technically valid. This handles the user-relogin-during-session
+   * case: before the fix, in-memory token stayed alive ~8h after relogin,
+   * causing requests to hit the OLD org's quota indefinitely. Now any
+   * external write to ~/.claude/.credentials.json is picked up at the next
+   * request, switching this PID to whichever org/account the user is on.
+   */
   async ensureValid(): Promise<string> {
-    // Check if another process updated the file
+    // Always check for external token updates (user re-login, parallel CLI
+    // refresh, etc). Cheap mtime check; only re-parses on actual change.
     if (this.diskChanged()) {
       this.loadFromDisk()
-      if (!this.isExpired()) return this.accessToken!
+      // After reload, fall through to standard expiry/refresh flow.
     }
 
     if (!this.isExpired()) return this.accessToken!
@@ -210,15 +216,9 @@ function dbg(...args: any[]) {
   try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`) } catch {}
 }
 
-// ─── Module-level identity error (bridged to signal-wire package) ──
-//
-// Identity-resolution errors flow: opencode-claude writes → signal-wire
-// package (via setIdentityError) → tui.tsx reads (via getIdentityError).
-// Re-exported for backward compat with any external consumers.
-import { setIdentityError, getIdentityError as _getIdentityError } from '@life-ai-tools/opencode-signal-wire'
-
-/** Export for TUI status display (Task 6) */
-export const getIdentityError = _getIdentityError
+// ─── Module-level identity error for Claude provider auth status ──
+let _identityError: string | null = null
+export function getIdentityError(): string | null { return _identityError }
 
 /**
  * Resolve member identity from OAuth token via SynqTask MCP whoami.
@@ -304,8 +304,6 @@ function _readPkgVersion(p: string): string {
 }
 const _PLUGIN_PKG = _readPkgVersion(join(import.meta.dir, '..', 'package.json'))
 const _SDK_PKG = _readPkgVersion(join(import.meta.dir, '..', 'node_modules', '@life-ai-tools', 'claude-code-sdk', 'package.json'))
-const _SIGNALWIRE_PKG = _readPkgVersion(join(import.meta.dir, '..', 'node_modules', '@life-ai-tools', 'opencode-signal-wire', 'package.json'))
-
 export default {
   id: 'opencode-claude-max',
   server: async (input: any) => {
@@ -322,32 +320,24 @@ export default {
     // STARTUP fields (in-process plugin only — DOES NOT include standalone proxy):
     //   plugin       — this opencode plugin package
     //   sdkInProc    — in-process keepalive engine + HTTP forwarder (what you'd call "embedded proxy")
-    //   signalWire   — extracted signal-wire helper package
     //   node         — Node/Bun runtime version
     //   providerPath — file:// URL to bundled dist/provider.js (what opencode actually loads)
     //   providerMtime — build timestamp of that bundle (useful when version doesn't change but rebuild happens)
     //
     // For standalone proxy daemon version — query its own log: GET http://127.0.0.1:5050/version
     // (that proxy logs to ~/.claude/claude-max-proxy.log, not here).
-    dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdkInProc=${_SDK_PKG} signalWire=${_SIGNALWIRE_PKG} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`)
+    dbg(`STARTUP plugin.server() pid=${process.pid} session=${sessionId} cwd=${cwd} cred=${creds.credPath} loggedIn=${creds.hasCredentials} plugin=${_PLUGIN_PKG} sdkInProc=${_SDK_PKG} node=${process.version} providerPath=${providerPath} providerMtime=${_providerMtime} initTime=${Date.now() - t0}ms`)
 
-    // Signal-wire: capture serverUrl for TUI notifications
     const _serverUrl = typeof input.serverUrl === 'object' && input.serverUrl?.href
       ? input.serverUrl.href.replace(/\/$/, '')  // URL object → string, strip trailing slash
       : (typeof input.serverUrl === 'string' ? input.serverUrl.replace(/\/$/, '') : '')
     const _sessionId = process.env.OPENCODE_SESSION_ID ?? sessionId
-    dbg(`STARTUP signal-wire: serverUrl=${_serverUrl} sessionId=${_sessionId}`)
-
-    // Pass serverUrl to provider.ts for SignalWire instance construction
-    setSignalWireServerUrl(_serverUrl)
-
-    // Proactive wake: start plugin wake listener (L4)
-    // Bun.serve on random port — writes discovery file for Event Router
-    let wakeHandle: WakeListenerHandle | null = null
+    dbg(`STARTUP provider context: serverUrl=${_serverUrl} sessionId=${_sessionId}`)
 
     // Resolve member identity — DB-01 priority: X-Agent-Id > OAuth whoami > env var
     let _memberId = process.env.SYNQTASK_MEMBER_ID
     let _memberType: 'human' | 'agent' | 'unknown' = 'unknown'
+    let _identityError: string | null = null
 
     // Priority 1: opencode.json X-Agent-Id header (agent path — CN-01: untouched)
     try {
@@ -372,47 +362,18 @@ export default {
           _memberType = 'human'
           dbg(`WAKE memberId from OAuth whoami (human): ${_memberId} name=${oauthResult.memberName}`)
         } else if (!_memberId) {
-          setIdentityError('OAuth whoami returned no member (token expired or SynqTask down?)')
+          _identityError = 'OAuth whoami returned no member (token expired or SynqTask down?)'
           dbg(`WAKE OAuth whoami failed: ${_identityError}`)
         }
       } catch (e: any) {
-        setIdentityError(e?.message ?? 'OAuth whoami exception')
+        _identityError = e?.message ?? 'OAuth whoami exception'
         dbg(`WAKE OAuth identity failed (non-fatal): ${_identityError}`)
       }
     }
 
     // Priority 3: env SYNQTASK_MEMBER_ID already assigned above as initial value
 
-    // Load wake preferences (SSOT) and compute subscribe list
-    const _wakePrefs = loadPreferences(cwd)
-    const { subscribe: _subscribe, preset: _presetName } = computeSubscribe(_wakePrefs, _memberType)
-
-    // Start wake listener if serverUrl available
-    if (_serverUrl) {
-      try {
-        wakeHandle = await startWakeListener({
-          serverUrl: _serverUrl,
-          sessionId: _sessionId,
-          memberId: _memberId,
-          synqtaskUrl: process.env.SYNQTASK_API_URL,
-          // SignalWire instance is constructed lazily in provider.ts config hook,
-          // not available at wake-listener startup — use resolver for request-time lookup
-          signalWireResolver: () => getSignalWireInstance() as any,
-          // SDK client for in-process injection (TUI mode — no HTTP server)
-          sdkClient: input.client,
-          // Wake subscriptions (REQ-02)
-          subscribe: _subscribe,
-          subscribePreset: _presetName ?? undefined,
-          memberType: _memberType,
-        })
-        dbg(`WAKE listener started on port ${wakeHandle.port} token=${wakeHandle.token.slice(0, 8)}...`)
-      } catch (e: any) {
-        // CN-02: wake failure must NOT crash plugin startup
-        dbg(`WAKE listener failed to start: ${e?.message ?? e}`)
-      }
-    } else {
-      dbg(`WAKE listener skipped: serverUrl=${_serverUrl} sessionId=${_sessionId}`)
-    }
+    dbg('WAKE listener bootstrap is owned by @life-ai-tools/opencode-signal-wire/plugin')
 
     // AC-04d: Deferred toast on identity failure (non-silent)
     if (!_memberId && _identityError) {
@@ -430,9 +391,6 @@ export default {
         }, 2000)
       } catch {}
     }
-
-    // Pass SDK client to signal-wire for in-process session injection
-    setSignalWireSdkClient(input.client)
 
     if (!creds.hasCredentials) {
       dbg('Not logged in — run: opencode providers login -p claude-max')
@@ -667,22 +625,6 @@ export default {
         if (event?.type === 'mcp.tools.changed') {
           dbg(`MCP_EVENT: tools changed on server=${event.properties?.server}`)
         }
-      },
-
-      // ─── Stage 2: Spawn budget enforcement (CR-06, CN-06, CN-07) ──
-      // Intercepts `task` tool to enforce depth/subagent limits.
-      // Non-task tools pass through unaffected (CN-06).
-      // Errors in budget tracking never block the agent (CN-07).
-      "pre_tool_use": async ({ toolName, input }: { toolName: string; input?: any }) => {
-        try {
-          const result = await handlePreToolUseSpawnCheck(toolName, _serverUrl, _sessionId, input)
-          if (result) return result  // { decision: 'block', message: '...' }
-        } catch (e: any) {
-          // CN-07: fail-open — never crash on hook errors
-          dbg(`pre_tool_use hook error (allowing): ${e?.message}`)
-        }
-        // Allow: return undefined (no block)
-        return undefined
       },
 
       // ─── Compaction: inject cache context ────────────────

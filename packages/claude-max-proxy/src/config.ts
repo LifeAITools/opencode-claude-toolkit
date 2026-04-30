@@ -14,8 +14,10 @@ export interface ProxyConfig {
   logFile: string
   logJsonl: string
 
-  // KA tuning (clamped via engine anyway, but user-visible defaults)
-  kaIntervalSec: number
+  // KA tuning. kaIntervalSec is OPTIONAL — when unset, KeepaliveEngine reads
+  // its default from SSOT (~/.claude/keepalive.json) which auto-scales with
+  // cacheTtlMs (legacy 5m → 150s, 1h → 1800s).
+  kaIntervalSec: number | undefined
   kaIdleTimeoutSec: number  // 0 = never stop
   kaMinTokens: number
 
@@ -100,7 +102,11 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     logFile: expandHome(read('LOG_FILE', '~/.claude/claude-max-proxy.log', fileEnv)),
     logJsonl: expandHome(read('LOG_JSONL', '~/.claude/claude-max-proxy.jsonl', fileEnv)),
 
-    kaIntervalSec: readInt('KA_INTERVAL_SEC', 120, fileEnv),
+    // KA_INTERVAL_SEC unset → defer to SSOT (~/.claude/keepalive.json).
+    // Set explicitly only to override the SSOT-resolved interval for this proxy instance.
+    kaIntervalSec: process.env.KA_INTERVAL_SEC || fileEnv.KA_INTERVAL_SEC
+      ? readInt('KA_INTERVAL_SEC', 0, fileEnv) || undefined
+      : undefined,
     kaIdleTimeoutSec: readInt('KA_IDLE_TIMEOUT_SEC', 0, fileEnv),
     kaMinTokens: readInt('KA_MIN_TOKENS', 2000, fileEnv),
 

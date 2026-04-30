@@ -12,36 +12,13 @@ try { _traceWrite('/tmp/opencode-claude-trace.log', `PROVIDER.TS pid=${process.p
  *   // or via file:// path
  */
 
-import { ClaudeCodeSDK, resolveMaxTokens, supportsAdaptiveThinking } from '@life-ai-tools/claude-code-sdk'
+import { ClaudeCodeSDK, resolveMaxTokens, supportsAdaptiveThinking, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
 
 import { appendFileSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
-// ── Signal-wire engine ──────────────────────────────────────────────
-// TS-only: @kiberos/signal-wire-core via signal-wire.ts adapter.
-// Legacy fallback (SIGNAL_WIRE_ENGINE=legacy) was removed 2026-04-23 after
-// the core engine reached full parity (150+ golden vectors, 20+ adapter
-// tests, live validation via validate-ssot.sh) — see SIGNAL-WIRE-CORE-MIGRATION.md.
-import { SignalWire } from '@life-ai-tools/opencode-signal-wire'
-
-// Provider-level startup banner — writes one line to signal-wire-debug.log
-// so operators can `tail -f` and confirm which engine build is loaded.
-;(() => {
-  try {
-    const { appendFileSync } = require('fs')
-    const { join } = require('path')
-    const { homedir } = require('os')
-    const logFile = join(homedir(), '.claude', 'signal-wire-debug.log')
-    appendFileSync(
-      logFile,
-      `[${new Date().toISOString()}] [provider pid=${process.pid}] ENGINE_SELECT=CORE implementation=sw-adapter-opencode-claude v1.0.0 env=(ts-only)\n`,
-    )
-  } catch {}
-})()
-import { getAgentIdentity, getSpawnActive, getSpawnTotal, helperStarted, helperFinished, resolveCurrentDepth, checkSpawnAllowed } from '@life-ai-tools/opencode-signal-wire'
-
 const DEBUG = process.env.CLAUDE_MAX_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'claude-max-debug.log')
 const STATS_FILE = join(homedir(), '.claude', 'claude-max-stats.log')
@@ -52,14 +29,6 @@ const SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSIO
 
 const MAX_MEMORY_LINES = 500
 const MAX_MEMORY_BYTES = 50_000
-
-// ─── Signal-wire: module-level state ──────────────────────
-let _swServerUrl = ''
-export function setSignalWireServerUrl(url: string) { _swServerUrl = url }
-export function setSignalWireSdkClient(client: any) { _signalWire?.setSdkClient(client) }
-
-let _signalWire: SignalWire | null = null
-export function getSignalWireInstance(): SignalWire | null { return _signalWire }
 
 function logStats(line: string, structured?: Record<string, unknown>) {
   try { appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}\n`) } catch {}
@@ -364,11 +333,25 @@ function truncateMemory(raw: string): { text: string; truncated: boolean } {
 // invalidating the entire Anthropic cache prefix (36K+ tokens). The agent already
 // has any new knowledge in conversation history — re-injecting it into the prefix
 // wastes cache and money. New sessions pick up fresh content on startup.
-let _contextInjectionFrozen: string | null | undefined = undefined  // undefined = not built yet
+//
+// Split into TWO blocks (added 2026-04-30):
+//   1. STABLE  — CLAUDE.md (rarely-changing global/project rules) → goes FIRST in system
+//   2. VOLATILE — MEMORY.md (agent-written, grows over time) → goes LAST in system
+// Rationale: cache_control breakpoint sits on the LAST system block (sdk.ts:805).
+// If MEMORY.md is at the end, only the small final segment invalidates when it grows;
+// the large STABLE prefix (CLAUDE.md + opencode-system + tools) stays cached.
+let _stableInjectionFrozen: string | null | undefined = undefined
+let _volatileInjectionFrozen: string | null | undefined = undefined
 
-export function buildContextInjection(): string | null {
-  // Fast path: return frozen injection for all calls after the first
-  if (_contextInjectionFrozen !== undefined) return _contextInjectionFrozen
+interface InjectionParts {
+  stable: string | null     // CLAUDE.md content — goes first in system
+  volatile: string | null   // MEMORY.md content — goes last in system
+}
+
+export function buildContextInjectionParts(): InjectionParts {
+  if (_stableInjectionFrozen !== undefined && _volatileInjectionFrozen !== undefined) {
+    return { stable: _stableInjectionFrozen, volatile: _volatileInjectionFrozen }
+  }
 
   const tInject = Date.now()
   const home = homedir()
@@ -378,111 +361,61 @@ export function buildContextInjection(): string | null {
   const sanitized = sanitizePathForProjects(projectBase)
   const memoryPath = join(home, '.claude', 'projects', sanitized, 'memory', 'MEMORY.md')
 
-  // Source files to check
-  const sources: { path: string; tag: string; isMemory?: boolean }[] = [
+  // STABLE sources — CLAUDE.md files (global + project)
+  const stableSources: { path: string; tag: string }[] = [
     { path: join(home, '.claude', 'CLAUDE.md'), tag: 'claude-rules' },
   ]
-
-  // Project CLAUDE.md — only if CWD differs from home (avoid dupe with global)
   if (cwd !== home) {
-    sources.push({ path: join(cwd, 'CLAUDE.md'), tag: 'claude-rules' })
+    stableSources.push({ path: join(cwd, 'CLAUDE.md'), tag: 'claude-rules' })
     const dotClaudePath = join(cwd, '.claude', 'CLAUDE.md')
-    // Only add .claude/CLAUDE.md if it's different from ~/.claude/CLAUDE.md
     if (dotClaudePath !== join(home, '.claude', 'CLAUDE.md')) {
-      sources.push({ path: dotClaudePath, tag: 'claude-rules' })
+      stableSources.push({ path: dotClaudePath, tag: 'claude-rules' })
     }
   }
 
-  sources.push({ path: memoryPath, tag: 'project-memory', isMemory: true })
-
-  // Build injection — read files once, freeze forever
-  const parts: string[] = []
+  const stableParts: string[] = []
   let claudeMdBytes = 0
-  let memoryBytes = 0
-  let memoryTruncated = false
-
-  for (const src of sources) {
+  for (const src of stableSources) {
     const raw = readCachedFile(src.path)
     if (!raw || !raw.trim()) continue
+    stableParts.push(`<${src.tag} source="${src.path}">\n${raw.trim()}\n</${src.tag}>`)
+    claudeMdBytes += raw.trim().length
+  }
+  const stable = stableParts.length > 0 ? stableParts.join('\n\n') : null
 
-    if (src.isMemory) {
-      const { text, truncated } = truncateMemory(raw)
-      parts.push(`<${src.tag} source="${src.path}">\n${text}\n</${src.tag}>`)
-      memoryBytes = text.length
-      memoryTruncated = truncated
-    } else {
-      parts.push(`<${src.tag} source="${src.path}">\n${raw.trim()}\n</${src.tag}>`)
-      claudeMdBytes += raw.trim().length
-    }
+  // VOLATILE source — MEMORY.md
+  let volatile: string | null = null
+  let memoryBytes = 0
+  let memoryTruncated = false
+  const memRaw = readCachedFile(memoryPath)
+  if (memRaw && memRaw.trim()) {
+    const { text, truncated } = truncateMemory(memRaw)
+    volatile = `<project-memory source="${memoryPath}">\n${text}\n</project-memory>`
+    memoryBytes = text.length
+    memoryTruncated = truncated
   }
 
-  const content = parts.length > 0 ? parts.join('\n\n') : null
-
-  dbg(`context_inject: ${parts.length} sources, ${content?.length ?? 0} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? ' TRUNCATED' : ''}) built in ${Date.now() - tInject}ms [FROZEN for session]`)
-  logStats(`[${new Date().toISOString()}] type=context_inject | sources=${parts.length} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject}`, {
-    type: 'context_inject', sources: parts.length, claudeMdBytes, memoryBytes, truncated: memoryTruncated, buildMs: Date.now() - tInject,
+  const totalSources = stableParts.length + (volatile ? 1 : 0)
+  const totalBytes = (stable?.length ?? 0) + (volatile?.length ?? 0)
+  dbg(`context_inject: ${totalSources} sources, ${totalBytes} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? ' TRUNCATED' : ''}) built in ${Date.now() - tInject}ms [FROZEN for session, split: stable+volatile]`)
+  logStats(`[${new Date().toISOString()}] type=context_inject | sources=${totalSources} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject} split=true`, {
+    type: 'context_inject', sources: totalSources, claudeMdBytes, memoryBytes, truncated: memoryTruncated, buildMs: Date.now() - tInject, split: true,
   })
 
-  // Freeze — this value is returned for ALL subsequent calls in this process
-  _contextInjectionFrozen = content
-  return content
+  _stableInjectionFrozen = stable
+  _volatileInjectionFrozen = volatile
+  return { stable, volatile }
 }
 
-// ─── Signal-wire: extract context from converted messages ─
-
-function extractSignalWireContext(messages: any[]): { event: 'UserPromptSubmit' | 'PostToolUse'; lastUserText: string; lastToolName: string; lastToolInput: string; lastToolOutput: string } {
-  let lastUserText = ''
-  let lastToolName = ''
-  let lastToolInput = ''
-  let lastToolOutput = ''
-  let lastAssistantText = ''
-
-  // Walk backwards through messages to find last user text, tool result, and assistant text
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role === 'user' && !lastUserText) {
-      // Check for text content (not tool_result)
-      const content = Array.isArray(msg.content) ? msg.content : [msg.content]
-      for (const part of content) {
-        if (part.type === 'text' && part.text) {
-          lastUserText = part.text
-          break
-        }
-        if (part.type === 'tool_result' && !lastToolOutput) {
-          lastToolOutput = typeof part.content === 'string' ? part.content : JSON.stringify(part.content)
-        }
-      }
-    }
-    if (msg.role === 'assistant') {
-      const content = Array.isArray(msg.content) ? msg.content : [msg.content]
-      for (const part of content) {
-        if (part.type === 'tool_use' && part.name && !lastToolName) {
-          lastToolName = part.name
-          lastToolInput = typeof part.input === 'string' ? part.input : JSON.stringify(part.input ?? {})
-        }
-        // Also capture assistant plain text — enables response_regex to match
-        // against text responses (not just tool output). Critical for rules like
-        // anti-premature-handover-output which need to catch "wrap up" in plain text.
-        if (part.type === 'text' && part.text && !lastAssistantText) {
-          lastAssistantText = part.text
-        }
-      }
-    }
-    if (lastUserText && (lastToolName || lastAssistantText)) break
-  }
-
-  // Merge assistant text into lastToolOutput so response_regex matches BOTH
-  // tool output AND plain text responses. Dedup: if tool output exists, append
-  // assistant text (separated by newline) so regex searches both.
-  if (lastAssistantText) {
-    lastToolOutput = lastToolOutput
-      ? `${lastToolOutput}\n${lastAssistantText}`
-      : lastAssistantText
-  }
-
-  // Determine event type: if we found tool result → PostToolUse, else UserPromptSubmit
-  const event = lastToolOutput ? 'PostToolUse' : 'UserPromptSubmit'
-  return { event, lastUserText, lastToolName, lastToolInput, lastToolOutput }
+/**
+ * Legacy helper: returns concatenated stable+volatile injection.
+ * Used by callers that don't yet support the split. New code should use buildContextInjectionParts().
+ * @deprecated Prefer buildContextInjectionParts() to keep MEMORY.md changes from invalidating the entire cache prefix.
+ */
+export function buildContextInjection(): string | null {
+  const { stable, volatile } = buildContextInjectionParts()
+  if (!stable && !volatile) return null
+  return [stable, volatile].filter(Boolean).join('\n\n')
 }
 
 // ─── Prompt conversion: V3 → SDK ──────────────────────────
@@ -532,20 +465,34 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
         system = (system as { type: string; text?: string }[]).filter(b => b.type !== 'text' || (b.text && b.text.length > 0))
         if ((system as unknown[]).length === 0) system = undefined
       }
-      // Inject CLAUDE.md rules + MEMORY.md into system prompt.
+      // Inject CLAUDE.md (stable) and MEMORY.md (volatile) into system prompt.
+      //
+      // Layout (added 2026-04-30 for cache prefix stability):
+      //   [STABLE: CLAUDE.md] + [opencode system content] + [VOLATILE: MEMORY.md]
+      //
+      // Why split: MEMORY.md grows over time (agent writes to it). cache_control
+      // breakpoint sits on the LAST system block (sdk.ts:805 addCacheMarkers).
+      // Putting MEMORY.md last means its growth invalidates only the small final
+      // segment, while the large CLAUDE.md + opencode-system prefix stays cached.
+      //
       // NOTE: attempted migration to experimental.chat.system.transform hook failed —
       // opencode only dispatches config/auth hooks to external (npm) plugins,
       // not trigger-type hooks. So injection stays in the provider for now.
-      const injection = buildContextInjection()
-      if (injection) {
+      const { stable: stableInj, volatile: volatileInj } = buildContextInjectionParts()
+
+      if (stableInj || volatileInj) {
         if (typeof system === 'string') {
-          system = injection + '\n\n' + (system || '')
+          system = [
+            stableInj,
+            system,
+            volatileInj,
+          ].filter(Boolean).join('\n\n') || undefined
         } else if (Array.isArray(system)) {
-          // Prepend as new text block WITHOUT cache_control
-          // Existing blocks keep their cache markers at their positions
-          ;(system as any[]).unshift({ type: 'text', text: injection })
+          // Stable goes to the front, volatile to the end.
+          if (stableInj) (system as any[]).unshift({ type: 'text', text: stableInj })
+          if (volatileInj) (system as any[]).push({ type: 'text', text: volatileInj })
         } else {
-          system = injection
+          system = [stableInj, volatileInj].filter(Boolean).join('\n\n') || undefined
         }
       }
       continue
@@ -756,25 +703,21 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
     dbg(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`)
   }
 
-  // ─── Signal-wire: evaluate rules and inject if triggered ──────
-  try {
-    if (_signalWire) {
-      const swContext = extractSignalWireContext(messages)
-      const swResult = _signalWire.evaluate(swContext)
-      if (swResult) {
-        // Append as user message with <system-reminder> — becomes cached on next call
-        messages.push({
-          role: 'user',
-          content: [{ type: 'text', text: `<system-reminder>\n${swResult.hint}\n</system-reminder>` }],
-        })
-        dbg(`signal-wire fired: ${swResult.ruleId} (${swResult.hint.length} chars)`)
-      }
+  // Prefix fingerprint: hash each system block separately for cache-debugging.
+  // When cache_read=0 unexpectedly, comparing fingerprints across PIDs reveals
+  // which block changed (CLAUDE.md? opencode hints? MEMORY.md?).
+  const sysFingerprints: string[] = []
+  if (Array.isArray(system)) {
+    const { createHash } = require('crypto') as typeof import('crypto')
+    for (const block of system as any[]) {
+      const text = block?.text ?? ''
+      sysFingerprints.push(`${createHash('md5').update(String(text)).digest('hex').slice(0, 8)}@${String(text).length}`)
     }
-  } catch (e: any) {
-    dbg(`signal-wire error (non-blocking): ${e.message}`)
+  } else if (typeof system === 'string') {
+    const { createHash } = require('crypto') as typeof import('crypto')
+    sysFingerprints.push(`${createHash('md5').update(system).digest('hex').slice(0, 8)}@${system.length}`)
   }
-
-  dbg(`convertPrompt: ${messages.length} messages, system=${typeof system === 'string' ? system.length : Array.isArray(system) ? (system as any[]).length + ' blocks' : 'none'}, in ${Date.now() - tConvert}ms`)
+  dbg(`convertPrompt: ${messages.length} messages, system=${typeof system === 'string' ? system.length : Array.isArray(system) ? (system as any[]).length + ' blocks' : 'none'} fingerprints=[${sysFingerprints.join(',')}] in ${Date.now() - tConvert}ms`)
   return { system, messages }
 }
 
@@ -816,6 +759,7 @@ function normalizeToolSchema(schema: any): any {
 
 let _lastToolCount = 0
 let _lastToolHash = ''
+let _lastToolFingerprint = ''
 
 // Tool name remapping — Anthropic blocks certain third-party tool names
 // by routing requests to overage/extra-usage billing with misleading error.
@@ -833,6 +777,16 @@ const TOOL_NAME_UNREMAP: Record<string, string> = Object.fromEntries(
 // We use this heuristic to separate them for cache-optimal ordering.
 const MCP_TOOL_PATTERN = /^[a-z][\w-]+_[a-z]/  // e.g. "km_km_think", "telegram-mcp_tg_send"
 
+// Explicit allowlist of built-in names AFTER TOOL_NAME_REMAP. Required because
+// `todo_write` (remapped from `todowrite`) contains an underscore and would
+// otherwise match MCP_TOOL_PATTERN, causing it to drift between builtin (10)
+// and MCP (69 or 70) buckets — observed 319× in claude-max-debug.log.
+// This caused the exact "TOOL_DRIFT 80↔79 (builtin=10 mcp=69)" pattern.
+const BUILTIN_NAMES_AFTER_REMAP: ReadonlySet<string> = new Set([
+  'bash', 'read', 'glob', 'grep', 'edit', 'write',
+  'task', 'todo_write', 'question', 'webfetch', 'skill',
+])
+
 function convertTools(tools?: any[]): any[] | undefined {
   if (!tools?.length) return undefined
 
@@ -848,12 +802,18 @@ function convertTools(tools?: any[]): any[] | undefined {
   // sort only MCP tools among themselves (deterministic regardless of connection race).
   // This way missing MCPs only truncate the SUFFIX — the built-in prefix stays
   // byte-identical for cache hits across sessions with different MCP availability.
+  //
+  // Allowlist takes priority: known built-in names always go to builtIn even if
+  // they happen to contain underscores (e.g. todo_write).
   const builtIn: typeof all = []
   const mcp: typeof all = []
   for (const t of all) {
-    if (MCP_TOOL_PATTERN.test(t.name)) {
+    if (BUILTIN_NAMES_AFTER_REMAP.has(t.name)) {
+      builtIn.push(t)
+    } else if (MCP_TOOL_PATTERN.test(t.name)) {
       mcp.push(t)
     } else {
+      // Unknown name without underscore separator — treat as builtin for cache stability
       builtIn.push(t)
     }
   }
@@ -861,19 +821,41 @@ function convertTools(tools?: any[]): any[] | undefined {
 
   const result = [...builtIn, ...mcp]
 
-  // Detect tool set changes (MCP server connected/disconnected mid-session)
+  // Detect tool set changes (MCP server connected/disconnected mid-session).
+  // Diff produces actionable info for next investigation: which tool was added/removed.
   const count = result.length
-  const hash = result.map((t: any) => t.name).join(',')
-  if (_lastToolCount > 0 && count !== _lastToolCount) {
-    dbg(`⚠ TOOL_DRIFT: tool count changed ${_lastToolCount} → ${count} mid-session (builtin=${builtIn.length} mcp=${mcp.length})`)
-    logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length}`, {
-      type: 'tool_drift', oldCount: _lastToolCount, newCount: count, builtIn: builtIn.length, mcpCount: mcp.length,
+  const namesNow = result.map((t: any) => t.name)
+  const hash = namesNow.join(',')
+  // Per-tool body fingerprints — catches mid-session schema/description drift
+  // even when the name list is stable. (Seen 2026-04-30: telegram-mcp_tg_send_message
+  // schema-hash differed between PIDs without name change.)
+  const { createHash } = require('crypto') as typeof import('crypto')
+  const toolsFingerprint = createHash('md5').update(
+    result.map((t: any) => `${t.name}|${createHash('md5').update(JSON.stringify(t)).digest('hex').slice(0,8)}`).join(',')
+  ).digest('hex').slice(0, 12)
+  if (_lastToolCount > 0 && hash !== _lastToolHash) {
+    const oldNames = new Set(_lastToolHash.split(','))
+    const newNames = new Set(namesNow)
+    const added = namesNow.filter(n => !oldNames.has(n))
+    const removed = [..._lastToolHash.split(',')].filter(n => !newNames.has(n))
+    dbg(`⚠ TOOL_DRIFT: count ${_lastToolCount} → ${count} (builtin=${builtIn.length} mcp=${mcp.length}) added=[${added.join(',')}] removed=[${removed.join(',')}] toolsFp=${toolsFingerprint}`)
+    logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length} added=${added.join(',')} removed=${removed.join(',')} toolsFp=${toolsFingerprint}`, {
+      type: 'tool_drift', oldCount: _lastToolCount, newCount: count,
+      builtIn: builtIn.length, mcpCount: mcp.length,
+      added, removed, toolsFingerprint,
     })
   } else if (_lastToolCount === 0) {
-    dbg(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length})`)
+    dbg(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length}) toolsFp=${toolsFingerprint}`)
+  } else if (toolsFingerprint !== _lastToolFingerprint) {
+    // Same name list but DIFFERENT schemas — silent drift, hardest to catch.
+    dbg(`⚠ TOOL_SCHEMA_DRIFT: same ${count} tools but fingerprint changed ${_lastToolFingerprint} → ${toolsFingerprint}`)
+    logStats(`[${new Date().toISOString()}] type=tool_schema_drift | count=${count} oldFp=${_lastToolFingerprint} newFp=${toolsFingerprint}`, {
+      type: 'tool_schema_drift', count, oldFingerprint: _lastToolFingerprint, newFingerprint: toolsFingerprint,
+    })
   }
   _lastToolCount = count
   _lastToolHash = hash
+  _lastToolFingerprint = toolsFingerprint
 
   return result
 }
@@ -990,9 +972,6 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
         usage: { in: u?.inputTokens ?? 0, out: u?.outputTokens ?? 0, cacheRead: u?.cacheReadInputTokens ?? 0, cacheWrite: u?.cacheCreationInputTokens ?? 0 },
         rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
       })
-      // Signal-wire: track generate tokens
-      try { _signalWire?.trackTokens({ inputTokens: u?.inputTokens ?? 0, outputTokens: u?.outputTokens ?? 0, cacheReadInputTokens: u?.cacheReadInputTokens ?? 0, cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0 }) } catch {}
-
       return {
         content,
         finishReason: convertFinishReason(response.stopReason),
@@ -1150,8 +1129,6 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                     rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
                   })
                   dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
-                  // Signal-wire: track stream tokens
-                  try { _signalWire?.trackTokens({ inputTokens: u?.inputTokens ?? 0, outputTokens: u?.outputTokens ?? 0, cacheReadInputTokens: u?.cacheReadInputTokens ?? 0, cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0 }) } catch {}
                   if (textActive) { controller.enqueue({ type: 'text-end', id: textId }); textActive = false }
                   if (reasoningActive) { controller.enqueue({ type: 'reasoning-end', id: reasoningId }); reasoningActive = false }
 
@@ -1211,9 +1188,13 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
   const keepaliveEnabled = providerOpts.keepalive !== undefined
     ? !!providerOpts.keepalive
     : process.env.CLAUDE_MAX_KEEPALIVE !== '0'
-  const keepaliveInterval = providerOpts.keepaliveInterval
+  // keepaliveInterval: explicit user value wins; otherwise undefined → engine reads
+  // from SSOT (~/.claude/keepalive.json). Auto-scales with cacheTtlMs (5m→150s, 1h→1800s).
+  const keepaliveInterval: number | undefined = providerOpts.keepaliveInterval
     ? parseInt(providerOpts.keepaliveInterval) * 1000
-    : (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ?? '120') || 120) * 1000
+    : process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL
+      ? (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL) || 0) * 1000 || undefined
+      : undefined
   const keepaliveIdle = providerOpts.keepaliveIdle
     ? parseInt(providerOpts.keepaliveIdle) * 1000
     : process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity
@@ -1229,7 +1210,35 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
   const rewriteBlockEnabled = process.env.CLAUDE_MAX_REWRITE_BLOCK === '1'
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? '1800', 10) || 1800) * 1000
 
-  dbg(`STARTUP createClaudeMax pid=${PID}`, { hasAccessToken: !!options.accessToken, credentialsPath: options.credentialsPath, keepaliveEnabled, keepaliveInterval, providerOpts: Object.keys(providerOpts), rewriteWarnIdleMs, rewriteBlockEnabled })
+  // Resolve cache + KA params from SSOT (~/.claude/keepalive.json) for visibility.
+  // This is the SAME config the engine will read internally; logging it makes
+  // it trivial to confirm new code is loaded after a restart.
+  let cacheConfigSnapshot: Record<string, unknown> = {}
+  try {
+    const c = loadKeepaliveConfig()
+    cacheConfigSnapshot = {
+      cacheTtlMs: c.cacheTtlMs,
+      cacheTtlMin: Math.round(c.cacheTtlMs / 60_000),
+      intervalMs: c.intervalMs,
+      intervalMin: Math.round(c.intervalMs / 60_000),
+      safetyMarginMs: c.safetyMarginMs,
+      retryCount: c.retryDelaysMs.length,
+      source: c._source,
+    }
+  } catch (e: any) {
+    cacheConfigSnapshot = { error: e?.message }
+  }
+
+  dbg(`STARTUP createClaudeMax pid=${PID} sdk=0.12.0 plugin=1.3.0 [cache-ssot]`, {
+    hasAccessToken: !!options.accessToken,
+    credentialsPath: options.credentialsPath,
+    keepaliveEnabled,
+    keepaliveInterval,
+    providerOpts: Object.keys(providerOpts),
+    rewriteWarnIdleMs,
+    rewriteBlockEnabled,
+    cacheConfig: cacheConfigSnapshot,
+  })
   const sdk = new ClaudeCodeSDK({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
@@ -1270,8 +1279,6 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
           rateLimit: stats.rateLimit ?? undefined,
         })
         dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit })
-        // Signal-wire: track keepalive tokens
-        try { _signalWire?.trackTokens({ inputTokens: stats.usage.inputTokens, cacheReadInputTokens: stats.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: stats.usage.cacheCreationInputTokens ?? 0 }) } catch {}
       },
       onDisarmed: (info) => {
         // KA stopped firing (cache/network issue) but timer stays alive for auto-resume.
@@ -1304,143 +1311,10 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
 
   dbg(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`)
 
-  // ─── Signal-wire: create instance for rule evaluation ───
-  try {
-    // rulesPath intentionally omitted — adapter resolves the canonical
-    // SSOT path via @kiberos/signal-wire-core's getBundledRulesPath().
-    // This is what enables hot-reload and guarantees no dist/source drift.
-    _signalWire = new SignalWire({
-      serverUrl: _swServerUrl || process.env.OPENCODE_SERVER_URL || '',
-      sessionId: process.env.OPENCODE_SESSION_ID ?? '?',
-      platform: 'opencode',
-    })
-    dbg(`signal-wire: instance created (${_signalWire ? 'ok' : 'null'})`)
-  } catch (e: any) {
-    dbg(`signal-wire: failed to create instance: ${e.message}`)
-    _signalWire = null
-  }
-
    return {
     languageModel(modelId: string): LanguageModelV3 {
       dbg('languageModel requested:', modelId)
       return createLanguageModel(sdk, modelId, 'claude-max')
     },
-  }
-}
-
-// ─── Stage 2: PreToolUse Spawn Budget Enforcement ─────────────────
-// CR-06: Block `task` tool when depth/count exceeded
-// CN-06: ONLY checks `task` tool — all other tools pass through
-// CN-07: Fail-open on any tracking error
-
-/**
- * PreToolUse hook handler for spawn budget enforcement.
- * Called from index.ts plugin hook. Returns block decision or undefined (allow).
- *
- * @param toolName - Name of the tool being invoked
- * @param serverUrl - OpenCode internal server URL (for depth resolution)
- * @param sessionId - Current session ID (for parent_id chain walk)
- */
-export async function handlePreToolUseSpawnCheck(
-  toolName: string,
-  serverUrl: string,
-  sessionId: string,
-  input?: Record<string, any>,
-): Promise<{ decision: 'block'; message: string } | undefined> {
-  // CN-06: Only check agent-spawning tools — let all other tools pass through
-  // Tool names from oh-my-opencode: ["task", "Task", "task_tool", "call_omo_agent"]
-  const SPAWN_TOOLS = ['task', 'Task', 'task_tool', 'call_omo_agent']
-  if (!SPAWN_TOOLS.includes(toolName)) return undefined
-
-  try {
-    const identity = getAgentIdentity()
-    const depth = await resolveCurrentDepth(sessionId)
-    
-    // ─── Case 1: No org role = HELPER (explore, plan, oracle) ───
-    // Helper depth is controlled by parent's maxHelperDepth (from role).
-    // Parent passes __MAX_HELPER_DEPTH via env. If current depth >= max → block.
-    if (!identity || !identity.roleName) {
-      const maxDepth = parseInt(process.env.__MAX_HELPER_DEPTH ?? '1', 10)
-      if (depth >= maxDepth) {
-        return {
-          decision: 'block',
-          message: [
-            `⚠️ Хелпер заблокирован: глубина ${depth}/${maxDepth}.`,
-            `Допустимая вложенность хелперов определяется ролью вызвавшего агента.`,
-            `На этом уровне порождение запрещено.`,
-            ``,
-            `Выполни задание сам и верни результат.`,
-            `Используй bash, read, grep, webfetch — но не task/call_omo_agent.`,
-          ].join('\n')
-        }
-      }
-      // Allowed — track active helper
-      helperStarted()
-      dbg(`helper spawn OK (depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()})`)
-      return undefined
-    }
-
-    // ─── Case 2: Agent with org role and budget ───
-    const check = checkSpawnAllowed(identity, depth, getSpawnActive())
-    if (!check.allowed) {
-      // Verbose error with role context and actionable options
-      const roleName = identity.roleName ?? 'unknown'
-      const teammates = identity.teammates?.length > 0
-        ? identity.teammates.map(t => `${t.name} (${t.roleName ?? '?'})`).join(', ')
-        : 'нет'
-      const reason = check.depth >= check.maxDepth
-        ? `Глубина ${check.depth}/${check.maxDepth} для роли '${roleName}'.`
-        : `Порождено ${check.spawned}/${check.maxSpawns} субагентов для роли '${roleName}'.`
-      
-      dbg(`spawn budget BLOCKED: ${reason}`)
-      return {
-        decision: 'block',
-        message: [
-          `⚠️ Spawn blocked: ${reason}`,
-          ``,
-          `Варианты:`,
-          `1. Выполни работу сам — ты ${roleName}`,
-          `2. Попроси teammate помочь: todo_channels({action:"send", channel_id:"333fec34-5604-447e-ac5d-4046d856ee5a", text:"Нужна помощь с [задача]"})`,
-          `   Teammates: ${teammates}`,
-          `3. Запроси специалиста: todo_members({action:"find_available", capability:"[нужная]"})`,
-          `4. Эскалируй owner'у: todo_channels({action:"send", ..., text:"@relishjev нужен специалист с [capability]"})`,
-        ].join('\n')
-      }
-    }
-
-    // CR-10: Validate delegation has substantive description BEFORE counting (Stage 3)
-    const description = String(input?.description ?? input?.prompt ?? input?.message ?? '')
-    if (description.length < 200) {
-      return {
-        decision: 'block',
-        message: [
-          `⚠️ Делегирование заблокировано: описание слишком короткое (${description.length} символов, нужно 200+).`,
-          ``,
-          `Включи в описание:`,
-          `- Что конкретно сделать`,
-          `- Что НЕ делать`,  
-          `- ID родительской задачи для контекста`,
-          `- Какие файлы/результаты прочитать`,
-        ].join('\n')
-      }
-    }
-
-    // All checks passed — track active helper (concurrent limit)
-    helperStarted()
-
-    // Stage 2.1 (REQ-16b): Set env vars for child to inherit spawn context
-    // Child's wake-listener reads these at startup for O(1) depth resolution
-    process.env.__PARENT_MEMBER_ID = identity.memberId
-    process.env.__PARENT_SESSION_ID = sessionId
-    process.env.__SPAWN_DEPTH = String(check.depth + 1)
-    // Pass parent's maxHelperDepth so helpers know their ceiling
-    process.env.__MAX_HELPER_DEPTH = String(identity.budget?.maxSpawnDepth ?? 2)
-    dbg(`spawn budget OK: depth=${check.depth}/${check.maxDepth} spawned=${check.spawned + 1}/${check.maxSpawns} → child will be depth=${check.depth + 1}`)
-
-    return undefined
-  } catch (e: any) {
-    // CN-07: fail-open on tracking errors — never block due to internal error
-    dbg(`spawn budget check failed (allowing): ${e?.message}`)
-    return undefined
   }
 }

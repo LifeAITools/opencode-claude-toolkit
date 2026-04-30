@@ -41757,8 +41757,8 @@ function createClaudeMax(options = {}) {
   const keepaliveEnabled = providerOpts.keepalive !== undefined ? !!providerOpts.keepalive : process.env.CLAUDE_MAX_KEEPALIVE !== "0";
   const keepaliveInterval = providerOpts.keepaliveInterval ? parseInt(providerOpts.keepaliveInterval) * 1000 : process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL ? (parseInt(process.env.CLAUDE_MAX_KEEPALIVE_INTERVAL) || 0) * 1000 || undefined : undefined;
   const keepaliveIdle = providerOpts.keepaliveIdle ? parseInt(providerOpts.keepaliveIdle) * 1000 : process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity;
-  const rewriteWarnIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC ?? "300", 10) || 300) * 1000;
-  const rewriteWarnTokens = parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS ?? "50000", 10) || 50000;
+  const rewriteWarnIdleMs = process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC ? (parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC, 10) || 0) * 1000 || undefined : undefined;
+  const rewriteWarnTokens = process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS ? parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS, 10) || 0 || undefined : undefined;
   const rewriteBlockEnabled = process.env.CLAUDE_MAX_REWRITE_BLOCK === "1";
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? "1800", 10) || 1800) * 1000;
   let cacheConfigSnapshot = {};

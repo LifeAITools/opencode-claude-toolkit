@@ -1200,13 +1200,22 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     : process.env.CLAUDE_MAX_KEEPALIVE_IDLE ? parseInt(process.env.CLAUDE_MAX_KEEPALIVE_IDLE) * 1000 : Infinity
 
   // ─── Rewrite-burst protection (Layer 3) ───────────────────────────
-  // Env flags (seconds for humans):
-  //   CLAUDE_MAX_REWRITE_WARN_IDLE_SEC   — warn if next stream fires after this idle. Default 300 (5 min).
-  //   CLAUDE_MAX_REWRITE_WARN_TOKENS     — warn threshold for estimated rewrite cost. Default 50000.
+  // Env flags override SSOT (~/.claude/keepalive.json) — useful for one-off testing.
+  // Default behavior: undefined → KeepaliveEngine reads from SSOT, which auto-scales
+  // rewriteWarnIdleMs to (cacheTtlMs - safetyMarginMs). For 1h TTL this means warning
+  // fires at ~59 min idle (close to actual TTL), not at the legacy hardcoded 5 min.
+  //
+  //   CLAUDE_MAX_REWRITE_WARN_IDLE_SEC   — warn if next stream fires after this idle.
+  //                                         Default: SSOT (auto-scale with cacheTtlMs).
+  //   CLAUDE_MAX_REWRITE_WARN_TOKENS     — warn threshold. Default: SSOT (50000).
   //   CLAUDE_MAX_REWRITE_BLOCK=1         — enable hard block (opt-in).
   //   CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC  — idle threshold for block. Default 1800 (30 min).
-  const rewriteWarnIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC ?? '300', 10) || 300) * 1000
-  const rewriteWarnTokens = parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS ?? '50000', 10) || 50_000
+  const rewriteWarnIdleMs: number | undefined = process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC
+    ? (parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_IDLE_SEC, 10) || 0) * 1000 || undefined
+    : undefined
+  const rewriteWarnTokens: number | undefined = process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS
+    ? (parseInt(process.env.CLAUDE_MAX_REWRITE_WARN_TOKENS, 10) || 0) || undefined
+    : undefined
   const rewriteBlockEnabled = process.env.CLAUDE_MAX_REWRITE_BLOCK === '1'
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? '1800', 10) || 1800) * 1000
 

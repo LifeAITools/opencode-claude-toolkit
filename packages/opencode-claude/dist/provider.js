@@ -38707,6 +38707,69 @@ var require_commonjs30 = __commonJS((exports) => {
   } });
 });
 
+// ../../package.json
+var require_package = __commonJS((exports, module) => {
+  module.exports = {
+    name: "@life-ai-tools/claude-code-sdk",
+    version: "0.14.0",
+    description: "TypeScript SDK for Claude Code API \u2014 use your Claude Max/Pro subscription programmatically",
+    type: "module",
+    main: "dist/index.js",
+    types: "dist/index.d.ts",
+    exports: {
+      ".": {
+        import: "./dist/index.js",
+        types: "./dist/index.d.ts"
+      }
+    },
+    scripts: {
+      build: "bun run scripts/build-sdk.ts",
+      "build:dev": "tsc",
+      test: "bun test",
+      typecheck: "tsc --noEmit",
+      prepublishOnly: "echo 'dist/ already built'"
+    },
+    dependencies: {
+      jimp: "^1.6.0"
+    },
+    devDependencies: {
+      "@types/bun": "latest",
+      esbuild: "^0.27.4",
+      terser: "^5.46.1",
+      typescript: "^5.8.0"
+    },
+    engines: {
+      node: ">=20.0.0",
+      bun: ">=1.0.0"
+    },
+    keywords: [
+      "claude",
+      "anthropic",
+      "claude-code",
+      "claude-max",
+      "sdk",
+      "openai-compatible",
+      "streaming"
+    ],
+    repository: {
+      type: "git",
+      url: "https://github.com/LifeAITools/opencode-claude-toolkit"
+    },
+    homepage: "https://github.com/LifeAITools/opencode-claude-toolkit",
+    license: "MIT",
+    publishConfig: {
+      registry: "https://npm.muid.io/",
+      access: "public"
+    },
+    files: [
+      "dist/index.js",
+      "dist/*.d.ts",
+      "README.md",
+      "LICENSE"
+    ]
+  };
+});
+
 // provider.ts
 import { appendFileSync as _traceWrite } from "fs";
 
@@ -40863,6 +40926,7 @@ import { appendFileSync } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
 import { homedir } from "os";
+var __dirname = "/home/relishev/projects/vibe/claude-code-sdk/packages/opencode-claude";
 try {
   _traceWrite("/tmp/opencode-claude-trace.log", `PROVIDER.TS pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()}
 `);
@@ -41447,6 +41511,35 @@ var TOOL_NAME_REMAP = {
   todowrite: "todo_write"
 };
 var TOOL_NAME_UNREMAP = Object.fromEntries(Object.entries(TOOL_NAME_REMAP).map(([k2, v2]) => [v2, k2]));
+function repairTodowriteInput(rawInput) {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawInput);
+  } catch (e2) {
+    return {
+      repaired: rawInput,
+      didRepair: false,
+      reason: `parse_failed: ${e2?.message ?? String(e2)}`
+    };
+  }
+  if (Array.isArray(parsed)) {
+    return {
+      repaired: JSON.stringify({ todos: parsed }),
+      didRepair: true
+    };
+  }
+  if (parsed && typeof parsed === "object" && "todos" in parsed) {
+    return {
+      repaired: rawInput,
+      didRepair: false
+    };
+  }
+  return {
+    repaired: rawInput,
+    didRepair: false,
+    reason: `unexpected_shape: keys=[${parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed}]`
+  };
+}
 var MCP_TOOL_PATTERN = /^[a-z][\w-]+_[a-z]/;
 var BUILTIN_NAMES_AFTER_REMAP = new Set([
   "bash",
@@ -41605,16 +41698,21 @@ function createLanguageModel(sdk, modelId, providerId) {
           });
         } else if (block.type === "tool_use") {
           const finalName = TOOL_NAME_UNREMAP[block.name] ?? block.name;
-          let toolInput = block.input ?? {};
-          if (finalName === "todowrite" && Array.isArray(toolInput)) {
-            toolInput = { todos: toolInput };
-            dbg(`tool_input_repair: todowrite (doGenerate) \u2014 wrapped bare array into {todos:[...]}`);
+          let inputStr = JSON.stringify(block.input ?? {});
+          if (finalName === "todowrite") {
+            const r2 = repairTodowriteInput(inputStr);
+            if (r2.didRepair) {
+              inputStr = r2.repaired;
+              dbg(`tool_input_repair: todowrite (doGenerate) \u2014 wrapped bare array into {todos:[...]}`);
+            } else if (r2.reason) {
+              dbg(`tool_input_repair: todowrite (doGenerate) \u2014 no-op: ${r2.reason}`);
+            }
           }
           content.push({
             type: "tool-call",
             toolCallId: block.id,
             toolName: finalName,
-            input: JSON.stringify(toolInput)
+            input: inputStr
           });
         }
       }
@@ -41755,16 +41853,12 @@ function createLanguageModel(sdk, modelId, providerId) {
                   const finalToolName = TOOL_NAME_UNREMAP[event.name] ?? event.name;
                   let inputStr = currentToolInput || JSON.stringify(event.input ?? {});
                   if (finalToolName === "todowrite") {
-                    try {
-                      const parsed = JSON.parse(inputStr);
-                      if (Array.isArray(parsed)) {
-                        inputStr = JSON.stringify({ todos: parsed });
-                        dbg(`tool_input_repair: todowrite \u2014 wrapped bare array into {todos:[...]} (model drift workaround)`);
-                      } else if (parsed && typeof parsed === "object" && !("todos" in parsed)) {
-                        dbg(`tool_input_repair: todowrite \u2014 unexpected shape, keys=[${Object.keys(parsed).join(",")}]`);
-                      }
-                    } catch (e2) {
-                      dbg(`tool_input_repair: todowrite \u2014 JSON parse failed: ${e2?.message}`);
+                    const r2 = repairTodowriteInput(inputStr);
+                    if (r2.didRepair) {
+                      inputStr = r2.repaired;
+                      dbg(`tool_input_repair: todowrite \u2014 wrapped bare array into {todos:[...]} (model drift workaround)`);
+                    } else if (r2.reason) {
+                      dbg(`tool_input_repair: todowrite \u2014 ${r2.reason}`);
                     }
                   }
                   controller.enqueue({
@@ -41854,7 +41948,20 @@ function createClaudeMax(options = {}) {
   } catch (e2) {
     cacheConfigSnapshot = { error: e2?.message };
   }
-  dbg(`STARTUP createClaudeMax pid=${PID} sdk=0.12.0 plugin=1.3.0 [cache-ssot]`, {
+  let __pkgVersion = "unknown";
+  let __sdkVersion = "unknown";
+  try {
+    const path = __require("path");
+    const fs2 = __require("fs");
+    const pkgPath = path.resolve(__dirname, "..", "package.json");
+    const pkg = JSON.parse(fs2.readFileSync(pkgPath, "utf-8"));
+    __pkgVersion = pkg.version ?? "unknown";
+    try {
+      const sdkPkg = require_package();
+      __sdkVersion = sdkPkg.version ?? "unknown";
+    } catch {}
+  } catch {}
+  dbg(`STARTUP createClaudeMax pid=${PID} sdk=${__sdkVersion} plugin=${__pkgVersion} [cache-ssot]`, {
     hasAccessToken: !!options.accessToken,
     credentialsPath: options.credentialsPath,
     keepaliveEnabled,
@@ -41946,6 +42053,7 @@ function createClaudeMax(options = {}) {
 }
 export {
   validateAndNormalizeImage,
+  repairTodowriteInput,
   createClaudeMax,
   buildContextInjectionParts,
   buildContextInjection

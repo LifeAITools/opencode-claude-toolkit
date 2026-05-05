@@ -5,12 +5,22 @@ node_modules/
 src/
 scripts/
 PRPs/
-test/
+# test/ — see selective allow-list below; directory-level ignore commented
+# out so explicit !test/<file> rules can re-include contract tests.
+test/*
 .claude/
 packages/opencode-claude/.claude/
 *.map
 *.backup
 *.backup2
+
+# Tracked regression tests inside the otherwise-ignored test/ tree.
+# Pattern `test/*` (above) ignores all files in test/ but NOT the directory
+# itself, allowing these `!`-prefixed re-includes to work. Listed explicitly
+# so contract tests don't drift out of git on accident.
+!test/keepalive-engine.test.ts
+!test/keepalive-regression.test.ts
+!test/todowrite-repair.test.ts
 
 # One-off test/POC scripts
 packages/claude-max-provider/test-*.ts

@@ -771,6 +771,70 @@ const TOOL_NAME_UNREMAP: Record<string, string> = Object.fromEntries(
   Object.entries(TOOL_NAME_REMAP).map(([k, v]) => [v, k])
 )
 
+/**
+ * Schema-shape repair for todowrite tool calls.
+ *
+ * Symptom: opencode's todowrite tool defines `K.Struct({todos: K.mutable(K.Array(...))})`
+ * but Claude models occasionally drop the `{todos: ...}` wrapper and emit a
+ * bare array `[{content,status,priority}, ...]`. This causes:
+ *   `SchemaError(Expected array, got "[{...}]")`
+ * in opencode TUI when the validator gets a string-encoded bare array.
+ *
+ * Fix: detect bare array → wrap into {todos: [...]}. Other shapes pass through
+ * unchanged (we only repair the specific known drift pattern).
+ *
+ * Pure function — no I/O, no globals. Returns:
+ *   { repaired: string, didRepair: boolean, reason?: string }
+ *
+ * EXPORTED for regression testing. Same logic was previously inline in two
+ * places (doGenerate + doStream); now both call this single function.
+ */
+export interface TodowriteRepairResult {
+  /** Output JSON string ready for downstream consumer. */
+  repaired: string
+  /** True iff input shape was actually mutated. */
+  didRepair: boolean
+  /** Diagnostic note when no repair applied (parse fail, unexpected shape). */
+  reason?: string
+}
+
+export function repairTodowriteInput(rawInput: string): TodowriteRepairResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawInput)
+  } catch (e: any) {
+    // Cannot decide shape — pass through. Schema validator will fail
+    // downstream with the original input, which is the same outcome as
+    // before this function existed.
+    return {
+      repaired: rawInput,
+      didRepair: false,
+      reason: `parse_failed: ${e?.message ?? String(e)}`,
+    }
+  }
+  // Bare array — the canonical drift pattern. Wrap.
+  if (Array.isArray(parsed)) {
+    return {
+      repaired: JSON.stringify({ todos: parsed }),
+      didRepair: true,
+    }
+  }
+  // Already correctly shaped {todos: [...]} — no-op.
+  if (parsed && typeof parsed === 'object' && 'todos' in (parsed as object)) {
+    return {
+      repaired: rawInput,
+      didRepair: false,
+    }
+  }
+  // Some other shape — neither bare array nor wrapped. Don't mutate; log
+  // for forensics so we learn about new drift patterns.
+  return {
+    repaired: rawInput,
+    didRepair: false,
+    reason: `unexpected_shape: keys=[${parsed && typeof parsed === 'object' ? Object.keys(parsed as object).join(',') : typeof parsed}]`,
+  }
+}
+
 // MCP tools have names like "km_km_think", "synqtask_todo_tasks" — they contain
 // underscores from the sanitized server name prefix. Built-in tools are simple
 // names: "bash", "read", "glob", "edit", "write", "task", etc.
@@ -956,17 +1020,24 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
           })
         } else if (block.type === 'tool_use') {
           const finalName = TOOL_NAME_UNREMAP[(block as any).name] ?? (block as any).name
-          let toolInput: any = (block as any).input ?? {}
-          // Same shape-repair as in doStream — see tool_use_end case for rationale.
-          if (finalName === 'todowrite' && Array.isArray(toolInput)) {
-            toolInput = { todos: toolInput }
-            dbg(`tool_input_repair: todowrite (doGenerate) — wrapped bare array into {todos:[...]}`)
+          let inputStr = JSON.stringify((block as any).input ?? {})
+          // Schema-shape repair via shared helper — see repairTodowriteInput
+          // for rationale + handles all edge cases (bare array / parse fail /
+          // unexpected shape) consistently with the doStream path below.
+          if (finalName === 'todowrite') {
+            const r = repairTodowriteInput(inputStr)
+            if (r.didRepair) {
+              inputStr = r.repaired
+              dbg(`tool_input_repair: todowrite (doGenerate) — wrapped bare array into {todos:[...]}`)
+            } else if (r.reason) {
+              dbg(`tool_input_repair: todowrite (doGenerate) — no-op: ${r.reason}`)
+            }
           }
           content.push({
             type: 'tool-call',
             toolCallId: (block as any).id,
             toolName: finalName,
-            input: JSON.stringify(toolInput),
+            input: inputStr,
           })
         }
       }
@@ -1115,23 +1186,15 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   const finalToolName = TOOL_NAME_UNREMAP[event.name] ?? event.name
                   let inputStr = currentToolInput || JSON.stringify(event.input ?? {})
 
-                  // Schema-shape repair for todowrite: model occasionally drops the
-                  // top-level {todos: [...]} wrapper and emits a bare array
-                  // [{content,status,priority}, ...]. Wrap it back so the opencode
-                  // tool's K.Struct({todos: K.mutable(K.Array(...))}) validator passes.
-                  // Symptom: "SchemaError(Expected array, got '[{...}]')" in TUI.
+                  // Schema-shape repair via shared helper — single source of
+                  // truth for repair logic, used in both doGenerate + doStream.
                   if (finalToolName === 'todowrite') {
-                    try {
-                      const parsed = JSON.parse(inputStr)
-                      if (Array.isArray(parsed)) {
-                        inputStr = JSON.stringify({ todos: parsed })
-                        dbg(`tool_input_repair: todowrite — wrapped bare array into {todos:[...]} (model drift workaround)`)
-                      } else if (parsed && typeof parsed === 'object' && !('todos' in parsed)) {
-                        // Some other shape — log but don't mutate
-                        dbg(`tool_input_repair: todowrite — unexpected shape, keys=[${Object.keys(parsed).join(',')}]`)
-                      }
-                    } catch (e: any) {
-                      dbg(`tool_input_repair: todowrite — JSON parse failed: ${e?.message}`)
+                    const r = repairTodowriteInput(inputStr)
+                    if (r.didRepair) {
+                      inputStr = r.repaired
+                      dbg(`tool_input_repair: todowrite — wrapped bare array into {todos:[...]} (model drift workaround)`)
+                    } else if (r.reason) {
+                      dbg(`tool_input_repair: todowrite — ${r.reason}`)
                     }
                   }
 
@@ -1267,7 +1330,29 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     cacheConfigSnapshot = { error: e?.message }
   }
 
-  dbg(`STARTUP createClaudeMax pid=${PID} sdk=0.12.0 plugin=1.3.0 [cache-ssot]`, {
+  // Read versions from package.json — SSOT. Hardcoded constants drift from
+  // package.json on every release (we observed sdk=0.12.0 plugin=1.3.0
+  // strings persisting in deployed pids long after packages bumped to
+  // 1.4.x and 1.5.x). Same issue as CORE_VERSION had pre-0.2.1.
+  let __pkgVersion = 'unknown'
+  let __sdkVersion = 'unknown'
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('path')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs')
+    const pkgPath = path.resolve(__dirname, '..', 'package.json')
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+    __pkgVersion = pkg.version ?? 'unknown'
+    // sdk version from sdk's own package.json (resolved via require — works for
+    // both bundled and unbundled consumers).
+    try {
+      const sdkPkg = require('@life-ai-tools/claude-code-sdk/package.json') as { version?: string }
+      __sdkVersion = sdkPkg.version ?? 'unknown'
+    } catch { /* sdk pkg not resolvable in some bundling modes */ }
+  } catch { /* leave as 'unknown' */ }
+
+  dbg(`STARTUP createClaudeMax pid=${PID} sdk=${__sdkVersion} plugin=${__pkgVersion} [cache-ssot]`, {
     hasAccessToken: !!options.accessToken,
     credentialsPath: options.credentialsPath,
     keepaliveEnabled,

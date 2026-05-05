@@ -1,6 +1,6 @@
 {
   "name": "@life-ai-tools/opencode-signal-wire",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "description": "Signal-wire + wake-listener infrastructure for opencode — agent coordination, spawn depth tracking, wake event routing",
   "type": "module",
   "main": "./index.ts",

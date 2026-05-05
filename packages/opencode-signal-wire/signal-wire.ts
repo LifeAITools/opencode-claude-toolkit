@@ -76,6 +76,16 @@ class RulesStore {
   private lastFingerprint: Fingerprint | null = null
   private lastCheckMs: number = 0
   private readonly onSwap: (newRules: CoreRule[]) => void
+  /**
+   * Set of disabled rule IDs that are CURRENTLY accepted by validateRuleSet
+   * (i.e. _minCoreVersion either absent or ≤ this engine's version) and would
+   * therefore become live the moment operator flips enabled=true.
+   *
+   * We log RULES_ELIGIBLE_FOR_ENABLE only when this set CHANGES (rule moves
+   * from "rejected by gate" → "would-be-loaded if enabled"). Without the
+   * transition check we'd spam the log on every 2s hot-reload tick.
+   */
+  private eligibleForEnable: Set<string> = new Set()
 
   constructor(opts: {
     path: string
@@ -119,6 +129,10 @@ class RulesStore {
       }
       this.translatedLegacy = canonical
       this.lastFingerprint = fp
+      // Seed initial eligibility snapshot so first hot-reload diff is correct
+      // (otherwise everything-disabled would log as a transition on first
+      // post-startup reload).
+      this.detectEligibilityTransitions(legacy, raw._minCoreVersion)
       return { rules: result.rules, fingerprint: fp }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -169,12 +183,95 @@ class RulesStore {
       this.lastFingerprint = fp
       this.onSwap(this.rules)
       swLog(`RULES_RELOADED old=${oldCount} new=${this.rules.length} rejected=${result.rejectedCount} mtime=${new Date(fp.mtimeMs).toISOString()}`)
+
+      // ─── Eligibility transition tracking (Step 2 of stabilization plan) ───
+      // For each disabled rule in the source file: would it pass validation
+      // if we set enabled=true RIGHT NOW on this engine? If yes and it wasn't
+      // before, this is a state transition worth surfacing to the operator.
+      // No auto-enable — just a single nudge line per transition.
+      this.detectEligibilityTransitions(legacy, raw._minCoreVersion)
+
       return { reloaded: true }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       this.lastFingerprint = fp  // don't retry every 2s
       swLog(`RULES_RELOAD_FAIL error="${msg}" keeping-old-rules=${this.rules.length}`)
       return { reloaded: false, error: msg }
+    }
+  }
+
+  /**
+   * For each disabled rule in source: check whether THIS engine would now
+   * accept it if enabled. Emit a single log line per transition (was-blocked
+   * → now-eligible). Operators tail signal-wire-debug.log and see when their
+   * fleet has rotated enough to safely flip enabled=true.
+   *
+   * Pure side effect via swLog. Does NOT mutate any rule state. Cheap:
+   * only runs on actual rule-file changes (not every tick).
+   *
+   * Logic:
+   *   1. From source rules, take only those with enabled === false
+   *   2. For each, ask: would `validateRuleSet` accept it if it were enabled?
+   *      (i.e. is _minCoreVersion ≤ CORE_VERSION on this engine?)
+   *   3. Compare to last-seen eligibility set; log transitions only.
+   */
+  private detectEligibilityTransitions(rawRules: unknown[], fileMinCore: unknown): void {
+    try {
+      const newEligible = new Set<string>()
+      // Build a "what would be accepted" probe by enabling every disabled rule
+      // and feeding through validateRuleSet on a one-rule-at-a-time basis.
+      // Single-rule probes isolate per-rule rejections from file-level gate
+      // (which is global). For the file-level gate to be relevant, we still
+      // pass it through to validateRuleSet (engine ANDs both gates).
+      for (const r of rawRules) {
+        if (!r || typeof r !== 'object') continue
+        const rule = r as Record<string, unknown>
+        if (typeof rule.id !== 'string') continue
+        if (rule.enabled !== false) continue // only check currently-disabled rules
+
+        const probe = { ...rule, enabled: true } as unknown as Record<string, unknown>
+        const probeCanonical = translateLegacyRules([probe], this.platform)
+        const probeResult = validateRuleSet(
+          {
+            rules: probeCanonical,
+            _minCoreVersion: typeof fileMinCore === 'string' ? fileMinCore : undefined,
+          },
+          this.registry,
+        )
+        if (probeResult.rules.length > 0) {
+          newEligible.add(rule.id)
+        }
+      }
+
+      // Diff old vs new — log only transitions
+      const becameEligible: string[] = []
+      const becameIneligible: string[] = []
+      for (const id of newEligible) {
+        if (!this.eligibleForEnable.has(id)) becameEligible.push(id)
+      }
+      for (const id of this.eligibleForEnable) {
+        if (!newEligible.has(id)) becameIneligible.push(id)
+      }
+
+      for (const id of becameEligible) {
+        swLog(
+          `RULES_ELIGIBLE_FOR_ENABLE rule=${id} reason=engine_now_satisfies_minCoreVersion ` +
+          `hint="rule is currently enabled=false but its _minCoreVersion gate now passes; ` +
+          `consider flipping enabled=true after running 'sw-fleet activation' to confirm fleet quorum"`,
+        )
+      }
+      for (const id of becameIneligible) {
+        swLog(
+          `RULES_NO_LONGER_ELIGIBLE rule=${id} reason=engine_no_longer_satisfies_minCoreVersion ` +
+          `hint="probably _minCoreVersion was bumped above this engine's version; rule cannot be enabled here"`,
+        )
+      }
+
+      this.eligibleForEnable = newEligible
+    } catch (e) {
+      // Best-effort: never let eligibility tracking break rules reload.
+      const msg = e instanceof Error ? e.message : String(e)
+      swLog(`ELIGIBILITY_PROBE_FAIL error="${msg}"`)
     }
   }
 
@@ -379,6 +476,88 @@ export class SignalWire {
   }
 
   /**
+   * Refresh runtime token / quota state from the canonical source of truth:
+   * `~/.claude/claude-max-stats.jsonl`. Each line is a per-API-response record
+   * written by opencode-claude provider with REAL usage numbers (cacheRead +
+   * cacheCreate + input + rateLimit util). Tailing the file gives us accurate
+   * data without coupling to opencode-claude internals — file is the natural
+   * integration boundary between the two plugins.
+   *
+   * Strategy: read last ~256KB of file, scan lines from end, find LAST line
+   * matching this pid. Parse usage; update contextPosition, model, quota.
+   *
+   * Cheap (small tail read) and idempotent — caller can invoke as often as
+   * desired. Best-effort: any IO/parse error leaves state unchanged.
+   *
+   * Why tail-read not full read: file grows unbounded (we observed 40MB).
+   * Last 256KB at typical 200-byte lines = ~1300 most recent records, more
+   * than enough for the latest line per pid.
+   *
+   * Returns true iff state was updated, false if no matching record found.
+   */
+  refreshTokensFromStatsFile(): boolean {
+    const STATS_FILE = join(homedir(), '.claude', 'claude-max-stats.jsonl')
+    const TAIL_BYTES = 256 * 1024
+    try {
+      const fs = require('fs') as typeof import('fs')
+      if (!fs.existsSync(STATS_FILE)) return false
+      const stat = fs.statSync(STATS_FILE)
+      const start = Math.max(0, stat.size - TAIL_BYTES)
+      const fd = fs.openSync(STATS_FILE, 'r')
+      const buf = Buffer.alloc(stat.size - start)
+      fs.readSync(fd, buf, 0, buf.length, start)
+      fs.closeSync(fd)
+      const tail = buf.toString('utf-8')
+      const lines = tail.split('\n')
+
+      // Walk from the END to find the LATEST line for this pid.
+      const myPid = process.pid
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]?.trim()
+        if (!line || !line.startsWith('{')) continue
+        // Cheap pre-filter — skip lines that don't mention this pid at all.
+        if (!line.includes(`"pid":${myPid}`)) continue
+        try {
+          const rec = JSON.parse(line) as {
+            pid?: number
+            type?: string
+            model?: string
+            usage?: { in?: number; out?: number; cacheRead?: number; cacheWrite?: number }
+            rateLimit?: { util5h?: number; util7d?: number }
+          }
+          if (rec.pid !== myPid) continue
+          // Only stream records carry full prompt-cache numbers; keepalive
+          // records are a tiny refresh and would understate contextPosition.
+          if (rec.type !== 'stream') continue
+          const u = rec.usage ?? {}
+          const totalIn = (u.in ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0)
+          if (totalIn > 0) {
+            this.trackTokens({
+              inputTokens: u.in ?? 0,
+              cacheReadInputTokens: u.cacheRead ?? 0,
+              cacheCreationInputTokens: u.cacheWrite ?? 0,
+            })
+          }
+          if (rec.model) this.trackModel(rec.model)
+          if (rec.rateLimit) {
+            this.trackRateLimit({
+              util5h: typeof rec.rateLimit.util5h === 'number' ? rec.rateLimit.util5h : null,
+              util7d: typeof rec.rateLimit.util7d === 'number' ? rec.rateLimit.util7d : null,
+            })
+          }
+          return true
+        } catch {
+          // Malformed line — keep walking.
+          continue
+        }
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * Toggle a rule on/off. Persists to the rules JSON file (atomic rewrite),
    * and the next hot-reload (within HOT_RELOAD_INTERVAL_MS) will pick it up.
    *
@@ -450,8 +629,18 @@ export class SignalWire {
    * Mutate event in place to attach the current runtimeMeta snapshot.
    * Centralized so every emit path (sync/async/hook/external) gets the
    * same enrichment without duplicating logic at call sites.
+   *
+   * Refreshes tokens from claude-max-stats.jsonl tail FIRST, so the
+   * snapshot reflects the latest API response for this pid. Without
+   * this refresh, runtimeMeta would only get coarse chat.message-text
+   * estimates (chars/4 fallback in plugin.ts), making contextPercent
+   * predicates unreliable for warning/critical thresholds.
+   *
+   * Refresh is cheap (~256KB tail read + line scan) and gracefully
+   * degrades to no-op when stats file unavailable.
    */
   private attachRuntimeMeta(event: SignalWireEvent): void {
+    this.refreshTokensFromStatsFile()
     event.runtimeMeta = this.getRuntimeMeta() as SignalWireEvent['runtimeMeta']
   }
 

@@ -1307,7 +1307,12 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       rewriteBlockEnabled,
       rewriteBlockIdleMs,
       onTick: (tick) => {
-        dbg(`keepalive tick: idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
+        // pid included for grep-friendliness — multi-pid systems otherwise can't
+        // distinguish whose engine is ticking. Heartbeat marker (KA_HEARTBEAT)
+        // is written by the engine itself in keepalive-engine.ts:tick() on
+        // EVERY tick (every 30s) regardless of state, providing the canonical
+        // visibility line. This callback is for additional consumer-side audit.
+        dbg(`keepalive tick: pid=${process.pid} idle=${Math.round(tick.idleMs/1000)}s nextFire=${Math.round(tick.nextFireMs/1000)}s model=${tick.model}`)
       },
       onHeartbeat: (stats) => {
         const rl = stats.rateLimit ? ` | quota=${stats.rateLimit.status ?? '?'} claim=${stats.rateLimit.claim ?? '?'}` : ''

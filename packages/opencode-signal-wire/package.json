@@ -1,6 +1,6 @@
 {
   "name": "@life-ai-tools/opencode-signal-wire",
-  "version": "0.2.0",
+  "version": "0.3.2",
   "description": "Signal-wire + wake-listener infrastructure for opencode — agent coordination, spawn depth tracking, wake event routing",
   "type": "module",
   "main": "./index.ts",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kiberos/signal-wire-core": "file:/home/relishev/packages/signal-wire-core"
+    "@kiberos/signal-wire-core": "^0.2.2"
   },
   "peerDependencies": {
     "solid-js": "*"

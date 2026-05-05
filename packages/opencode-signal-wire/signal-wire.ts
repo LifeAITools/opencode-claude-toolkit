@@ -104,10 +104,22 @@ class RulesStore {
       const raw = JSON.parse(readFileSync(this.path, 'utf8'))
       const legacy = (raw.rules ?? []) as unknown[]
       const canonical = translateLegacyRules(legacy, this.platform)
-      const validated = validateRuleSet({ rules: canonical }, this.registry).rules
+      // CRITICAL (v1.2): pass _minCoreVersion through to validateRuleSet so
+      // the engine version gate fires. Without this, an updated rules.json
+      // requiring a newer core would silently load in older engines and
+      // unknown predicates would be ignored → unconditional fires with
+      // empty templates (the v0.2.0 bug we're fixing).
+      const minCoreVersion = typeof raw._minCoreVersion === 'string' ? raw._minCoreVersion : undefined
+      const result = validateRuleSet({ rules: canonical, _minCoreVersion: minCoreVersion }, this.registry)
+      if (result.rejectedCount > 0) {
+        // Surface rejection reasons in adapter log — operators tail this to
+        // diagnose "why aren't my rules firing".
+        const sampled = result.rejected.slice(0, 5).map(r => `${r.id ?? '?'}: ${r.reason}`).join('; ')
+        swLog(`RULES_LOAD_REJECTED count=${result.rejectedCount}/${canonical.length} samples="${sampled}"`)
+      }
       this.translatedLegacy = canonical
       this.lastFingerprint = fp
-      return { rules: validated, fingerprint: fp }
+      return { rules: result.rules, fingerprint: fp }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       swLog(`RULES_LOAD_FAIL path=${this.path} error="${msg}"`)
@@ -139,13 +151,24 @@ class RulesStore {
       const raw = JSON.parse(readFileSync(this.path, 'utf8'))
       const legacy = (raw.rules ?? []) as unknown[]
       const canonical = translateLegacyRules(legacy, this.platform)
-      const validated = validateRuleSet({ rules: canonical }, this.registry).rules
+      const minCoreVersion = typeof raw._minCoreVersion === 'string' ? raw._minCoreVersion : undefined
+      const result = validateRuleSet({ rules: canonical, _minCoreVersion: minCoreVersion }, this.registry)
       const oldCount = this.rules.length
-      this.rules = validated  // ATOMIC SWAP
+      // ATOMIC SWAP — but only when validation actually returned rules.
+      // If version gate or unknown predicates rejected EVERY rule, we do
+      // NOT clear the existing in-memory ruleset (better to keep the
+      // older effective set than fall back to empty/unsafe state).
+      if (result.rules.length > 0 || result.rejectedCount === 0) {
+        this.rules = result.rules
+      }
+      if (result.rejectedCount > 0) {
+        const sampled = result.rejected.slice(0, 5).map(r => `${r.id ?? '?'}: ${r.reason}`).join('; ')
+        swLog(`RULES_RELOAD_REJECTED count=${result.rejectedCount}/${canonical.length} samples="${sampled}" keeping-old-rules=${result.rules.length === 0 ? oldCount : 0}`)
+      }
       this.translatedLegacy = canonical
       this.lastFingerprint = fp
-      this.onSwap(validated)
-      swLog(`RULES_RELOADED old=${oldCount} new=${validated.length} mtime=${new Date(fp.mtimeMs).toISOString()}`)
+      this.onSwap(this.rules)
+      swLog(`RULES_RELOADED old=${oldCount} new=${this.rules.length} rejected=${result.rejectedCount} mtime=${new Date(fp.mtimeMs).toISOString()}`)
       return { reloaded: true }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -211,6 +234,18 @@ export class SignalWire {
   private contextPosition = 0
   /** Cache of last async evaluate result — supports legacy sync `evaluate()`. */
   private lastAsyncResult: SignalWireResult | null = null
+
+  // ─── runtimeMeta state (v1.2) ────────────────────────────
+  // Track latest known runtime values to attach to outgoing events. These
+  // are updated opportunistically as the adapter sees real activity:
+  //   - trackTokens() updates contextPosition (already existed)
+  //   - trackModel() updates last seen model id (called from provider.ts on API_REQ)
+  //   - trackRateLimit() updates quota util (called from provider.ts on API_RESPONSE)
+  // Adapter merges all into runtimeMeta inside getRuntimeMeta() at emit time.
+  private lastModel: string | undefined
+  private lastQuotaUtil5h: number | undefined
+  private lastQuotaUtil7d: number | undefined
+  private lastContextWindow: number | undefined
 
   constructor(config: SignalWireConfig) {
     this.sessionId = config.sessionId
@@ -283,6 +318,67 @@ export class SignalWire {
   getContextPosition(): number { return this.contextPosition }
 
   /**
+   * Update last-seen model id. Called by provider.ts on API_REQ. Used in
+   * runtimeMeta for both match predicates ({"match":{"model":"..."}}) and
+   * template interpolation ({model} in hint text).
+   *
+   * Also captures the implicit context window for the model (200k for
+   * Claude Opus/Sonnet, 128k for Haiku) — used to compute contextPercent.
+   */
+  trackModel(modelId: string): void {
+    if (typeof modelId !== 'string' || modelId.length === 0) return
+    this.lastModel = modelId
+    // Heuristic: Claude family models. Adapter-specific knowledge belongs
+    // here, not in core (which is model-agnostic).
+    if (/haiku/i.test(modelId)) this.lastContextWindow = 200_000
+    else if (/(opus|sonnet|claude)/i.test(modelId)) this.lastContextWindow = 200_000
+    // else: leave undefined (unknown model → don't fake the window)
+  }
+
+  /**
+   * Update quota utilization. Called by provider.ts on API_RESPONSE when
+   * rateLimit headers were observed. util5h/util7d in 0..1 range.
+   */
+  trackRateLimit(rl: { util5h?: number | null; util7d?: number | null }): void {
+    if (typeof rl.util5h === 'number') this.lastQuotaUtil5h = rl.util5h
+    if (typeof rl.util7d === 'number') this.lastQuotaUtil7d = rl.util7d
+  }
+
+  /**
+   * Build the RuntimeMeta snapshot for the current moment. Adapter-side
+   * single source of truth — engine never builds this directly.
+   *
+   * Returned object is a snapshot (cloned each call); safe to attach to
+   * events without aliasing concerns.
+   */
+  private getRuntimeMeta(): Record<string, unknown> {
+    const meta: Record<string, unknown> = {
+      pid: process.pid,
+      sessionId: this.sessionId || undefined,
+      contextTokens: this.contextPosition || undefined,
+    }
+    if (this.lastContextWindow != null) {
+      meta.contextWindow = this.lastContextWindow
+      if (this.contextPosition > 0) {
+        meta.contextPercent = Math.min(100, Math.round((this.contextPosition / this.lastContextWindow) * 100))
+        meta.contextRemaining = Math.max(0, this.lastContextWindow - this.contextPosition)
+      }
+    }
+    if (this.lastModel) meta.model = this.lastModel
+    if (this.lastQuotaUtil5h != null) meta.quotaUtil5h = this.lastQuotaUtil5h
+    if (this.lastQuotaUtil7d != null) meta.quotaUtil7d = this.lastQuotaUtil7d
+    return meta
+  }
+
+  /**
+   * Public read-only accessor for adapter consumers (provider.ts logging,
+   * tests). Returns the same snapshot used internally for event attachment.
+   */
+  getCurrentRuntimeMeta(): Record<string, unknown> {
+    return this.getRuntimeMeta()
+  }
+
+  /**
    * Toggle a rule on/off. Persists to the rules JSON file (atomic rewrite),
    * and the next hot-reload (within HOT_RELOAD_INTERVAL_MS) will pick it up.
    *
@@ -350,9 +446,19 @@ export class SignalWire {
     swLog(`CONSUMER_INVOKE consumer=opencode-plugin mode=${mode} type=${event.type} session=${this.sessionId || '?'}`)
   }
 
+  /**
+   * Mutate event in place to attach the current runtimeMeta snapshot.
+   * Centralized so every emit path (sync/async/hook/external) gets the
+   * same enrichment without duplicating logic at call sites.
+   */
+  private attachRuntimeMeta(event: SignalWireEvent): void {
+    event.runtimeMeta = this.getRuntimeMeta() as SignalWireEvent['runtimeMeta']
+  }
+
   evaluate(ctx: SignalWireContext): SignalWireResult | null {
     this.rulesStore.maybeReload()
     const event = contextToEvent(ctx, this.sessionId)
+    this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-sync', event)
     this.pipeline.process(event)
       .then(rs => { this.lastAsyncResult = this.toLegacy(rs) })
@@ -364,6 +470,7 @@ export class SignalWire {
   async evaluateAsync(ctx: SignalWireContext): Promise<SignalWireResult | null> {
     this.rulesStore.maybeReload()
     const event = contextToEvent(ctx, this.sessionId)
+    this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-async', event)
     const results = await this.pipeline.process(event)
     const legacy = this.toLegacy(results)
@@ -385,6 +492,7 @@ export class SignalWire {
    */
   async evaluateHook(event: SignalWireEvent): Promise<EmitResult[]> {
     this.rulesStore.maybeReload()
+    this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-hook', event)
     const results = await this.pipeline.process(event)
     // Cache so legacy sync evaluate() (if anyone still calls it) sees something
@@ -395,6 +503,19 @@ export class SignalWire {
   /** External wake-event evaluation (wake-listener.ts consumer). */
   async evaluateExternal(wakeEvent: WakeEvent): Promise<{ matched: CoreRule[]; results: EmitResult[] }> {
     this.rulesStore.maybeReload()
+
+    // Opportunistic quota tracking — wake events from quota-watcher carry
+    // util5h/util7d in payload. Capture them so subsequent chat.message
+    // events have fresh quota data in runtimeMeta for match predicates and
+    // template interpolation. Cheap, idempotent.
+    const wp = wakeEvent.payload as Record<string, unknown> | undefined
+    if (wp && (typeof wp.util5h === 'number' || typeof wp.util7d === 'number')) {
+      this.trackRateLimit({
+        util5h: typeof wp.util5h === 'number' ? wp.util5h : null,
+        util7d: typeof wp.util7d === 'number' ? wp.util7d : null,
+      })
+    }
+
     const event: SignalWireEvent = {
       source: 'wake',
       type: `wake.${wakeEvent.type}`,
@@ -409,6 +530,7 @@ export class SignalWire {
       },
       timestamp: Date.now(),
     }
+    this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-external', event)
     const results = await this.pipeline.process(event)
     const firedIds = new Set(results.map(r => r.ruleId))

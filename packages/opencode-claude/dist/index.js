@@ -64,24 +64,24 @@ function k(e2) {
 async function _(e2 = {}) {
   let t2 = e2.credentialsPath ?? m(), i2 = y(), s2 = g(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await T(r2, e2.port), f2 = `http://localhost:${n2}/callback`, p2 = e2.loginWithClaudeAi !== false ? $ : S, k2 = new URLSearchParams({ client_id: v, response_type: "code", scope: D, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
   e2.loginHint && k2.set("login_hint", e2.loginHint), e2.loginMethod && k2.set("login_method", e2.loginMethod), e2.orgUUID && k2.set("orgUUID", e2.orgUUID);
-  let _2, R, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, O = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(M)}`;
-  e2.onAuthUrl ? e2.onAuthUrl(C, O) : (console.log(`
+  let _2, R, A = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(M)}`;
+  e2.onAuthUrl ? e2.onAuthUrl(A, C) : (console.log(`
 \uD83D\uDD10 Login to Claude
 `), console.log(`Open this URL in your browser:
-`), console.log(`  ${O}
-`)), e2.openBrowser !== false && E(C).catch(() => {});
+`), console.log(`  ${C}
+`)), e2.openBrowser !== false && E(A).catch(() => {});
   try {
     _2 = await a2, R = f2;
   } catch (e3) {
     throw d2(), e3;
   }
   d2();
-  let A = await fetch(b, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: R, client_id: v, code_verifier: i2, state: r2 }) });
-  if (!A.ok) {
-    let e3 = await A.text();
-    throw new Error(`Token exchange failed (${A.status}): ${e3}`);
+  let O = await fetch(b, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: R, client_id: v, code_verifier: i2, state: r2 }) });
+  if (!O.ok) {
+    let e3 = await O.text();
+    throw new Error(`Token exchange failed (${O.status}): ${e3}`);
   }
-  let x2 = await A.json(), I2 = Date.now() + 1000 * x2.expires_in, N2 = { accessToken: x2.access_token, refreshToken: x2.refresh_token, expiresAt: I2, scopes: x2.scope?.split(" ") ?? [] }, L2 = {};
+  let x2 = await O.json(), I2 = Date.now() + 1000 * x2.expires_in, N2 = { accessToken: x2.access_token, refreshToken: x2.refresh_token, expiresAt: I2, scopes: x2.scope?.split(" ") ?? [] }, L2 = {};
   try {
     L2 = JSON.parse(l(t2, "utf8"));
   } catch {}
@@ -135,12 +135,12 @@ var $;
 var b;
 var M;
 var D;
+var A;
 var C;
-var O;
-var A = (C = { "src/auth.ts"() {
+var O = (A = { "src/auth.ts"() {
   v = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (R = "https://platform.claude.com") + "/oauth/authorize", $ = "https://claude.com/cai/oauth/authorize", b = `${R}/v1/oauth/token`, M = `${R}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), D = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(_, "oauthLogin"), i(T, "startCallbackServer"), i(E, "tryOpenBrowser");
 } }, function() {
-  return C && (O = (0, C[t(C)[0]])(C = 0)), O;
+  return A && (C = (0, A[t(A)[0]])(A = 0)), C;
 });
 var q = class extends Error {
   constructor(e2, t2) {
@@ -262,13 +262,13 @@ function De(e2) {
   let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: Se(e2?.retryDelaysMs ?? (Array.isArray(e2?.retryDelaysSec) ? e2.retryDelaysSec.map((e3) => typeof e3 == "number" ? 1000 * e3 : NaN) : undefined), "retryDelaysMs", ye.retryDelaysMs), rewriteWarnIdleMs: Re(e2?.rewriteWarnIdleMs ?? (typeof e2?.rewriteWarnIdleSec == "number" ? 1000 * e2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: Re(e2?.rewriteWarnTokens, "rewriteWarnTokens", ye.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: Se(e2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", ye.healthProbeIntervalsMs), healthProbeTimeoutMs: Re(e2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", ye.healthProbeTimeoutMs, 500, 60000), enabled: $e(e2?.enabled, ye.enabled), idleTimeoutMs: e2?.idleTimeoutMs === null || e2?.idleTimeoutSec === null ? 1 / 0 : Re(e2?.idleTimeoutMs ?? (typeof e2?.idleTimeoutSec == "number" ? 1000 * e2.idleTimeoutSec : undefined), "idleTimeoutMs", ye.idleTimeoutMs === 1 / 0 ? 86400000 : ye.idleTimeoutMs, 0, 86400000), minTokens: Re(e2?.minTokens, "minTokens", ye.minTokens, 1, 1e6), rewriteBlockEnabled: $e(e2?.rewriteBlockEnabled, ye.rewriteBlockEnabled), dump: me, t: t2 };
   return Te = l2, l2;
 }
-function Ce() {
+function Ae() {
   return ke;
 }
-function Oe() {
+function Ce() {
   return be().cacheTtlMs;
 }
-function Ae() {
+function Oe() {
   return be().safetyMarginMs;
 }
 function xe(e2) {
@@ -285,7 +285,7 @@ function xe(e2) {
   let s2 = t2.code ?? t2.cause?.code ?? "", r2 = t2.name ?? t2.cause?.name ?? "", n2 = `${(t2.message ?? "").toLowerCase()} ${(t2.cause?.message ?? "").toLowerCase()}`.trim();
   return r2 === "AbortError" || r2 === "TimeoutError" || n2.includes("aborted") || n2.includes("the operation timed out") || n2.includes("request timed out") || s2 && new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_ABORTED", "ABORT_ERR", "ERR_NETWORK", "ConnectionRefused", "FailedToOpenSocket"]).has(s2) || n2.includes("unable to connect") || n2.includes("failed to open socket") || n2.includes("connection refused") || n2.includes("network is unreachable") || n2.includes("network error") || n2.includes("fetch failed") || n2.includes("timeout") || n2.includes("dns") || n2.includes("socket hang up") || n2.includes("terminated") ? "network" : "server_transient";
 }
-i(ve, "readRawConfig"), i(Re, "num"), i(Se, "numArray"), i($e, "bool"), i(be, "loadKeepaliveConfig"), i(Me, "reloadKeepaliveConfig"), i(De, "_resolve"), i(Ce, "getConfigPath"), i(Oe, "getCacheTtlMs"), i(Ae, "getSafetyMarginMs"), i(xe, "classifyError");
+i(ve, "readRawConfig"), i(Re, "num"), i(Se, "numArray"), i($e, "bool"), i(be, "loadKeepaliveConfig"), i(Me, "reloadKeepaliveConfig"), i(De, "_resolve"), i(Ae, "getConfigPath"), i(Ce, "getCacheTtlMs"), i(Oe, "getSafetyMarginMs"), i(xe, "classifyError");
 var Ie = class _KeepaliveEngine {
   static {
     i(this, "KeepaliveEngine");
@@ -372,6 +372,11 @@ var Ie = class _KeepaliveEngine {
     this.timer = setInterval(() => this.tick(), e2), this.timer && typeof this.timer == "object" && "unref" in this.timer && this.timer.unref();
   }
   async tick() {
+    try {
+      let e3 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, t3 = Math.round((Date.now() - this.lastActivityAt) / 1000), i3 = Math.max(0, Math.round((this.config.intervalMs - (Date.now() - this.lastActivityAt)) / 1000)), s3 = this.inFlight ? "firing" : this.registry.size === 0 ? "empty_registry" : "armed";
+      ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${s3} regSize=${this.registry.size} idleSec=${t3} nextFireSec=${i3} cacheAgeSec=${e3 < 0 ? "na" : Math.round(e3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}
+`);
+    } catch {}
     if (this.registry.size === 0 || this.inFlight)
       return;
     try {
@@ -418,9 +423,7 @@ var Ie = class _KeepaliveEngine {
     if (!s2)
       return;
     let r2 = Date.now() - this.lastActivityAt;
-    if (this.jitterMs || (this.jitterMs = Math.floor(30000 * Math.random())), r2 < 0.9 * this.config.intervalMs + this.jitterMs)
-      this.config.onTick?.({ idleMs: r2, nextFireMs: Math.max(0, this.config.intervalMs - r2), model: s2.model, tokens: s2.inputTokens });
-    else {
+    if (this.jitterMs || (this.jitterMs = Math.floor(30000 * Math.random())), this.config.onTick?.({ idleMs: r2, nextFireMs: Math.max(0, this.config.intervalMs - r2), model: s2.model, tokens: s2.inputTokens }), !(r2 < 0.9 * this.config.intervalMs + this.jitterMs)) {
       this.inFlight = true;
       try {
         let e3 = await this.getToken(), t3 = JSON.parse(JSON.stringify(s2.body)), i3 = t3.thinking?.budget_tokens ?? 0;
@@ -982,7 +985,7 @@ var Qe = class {
   async forceReLogin() {
     this.initialLoad && await this.initialLoad, this.dbg("FORCE RE-LOGIN requested \u2014 opening browser OAuth flow"), this.emitTokenStatus("critical", "Initiating browser re-login \u2014 refresh token may be dead");
     try {
-      let { oauthLogin: e2 } = await Promise.resolve().then(() => (A(), r)), t2 = this.credentialStore instanceof Ye ? this.credentialStore.path : K(j(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
+      let { oauthLogin: e2 } = await Promise.resolve().then(() => (O(), r)), t2 = this.credentialStore instanceof Ye ? this.credentialStore.path : K(j(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
       return this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.emitTokenStatus("rotated", "Re-login successful \u2014 fresh tokens"), this.scheduleProactiveRotation(), this.dbg(`RE-LOGIN SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()}`), true;
     } catch (e2) {
       let t2 = e2?.message ?? String(e2);
@@ -1920,12 +1923,12 @@ async function* vt(e2, t2) {
     s2.releaseLock();
   }
 }
-i(Tt, "parseRateLimitHeaders"), i(Et, "jsonResponse"), i(vt, "parseSSEToEvents"), A(), A();
+i(Tt, "parseRateLimitHeaders"), i(Et, "jsonResponse"), i(vt, "parseSSEToEvents"), O(), O();
 var Dt = '{"type":"KeepAlive"}';
-var Ct = 16000;
-var Ot = Math.floor(3200);
-async function At(e2, t2, s2) {
-  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(Ct), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
+var At = 16000;
+var Ct = Math.floor(3200);
+async function Ot(e2, t2, s2) {
+  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(At), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
   if (s2?.keyterms?.length)
     for (let e3 of s2.keyterms)
       n2.append("keyterms", e3);
@@ -2063,7 +2066,7 @@ async function At(e2, t2, s2) {
   }, isConnected: () => h2 && !m2.destroyed };
 }
 async function xt(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await At(e2, { onTranscript: i((e3, t3) => {
+  let r2 = [], n2 = null, a2 = await Ot(e2, { onTranscript: i((e3, t3) => {
     t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
   }, "onTranscript"), onError: i((e3) => {
     n2 = e3;
@@ -2072,9 +2075,9 @@ async function xt(e2, t2, s2) {
     let e3 = await Ut(t2), i2 = e3;
     e3.length > 44 && e3[0] === 82 && e3[1] === 73 && e3[2] === 70 && e3[3] === 70 && (i2 = e3.subarray(44));
     let r3 = s2?.realtime !== false;
-    for (let e4 = 0;e4 < i2.length && a2.isConnected(); e4 += Ot) {
-      let t3 = i2.subarray(e4, Math.min(e4 + Ot, i2.length));
-      a2.send(t3), r3 && e4 + Ot < i2.length && await Pt(80);
+    for (let e4 = 0;e4 < i2.length && a2.isConnected(); e4 += Ct) {
+      let t3 = i2.subarray(e4, Math.min(e4 + Ct, i2.length));
+      a2.send(t3), r3 && e4 + Ct < i2.length && await Pt(80);
     }
     await a2.finalize();
   } finally {
@@ -2085,7 +2088,7 @@ async function xt(e2, t2, s2) {
   return r2.join(" ");
 }
 async function It(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await At(e2, { onTranscript: i((e3, t3) => {
+  let r2 = [], n2 = null, a2 = await Ot(e2, { onTranscript: i((e3, t3) => {
     t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
   }, "onTranscript"), onError: i((e3) => {
     n2 = e3;
@@ -2104,13 +2107,13 @@ async function It(e2, t2, s2) {
 }
 function Nt(e2, t2) {
   if (Ft("rec")) {
-    let i2 = Rt("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(Ct), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
+    let i2 = Rt("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(At), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
     return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
   if (Ft("arecord")) {
-    let i2 = Rt("arecord", ["-f", "S16_LE", "-r", String(Ct), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
+    let i2 = Rt("arecord", ["-f", "S16_LE", "-r", String(At), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
     return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
@@ -2134,7 +2137,7 @@ function Bt() {
   return Ft("ffmpeg") ? "ffmpeg" : Ft("sox") ? "sox" : null;
 }
 async function Ht(e2, t2, i2, s2) {
-  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(Ct), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(Ct), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = Rt(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
+  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(At), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(At), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = Rt(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
   return new Promise((t3, r3) => {
     let a2 = Date.now();
     n2.stdout?.on("data", async (t4) => {
@@ -2150,7 +2153,7 @@ async function Ht(e2, t2, i2, s2) {
     }), n2.on("error", r3);
   });
 }
-i(At, "connectVoiceStream"), i(xt, "transcribeFile"), i(It, "transcribeAudioFile"), i(Nt, "startMicRecording"), i(Lt, "checkVoiceDeps"), i(Ft, "hasCommand"), i(Pt, "sleep"), i(Ut, "readFileAsBuffer"), i(Bt, "findConverter"), i(Ht, "streamConvertedAudio");
+i(Ot, "connectVoiceStream"), i(xt, "transcribeFile"), i(It, "transcribeAudioFile"), i(Nt, "startMicRecording"), i(Lt, "checkVoiceDeps"), i(Ft, "hasCommand"), i(Pt, "sleep"), i(Ut, "readFileAsBuffer"), i(Bt, "findConverter"), i(Ht, "streamConvertedAudio");
 
 // index.ts
 import { appendFileSync } from "fs";

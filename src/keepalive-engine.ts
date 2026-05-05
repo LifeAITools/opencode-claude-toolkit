@@ -428,6 +428,20 @@ export class KeepaliveEngine {
   }
 
   private async tick(): Promise<void> {
+    // ── KA_HEARTBEAT: visible proof engine is alive on EVERY tick ─────
+    // Writes a single low-cost line every TICK_MS (≤30s) to debug log so
+    // operators can confirm the engine is running even on totally idle pids.
+    // Independent of `onTick` callback (which is gated by jitter window).
+    // Format is grep-friendly: `KA_HEARTBEAT pid=X regSize=N idleSec=... ...`
+    try {
+      const cacheAge = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1
+      const idleSec = Math.round((Date.now() - this.lastActivityAt) / 1000)
+      const nextFireSec = Math.max(0, Math.round((this.config.intervalMs - (Date.now() - this.lastActivityAt)) / 1000))
+      const state = this.inFlight ? 'firing' : (this.registry.size === 0 ? 'empty_registry' : 'armed')
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${state} regSize=${this.registry.size} idleSec=${idleSec} nextFireSec=${nextFireSec} cacheAgeSec=${cacheAge < 0 ? 'na' : Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}\n`)
+    } catch { /* logging best-effort */ }
+
     if (this.registry.size === 0 || this.inFlight) return
 
     // ── Layer 0a: owner-alive check (JIT PID-death gate) ───────────
@@ -540,13 +554,17 @@ export class KeepaliveEngine {
     if (!this.jitterMs) {
       this.jitterMs = Math.floor(Math.random() * 30_000)
     }
+    // Always emit onTick — gives provider/consumer a chance to log per-tick
+    // visibility. The "should we fire now?" decision is made AFTER this hook.
+    this.config.onTick?.({
+      idleMs: idle,
+      nextFireMs: Math.max(0, this.config.intervalMs - idle),
+      model: best.model,
+      tokens: best.inputTokens,
+    })
+
     if (idle < this.config.intervalMs * 0.9 + this.jitterMs) {
-      this.config.onTick?.({
-        idleMs: idle,
-        nextFireMs: Math.max(0, this.config.intervalMs - idle),
-        model: best.model,
-        tokens: best.inputTokens,
-      })
+      // Not yet time to fire — return after onTick so consumers see the tick.
       return
     }
 

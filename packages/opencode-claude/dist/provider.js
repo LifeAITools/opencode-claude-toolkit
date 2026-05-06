@@ -38711,7 +38711,7 @@ var require_commonjs30 = __commonJS((exports) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "@life-ai-tools/claude-code-sdk",
-    version: "0.14.0",
+    version: "0.14.1",
     description: "TypeScript SDK for Claude Code API \u2014 use your Claude Max/Pro subscription programmatically",
     type: "module",
     main: "dist/index.js",

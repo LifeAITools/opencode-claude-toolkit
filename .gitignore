@@ -21,6 +21,7 @@ packages/opencode-claude/.claude/
 !test/keepalive-engine.test.ts
 !test/keepalive-regression.test.ts
 !test/todowrite-repair.test.ts
+!test/orphan-tool-use-sanitizer.test.ts
 
 # One-off test/POC scripts
 packages/claude-max-provider/test-*.ts

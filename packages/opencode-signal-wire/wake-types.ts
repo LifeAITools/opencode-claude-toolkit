@@ -61,6 +61,13 @@ export const WAKE_EVENT_TYPES = {
   // Single canonical inject path; no parallel session.prompt calls.
   QUOTA_CRITICAL: 'quota_critical',
   QUOTA_WARNING: 'quota_warning',
+  // Trailing-edge: emitted when level DECREASES (critical→warning, critical→ok, warning→ok).
+  // Without this, agent keeps stale snapshot from earlier rising-edge warning and gives
+  // misleading info to user ("91% utilization" long after reset).
+  QUOTA_RECOVERED: 'quota_recovered',
+  // On-demand snapshot: synthesized when user explicitly asks "what's my quota?".
+  // Reads quota-status.json fresh and injects current state regardless of cooldown.
+  QUOTA_STATUS: 'quota_status',
 } as const
 
 // ─── Enums ───────────────────────────────────────────────────────────
@@ -82,6 +89,8 @@ export type WakeEventType =
   | 'agent_stale'
   | 'quota_critical'
   | 'quota_warning'
+  | 'quota_recovered'
+  | 'quota_status'
 
 export type DispatchStatus = 'delivered' | 'queued' | 'rate_limited' | 'deduped' | 'failed' | 'agent_not_found' | 'filtered' | 'blocked_by_rule'
 

@@ -487,6 +487,23 @@ export default {
               matched,
               hintsInjected: injected,
             })
+            // Side-effect: if 'quota-on-demand-trigger' fired (user asked
+            // about quota), force-inject current quota snapshot. The rule's
+            // hint already informed the agent that fresh values are coming;
+            // this side-effect actually delivers them. Async/non-blocking —
+            // hint is already in output, snapshot arrives in next message
+            // turn as <system-reminder type="wake" event="quota_status">.
+            const triggeredOnDemand = results.some(
+              (r: any) => r?.ruleId === 'quota-on-demand-trigger',
+            )
+            if (triggeredOnDemand && quotaHandle) {
+              // Don't await — let it inject in background. Errors are
+              // already logged inside injectCurrentSnapshot.
+              void quotaHandle.injectCurrentSnapshot().catch(() => { /* logged */ })
+              logStep('QUOTA_ON_DEMAND_TRIGGERED', {
+                sessionId: event.sessionId ?? 'unbound',
+              })
+            }
           }
         } catch (e: any) {
           logStep('HOOK_FAILED_OPEN', { hook: 'chat.message', error: e?.message ?? String(e) })

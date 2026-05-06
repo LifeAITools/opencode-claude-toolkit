@@ -1143,6 +1143,59 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
       break
     }
 
+    case WAKE_EVENT_TYPES.QUOTA_RECOVERED: {
+      // Trailing-edge: emitted when level decreased (critical|warning → ok,
+      // OR critical → warning). Lifts prior <stop> rules so agent can resume
+      // long tasks without confusion. Replaces stale snapshot from earlier
+      // rising-edge warning with current values.
+      const accountHint = String(p.accountHint ?? 'unknown')
+      const util5h = typeof p.util5h === 'number' ? Math.round(p.util5h * 100) : null
+      const util7d = typeof p.util7d === 'number' ? Math.round(p.util7d * 100) : null
+      const previousLevel = String(p.previousLevel ?? 'elevated')
+      const currentLevel = String(p.level ?? 'ok')
+      const transition = `${previousLevel} → ${currentLevel}`
+      body = [
+        `## Claude Max Quota Recovered`,
+        `**Account:** \`${accountHint}\``,
+        `**Transition:** ${transition}`,
+        util5h !== null ? `**5h utilization:** ${util5h}%` : '',
+        util7d !== null ? `**7d utilization:** ${util7d}%` : '',
+        ``,
+        `<rules>`,
+        currentLevel === 'ok'
+          ? `  <note>Quota back to normal. Earlier warning/critical advisories no longer apply — discard stale references to prior utilization values.</note>`
+          : `  <note>Partially recovered (still ${currentLevel}). Continue with caution but earlier critical-level <stop> rules no longer apply.</note>`,
+        currentLevel === 'ok'
+          ? `  <action>Resume normal work. Long tasks ok again.</action>`
+          : `  <action>Long tasks acceptable; monitor for re-escalation.</action>`,
+        `</rules>`,
+      ].filter(Boolean).join('\n')
+      break
+    }
+
+    case WAKE_EVENT_TYPES.QUOTA_STATUS: {
+      // On-demand snapshot — agent or user explicitly asked "what's the
+      // current quota?". Always shows fresh values from quota-status.json
+      // regardless of level/transition. Pure info, no rules.
+      const accountHint = String(p.accountHint ?? 'unknown')
+      const util5h = typeof p.util5h === 'number' ? Math.round(p.util5h * 100) : null
+      const util7d = typeof p.util7d === 'number' ? Math.round(p.util7d * 100) : null
+      const level = String(p.level ?? 'unknown')
+      const resetAtMs = typeof p.resetAt === 'number' ? p.resetAt : null
+      const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60_000)) : null
+      body = [
+        `## Claude Max Quota Status (current snapshot)`,
+        `**Account:** \`${accountHint}\``,
+        `**Level:** ${level}`,
+        util5h !== null ? `**5h utilization:** ${util5h}%` : '',
+        util7d !== null ? `**7d utilization:** ${util7d}%` : '',
+        resetInMin !== null ? `**Resets in:** ${resetInMin}min` : '',
+        ``,
+        `Refreshed from proxy on demand. Use this in place of any earlier stale snapshot.`,
+      ].filter(Boolean).join('\n')
+      break
+    }
+
     default:
       body = `Event: ${event.type}\n${JSON.stringify(p, null, 2)}`
   }
@@ -1689,7 +1742,9 @@ export async function startWakeListener(
     // task_assigned) use noReply:false to wake the agent into a response.
     const isAdvisoryEvent = (
       event.type === WAKE_EVENT_TYPES.QUOTA_CRITICAL ||
-      event.type === WAKE_EVENT_TYPES.QUOTA_WARNING
+      event.type === WAKE_EVENT_TYPES.QUOTA_WARNING ||
+      event.type === WAKE_EVENT_TYPES.QUOTA_RECOVERED ||
+      event.type === WAKE_EVENT_TYPES.QUOTA_STATUS
     )
 
     if (isAdvisoryEvent) {

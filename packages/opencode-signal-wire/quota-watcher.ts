@@ -97,6 +97,12 @@ interface QuotaStatusFile {
 export interface QuotaWatcherHandle {
   stop: () => void
   forceCheck: () => Promise<void>
+  /**
+   * Inject current quota snapshot as quota_status event, regardless of
+   * level/transition. Used by on-demand rule when user explicitly asks
+   * about quota. Returns true if injection succeeded.
+   */
+  injectCurrentSnapshot: () => Promise<boolean>
 }
 
 export interface QuotaWatcherOptions {
@@ -123,6 +129,12 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): QuotaWatcherHandle
   // when the proxy ACTUALLY transitioned state (not on every refresh of
   // the status file). The proxy bumps issuedAt only on level changes.
   const lastIssuedAt = new Map<string, string>()
+
+  // Track last-known LEVEL per account to detect trailing-edge transitions
+  // (critical→warning, critical→ok, warning→ok). Without this, recovery is
+  // silent and agents keep stale snapshots from prior rising-edge warnings.
+  // Possible values: 'ok' | 'warning' | 'critical' | undefined (first sight).
+  const lastLevel = new Map<string, 'ok' | 'warning' | 'critical'>()
 
   // Pending account hint for retry when session wasn't bound at first try.
   // The 5s retry timer below probes this.
@@ -158,7 +170,8 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): QuotaWatcherHandle
 
   function synthesizeWakeEvent(
     account: AccountState,
-    type: 'quota_critical' | 'quota_warning',
+    type: 'quota_critical' | 'quota_warning' | 'quota_recovered' | 'quota_status',
+    extras: { previousLevel?: 'ok' | 'warning' | 'critical' } = {},
   ): WakeEvent {
     return {
       eventId: `quota-${type}-${randomUUID()}`,
@@ -178,20 +191,47 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): QuotaWatcherHandle
         message: account.message,
         issuedAt: account.issuedAt,
         pids: account.pids,
+        // Trailing-edge events include previousLevel so formatter can render
+        // "back from critical to ok" or "back from warning to ok" etc.
+        ...(extras.previousLevel !== undefined ? { previousLevel: extras.previousLevel } : {}),
       },
       timestamp: new Date().toISOString(),
-      // Fingerprint = accountHint+issuedAt — engine can use this for
+      // Fingerprint = accountHint+issuedAt+type — engine can use this for
       // deeper dedup if needed (cooldown_seconds is the primary throttle).
-      fingerprint: `${account.accountHint}:${account.issuedAt}`,
+      // Including type prevents a recovered event from sharing fingerprint
+      // with a prior warning event (different events, both of value).
+      fingerprint: `${account.accountHint}:${account.issuedAt}:${type}`,
       schemaVersion: 1,
     }
   }
 
-  async function dispatchQuotaEvent(account: AccountState): Promise<boolean> {
-    if (account.level === 'ok') return true  // no event to dispatch
+  async function dispatchQuotaEvent(
+    account: AccountState,
+    previousLevel?: 'ok' | 'warning' | 'critical',
+  ): Promise<boolean> {
+    // Decide event type based on transition direction:
+    //   ok|undefined  → warning   = quota_warning  (rising edge)
+    //   ok|warning    → critical  = quota_critical (rising edge)
+    //   critical      → warning   = quota_recovered (trailing edge)
+    //   critical|warning → ok     = quota_recovered (trailing edge)
+    //   warning       → warning   (issuedAt changed) = quota_warning (proxy refresh)
+    //   critical      → critical  (issuedAt changed) = quota_critical (proxy refresh)
+    let type: 'quota_critical' | 'quota_warning' | 'quota_recovered'
+    if (account.level === 'critical') {
+      type = 'quota_critical'
+    } else if (account.level === 'warning') {
+      // Rising edge or refresh: ok|undefined|warning → warning = quota_warning
+      // Trailing partial: critical → warning = quota_recovered
+      type = previousLevel === 'critical' ? 'quota_recovered' : 'quota_warning'
+    } else {
+      // account.level === 'ok' — only emit if previously was warning|critical
+      if (previousLevel === undefined || previousLevel === 'ok') {
+        return true  // healthy → healthy, nothing to say
+      }
+      type = 'quota_recovered'
+    }
 
-    const type = account.level === 'critical' ? 'quota_critical' : 'quota_warning'
-    const event = synthesizeWakeEvent(account, type)
+    const event = synthesizeWakeEvent(account, type, { previousLevel })
 
     // Two-step canonical path:
     //
@@ -258,25 +298,80 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): QuotaWatcherHandle
     const myAccount = findMyAccount(status)
     if (!myAccount) return  // proxy hasn't seen us yet — normal during startup
 
+    const previousLevel = lastLevel.get(myAccount.accountHint)
+    const lastSeen = lastIssuedAt.get(myAccount.accountHint)
+
+    // Trailing-edge case: account was warning|critical, now ok.
+    // Proxy may NOT bump issuedAt on level decrease (depends on proxy impl)
+    // — so we use level transition (not issuedAt) as the trigger here.
     if (myAccount.level === 'ok') {
-      // Quota healthy — clear pending; preserve lastIssuedAt so we don't
-      // re-fire on transient ok→critical→ok→critical with same issuedAt.
+      if (previousLevel === 'warning' || previousLevel === 'critical') {
+        // Recovery! Emit quota_recovered.
+        const ok = await dispatchQuotaEvent(myAccount, previousLevel)
+        if (ok) {
+          lastLevel.set(myAccount.accountHint, 'ok')
+          // Track issuedAt to avoid re-firing if proxy did bump it.
+          lastIssuedAt.set(myAccount.accountHint, myAccount.issuedAt)
+          pendingForAccount = null
+          log(`quota-watcher: recovered ${previousLevel}→ok for account=${myAccount.accountHint}`)
+        }
+        return
+      }
+      // ok→ok (steady state). Update tracker, no event.
+      lastLevel.set(myAccount.accountHint, 'ok')
       pendingForAccount = null
       return
     }
 
-    const lastSeen = lastIssuedAt.get(myAccount.accountHint)
-    if (lastSeen === myAccount.issuedAt) {
-      // Same issuance — proxy hasn't transitioned to a new state.
-      // Nothing new to dispatch.
+    // Account is warning or critical.
+    // Skip if same issuedAt AND same level (no transition).
+    if (lastSeen === myAccount.issuedAt && previousLevel === myAccount.level) {
       return
     }
 
-    const ok = await dispatchQuotaEvent(myAccount)
+    // Either issuedAt changed (proxy refreshed) OR level changed (transition).
+    // Both warrant an event — could be rising edge (e.g. warning→critical)
+    // or trailing edge with level still elevated (critical→warning = partial
+    // recovery, treated as quota_recovered with level=warning).
+    const ok = await dispatchQuotaEvent(myAccount, previousLevel)
     if (ok) {
       lastIssuedAt.set(myAccount.accountHint, myAccount.issuedAt)
+      lastLevel.set(myAccount.accountHint, myAccount.level)
       pendingForAccount = null
     }
+  }
+
+  // ─── On-demand snapshot ────────────────────────────────────────────
+  // Public method: read current quota state and inject as quota_status event.
+  // Used by signal-wire rule when user types "quota?" / "квота?" etc.
+  // Bypasses level-tracking entirely — always reads fresh from quota-status.json.
+  async function injectCurrentSnapshot(): Promise<boolean> {
+    const status = readStatus()
+    if (!status) {
+      log(`quota-watcher: on-demand snapshot — no quota-status.json (proxy not running?)`)
+      return false
+    }
+    const myAccount = findMyAccount(status)
+    if (!myAccount) {
+      log(`quota-watcher: on-demand snapshot — pid ${myPid} not registered with proxy yet`)
+      return false
+    }
+    const event = synthesizeWakeEvent(myAccount, 'quota_status')
+    const sessionId = resolveSessionId()
+    if (!sessionId) {
+      log(`quota-watcher: on-demand snapshot — session not bound`)
+      return false
+    }
+    // Run engine to record audit, but force-inject regardless of cooldown
+    // (user explicitly asked, throttling here would hide info from them).
+    if (signalWire) {
+      try { await signalWire.evaluateExternal(event) } catch (e: any) {
+        log(`quota-watcher: on-demand engine error: ${e?.message ?? e}`)
+      }
+    }
+    const ok = await injectContextEvent(event, sessionId)
+    log(`quota-watcher: on-demand snapshot ${ok ? 'injected' : 'failed'} for account=${myAccount.accountHint} level=${myAccount.level}`)
+    return ok
   }
 
   function scheduleCheck(): void {
@@ -315,5 +410,6 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): QuotaWatcherHandle
       if (retryTimer) clearInterval(retryTimer)
     },
     forceCheck: check,
+    injectCurrentSnapshot,
   }
 }

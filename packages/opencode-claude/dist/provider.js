@@ -38711,7 +38711,7 @@ var require_commonjs30 = __commonJS((exports) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "@life-ai-tools/claude-code-sdk",
-    version: "0.14.1",
+    version: "0.14.2",
     description: "TypeScript SDK for Claude Code API \u2014 use your Claude Max/Pro subscription programmatically",
     type: "module",
     main: "dist/index.js",
@@ -38795,7 +38795,7 @@ import { randomUUID as st } from "crypto";
 import { readFileSync as ot, statSync as lt } from "fs";
 import { spawn as Rt, spawnSync as St } from "child_process";
 import { request as $t } from "https";
-import { randomBytes as bt, createHash as Mt } from "crypto";
+import { randomBytes as Mt, createHash as bt } from "crypto";
 var e = Object.defineProperty;
 var t = Object.getOwnPropertyNames;
 var i = (t2, i2) => e(t2, "name", { value: i2, configurable: true });
@@ -38830,7 +38830,7 @@ function k(e2) {
 async function _(e2 = {}) {
   let t2 = e2.credentialsPath ?? m(), i2 = y(), s2 = g(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await T(r2, e2.port), f2 = `http://localhost:${n2}/callback`, p2 = e2.loginWithClaudeAi !== false ? $ : S, k2 = new URLSearchParams({ client_id: v, response_type: "code", scope: D, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
   e2.loginHint && k2.set("login_hint", e2.loginHint), e2.loginMethod && k2.set("login_method", e2.loginMethod), e2.orgUUID && k2.set("orgUUID", e2.orgUUID);
-  let _2, R, A = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(M)}`;
+  let _2, R, A = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(b)}`;
   e2.onAuthUrl ? e2.onAuthUrl(A, C) : (console.log(`
 \uD83D\uDD10 Login to Claude
 `), console.log(`Open this URL in your browser:
@@ -38842,7 +38842,7 @@ async function _(e2 = {}) {
     throw d2(), e3;
   }
   d2();
-  let O = await fetch(b, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: R, client_id: v, code_verifier: i2, state: r2 }) });
+  let O = await fetch(M, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: R, client_id: v, code_verifier: i2, state: r2 }) });
   if (!O.ok) {
     let e3 = await O.text();
     throw new Error(`Token exchange failed (${O.status}): ${e3}`);
@@ -38898,13 +38898,13 @@ var v;
 var R;
 var S;
 var $;
-var b;
 var M;
+var b;
 var D;
 var A;
 var C;
 var O = (A = { "src/auth.ts"() {
-  v = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (R = "https://platform.claude.com") + "/oauth/authorize", $ = "https://claude.com/cai/oauth/authorize", b = `${R}/v1/oauth/token`, M = `${R}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), D = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(_, "oauthLogin"), i(T, "startCallbackServer"), i(E, "tryOpenBrowser");
+  v = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (R = "https://platform.claude.com") + "/oauth/authorize", $ = "https://claude.com/cai/oauth/authorize", M = `${R}/v1/oauth/token`, b = `${R}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), D = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(_, "oauthLogin"), i(T, "startCallbackServer"), i(E, "tryOpenBrowser");
 } }, function() {
   return A && (C = (0, A[t(A)[0]])(A = 0)), C;
 });
@@ -39015,12 +39015,12 @@ function Se(e2, t2, i2, s2 = 1, r2 = 30) {
 function $e(e2, t2) {
   return e2 == null ? t2 : typeof e2 == "boolean" ? e2 : typeof e2 == "string" ? e2 === "true" || e2 === "1" || e2 === "yes" : !!e2;
 }
-function be() {
+function Me() {
   let e2 = ve();
   return e2 === null && Te ? Te : De(e2 ?? null);
 }
-function Me() {
-  return _e = 0, Te = null, be();
+function be() {
+  return _e = 0, Te = null, Me();
 }
 function De(e2) {
   let t2 = e2 === null ? "defaults" : Object.keys(e2).length > 0 ? "mixed" : "defaults", i2 = Re(e2?.cacheTtlMs ?? (typeof e2?.cacheTtlSec == "number" ? 1000 * e2.cacheTtlSec : undefined), "cacheTtlMs", ye.cacheTtlMs, 60000, 7200000), s2 = Re(e2?.safetyMarginMs ?? (typeof e2?.safetyMarginSec == "number" ? 1000 * e2.safetyMarginSec : undefined), "safetyMarginMs", ye.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = Re(e2?.intervalMs ?? (typeof e2?.intervalSec == "number" ? 1000 * e2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = ye.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
@@ -39032,10 +39032,10 @@ function Ae() {
   return ke;
 }
 function Ce() {
-  return be().cacheTtlMs;
+  return Me().cacheTtlMs;
 }
 function Oe() {
-  return be().safetyMarginMs;
+  return Me().safetyMarginMs;
 }
 function xe(e2) {
   let t2 = e2;
@@ -39051,7 +39051,7 @@ function xe(e2) {
   let s2 = t2.code ?? t2.cause?.code ?? "", r2 = t2.name ?? t2.cause?.name ?? "", n2 = `${(t2.message ?? "").toLowerCase()} ${(t2.cause?.message ?? "").toLowerCase()}`.trim();
   return r2 === "AbortError" || r2 === "TimeoutError" || n2.includes("aborted") || n2.includes("the operation timed out") || n2.includes("request timed out") || s2 && new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_ABORTED", "ABORT_ERR", "ERR_NETWORK", "ConnectionRefused", "FailedToOpenSocket"]).has(s2) || n2.includes("unable to connect") || n2.includes("failed to open socket") || n2.includes("connection refused") || n2.includes("network is unreachable") || n2.includes("network error") || n2.includes("fetch failed") || n2.includes("timeout") || n2.includes("dns") || n2.includes("socket hang up") || n2.includes("terminated") ? "network" : "server_transient";
 }
-i(ve, "readRawConfig"), i(Re, "num"), i(Se, "numArray"), i($e, "bool"), i(be, "loadKeepaliveConfig"), i(Me, "reloadKeepaliveConfig"), i(De, "_resolve"), i(Ae, "getConfigPath"), i(Ce, "getCacheTtlMs"), i(Oe, "getSafetyMarginMs"), i(xe, "classifyError");
+i(ve, "readRawConfig"), i(Re, "num"), i(Se, "numArray"), i($e, "bool"), i(Me, "loadKeepaliveConfig"), i(be, "reloadKeepaliveConfig"), i(De, "_resolve"), i(Ae, "getConfigPath"), i(Ce, "getCacheTtlMs"), i(Oe, "getSafetyMarginMs"), i(xe, "classifyError");
 var Ie = class _KeepaliveEngine {
   static {
     i(this, "KeepaliveEngine");
@@ -39087,7 +39087,7 @@ var Ie = class _KeepaliveEngine {
   snapshotCallCount = 0;
   constructor(e2) {
     this.getToken = e2.getToken, this.doFetch = e2.doFetch, this.getRateLimitInfo = e2.getRateLimitInfo, this.isOwnerAlive = e2.isOwnerAlive ?? (() => true);
-    let t2 = e2.config ?? {}, i2 = be();
+    let t2 = e2.config ?? {}, i2 = Me();
     this.cacheTtlMs = i2.cacheTtlMs, this.safetyMarginMs = i2.safetyMarginMs, this.retryDelaysMs = i2.retryDelaysMs, this.healthProbeIntervalsMs = i2.healthProbeIntervalsMs, this.healthProbeTimeoutMs = i2.healthProbeTimeoutMs;
     let s2 = t2.intervalMs ?? i2.intervalMs;
     s2 < i2.intervalClampMin && (console.error(`[claude-sdk] keepalive intervalMs=${s2} below safe min (${i2.intervalClampMin}); clamped`), s2 = i2.intervalClampMin), s2 > i2.intervalClampMax && (console.error(`[claude-sdk] keepalive intervalMs=${s2} above safe max (${i2.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`), s2 = i2.intervalClampMax), this.config = { enabled: t2.enabled ?? i2.enabled, intervalMs: s2, idleTimeoutMs: t2.idleTimeoutMs ?? i2.idleTimeoutMs, minTokens: t2.minTokens ?? i2.minTokens, rewriteWarnIdleMs: t2.rewriteWarnIdleMs ?? i2.rewriteWarnIdleMs, rewriteWarnTokens: t2.rewriteWarnTokens ?? i2.rewriteWarnTokens, rewriteBlockIdleMs: t2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: t2.rewriteBlockEnabled ?? i2.rewriteBlockEnabled, onHeartbeat: t2.onHeartbeat, onTick: t2.onTick, onDisarmed: t2.onDisarmed, onRewriteWarning: t2.onRewriteWarning, onNetworkStateChange: t2.onNetworkStateChange };
@@ -39147,7 +39147,7 @@ var Ie = class _KeepaliveEngine {
       return;
     try {
       if (!this.isOwnerAlive())
-        return this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
+        return this.logClearDiag("owner_dead", { ownerCheck: "tick" }), this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
     } catch {}
     if (this.cacheWrittenAt > 0) {
       let e3 = Date.now() - this.cacheWrittenAt;
@@ -39156,12 +39156,12 @@ var Ie = class _KeepaliveEngine {
           ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(e3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((e3 - this.cacheTtlMs) / 1000)}
 `);
         } catch {}
-        return this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
+        return this.logClearDiag("cache_expired_during_sleep", { overSec: Math.round((e3 - this.cacheTtlMs) / 1000) }), this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
       }
     }
-    let e2 = be();
+    let e2 = Me();
     if (!e2.enabled)
-      return this.registry.clear(), void this.stop();
+      return this.logClearDiag("config_disabled", { liveConfigEnabled: e2.enabled }), this.registry.clear(), void this.stop();
     if (e2.cacheTtlMs !== this.cacheTtlMs) {
       let t3 = this.cacheTtlMs;
       this.cacheTtlMs = e2.cacheTtlMs;
@@ -39182,7 +39182,7 @@ var Ie = class _KeepaliveEngine {
     t2 !== this.config.intervalMs && (this.config.intervalMs = t2), e2.idleTimeoutMs !== this.config.idleTimeoutMs && (this.config.idleTimeoutMs = e2.idleTimeoutMs), e2.minTokens !== this.config.minTokens && (this.config.minTokens = e2.minTokens);
     let i2 = Date.now() - this.lastRealActivityAt;
     if (this.config.idleTimeoutMs !== 1 / 0 && i2 > this.config.idleTimeoutMs)
-      return this.registry.clear(), void this.stop();
+      return this.logClearDiag("idle_timeout", { realIdleMs: i2, idleTimeoutMs: this.config.idleTimeoutMs }), this.registry.clear(), void this.stop();
     let s2 = null;
     for (let e3 of this.registry.values())
       (!s2 || e3.inputTokens > s2.inputTokens) && (s2 = e3);
@@ -39209,52 +39209,59 @@ var Ie = class _KeepaliveEngine {
           let e4 = Date.now() - this.cacheWrittenAt, t4 = this.cacheTtlMs - e4 <= this.safetyMarginMs;
           this.onDisarmed("network_error"), this.startHealthProbe({ reviveMode: t4 });
         } else
-          t3 === "server_transient" ? this.retryChain(s2) : t3 === "auth" ? (this.registry.clear(), this.onDisarmed("auth_error")) : (this.registry.clear(), this.onDisarmed("permanent_error"));
+          t3 === "server_transient" ? this.retryChain(s2) : t3 === "auth" ? (this.logClearDiag("auth_error", { category: t3, errStatus: e3?.status }), this.registry.clear(), this.onDisarmed("auth_error")) : (this.logClearDiag("permanent_error", { category: t3, errStatus: e3?.status, errMessage: e3?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error"));
       } finally {
         this.inFlight = false, this.abortController = null;
       }
     }
   }
+  logClearDiag(e2, t2) {
+    try {
+      let i2 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, s2 = this.cacheTtlMs - i2, r2 = Date.now() - this.lastActivityAt, n2 = Date.now() - this.lastRealActivityAt, a2 = { reason: e2, cacheAgeMs: i2, cacheTtlMs: this.cacheTtlMs, ttlRemainingMs: s2, safetyMarginMs: this.safetyMarginMs, idleMs: r2, realIdleMs: n2, regSize: this.registry.size, inFlight: this.inFlight, cacheWrittenAt: this.cacheWrittenAt, lastActivityAt: this.lastActivityAt, lastRealActivityAt: this.lastRealActivityAt, ...t2 }, o2 = Object.entries(a2).map(([e3, t3]) => `${e3}=${t3}`).join(" ");
+      ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_CLEAR_DIAG pid=${process.pid} ${o2}
+`);
+    } catch {}
+  }
   retryChain(e2, t2 = 0) {
     if (t2 >= this.retryDelaysMs.length)
-      return this.registry.clear(), void this.onDisarmed("retry_exhausted");
+      return this.logClearDiag("retry_exhausted", { attemptIndex: t2, retryDelaysMsLen: this.retryDelaysMs.length }), this.registry.clear(), void this.onDisarmed("retry_exhausted");
     let i2 = Date.now() - this.cacheWrittenAt, s2 = this.cacheTtlMs - i2, r2 = 1000 * this.retryDelaysMs[t2];
     if (s2 < r2 + this.safetyMarginMs) {
-      this.registry.clear();
       let e3 = i2 < this.cacheTtlMs / 2 ? "retry_budget_exceeds_ttl" : "cache_ttl_exhausted";
-      return void this.onDisarmed(e3);
+      return this.logClearDiag(e3, { cmpLeft: s2, cmpRight: r2 + this.safetyMarginMs, nextDelayMs: r2, attemptIndex: t2, retryDelaysMsRaw: JSON.stringify(this.retryDelaysMs) }), this.registry.clear(), void this.onDisarmed(e3);
     }
     this.retryTimer = setTimeout(async () => {
       this.retryTimer = null;
       try {
         if (!this.isOwnerAlive())
-          return this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
+          return this.logClearDiag("owner_dead", { ownerCheck: "retry" }), this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
       } catch {}
-      if (!(this.lastRealActivityAt > this.cacheWrittenAt)) {
-        if (Date.now() - this.cacheWrittenAt > this.cacheTtlMs - this.safetyMarginMs)
-          return this.registry.clear(), void this.onDisarmed("cache_ttl_expired_mid_retry");
-        this.inFlight = true;
-        try {
-          let t3 = await this.getToken(), i3 = JSON.parse(JSON.stringify(e2.body)), s3 = i3.thinking?.budget_tokens ?? 0;
-          i3.max_tokens = s3 > 0 ? s3 + 1 : 1;
-          let r3 = { ...e2.headers, Authorization: `Bearer ${t3}` }, n2 = new AbortController;
-          this.abortController = n2;
-          for await (let e3 of this.doFetch(i3, r3, n2.signal))
-            ;
-          this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
-        } catch (i3) {
-          let s3 = xe(i3);
-          if (s3 === "network") {
-            this.inFlight = false, this.abortController = null;
-            let e3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
-            return this.onDisarmed("network_error_mid_retry"), void this.startHealthProbe({ reviveMode: e3 });
-          }
-          if (s3 === "server_transient")
-            return this.inFlight = false, this.abortController = null, void this.retryChain(e2, t2 + 1);
-          this.registry.clear(), this.onDisarmed("permanent_error_mid_retry");
-        } finally {
+      if (this.lastRealActivityAt > this.cacheWrittenAt)
+        return;
+      let i3 = Date.now() - this.cacheWrittenAt;
+      if (i3 > this.cacheTtlMs - this.safetyMarginMs)
+        return this.logClearDiag("cache_ttl_expired_mid_retry", { ageNowMs: i3 }), this.registry.clear(), void this.onDisarmed("cache_ttl_expired_mid_retry");
+      this.inFlight = true;
+      try {
+        let t3 = await this.getToken(), i4 = JSON.parse(JSON.stringify(e2.body)), s3 = i4.thinking?.budget_tokens ?? 0;
+        i4.max_tokens = s3 > 0 ? s3 + 1 : 1;
+        let r3 = { ...e2.headers, Authorization: `Bearer ${t3}` }, n2 = new AbortController;
+        this.abortController = n2;
+        for await (let e3 of this.doFetch(i4, r3, n2.signal))
+          ;
+        this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
+      } catch (i4) {
+        let s3 = xe(i4);
+        if (s3 === "network") {
           this.inFlight = false, this.abortController = null;
+          let e3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
+          return this.onDisarmed("network_error_mid_retry"), void this.startHealthProbe({ reviveMode: e3 });
         }
+        if (s3 === "server_transient")
+          return this.inFlight = false, this.abortController = null, void this.retryChain(e2, t2 + 1);
+        this.logClearDiag("permanent_error_mid_retry", { category: s3, attemptIndex: t2, errStatus: i4?.status, errMessage: i4?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error_mid_retry");
+      } finally {
+        this.inFlight = false, this.abortController = null;
       }
     }, r2);
   }
@@ -40698,13 +40705,13 @@ async function Ot(e2, t2, s2) {
   if (s2?.keyterms?.length)
     for (let e3 of s2.keyterms)
       n2.append("keyterms", e3);
-  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = bt(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, f2 = null, p2 = "", m2 = await new Promise((t3, i2) => {
+  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = Mt(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, f2 = null, p2 = "", m2 = await new Promise((t3, i2) => {
     let s3 = setTimeout(() => {
       i2(new Error("voice_stream WebSocket connection timeout (10s)"));
     }, 1e4), n3 = new URL(r2), l3 = $t({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${e2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
     l3.on("upgrade", (e3, r3, n4) => {
       clearTimeout(s3);
-      let a3 = Mt("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
+      let a3 = bt("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
       if (e3.headers["sec-websocket-accept"] !== a3)
         return r3.destroy(), void i2(new Error("WebSocket handshake failed: invalid accept header"));
       t3(r3);
@@ -40728,7 +40735,7 @@ async function Ot(e2, t2, s2) {
   function k2(e3, t3) {
     if (m2.destroyed)
       return;
-    let i2, s3 = bt(4), r3 = Buffer.alloc(e3.length);
+    let i2, s3 = Mt(4), r3 = Buffer.alloc(e3.length);
     for (let t4 = 0;t4 < e3.length; t4++)
       r3[t4] = e3[t4] ^ s3[t4 % 4];
     e3.length < 126 ? (i2 = Buffer.alloc(6), i2[0] = 128 | t3, i2[1] = 128 | e3.length, s3.copy(i2, 2)) : e3.length < 65536 ? (i2 = Buffer.alloc(8), i2[0] = 128 | t3, i2[1] = 254, i2.writeUInt16BE(e3.length, 2), s3.copy(i2, 4)) : (i2 = Buffer.alloc(14), i2[0] = 128 | t3, i2[1] = 255, i2.writeBigUInt64BE(BigInt(e3.length), 2), s3.copy(i2, 10)), m2.write(Buffer.concat([i2, r3]));
@@ -41935,7 +41942,7 @@ function createClaudeMax(options = {}) {
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? "1800", 10) || 1800) * 1000;
   let cacheConfigSnapshot = {};
   try {
-    const c2 = be();
+    const c2 = Me();
     cacheConfigSnapshot = {
       cacheTtlMs: c2.cacheTtlMs,
       cacheTtlMin: Math.round(c2.cacheTtlMs / 60000),

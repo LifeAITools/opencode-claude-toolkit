@@ -449,6 +449,7 @@ export class KeepaliveEngine {
     // disarm. Saves wasted KA fires into a dead owner's cache.
     try {
       if (!this.isOwnerAlive()) {
+        this.logClearDiag('owner_dead', { ownerCheck: 'tick' })
         this.registry.clear()
         this.stop()
         this.onDisarmed('owner_dead')
@@ -476,6 +477,7 @@ export class KeepaliveEngine {
           appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
             `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((cacheAge - this.cacheTtlMs) / 1000)}\n`)
         } catch { /* logging best-effort */ }
+        this.logClearDiag('cache_expired_during_sleep', { overSec: Math.round((cacheAge - this.cacheTtlMs) / 1000) })
         this.registry.clear()
         this.onDisarmed('cache_expired_during_sleep')
         return
@@ -487,6 +489,7 @@ export class KeepaliveEngine {
     // idleTimeoutSec / cacheTtlSec changes without restart.
     const liveConfig = loadKeepaliveConfig()
     if (!liveConfig.enabled) {
+      this.logClearDiag('config_disabled', { liveConfigEnabled: liveConfig.enabled })
       this.registry.clear()
       this.stop()
       return
@@ -536,6 +539,7 @@ export class KeepaliveEngine {
     // Idle timeout
     const realIdle = Date.now() - this.lastRealActivityAt
     if (this.config.idleTimeoutMs !== Infinity && realIdle > this.config.idleTimeoutMs) {
+      this.logClearDiag('idle_timeout', { realIdleMs: realIdle, idleTimeoutMs: this.config.idleTimeoutMs })
       this.registry.clear()
       this.stop()
       return
@@ -629,10 +633,12 @@ export class KeepaliveEngine {
         // Token issue — disarm, token refresh is the consumer's responsibility
         // (they should refresh via credentialStore on 401). Engine will resume
         // on next real request with fresh creds.
+        this.logClearDiag('auth_error', { category, errStatus: (err as any)?.status })
         this.registry.clear()
         this.onDisarmed('auth_error')
       } else {
         // Permanent (400, malformed request, etc). Don't retry.
+        this.logClearDiag('permanent_error', { category, errStatus: (err as any)?.status, errMessage: (err as any)?.message?.slice(0, 200) })
         this.registry.clear()
         this.onDisarmed('permanent_error')
       }
@@ -640,6 +646,41 @@ export class KeepaliveEngine {
       this.inFlight = false
       this.abortController = null
     }
+  }
+
+  /**
+   * Diagnostic logger — call BEFORE registry.clear() to capture exact
+   * state at the moment of disarm. Enables post-mortem analysis without
+   * needing to reproduce the incident.
+   *
+   * Writes to claude-max-debug.log with grep-friendly tag KA_CLEAR_DIAG.
+   * Includes every variable that gates a clear() decision.
+   */
+  private logClearDiag(reason: string, extra?: Record<string, unknown>): void {
+    try {
+      const cacheAge = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1
+      const ttlRemaining = this.cacheTtlMs - cacheAge
+      const idleMs = Date.now() - this.lastActivityAt
+      const realIdleMs = Date.now() - this.lastRealActivityAt
+      const fields = {
+        reason,
+        cacheAgeMs: cacheAge,
+        cacheTtlMs: this.cacheTtlMs,
+        ttlRemainingMs: ttlRemaining,
+        safetyMarginMs: this.safetyMarginMs,
+        idleMs,
+        realIdleMs,
+        regSize: this.registry.size,
+        inFlight: this.inFlight,
+        cacheWrittenAt: this.cacheWrittenAt,
+        lastActivityAt: this.lastActivityAt,
+        lastRealActivityAt: this.lastRealActivityAt,
+        ...extra,
+      }
+      const line = Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(' ')
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] KA_CLEAR_DIAG pid=${process.pid} ${line}\n`)
+    } catch { /* logging best-effort */ }
   }
 
   /**
@@ -651,6 +692,7 @@ export class KeepaliveEngine {
     attemptIndex = 0,
   ): void {
     if (attemptIndex >= this.retryDelaysMs.length) {
+      this.logClearDiag('retry_exhausted', { attemptIndex, retryDelaysMsLen: this.retryDelaysMs.length })
       this.registry.clear()
       this.onDisarmed('retry_exhausted')
       return
@@ -678,10 +720,23 @@ export class KeepaliveEngine {
       // Heuristic: if cacheAge > TTL/2 the user-visible behaviour is the
       // same (KA stops), but the *cause* is the retry budget colliding with
       // the natural TTL boundary, not idle expiry. We tag it distinctly.
-      this.registry.clear()
       const reason = cacheAge < this.cacheTtlMs / 2
         ? 'retry_budget_exceeds_ttl'  // server failures consumed too much of the window
         : 'cache_ttl_exhausted'        // genuine TTL boundary hit
+      // DIAGNOSTIC: capture the EXACT comparison values that triggered this.
+      // If reason='retry_budget_exceeds_ttl' fires when ttlRemaining is
+      // genuinely large (incident 2026-05-06T23:01:50 had cacheAgeSec=1694
+      // ttlSec=3600 yet trigger fired), this log will show whether
+      // cacheTtlMs, safetyMarginMs, nextDelay, or cacheWrittenAt held
+      // unexpected values at the trigger moment.
+      this.logClearDiag(reason, {
+        cmpLeft: ttlRemaining,
+        cmpRight: nextDelay + this.safetyMarginMs,
+        nextDelayMs: nextDelay,
+        attemptIndex,
+        retryDelaysMsRaw: JSON.stringify(this.retryDelaysMs),
+      })
+      this.registry.clear()
       this.onDisarmed(reason)
       return
     }
@@ -693,6 +748,7 @@ export class KeepaliveEngine {
       // between scheduled retry and fire time.
       try {
         if (!this.isOwnerAlive()) {
+          this.logClearDiag('owner_dead', { ownerCheck: 'retry' })
           this.registry.clear()
           this.stop()
           this.onDisarmed('owner_dead')
@@ -707,6 +763,7 @@ export class KeepaliveEngine {
 
       const ageNow = Date.now() - this.cacheWrittenAt
       if (ageNow > this.cacheTtlMs - this.safetyMarginMs) {
+        this.logClearDiag('cache_ttl_expired_mid_retry', { ageNowMs: ageNow })
         this.registry.clear()
         this.onDisarmed('cache_ttl_expired_mid_retry')
         return
@@ -750,6 +807,12 @@ export class KeepaliveEngine {
           this.retryChain(entry, attemptIndex + 1)
           return
         } else {
+          this.logClearDiag('permanent_error_mid_retry', {
+            category,
+            attemptIndex,
+            errStatus: (err as any)?.status,
+            errMessage: (err as any)?.message?.slice(0, 200),
+          })
           this.registry.clear()
           this.onDisarmed('permanent_error_mid_retry')
         }

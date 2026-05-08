@@ -983,6 +983,53 @@ function parseAgentsMd(): AgentIdentity | null {
 
 // ─── Format Wake Message ────────────────────────────────────────────
 
+/**
+ * Render a "measured at" line for quota wake events so the agent can tell
+ * whether the snapshot is fresh or stale at injection time.
+ *
+ * Inputs (in priority order, all optional):
+ *   - `issuedAt`: ISO timestamp from quota-status.json `account.issuedAt` —
+ *     when the proxy actually observed the quota state on the wire. This is
+ *     the "ground truth" timestamp. Set on rising-edge transitions and
+ *     refreshed on injectCurrentSnapshot() reads.
+ *   - `eventTimestamp`: top-level `event.timestamp` — when this wake event
+ *     was synthesized. Useful as a fallback when issuedAt is missing.
+ *
+ * Output:
+ *   "2026-05-07T06:11:00Z (5s ago)"  — if recent
+ *   "2026-05-07T05:30:00Z (47min ago)"  — if stale
+ *   ""  — both timestamps missing
+ *
+ * Renders age in human units (seconds < 60s, minutes < 60min, hours otherwise)
+ * so the agent can make a snap judgment without doing date math.
+ */
+function formatMeasuredAt(issuedAt: unknown, eventTimestamp?: string): string {
+  const raw = (typeof issuedAt === 'string' && issuedAt) ? issuedAt
+    : (typeof eventTimestamp === 'string' && eventTimestamp) ? eventTimestamp
+    : null
+  if (!raw) return ''
+
+  const t = Date.parse(raw)
+  if (!Number.isFinite(t)) return ''
+
+  const ageMs = Date.now() - t
+  let ageHuman: string
+  if (ageMs < 0) {
+    // Clock skew or freshly issued event whose ts is microseconds ahead. Treat as "now".
+    ageHuman = 'just now'
+  } else if (ageMs < 60_000) {
+    ageHuman = `${Math.round(ageMs / 1000)}s ago`
+  } else if (ageMs < 60 * 60_000) {
+    ageHuman = `${Math.round(ageMs / 60_000)}min ago`
+  } else if (ageMs < 24 * 60 * 60_000) {
+    ageHuman = `${Math.round(ageMs / (60 * 60_000) * 10) / 10}h ago`
+  } else {
+    ageHuman = `${Math.round(ageMs / (24 * 60 * 60_000))}d ago`
+  }
+
+  return `${raw} (${ageHuman})`
+}
+
 /** Format wake event with actionable instructions per event type.
  *  Standalone — no imports from signal-wire.ts (avoids circular deps).
  *
@@ -992,7 +1039,13 @@ function parseAgentsMd(): AgentIdentity | null {
 export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | null): string {
   const p = event.payload as Record<string, any>
   const esc = (s: string) => s.replace(/"/g, '&quot;')
-  const tag = `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}">`
+  // Include both event-emit timestamp (when wake was synthesized) and
+  // measured-at timestamp (when the underlying state was actually observed
+  // on the wire). For quota events these can differ by minutes — agent
+  // needs to see the measured-at to assess staleness.
+  const emittedAt = typeof event.timestamp === 'string' && event.timestamp ? event.timestamp : new Date().toISOString()
+  const measuredAtRaw = typeof (p as any)?.issuedAt === 'string' ? (p as any).issuedAt : null
+  const tag = `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}" emitted-at="${esc(emittedAt)}"${measuredAtRaw ? ` measured-at="${esc(measuredAtRaw)}"` : ''}>`
   const end = `</system-reminder>`
 
   // ── CR-01, DB-05: Prepend <agent-identity> block if identity is available ──
@@ -1099,11 +1152,13 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
       const resetIso = resetAtMs ? new Date(resetAtMs).toISOString() : 'unknown'
       const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60_000)) : null
       const message = String(p.message ?? `Quota critical on account ${accountHint}.`)
+      const measuredAt = formatMeasuredAt(p.issuedAt, event.timestamp)
       body = [
         `## ⚠️ Claude Max Quota Critical`,
         `**Account:** \`${accountHint}\``,
         util5h !== null ? `**5h utilization:** ${util5h}% (≥98% = critical)` : '',
         resetInMin !== null ? `**Resets in:** ${resetInMin}min (${resetIso})` : '',
+        measuredAt ? `**Measured:** ${measuredAt}` : '',
         ``,
         message,
         ``,
@@ -1115,6 +1170,7 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
           : `  <option name="wait">Wait for natural reset (preserves cache)</option>`,
         `  <option name="switch-org">Switch via 'claude /login' to another account (cache rebuild ~150k cw on new org, recoverable)</option>`,
         `  <stop-condition>Resume normal work after util drops below 0.95 OR user explicitly tells you to continue.</stop-condition>`,
+        `  <freshness>If "Measured" is older than ~2 minutes from now, treat values as potentially stale — request a fresh check before acting.</freshness>`,
         `</rules>`,
       ].filter(Boolean).join('\n')
       break
@@ -1127,17 +1183,20 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
       const resetAtMs = typeof p.resetAt === 'number' ? p.resetAt : null
       const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60_000)) : null
       const message = String(p.message ?? `Quota approaching limit on account ${accountHint}.`)
+      const measuredAt = formatMeasuredAt(p.issuedAt, event.timestamp)
       body = [
         `## Claude Max Quota Warning`,
         `**Account:** \`${accountHint}\``,
         util5h !== null ? `**5h utilization:** ${util5h}% (≥85% = warning)` : '',
         resetInMin !== null ? `**Resets in:** ${resetInMin}min` : '',
+        measuredAt ? `**Measured:** ${measuredAt}` : '',
         ``,
         message,
         ``,
         `<rules>`,
         `  <note>Approaching quota limit. Plan to wrap up current work soon.</note>`,
         `  <action>Avoid starting new long tasks; finish what's in flight.</action>`,
+        `  <freshness>If "Measured" is older than ~2 minutes from now, treat as potentially stale — request a fresh quota check before acting.</freshness>`,
         `</rules>`,
       ].filter(Boolean).join('\n')
       break
@@ -1154,12 +1213,14 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
       const previousLevel = String(p.previousLevel ?? 'elevated')
       const currentLevel = String(p.level ?? 'ok')
       const transition = `${previousLevel} → ${currentLevel}`
+      const measuredAt = formatMeasuredAt(p.issuedAt, event.timestamp)
       body = [
         `## Claude Max Quota Recovered`,
         `**Account:** \`${accountHint}\``,
         `**Transition:** ${transition}`,
         util5h !== null ? `**5h utilization:** ${util5h}%` : '',
         util7d !== null ? `**7d utilization:** ${util7d}%` : '',
+        measuredAt ? `**Measured:** ${measuredAt}` : '',
         ``,
         `<rules>`,
         currentLevel === 'ok'
@@ -1183,6 +1244,7 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
       const level = String(p.level ?? 'unknown')
       const resetAtMs = typeof p.resetAt === 'number' ? p.resetAt : null
       const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60_000)) : null
+      const measuredAt = formatMeasuredAt(p.issuedAt, event.timestamp)
       body = [
         `## Claude Max Quota Status (current snapshot)`,
         `**Account:** \`${accountHint}\``,
@@ -1190,6 +1252,7 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
         util5h !== null ? `**5h utilization:** ${util5h}%` : '',
         util7d !== null ? `**7d utilization:** ${util7d}%` : '',
         resetInMin !== null ? `**Resets in:** ${resetInMin}min` : '',
+        measuredAt ? `**Measured:** ${measuredAt}` : '',
         ``,
         `Refreshed from proxy on demand. Use this in place of any earlier stale snapshot.`,
       ].filter(Boolean).join('\n')

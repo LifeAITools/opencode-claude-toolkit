@@ -119,6 +119,15 @@ export declare class KeepaliveEngine {
     private startTimer;
     private tick;
     /**
+     * Diagnostic logger — call BEFORE registry.clear() to capture exact
+     * state at the moment of disarm. Enables post-mortem analysis without
+     * needing to reproduce the incident.
+     *
+     * Writes to claude-max-debug.log with grep-friendly tag KA_CLEAR_DIAG.
+     * Includes every variable that gates a clear() decision.
+     */
+    private logClearDiag;
+    /**
      * Dedicated retry chain for transient keepalive failures.
      * Uses setTimeout with exact delays from cacheWrittenAt — no drift.
      */

@@ -10,9 +10,16 @@
  * and pass-through behavior on errors / non-matches.
  */
 
-import { describe, test, expect } from 'bun:test'
-import { applyCompactResults } from './hook-listener'
-import type { EmitResult } from '@kiberos/signal-wire-core'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import {
+  applyCompactResults,
+  resolveOpencodeToolOutputDir,
+  computeContentHash,
+  writeFallbackFile,
+} from './hook-listener'
+import { SW_FALLBACK_PATH_SENTINEL, type EmitResult } from '@kiberos/signal-wire-core'
+import { existsSync, readFileSync, unlinkSync, mkdirSync } from 'fs'
+import { join } from 'path'
 
 function makeCompactResult(overrides: Partial<EmitResult> = {}): EmitResult {
   return {
@@ -215,5 +222,163 @@ describe('applyCompactResults: empty / edge', () => {
     expect(r.compacted).toBe(false)
     expect(r.outcome).toBe('no-match')
     expect(output.output).toBe('raw')
+  })
+})
+
+// ─── REQ-09 / CR-06: Fallback file write tests ──────────────────────
+//
+// These tests touch the real filesystem under the opencode tool-output
+// directory. We use uniquely-named raw outputs so test artifacts are
+// trivially distinguishable, and we clean them up in afterEach.
+
+describe('applyCompactResults: REQ-09 fallback file-write (CR-06)', () => {
+  const writtenPaths: string[] = []
+
+  afterEach(() => {
+    // Cleanup any fallback files created during the test
+    for (const p of writtenPaths) {
+      try { if (existsSync(p)) unlinkSync(p) } catch { /* ignore */ }
+    }
+    writtenPaths.length = 0
+  })
+
+  test('compactNeedsFallback=true → writes raw to disk + substitutes sentinel', () => {
+    const rawOriginal = `RAW-OUTPUT-FOR-FALLBACK-TEST-${Date.now()}-${Math.random()}\n`.repeat(50)
+    const output = { output: rawOriginal, metadata: {} }
+    // Body the emitter would have rendered: head + sentinel placeholder + tail
+    const renderedBody =
+      '<!--sw:compacted:fb-rule-->\nhead\n[stripped; full at ' +
+      SW_FALLBACK_PATH_SENTINEL +
+      ']\ntail'
+    const results: EmitResult[] = [
+      {
+        type: 'compact',
+        success: true,
+        ruleId: 'fb-rule',
+        correlationId: 'corr',
+        compactOutcome: 'compacted',
+        compacted: true,
+        bytesDropped: 1000,
+        linesDropped: 48,
+        hintText: renderedBody,
+        compactNeedsFallback: true,
+      } as EmitResult,
+    ]
+
+    const r = applyCompactResults(results, output, 'sess-fb')
+    expect(r.compacted).toBe(true)
+    expect(r.ruleId).toBe('fb-rule')
+
+    // Sentinel must be GONE from output, replaced with real path
+    expect(output.output).not.toContain(SW_FALLBACK_PATH_SENTINEL)
+
+    // Compute expected fallback path
+    const expectedHash = computeContentHash(rawOriginal)
+    const expectedPath = join(resolveOpencodeToolOutputDir(), `tool_sw_fb-rule_${expectedHash}`)
+    writtenPaths.push(expectedPath)
+
+    expect(output.output).toContain(expectedPath)
+    expect(existsSync(expectedPath)).toBe(true)
+    expect(readFileSync(expectedPath, 'utf8')).toBe(rawOriginal)
+  })
+
+  test('fallback path is deterministic across re-runs (NFR-04)', () => {
+    const rawOriginal = `DETERMINISM-TEST-${Date.now()}\n`.repeat(20)
+    const output1 = { output: rawOriginal, metadata: {} }
+    const output2 = { output: rawOriginal, metadata: {} }
+
+    const renderedBody =
+      '<!--sw:compacted:det-rule-->\nh\n[' + SW_FALLBACK_PATH_SENTINEL + ']\nt'
+    const makeResults = (): EmitResult[] => [
+      {
+        type: 'compact',
+        success: true,
+        ruleId: 'det-rule',
+        correlationId: 'c',
+        compactOutcome: 'compacted',
+        compacted: true,
+        hintText: renderedBody,
+        compactNeedsFallback: true,
+      } as EmitResult,
+    ]
+
+    applyCompactResults(makeResults(), output1, 'sess-1')
+    applyCompactResults(makeResults(), output2, 'sess-2')
+
+    expect(output1.output).toBe(output2.output) // identical path substitution
+
+    // Track for cleanup
+    const hash = computeContentHash(rawOriginal)
+    writtenPaths.push(join(resolveOpencodeToolOutputDir(), `tool_sw_det-rule_${hash}`))
+  })
+
+  test('fallback dedup: existing file with same hash is NOT overwritten', () => {
+    const rawOriginal = `DEDUP-TEST-${Date.now()}-${Math.random()}\n`.repeat(10)
+    const hash = computeContentHash(rawOriginal)
+    const expectedPath = join(resolveOpencodeToolOutputDir(), `tool_sw_dedup-rule_${hash}`)
+    writtenPaths.push(expectedPath)
+
+    // Pre-write with sentinel content to verify dedup
+    const dir = resolveOpencodeToolOutputDir()
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const sentinelContent = '__PRE-EXISTING__'
+    require('fs').writeFileSync(expectedPath, sentinelContent, 'utf8')
+
+    const output = { output: rawOriginal, metadata: {} }
+    const results: EmitResult[] = [
+      {
+        type: 'compact',
+        success: true,
+        ruleId: 'dedup-rule',
+        correlationId: 'c',
+        compactOutcome: 'compacted',
+        compacted: true,
+        hintText: '<!--sw:compacted:dedup-rule-->\nh\n[' + SW_FALLBACK_PATH_SENTINEL + ']\nt',
+        compactNeedsFallback: true,
+      } as EmitResult,
+    ]
+    applyCompactResults(results, output, 'sess-1')
+
+    // File still has pre-existing content (not overwritten)
+    expect(readFileSync(expectedPath, 'utf8')).toBe(sentinelContent)
+    // But applier still substituted the path correctly
+    expect(output.output).toContain(expectedPath)
+  })
+
+  test('writeFallbackFile helper directly: returns path, writes content', () => {
+    const raw = `HELPER-TEST-${Date.now()}-${Math.random()}\n`
+    const path = writeFallbackFile('helper-rule', raw)
+    expect(path).toBeTruthy()
+    if (path) {
+      writtenPaths.push(path)
+      expect(existsSync(path)).toBe(true)
+      expect(readFileSync(path, 'utf8')).toBe(raw)
+      // Path shape: <dir>/tool_sw_<ruleId>_<12-char-hex>
+      expect(path).toContain('tool_sw_helper-rule_')
+      expect(path).toMatch(/_[0-9a-f]{12}$/)
+    }
+  })
+
+  test('compactNeedsFallback=false (path was set) → no file written, no sentinel', () => {
+    // When emitter has tool_output_path set, no fallback flag, no sentinel
+    // in body, no file should be written.
+    const output = { output: 'raw text', metadata: {} }
+    const results: EmitResult[] = [
+      {
+        type: 'compact',
+        success: true,
+        ruleId: 'normal-rule',
+        correlationId: 'c',
+        compactOutcome: 'compacted',
+        compacted: true,
+        hintText: '<!--sw:compacted:normal-rule-->\nhead\n[stripped; full at /real/path]\ntail',
+        // No compactNeedsFallback flag
+      } as EmitResult,
+    ]
+    applyCompactResults(results, output, 'sess-1')
+
+    expect(output.output).toContain('/real/path')
+    expect(output.output).not.toContain(SW_FALLBACK_PATH_SENTINEL)
+    // No path tracked for cleanup — none should have been written
   })
 })

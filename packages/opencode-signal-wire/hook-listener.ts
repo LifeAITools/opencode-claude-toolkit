@@ -31,6 +31,7 @@
 import {
   packHints,
   renderCompactedBody,
+  SW_FALLBACK_PATH_SENTINEL,
   type SignalWireEvent,
   type EmitResult,
   type PackOutput,
@@ -254,6 +255,41 @@ function logCompactDiag(
 }
 
 /**
+ * Write the raw output to a deterministic fallback file under opencode's
+ * tool-output dir. Returns the absolute path on success, or null on any
+ * I/O failure (NFR-08 fail-open — we never throw out of the hook).
+ *
+ * Path shape: `<toolOutputDir>/tool_sw_<ruleId>_<sha256-12>` — content
+ * hash makes the path deterministic for re-runs (NFR-04 + REQ-09 dedup).
+ * Existing files with the same hash are NOT overwritten (assume same
+ * content; idempotent dedup).
+ *
+ * Per CN-07: this is the ONLY directory we may create files in.
+ */
+function writeFallbackFile(ruleId: string, rawOutput: string): string | null {
+  try {
+    const dir = resolveOpencodeToolOutputDir()
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true })
+    }
+    const hash = computeContentHash(rawOutput)
+    // Sanitize ruleId for filename safety (alphanumeric + hyphen — same
+    // alphabet as DB-09 rule id constraint).
+    const safeRuleId = ruleId.replace(/[^a-z0-9-]/gi, '-') || 'unknown'
+    const filename = `tool_sw_${safeRuleId}_${hash}`
+    const fullPath = join(dir, filename)
+    if (!existsSync(fullPath)) {
+      writeFileSync(fullPath, rawOutput, 'utf8')
+    }
+    return fullPath
+  } catch {
+    // I/O error → fail-open. Caller decides what to do (typically: pass
+    // through original uncompacted output to preserve user's data).
+    return null
+  }
+}
+
+/**
  * Apply compact results to a tool.execute.after output. Mutates
  * `output.output` in place when a compact rule fires successfully.
  *
@@ -261,12 +297,18 @@ function logCompactDiag(
  * first successful compaction OR first detected cross-rule marker
  * (REQ-15). Subsequent compact rules in the array are skipped.
  *
- * For results with `compactOutcome: 'error'` AND a missing-output-path
- * scenario (CompactEmitter couldn't compute path because metadata
- * lacked outputPath), this function performs the fallback file write
- * (REQ-09) using the rule's own action data carried via hintText
- * (which on error contains the assembled body the emitter would have
- * written). When that's not feasible, fail-open per NFR-08.
+ * REQ-09 / CR-06 fallback path: when a result carries
+ * `compactNeedsFallback: true`, the emitter rendered the body with
+ * `SW_FALLBACK_PATH_SENTINEL` in place of `{tool_output_path}` because
+ * opencode didn't truncate the original to disk. We:
+ *   1. Read the original raw output from `output.output` (still the
+ *      pre-mutation source — applier runs on the live tool output).
+ *   2. Write it to a deterministic file under `~/.local/share/opencode/
+ *      tool-output/tool_sw_<rule_id>_<sha256-12>` (CN-07 + NFR-04).
+ *   3. String-replace the sentinel in the compacted body with the
+ *      actual fallback path before mutating `output.output`.
+ *   4. On write failure → fail-open per NFR-08: skip this rule, output
+ *      passes through unchanged, log the error.
  *
  * Returns: structured result for logging + caller observability.
  */
@@ -282,13 +324,34 @@ export function applyCompactResults(
     return { compacted: false, outcome: 'already-compacted', bytesDropped: 0, linesDropped: 0, ruleId: null }
   }
 
+  // Capture the raw output BEFORE any mutation — the fallback writer
+  // needs the original bytes (the compacted hintText would lose data).
+  const rawOriginal = output.output
+
   for (const r of results) {
     if (r.type !== 'compact') continue
 
     // Successful compaction with full body in hintText
     if (r.success && r.compactOutcome === 'compacted' && typeof r.hintText === 'string') {
-      output.output = r.hintText
+      let body = r.hintText
       const ruleId = r.ruleId ?? null
+
+      // REQ-09 fallback: emitter signaled it rendered with the sentinel
+      // because the source event had no tool_output_path. Persist raw
+      // output to disk + substitute the sentinel.
+      if (r.compactNeedsFallback === true) {
+        const fallbackPath = writeFallbackFile(ruleId ?? 'unknown', rawOriginal)
+        if (fallbackPath === null) {
+          // Fail-open: I/O failed → log + try next rule. Output unchanged.
+          logCompactDiag(sessionId ?? null, ruleId, 'error', 0, 0)
+          continue
+        }
+        // Substitute sentinel with real path. The sentinel is unique enough
+        // that a global replace is safe; use replaceAll for clarity.
+        body = body.split(SW_FALLBACK_PATH_SENTINEL).join(fallbackPath)
+      }
+
+      output.output = body
       const bd = r.bytesDropped ?? 0
       const ld = r.linesDropped ?? 0
       logCompactDiag(sessionId ?? null, ruleId, 'compacted', bd, ld)
@@ -309,14 +372,7 @@ export function applyCompactResults(
     }
 
     // Error path: log + try next rule. fail-open per NFR-08 — original
-    // output unchanged. Fallback file-write is intentionally NOT performed
-    // here in v1: it would require the applier to know the rule's compact
-    // action data (preserve, replace_middle_with, marker), which isn't
-    // currently propagated through EmitResult. If a rule fires with output
-    // ≥ thresholds but opencode hasn't saved to disk, the rule designer
-    // should also include a non-compact fallback hint or accept that
-    // those edge cases pass through uncompacted. (See REQ-09 evolution
-    // — current pragma: emitter logs error, applier no-ops, output unchanged.)
+    // output unchanged.
     if (!r.success || r.compactOutcome === 'error') {
       logCompactDiag(sessionId ?? null, r.ruleId ?? null, 'error', 0, 0)
       continue
@@ -331,7 +387,7 @@ export function applyCompactResults(
  * Re-export for test convenience — allows tests to invoke the helper
  * without importing from inner core path.
  */
-export { renderCompactedBody, resolveOpencodeToolOutputDir, computeContentHash }
+export { renderCompactedBody, resolveOpencodeToolOutputDir, computeContentHash, writeFallbackFile }
 
 /**
  * Check if any block result indicates the tool action should be denied.

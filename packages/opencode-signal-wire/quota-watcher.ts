@@ -156,14 +156,21 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): QuotaWatcherHandle
   }
 
   function findMyAccount(status: QuotaStatusFile): AccountState | null {
-    // Primary lookup: account.pids contains our pid
-    for (const acc of Object.values(status.accounts)) {
-      if (acc.pids.includes(myPid)) return acc
-    }
-    // Secondary: pids map (more direct but only set after first request)
+    // FIX (cross-account contamination): prefer status.pids[myPid] map
+    // (current account for this pid, set on every actual proxy request)
+    // over scanning account.pids[] arrays (historical, may contain stale
+    // registrations after rotation/failover that proxy didn't clean up).
+    // Previously this scanned accounts[] FIRST and returned the first match
+    // — which could be a stale account this pid was previously tied to.
     const myPidState = status.pids[String(myPid)]
     if (myPidState) {
-      return status.accounts[myPidState.accountHint] ?? null
+      const acc = status.accounts[myPidState.accountHint]
+      if (acc) return acc
+    }
+    // Fallback: scan accounts[] (for legacy proxy versions without pids map,
+    // or during the first request before pids map is populated).
+    for (const acc of Object.values(status.accounts)) {
+      if (acc.pids.includes(myPid)) return acc
     }
     return null
   }

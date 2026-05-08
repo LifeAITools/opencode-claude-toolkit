@@ -1352,15 +1352,24 @@ export function bindWakeListenerSession(
 }
 
 async function resolveSessionId(sessionId: string): Promise<string | null> {
-  // Return cached if already resolved
-  if (_cachedSessionId && _cachedSessionId !== 'unknown') return _cachedSessionId
-
-  // Use explicit session ID from env/config
+  // FIX (cross-session contamination): explicit sessionId arg ALWAYS wins.
+  // Previously this function returned the module-level _cachedSessionId
+  // FIRST, ignoring the explicit arg. In a single Node process serving
+  // multiple sessions (e.g. `opencode serve` mode, or a TUI process whose
+  // module-level singletons leak across sessions), the first session bound
+  // would be cached and ALL subsequent injectContextEvent(event, sessionId)
+  // calls would be redirected to that session — causing quota events for
+  // OTHER accounts/sessions to be injected into the wrong transcript.
+  // Caller (injectContextEvent) knows which session the event is addressed
+  // to; trust it. Refresh cache as a side-effect.
   if (sessionId && sessionId !== 'unknown') {
     _cachedSessionId = sessionId
     updateBoundSessionGlobal(sessionId)
     return sessionId
   }
+
+  // Cache only as fallback when no explicit arg given.
+  if (_cachedSessionId && _cachedSessionId !== 'unknown') return _cachedSessionId
 
   // Fallback 1: read from discovery file (launcher updates it)
   if (_discoveryPath) {

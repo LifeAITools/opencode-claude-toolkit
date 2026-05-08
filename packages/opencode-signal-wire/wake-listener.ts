@@ -582,15 +582,17 @@ async function pollActivity(config: WakeListenerConfig, cursor: string | null): 
 // ─── Spawn Budget Tracking (Stage 2 + 2.1) ──────────────────────────
 let _spawnTotal = 0        // total helpers spawned (lifetime, informational)
 let _spawnActive = 0       // currently active helpers (for concurrent limit)
-let _currentDepth: number | null = null  // cached, resolved lazily
-
-// Stage 2.1: Read inherited spawn depth from parent (REQ-16c)
-// Parent sets __SPAWN_DEPTH before spawning child → child reads at startup
-const _inheritedDepth = parseInt(process.env.__SPAWN_DEPTH ?? '', 10)
-if (!isNaN(_inheritedDepth) && _inheritedDepth >= 0) {
-  _currentDepth = _inheritedDepth  // O(1) depth, no parent_id walking needed
-  dbg(`spawn depth inherited from parent: ${_inheritedDepth}`)
-}
+// Cached after first resolution — set by resolveCurrentDepth() walking
+// the SDK's session.parent_id chain. opencode's Task() tool spawns child
+// agents within the SAME Node process (not as subprocess), so env-var
+// inheritance does NOT apply — depth must come from SDK introspection.
+//
+// History: an earlier `__SPAWN_DEPTH` env-var inheritance path was present
+// here (referencing a non-existent "REQ-16c") but was never wired — no
+// caller anywhere in the codebase set the env var on Task() spawn. Removed
+// 2026-05-08 to prevent future maintainer confusion. See
+// PRPs/spawn-depth-enforcement/01-analysis.md §"Bug 2".
+let _currentDepth: number | null = null
 
 // Stage 2.1: Parent identity for chain tracking (REQ-16b)
 export const _parentMemberId = process.env.__PARENT_MEMBER_ID ?? null
@@ -630,9 +632,18 @@ export function getAgentIdentity(): AgentIdentity | null { return _agentIdentity
 export function getCurrentDepth(): number | null { return _currentDepth }
 
 /**
- * Resolve current session depth.
- * Priority: inherited from env (O(1)) → walk parent_id chain (O(depth)) → 0.
- * Cached after first resolution.
+ * Resolve current session depth by walking the SDK's session.parent_id
+ * chain (O(depth) one-time SDK calls). Cached after first resolution.
+ *
+ * Multi-session safety: takes explicit `sessionId` argument and walks
+ * THAT session's lineage. In a process serving multiple sessions
+ * (e.g. opencode serve mode), each call is per-session-correct because
+ * we don't trust shared state — the SDK is the source of truth.
+ *
+ * Fail-open: if SDK errors during walk, we return depth=0 (assume
+ * top-level). Rationale: blocking spawn on transient SDK errors would
+ * stuck legitimate agents; depth limit enforcement is best-effort
+ * defense-in-depth, not a security boundary.
  */
 export async function resolveCurrentDepth(sessionId: string): Promise<number> {
   if (_currentDepth !== null) return _currentDepth
@@ -661,7 +672,25 @@ export async function resolveCurrentDepth(sessionId: string): Promise<number> {
 
 /**
  * Check if spawn is allowed given current budget.
+ *
+ * Two enforcement axes (depth checked FIRST — more fundamental):
+ *   1. depth: must have currentDepth < maxSpawnDepth (else recursion risk)
+ *   2. concurrency: must have activeHelpers < maxConcurrent (else swarm risk)
+ *
  * Returns { allowed, reason } for clear error messaging (CR-09).
+ *
+ * Multi-session note: `currentDepth` and `activeHelpers` are caller-provided
+ * per-session metrics — `currentDepth` from `resolveCurrentDepth(sessionId)`
+ * walks THIS session's parent chain; `activeHelpers` is the per-process
+ * spawn count. Two TUIs in the same dir each get independent enforcement
+ * (correct: depth/concurrency are local-runaway prevention, not org-wide
+ * budgeting; org-level budgeting is a SynqTask API concern, not a hook one).
+ *
+ * Why depth check is FIRST: a depth violation is unrecoverable (the agent
+ * is structurally too deep — must HALT or do work directly), whereas a
+ * concurrency violation is transient (wait for active helpers to finish,
+ * try again). Surfacing the more fundamental violation first gives the
+ * agent the right next action.
  */
 export function checkSpawnAllowed(
   identity: AgentIdentity,
@@ -672,6 +701,25 @@ export function checkSpawnAllowed(
   // Read concurrent limit from metadata (maxConcurrentHelpers), fallback to maxSubagents
   const maxConcurrent = (identity as any)._maxConcurrent ?? budget.maxSubagents
 
+  // (1) Depth check — most fundamental. Block before considering anything else.
+  // A spawn at depth N creates a child at depth N+1, so we block when
+  // currentDepth >= maxSpawnDepth (next spawn would exceed budget).
+  if (currentDepth >= budget.maxSpawnDepth) {
+    return {
+      allowed: false,
+      reason: [
+        `⚠️ Лимит глубины делегирования: depth ${currentDepth}/${budget.maxSpawnDepth} for role '${identity.roleName ?? 'unknown'}'.`,
+        `Spawn at this depth would create child at depth ${currentDepth + 1}, exceeding budget.`,
+        `Делегирование запрещено агентам этой глубины — выполни работу самостоятельно.`,
+        `Если задача слишком велика — верни \`HALT: scope-too-large\` оркестратору.`,
+        `Recursive spawning is the #1 cause of stuck/frozen sessions (plugin rule #5).`,
+      ].join('\n'),
+      depth: currentDepth, maxDepth: budget.maxSpawnDepth,
+      active: activeHelpers, maxConcurrent,
+    }
+  }
+
+  // (2) Concurrency check — transient. Block if too many active right now.
   if (activeHelpers >= maxConcurrent) {
     return {
       allowed: false,

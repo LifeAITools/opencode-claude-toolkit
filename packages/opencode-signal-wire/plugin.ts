@@ -28,6 +28,7 @@ import {
   normalizeToolBefore,
   normalizeToolAfter,
   applyHintResults,
+  applyCompactResults,
   applyChatHintResults,
   applyBlockResults,
 } from './hook-listener'
@@ -546,13 +547,23 @@ export default {
           }
           const results = await signalWireEngine.evaluateHook(event)
           if (results.length > 0) {
-            const injected = applyHintResults(results, output ?? { output: '', title: '', metadata: {} }, event.sessionId)
+            const safeOutput = output ?? { output: '', title: '', metadata: {} }
+            // CR-03 + REQ-05 + NFR-07: compact MUST run BEFORE hint append
+            // so subsequent hint text lands on the compacted body, not the
+            // raw original. Cross-rule idempotency (REQ-15) enforced inside.
+            const compactResult = applyCompactResults(results, safeOutput, event.sessionId)
+            const injected = applyHintResults(results, safeOutput, event.sessionId)
             logStep('HOOK_FIRED', {
               hook: 'tool.execute.after',
               tool: input?.tool,
               sessionId: event.sessionId ?? 'unbound',
               matched: results.length,
               hintsInjected: injected,
+              ...(compactResult.compacted && {
+                compactRuleId: compactResult.ruleId,
+                bytesDropped: compactResult.bytesDropped,
+                linesDropped: compactResult.linesDropped,
+              }),
             })
           }
         } catch (e: any) {

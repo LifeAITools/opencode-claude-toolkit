@@ -24,6 +24,9 @@ import type {
 import { AuthError, APIError, RateLimitError, ClaudeCodeSDKError } from './types.js'
 import { resolveMaxTokens } from './models.js'
 import { KeepaliveEngine } from './keepalive-engine.js'
+import { tokenHint } from './token-utils.js'
+import { TokenRotationManager } from './token-rotation.js'
+import { loadKeepaliveConfig } from './keepalive-config.js'
 
 // ============================================================
 // Constants — cherry-picked from Claude Code CLI source
@@ -195,6 +198,8 @@ export class ClaudeCodeSDK {
   private refreshToken: string | null = null
   private expiresAt: number | null = null
   private credentialStore: CredentialStore
+  /** Token rotation deferred-apply state machine. See PRPs/token-rotation-deferred-apply. */
+  private tokenRotation!: TokenRotationManager
   private sessionId: string
   private deviceId: string
   private accountUuid: string
@@ -280,6 +285,21 @@ export class ClaudeCodeSDK {
       // Kick off initial token load + rotation schedule (async, non-blocking)
       this.initialLoad = this.loadFromStore().catch(() => { /* will be retried on first API call */ })
     }
+
+    this.tokenRotation = new TokenRotationManager(
+      this.credentialStore,
+      options.contextTokensProvider,
+      () => loadKeepaliveConfig(),
+    )
+  }
+
+  /**
+   * Release resources held by this client. Call when the client is no longer
+   * needed (e.g. test teardown). Currently closes the TokenRotationManager
+   * (fs.watch fd + poll timer). Idempotent.
+   */
+  close(): void {
+    this.tokenRotation.close()
   }
 
   // ----------------------------------------------------------
@@ -378,6 +398,42 @@ export class ClaudeCodeSDK {
 
     const t0 = Date.now()
     const bodyStr = JSON.stringify(body)
+
+    // ─── Tier 2: last-resort body-size guard (claude-max 413 prevention) ────
+    // Tier 1 (per-image resize) and Tier 1.5 (total-body shrink+strip) live in
+    // the consumer (e.g. opencode-claude/provider.ts). This Tier 2 is the
+    // SDK-level safety net: if some consumer skipped body management OR a
+    // pathological case slipped through (e.g. enormous system prompt + tool
+    // schemas), we throw a CLEAR user-facing error BEFORE wasting an HTTP
+    // round-trip on a guaranteed-413.
+    //
+    // Threshold 19 MB: Anthropic /v1/messages effective limit is ~20 MB. We
+    // keep 1 MB safety margin for header overhead + request line + TLS
+    // framing. Actual server-side limit fluctuates so the check is heuristic
+    // but conservative.
+    //
+    // Backward-compat: existing consumers that already manage body size (e.g.
+    // claude-max-proxy in passthrough mode where consumer is responsible)
+    // never hit this branch because their bodies stay well under 19 MB.
+    // Failure mode = thrown Error with actionable message; caller decides
+    // whether to surface to user, retry, etc.
+    const BODY_HARD_LIMIT_BYTES = 19 * 1024 * 1024
+    if (bodyStr.length > BODY_HARD_LIMIT_BYTES) {
+      const sizeMb = (bodyStr.length / 1024 / 1024).toFixed(1)
+      try {
+        const { appendFileSync } = require('fs')
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] BODY_TOO_LARGE pid=${process.pid} bodyLen=${bodyStr.length} (${sizeMb}MB) — refusing to send (would 413)\n`)
+      } catch {}
+      const msgCount = (body.messages as unknown[])?.length ?? 0
+      throw new Error(
+        `Request body too large: ${sizeMb}MB exceeds the ${(BODY_HARD_LIMIT_BYTES / 1024 / 1024)}MB safety threshold ` +
+        `(API hard limit ~20MB). Got ${msgCount} messages. ` +
+        `Run /compact to summarize history, or start a fresh session. ` +
+        `If this is unexpected, the consumer's per-image / total-body management may have a gap.`,
+      )
+    }
+
     try {
       const { appendFileSync } = require('fs')
       appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
@@ -923,6 +979,15 @@ export class ClaudeCodeSDK {
    * quota at util5h=1.0 critical. This fix prevents that scenario.
    */
   private async ensureAuth(): Promise<void> {
+    // Token rotation deferred-apply gate (PRP REQ-06 + CR-03/CR-04).
+    // 'apply-now' → invalidate in-memory token; 'continue-with-old' falls through.
+    const rotationResult = await this.tokenRotation.checkPending()
+    if (rotationResult.action === 'apply-now') {
+      this.accessToken = null
+      this.refreshToken = null
+      this.expiresAt = 0
+    }
+
     // Pre-fast-path: cheap disk mtime check. If credentials.json changed
     // since our last load, drop in-memory token so the slow path picks up
     // the fresh one. statSync from page cache is ~0.1µs — free.
@@ -937,7 +1002,7 @@ export class ClaudeCodeSDK {
           // the token. Fresh token gets logged on next loadFromStore via
           // TOKEN_LOADED.
           try {
-            const oldHint = (this.accessToken ?? '').slice(13, 21)  // skip "sk-ant-oat01-"
+            const oldHint = tokenHint(this.accessToken)  // 8 chars after "sk-ant-oat01-"
             appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
               `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${oldHint} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token\n`)
           } catch { /* logging best-effort */ }
@@ -990,7 +1055,13 @@ export class ClaudeCodeSDK {
       if (this.accessToken && !this.isTokenExpired()) return
     }
 
-    // Step 3: refresh needed
+    // Step 3: forced-expiry rotation hook (PRP REQ-09 + CR-05) — if pending
+    // exists and OLD token expired, apply forced before refresh path runs.
+    if (this.tokenRotation.hasPending() && this.isTokenExpired()) {
+      await this.tokenRotation.applyPending('forced-expired', 'old-token-expired')
+    }
+
+    // Step 4: refresh needed
     if (this.accessToken && this.isTokenExpired()) {
       await this.refreshTokenWithTripleCheck()
     }
@@ -1023,12 +1094,12 @@ export class ClaudeCodeSDK {
     // leaking the full token. Operators tail this log to verify rotation
     // is being detected and applied (Defect 1 visibility requirement).
     try {
-      const newHint = creds.accessToken.slice(13, 21)
+      const newHint = tokenHint(creds.accessToken)
       if (!prevToken) {
         appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
           `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${newHint} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}\n`)
       } else if (prevToken !== creds.accessToken) {
-        const oldHint = prevToken.slice(13, 21)
+        const oldHint = tokenHint(prevToken)
         appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
           `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${oldHint} newHint=${newHint} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}\n`)
       } else {

@@ -98,6 +98,16 @@ export interface ResolvedKeepaliveConfig {
     readonly rewriteBlockEnabled: boolean;
     /** Body-dump policy with rotation. See DumpConfig docs. */
     readonly dump: DumpConfig;
+    /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
+    readonly tokenRotationContextThreshold: number;
+    /** Fallback mtime poll interval if fs.watch misses an event (REQ-02). Default 30000. */
+    readonly tokenRotationPollIntervalMs: number;
+    /** How long an extracted org-id is cached to avoid per-request JWT decode overhead (REQ-14). Default 300000. */
+    readonly orgIdCacheTtlMs: number;
+    /** Audit log rotation threshold (~10MB) (US-03 AC-3.4). Default 10485760. */
+    readonly tokenRotationLogMaxBytes: number;
+    /** Audit log retention before cleanup (US-03 AC-3.4). Default 7. */
+    readonly tokenRotationLogRetentionDays: number;
     /** Source of truth — where we read this config from (for diagnostics). */
     readonly _source: 'defaults' | 'file' | 'mixed';
 }

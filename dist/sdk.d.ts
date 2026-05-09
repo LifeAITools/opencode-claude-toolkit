@@ -4,6 +4,8 @@ export declare class ClaudeCodeSDK {
     private refreshToken;
     private expiresAt;
     private credentialStore;
+    /** Token rotation deferred-apply state machine. See PRPs/token-rotation-deferred-apply. */
+    private tokenRotation;
     private sessionId;
     private deviceId;
     private accountUuid;
@@ -23,6 +25,12 @@ export declare class ClaudeCodeSDK {
     private keepalive;
     private _lastStreamUsage;
     constructor(options?: ClaudeCodeSDKOptions);
+    /**
+     * Release resources held by this client. Call when the client is no longer
+     * needed (e.g. test teardown). Currently closes the TokenRotationManager
+     * (fs.watch fd + poll timer). Idempotent.
+     */
+    close(): void;
     /** Non-streaming: send messages, get full response */
     generate(options: GenerateOptions): Promise<GenerateResponse>;
     /** Streaming: yields events as they arrive from SSE */

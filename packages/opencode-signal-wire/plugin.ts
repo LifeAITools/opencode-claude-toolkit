@@ -33,6 +33,7 @@ import {
   applyBlockResults,
 } from './hook-listener'
 import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
+import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -256,6 +257,18 @@ export default {
       reason: signalWire ? 'serverUrl_present' : 'serverUrl_absent',
     })
 
+    // ─── Expose signalWire to token-rotation-bridge consumers ─────────
+    // PRP token-rotation-deferred-apply: provider.ts in opencode-claude
+    // creates ClaudeCodeSDK with a contextTokensProvider that lazily
+    // looks up signalWire.getContextPosition() via the bridge registry.
+    // Per-session lifecycle: overwritten on each session's createSignalWire
+    // call. Mirrors the setBoundSdk/_boundSdk pattern in
+    // token-rotation-bridge.ts (cross-package handoff without adding a
+    // direct dep). Best-effort; never block plugin init.
+    if (signalWire) {
+      try { setCurrentSignalWire(signalWire as any) } catch { /* */ }
+    }
+
     const signalWireEngine = signalWire
       ? {
           evaluateExternal: async (event: any) => {
@@ -444,6 +457,28 @@ export default {
       // uses via evaluateExternal, but for in-process events.
 
       'chat.message': async (input: any, output: any) => {
+        // ─── Token rotation: turn-boundary apply (REQ-08 / CR-04) ───
+        // User sent a new message → that's the consent-signal to apply
+        // any deferred rotation BEFORE the next API request. The SDK
+        // (registered by opencode-claude via wireTokenRotation) owns the
+        // pending state; we just trigger the apply at the safe boundary.
+        // Fail-open per NFR-08: rotation hiccups must NOT block the
+        // user's message processing.
+        try {
+          const sdk = getBoundSdk()
+          if (sdk?.tokenRotation?.hasPending?.() && sdk.tokenRotation.applyPending) {
+            await sdk.tokenRotation.applyPending('turn-boundary').catch((e: any) => {
+              logStep('TOKEN_ROTATION_TURN_BOUNDARY_FAILED_OPEN', {
+                error: e?.message ?? String(e),
+              })
+            })
+          }
+        } catch (e: any) {
+          logStep('TOKEN_ROTATION_TURN_BOUNDARY_FAILED_OPEN', {
+            error: e?.message ?? String(e),
+          })
+        }
+
         if (!signalWireEngine) return
         try {
           const event = normalizeChatMessage(input ?? {}, output ?? { parts: [] })

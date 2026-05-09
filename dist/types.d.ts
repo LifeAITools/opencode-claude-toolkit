@@ -52,6 +52,17 @@ export interface ClaudeCodeSDKOptions {
     /** Cache keepalive configuration. Keeps Claude's prompt cache warm between requests. */
     keepalive?: KeepaliveConfig;
     /**
+     * Optional callback that returns the current Anthropic context token count
+     * for the active session. Used by TokenRotationManager to decide whether to
+     * defer token rotation when context is large (PRP token-rotation-deferred-apply
+     * REQ-03 + CR-09). Synchronous; returning null/undefined OR throwing →
+     * treated as "below threshold" (apply immediately).
+     *
+     * Typically wired by the platform adapter (e.g. opencode-signal-wire) to a
+     * snapshot reader of quota-watcher trackTokens.
+     */
+    contextTokensProvider?: () => number | null;
+    /**
      * Token rotation callback — fired when proactive refresh encounters issues.
      * Levels escalate as token approaches expiry:
      *   'rotated'  — silent success (informational)

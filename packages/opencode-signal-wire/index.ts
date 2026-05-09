@@ -34,6 +34,27 @@ export type { WakeListenerHandle } from './wake-listener'
 
 export { loadPreferences, computeSubscribe } from './wake-preferences'
 
+// ─── Token rotation bridge (T13 of token-rotation-deferred-apply PRP) ─
+// Glue between claude-code-sdk's TokenRotationManager and signal-wire.
+// opencode-claude (or any SDK consumer) calls wireTokenRotation() after
+// constructing ClaudeCodeSDK; the chat.message hook then drives the
+// turn-boundary apply via the SDK registry maintained here.
+export {
+  createContextTokensProvider,
+  createTokenRotationEmitter,
+  wireTokenRotation,
+  setBoundSdk,
+  getBoundSdk,
+  setCurrentSignalWire,
+  getCurrentSignalWire,
+  createLazyContextTokensProvider,
+} from './token-rotation-bridge'
+export type {
+  ContextTokensSource,
+  SignalWireEmitFn,
+  TokenRotationSdkSurface,
+} from './token-rotation-bridge'
+
 export type {
   AgentTransport,
   DiscoveryFile,

@@ -73,6 +73,29 @@ const IMAGE_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'ima
 const IMAGE_MIN_DIMENSION = 8
 const IMAGE_MIN_BASE64_BYTES = 32            // anything smaller can't be a real image header
 
+// ─── Total body size guard (claude-max-specific 413 prevention) ──────────────
+//
+// Anthropic /v1/messages enforces a ~20MB hard limit on request body. When N
+// small images accumulate (each < per-image 5MB limit but summed > 20MB) the
+// per-image guard alone is insufficient. This Tier 1.5 guard runs AFTER the
+// per-image pass and BEFORE the body leaves provider.ts:
+//
+//   1. Estimate JSON.stringify(messages).length
+//   2. If above BODY_TARGET → progressively shrink ALL images more aggressively
+//      (cap at 800×800 long edge, force JPEG q60). Newest images preserved best;
+//      oldest images shrink first.
+//   3. If still above BODY_HARD_LIMIT → strip oldest images entirely, replace
+//      with text placeholder noting size + count
+//   4. Logged via signal-wire IMAGE_BODY_GUARD marker for observability
+//
+// The constants are chosen so we never get a 413: BODY_HARD_LIMIT (18 MB) sits
+// 2 MB under the API's effective 20 MB threshold, leaving headroom for system
+// prompt + tool schemas + assistant text accumulating during a turn.
+const BODY_TARGET_BYTES = 14 * 1024 * 1024     // soft target: aggressive resize kicks in
+const BODY_HARD_LIMIT_BYTES = 18 * 1024 * 1024 // hard limit: strip-oldest kicks in
+const IMAGE_AGGRESSIVE_MAX_LONG_EDGE = 800     // when body too big: cap at 800px
+const IMAGE_AGGRESSIVE_TARGET_BYTES = 200 * 1024 // target each image at ≤200KB raw
+
 // Magic-byte detection so we catch mislabeled images (e.g. PNG bytes with media_type=image/jpeg)
 // and malformed/truncated data before shipping to the API.
 function sniffImageMime(raw: Buffer): string | null {
@@ -271,6 +294,138 @@ async function maybeResizeImage(
     dbg('Image resize failed, using original:', e.message)
     return { data: base64Data, mediaType, resized: false }
   }
+}
+
+/**
+ * Aggressive resize for total-body-too-large case. Stricter than
+ * `maybeResizeImage`: caps at 800×800 long edge AND forces JPEG q60 regardless
+ * of source format. Used by `enforceTotalBodyBudget` only — never on first pass.
+ *
+ * Returns the new base64 + media type. On any error or when Jimp unavailable,
+ * returns the input unchanged (caller falls back to strip-oldest path).
+ */
+async function aggressiveResizeImage(
+  base64Data: string,
+  mediaType: string,
+): Promise<{ data: string; mediaType: string; shrunk: boolean }> {
+  const jimpMod = getJimp()
+  if (!jimpMod) return { data: base64Data, mediaType, shrunk: false }
+  try {
+    const { Jimp } = jimpMod
+    const rawBytes = Buffer.from(base64Data, 'base64')
+    const img = await Jimp.fromBuffer(rawBytes)
+    const longEdge = Math.max(img.width, img.height)
+    const scale = Math.min(IMAGE_AGGRESSIVE_MAX_LONG_EDGE / longEdge, 1)
+    const nw = Math.max(1, Math.round(img.width * scale))
+    const nh = Math.max(1, Math.round(img.height * scale))
+    img.resize({ w: nw, h: nh })
+    // Always JPEG q60 — small + universally supported
+    const outBuf = await img.getBuffer('image/jpeg', { quality: 60 } as any)
+    const outBase64 = outBuf.toString('base64')
+    const shrunk = outBuf.length < rawBytes.length
+    return { data: outBase64, mediaType: 'image/jpeg', shrunk }
+  } catch {
+    return { data: base64Data, mediaType, shrunk: false }
+  }
+}
+
+/**
+ * Tier 1.5: total-body-size guard.
+ *
+ * Walks the messages array AFTER the per-image pass and ensures the
+ * serialized body stays under Anthropic's effective 20 MB request limit.
+ * Two-stage strategy:
+ *
+ *   Stage A (BODY_TARGET_BYTES = 14 MB):
+ *     For every image content block found, run `aggressiveResizeImage` —
+ *     800×800 cap + JPEG q60. Cheap, lossy but readable. If body now ≤
+ *     BODY_TARGET, return.
+ *
+ *   Stage B (BODY_HARD_LIMIT_BYTES = 18 MB):
+ *     Strip oldest images first. Replace each image content block with a
+ *     text block "[image stripped: <reason>, was X KB]". Iterate from the
+ *     start of `messages` (oldest first) — newest images are most relevant
+ *     to current turn so preserve them.
+ *
+ *   Stage C (give up):
+ *     If still > 18 MB after stripping ALL images, return as-is. SDK
+ *     Tier 2 safety net throws a user-friendly error before fetch.
+ *
+ * Mutates `messages` in place. Logs each decision via dbg so operators can
+ * grep "IMAGE_BODY_GUARD" for visibility. Idempotent: running twice on the
+ * same already-shrunk messages produces identical output (no further shrink
+ * because aggressive-resize returns shrunk:false when output ≥ input).
+ *
+ * Per CR/CN of fundamental architecture: this is THE claude-max-specific
+ * place to enforce Anthropic's body size limit. SDK-level enforcement
+ * would break passthrough consumers (claude-max-proxy); plugin-level would
+ * be over-generic for one provider's quirk.
+ */
+async function enforceTotalBodyBudget(
+  messages: any[],
+  systemSize: number,
+): Promise<void> {
+  const measure = () => systemSize + JSON.stringify(messages).length
+  let bodySize = measure()
+  if (bodySize <= BODY_TARGET_BYTES) return // happy path — no action
+
+  const t0 = Date.now()
+  dbg(`IMAGE_BODY_GUARD start: bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB target=${(BODY_TARGET_BYTES / 1024 / 1024).toFixed(0)}MB`)
+
+  // Stage A: aggressive resize of every image
+  let shrunkCount = 0
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue
+    for (const block of msg.content) {
+      if (block?.type === 'image' && block.source?.type === 'base64' && typeof block.source.data === 'string') {
+        const before = block.source.data.length
+        const result = await aggressiveResizeImage(block.source.data, block.source.media_type ?? 'image/png')
+        if (result.shrunk && result.data.length < before) {
+          block.source.data = result.data
+          block.source.media_type = result.mediaType
+          shrunkCount++
+        }
+      }
+    }
+  }
+  bodySize = measure()
+  dbg(`IMAGE_BODY_GUARD stage-A: aggressively shrunk ${shrunkCount} images, bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB`)
+  if (bodySize <= BODY_TARGET_BYTES) {
+    dbg(`IMAGE_BODY_GUARD complete: stage-A sufficient in ${Date.now() - t0}ms`)
+    return
+  }
+
+  // Stage B: strip oldest images first (FIFO replace with text placeholder)
+  let strippedCount = 0
+  let strippedBytes = 0
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue
+    for (let i = 0; i < msg.content.length; i++) {
+      const block = msg.content[i]
+      if (block?.type === 'image' && block.source?.type === 'base64' && typeof block.source.data === 'string') {
+        const sizeKb = Math.round(Buffer.from(block.source.data, 'base64').length / 1024)
+        const mediaType = block.source.media_type ?? 'image/?'
+        msg.content[i] = {
+          type: 'text',
+          text: `[image stripped to fit context budget: was ${sizeKb}KB ${mediaType}; resend if relevant]`,
+        }
+        strippedCount++
+        strippedBytes += block.source.data.length
+        bodySize = measure()
+        if (bodySize <= BODY_HARD_LIMIT_BYTES) break
+      }
+    }
+    if (bodySize <= BODY_HARD_LIMIT_BYTES) break
+  }
+  dbg(`IMAGE_BODY_GUARD stage-B: stripped ${strippedCount} images (~${(strippedBytes / 1024 / 1024).toFixed(1)}MB base64), bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB`)
+  if (bodySize <= BODY_HARD_LIMIT_BYTES) {
+    dbg(`IMAGE_BODY_GUARD complete: stage-B sufficient in ${Date.now() - t0}ms`)
+    return
+  }
+
+  // Stage C: still over hard limit even with all images stripped — Tier 2 in
+  // claude-code-sdk will throw the user-friendly error before fetch.
+  dbg(`IMAGE_BODY_GUARD stage-C: bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB still over hard limit ${(BODY_HARD_LIMIT_BYTES / 1024 / 1024).toFixed(0)}MB — SDK Tier 2 will gate`)
 }
 
 // ─── Context injection: CLAUDE.md + MEMORY.md ──────────────
@@ -718,6 +873,18 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
     sysFingerprints.push(`${createHash('md5').update(system).digest('hex').slice(0, 8)}@${system.length}`)
   }
   dbg(`convertPrompt: ${messages.length} messages, system=${typeof system === 'string' ? system.length : Array.isArray(system) ? (system as any[]).length + ' blocks' : 'none'} fingerprints=[${sysFingerprints.join(',')}] in ${Date.now() - tConvert}ms`)
+
+  // ─── Tier 1.5: total-body-size guard (claude-max 413 prevention) ────
+  // Per-image guard above already caps individual images at 5MB. But N small
+  // images can still sum > 20MB → Anthropic 413. This pass ensures total
+  // body stays under 18MB by progressively shrinking + (last resort)
+  // stripping oldest images. See enforceTotalBodyBudget JSDoc for details.
+  // Idempotent + safe — only fires when over BODY_TARGET_BYTES.
+  const systemSize = typeof system === 'string'
+    ? system.length
+    : Array.isArray(system) ? JSON.stringify(system).length : 0
+  await enforceTotalBodyBudget(messages, systemSize)
+
   return { system, messages }
 }
 
@@ -1362,11 +1529,52 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
     rewriteBlockEnabled,
     cacheConfig: cacheConfigSnapshot,
   })
+
+  // ─── Token rotation: lazy contextTokensProvider via signal-wire bridge ─
+  // PRP token-rotation-deferred-apply REQ-03 / CR-09. The SDK's
+  // TokenRotationManager calls this on each rotation-decision point
+  // (NOT per request) to decide defer-vs-apply for cross-org rotations
+  // at the 150K-context threshold.
+  //
+  // Lazy strategy: try to import @life-ai-tools/opencode-signal-wire's
+  // bridge once; if present, every call resolves through its registry
+  // (which lazily lookup the per-session SignalWire engine). When the
+  // bridge isn't installed, contextTokensProvider stays undefined and
+  // the SDK falls back to "apply immediately" (CR-09 fail-safe).
+  // Sync contract per REQ-03: returning a Promise → coerced to null.
+  let _bridgeContextProvider: (() => number | null) | null = null
+  let _bridgeImportAttempted = false
+  const contextTokensProvider = (): number | null => {
+    if (_bridgeContextProvider) {
+      try { return _bridgeContextProvider() } catch { return null }
+    }
+    if (!_bridgeImportAttempted) {
+      _bridgeImportAttempted = true
+      // Fire-and-forget: import the bridge on first call; once resolved,
+      // future calls use the cached provider. First few calls return null
+      // (CR-09 apply path) until import completes — acceptable because
+      // rotation-decision points are infrequent and CR-09 is fail-safe.
+      void (async () => {
+        try {
+          const swBridge: any = await import('@life-ai-tools/opencode-signal-wire')
+          if (typeof swBridge.createLazyContextTokensProvider === 'function') {
+            _bridgeContextProvider = swBridge.createLazyContextTokensProvider()
+            dbg(`STARTUP token-rotation: contextTokensProvider wired via lazy bridge`)
+          }
+        } catch (e: any) {
+          dbg(`STARTUP token-rotation: lazy contextTokensProvider unavailable (${e?.message ?? 'unknown'})`)
+        }
+      })()
+    }
+    return null
+  }
+
   const sdk = new ClaudeCodeSDK({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
     expiresAt: options.expiresAt,
     credentialsPath: options.credentialsPath,
+    contextTokensProvider,
     onTokenStatus: (event) => {
       const emoji = event.level === 'rotated' ? '✅' : event.level === 'warning' ? '⚠️' : event.level === 'critical' ? '🔴' : '💀'
       const line = `${emoji} TOKEN ${event.level.toUpperCase()}: ${event.message} (expires in ${Math.round(event.expiresInMs / 60000)}min, failures=${event.failedAttempts})`
@@ -1438,6 +1646,32 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
   })
 
   dbg(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`)
+
+  // ─── Token rotation: register SDK with signal-wire bridge ─────────
+  // PRP token-rotation-deferred-apply T13 wire-up. After ClaudeCodeSDK
+  // is constructed (which inits TokenRotationManager internally), the
+  // chat.message hook in @life-ai-tools/opencode-signal-wire needs a
+  // handle to call applyPending('turn-boundary') at safe boundaries
+  // (REQ-08 / CR-04). The bridge also accepts a contextTokensProvider
+  // wired to signal-wire's per-pid context tracker (REQ-03 / CR-09).
+  //
+  // Dynamic import — opencode-signal-wire is NOT a hard dep of this
+  // package. When absent (e.g. running standalone without the bridge
+  // plugin), this block silently no-ops. CN-01 + NFR-08 fail-open.
+  void (async () => {
+    try {
+      const swBridge: any = await import('@life-ai-tools/opencode-signal-wire')
+      if (typeof swBridge.setBoundSdk === 'function') {
+        swBridge.setBoundSdk(sdk)
+        dbg(`STARTUP token-rotation: setBoundSdk OK (chat.message turn-boundary apply enabled)`)
+      }
+    } catch (e: any) {
+      // Bridge package not installed OR import failed — safe to skip;
+      // SDK's TokenRotationManager still works in degraded mode (audit
+      // log + Defect 1 mtime fallback retain full safety).
+      dbg(`STARTUP token-rotation: bridge unavailable (${e?.message ?? 'unknown'}); continuing without turn-boundary hook`)
+    }
+  })()
 
    return {
     languageModel(modelId: string): LanguageModelV3 {

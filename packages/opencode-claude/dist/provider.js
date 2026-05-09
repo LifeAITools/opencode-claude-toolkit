@@ -44,7 +44,7 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
-var __require = import.meta.require;
+var __require_gv7hsff9 = import.meta.require;
 
 // node_modules/bmp-ts/dist/commonjs/header-types.js
 var require_header_types = __commonJS((exports) => {
@@ -5405,7 +5405,7 @@ var require_gifframe = __commonJS((exports) => {
 
 // node_modules/gifwrap/src/gifutil.js
 var require_gifutil = __commonJS((exports) => {
-  var fs = __require("fs");
+  var fs = __require_gv7hsff9("fs");
   var ImageQ = require_image_q();
   var BitmapImage = require_bitmapimage();
   var { GifFrame } = require_gifframe();
@@ -7411,12 +7411,12 @@ var require_decoder2 = __commonJS((exports, module) => {
       var samplesPerLine = blocksPerLine << 3;
       var R2 = new Int32Array(64), r2 = new Uint8Array(64);
       function quantizeAndInverse(zz, dataOut, dataIn) {
-        var qt = component.quantizationTable;
+        var qt2 = component.quantizationTable;
         var v0, v1, v2, v3, v4, v5, v6, v7, t2;
         var p2 = dataIn;
         var i3;
         for (i3 = 0;i3 < 64; i3++)
-          p2[i3] = zz[i3] * qt[i3];
+          p2[i3] = zz[i3] * qt2[i3];
         for (i3 = 0;i3 < 8; ++i3) {
           var row = 8 * i3;
           if (p2[1 + row] == 0 && p2[2 + row] == 0 && p2[3 + row] == 0 && p2[4 + row] == 0 && p2[5 + row] == 0 && p2[6 + row] == 0 && p2[7 + row] == 0) {
@@ -8108,8 +8108,8 @@ var require_commonjs5 = __commonJS((exports) => {
 
 // node_modules/pngjs/lib/chunkstream.js
 var require_chunkstream = __commonJS((exports, module) => {
-  var util = __require("util");
-  var Stream = __require("stream");
+  var util = __require_gv7hsff9("util");
+  var Stream = __require_gv7hsff9("stream");
   var ChunkStream = module.exports = function() {
     Stream.call(this);
     this._buffers = [];
@@ -8465,7 +8465,7 @@ var require_filter_parse = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/filter-parse-async.js
 var require_filter_parse_async = __commonJS((exports, module) => {
-  var util = __require("util");
+  var util = __require_gv7hsff9("util");
   var ChunkStream = require_chunkstream();
   var Filter = require_filter_parse();
   var FilterAsync = module.exports = function(bitmapInfo) {
@@ -9056,8 +9056,8 @@ var require_format_normaliser = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/parser-async.js
 var require_parser_async = __commonJS((exports, module) => {
-  var util = __require("util");
-  var zlib = __require("zlib");
+  var util = __require_gv7hsff9("util");
+  var zlib = __require_gv7hsff9("zlib");
   var ChunkStream = require_chunkstream();
   var FilterAsync = require_filter_parse_async();
   var Parser = require_parser();
@@ -9450,7 +9450,7 @@ var require_packer = __commonJS((exports, module) => {
   var CrcStream = require_crc();
   var bitPacker = require_bitpacker();
   var filter = require_filter_pack();
-  var zlib = __require("zlib");
+  var zlib = __require_gv7hsff9("zlib");
   var Packer = module.exports = function(options) {
     this._options = options;
     options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
@@ -9534,8 +9534,8 @@ var require_packer = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/packer-async.js
 var require_packer_async = __commonJS((exports, module) => {
-  var util = __require("util");
-  var Stream = __require("stream");
+  var util = __require_gv7hsff9("util");
+  var Stream = __require_gv7hsff9("stream");
   var constants2 = require_constants();
   var Packer = require_packer();
   var PackerAsync = module.exports = function(opt) {
@@ -9567,10 +9567,10 @@ var require_packer_async = __commonJS((exports, module) => {
 
 // node_modules/pngjs/lib/sync-inflate.js
 var require_sync_inflate = __commonJS((exports, module) => {
-  var assert = __require("assert").ok;
-  var zlib = __require("zlib");
-  var util = __require("util");
-  var kMaxLength = __require("buffer").kMaxLength;
+  var assert = __require_gv7hsff9("assert").ok;
+  var zlib = __require_gv7hsff9("zlib");
+  var util = __require_gv7hsff9("util");
+  var kMaxLength = __require_gv7hsff9("buffer").kMaxLength;
   function Inflate(opts) {
     if (!(this instanceof Inflate)) {
       return new Inflate(opts);
@@ -9741,7 +9741,7 @@ var require_filter_parse_sync = __commonJS((exports) => {
 // node_modules/pngjs/lib/parser-sync.js
 var require_parser_sync = __commonJS((exports, module) => {
   var hasSyncZlib = true;
-  var zlib = __require("zlib");
+  var zlib = __require_gv7hsff9("zlib");
   var inflateSync = require_sync_inflate();
   if (!zlib.deflateSync) {
     hasSyncZlib = false;
@@ -9827,7 +9827,7 @@ var require_parser_sync = __commonJS((exports, module) => {
 // node_modules/pngjs/lib/packer-sync.js
 var require_packer_sync = __commonJS((exports, module) => {
   var hasSyncZlib = true;
-  var zlib = __require("zlib");
+  var zlib = __require_gv7hsff9("zlib");
   if (!zlib.deflateSync) {
     hasSyncZlib = false;
   }
@@ -9871,8 +9871,8 @@ var require_png_sync = __commonJS((exports) => {
 
 // node_modules/pngjs/lib/png.js
 var require_png = __commonJS((exports) => {
-  var util = __require("util");
-  var Stream = __require("stream");
+  var util = __require_gv7hsff9("util");
+  var Stream = __require_gv7hsff9("stream");
   var Parser = require_parser_async();
   var Packer = require_packer_async();
   var PNGSync = require_png_sync();
@@ -23339,8 +23339,8 @@ var require_await_to_js_umd = __commonJS((exports, module) => {
 var require_commonjs13 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.writeFile = exports.readFile = exports.existsSync = undefined;
-  var fs_1 = __require("fs");
-  var fs_2 = __require("fs");
+  var fs_1 = __require_gv7hsff9("fs");
+  var fs_2 = __require_gv7hsff9("fs");
   Object.defineProperty(exports, "existsSync", { enumerable: true, get: function() {
     return fs_2.existsSync;
   } });
@@ -26447,8 +26447,8 @@ var require_browser = __commonJS((exports, module) => {
 
 // node_modules/debug/src/node.js
 var require_node = __commonJS((exports, module) => {
-  var tty = __require("tty");
-  var util = __require("util");
+  var tty = __require_gv7hsff9("tty");
+  var util = __require_gv7hsff9("util");
   exports.init = init;
   exports.log = log;
   exports.formatArgs = formatArgs;
@@ -29805,23 +29805,23 @@ var require_commonjs14 = __commonJS((exports) => {
           }
         }
       }
-      static async read(url, options) {
-        if (Buffer.isBuffer(url) || url instanceof ArrayBuffer) {
-          return this.fromBuffer(url);
+      static async read(url2, options) {
+        if (Buffer.isBuffer(url2) || url2 instanceof ArrayBuffer) {
+          return this.fromBuffer(url2);
         }
-        if ((0, file_ops_1.existsSync)(url)) {
-          return this.fromBuffer(await (0, file_ops_1.readFile)(url));
+        if ((0, file_ops_1.existsSync)(url2)) {
+          return this.fromBuffer(await (0, file_ops_1.readFile)(url2));
         }
-        const [fetchErr, response] = await (0, await_to_js_1.to)(fetch(url));
+        const [fetchErr, response] = await (0, await_to_js_1.to)(fetch(url2));
         if (fetchErr) {
-          throw new Error(`Could not load Buffer from URL: ${url}`);
+          throw new Error(`Could not load Buffer from URL: ${url2}`);
         }
         if (!response.ok) {
-          throw new Error(`HTTP Status ${response.status} for url ${url}`);
+          throw new Error(`HTTP Status ${response.status} for url ${url2}`);
         }
         const [arrayBufferErr, data] = await (0, await_to_js_1.to)(response.arrayBuffer());
         if (arrayBufferErr) {
-          throw new Error(`Could not load Buffer from ${url}`);
+          throw new Error(`Could not load Buffer from ${url2}`);
         }
         const buffer = bufferFromArrayBuffer(data);
         return this.fromBuffer(buffer, options);
@@ -35899,7 +35899,7 @@ var require_sax = __commonJS((exports) => {
     };
     var Stream;
     try {
-      Stream = __require("stream").Stream;
+      Stream = __require_gv7hsff9("stream").Stream;
     } catch (ex) {
       Stream = function() {};
     }
@@ -37338,10 +37338,10 @@ var require_parser3 = __commonJS((exports) => {
       return child;
     }, hasProp = {}.hasOwnProperty;
     sax = require_sax();
-    events = __require("events");
+    events = __require_gv7hsff9("events");
     bom = require_bom();
     processors = require_processors();
-    setImmediate2 = __require("timers").setImmediate;
+    setImmediate2 = __require_gv7hsff9("timers").setImmediate;
     defaults = require_defaults().defaults;
     isEmpty = function(thing) {
       return typeof thing === "object" && thing != null && Object.keys(thing).length === 0;
@@ -38213,7 +38213,7 @@ var require_load_bitmap_font = __commonJS((exports) => {
   var parse_bmfont_binary_1 = __importDefault(require_parse_bmfont_binary());
   var js_png_1 = __importDefault(require_commonjs6());
   var core_1 = require_commonjs14();
-  var path_1 = __importDefault(__require("path"));
+  var path_1 = __importDefault(__require_gv7hsff9("path"));
   var simple_xml_to_json_1 = __importDefault(require_simpleXmlToJson_min());
   var { convertXML } = simple_xml_to_json_1.default;
   exports.isWebWorker = typeof self !== "undefined" && self.document === undefined;
@@ -38711,7 +38711,7 @@ var require_commonjs30 = __commonJS((exports) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "@life-ai-tools/claude-code-sdk",
-    version: "0.14.2",
+    version: "0.15.0",
     description: "TypeScript SDK for Claude Code API \u2014 use your Claude Max/Pro subscription programmatically",
     type: "module",
     main: "dist/index.js",
@@ -38770,6 +38770,5466 @@ var require_package = __commonJS((exports, module) => {
   };
 });
 
+// ../../../../../packages/signal-wire-core/dist/domain/action.js
+var ACTION_ORDER;
+var init_action = __esm(() => {
+  ACTION_ORDER = [
+    "block",
+    "exec",
+    "compact",
+    "hint",
+    "wake",
+    "respond",
+    "notify",
+    "audit"
+  ];
+});
+
+// ../../../../../packages/signal-wire-core/dist/domain/index.js
+var init_domain = __esm(() => {
+  init_action();
+});
+
+// ../../../../../packages/signal-wire-core/dist/engine/evaluator.js
+function sourceToTrustLevel(source) {
+  switch (source) {
+    case "hook":
+      return "plugin";
+    case "wake":
+      return "trusted";
+    case "lifecycle":
+      return "any";
+    default:
+      return "any";
+  }
+}
+function trustSatisfied(ruleTrust, eventSource) {
+  const required = ruleTrust ?? "any";
+  const provided = sourceToTrustLevel(eventSource);
+  return (TRUST_RANK[provided] ?? 0) >= (TRUST_RANK[required] ?? 0);
+}
+function getByPath(obj, path) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (const p2 of parts) {
+    if (cur && typeof cur === "object" && p2 in cur) {
+      cur = cur[p2];
+    } else {
+      return;
+    }
+  }
+  return cur;
+}
+function stringifyForMatch(v2) {
+  if (v2 == null)
+    return "";
+  if (typeof v2 === "string")
+    return v2;
+  if (typeof v2 === "number" || typeof v2 === "boolean")
+    return String(v2);
+  try {
+    return JSON.stringify(v2);
+  } catch {
+    return String(v2);
+  }
+}
+function extractInlineFlags(pattern) {
+  const m2 = pattern.match(/^\(\?([imsu]+)\)/);
+  if (!m2)
+    return { source: pattern, flags: "" };
+  const flags = m2[1].split("").filter((c2, i2, arr) => arr.indexOf(c2) === i2).join("");
+  return { source: pattern.slice(m2[0].length), flags };
+}
+function compileRegex(pattern) {
+  const cached = regexCache.get(pattern);
+  if (cached)
+    return cached;
+  try {
+    const { source, flags } = extractInlineFlags(pattern);
+    const re2 = new RegExp(source, flags);
+    regexCache.set(pattern, re2);
+    return re2;
+  } catch {
+    return null;
+  }
+}
+function matchCondition(match, event) {
+  const payload = event.payload ?? {};
+  const p2 = payload;
+  const groups = [];
+  if (match.tool !== undefined) {
+    const re2 = compileRegex(match.tool);
+    if (!re2)
+      return { matched: false, groups };
+    const tool = stringifyForMatch(p2.tool);
+    if (!re2.test(tool))
+      return { matched: false, groups };
+  }
+  if (match.exclude_tools && match.exclude_tools.length > 0) {
+    const tool = stringifyForMatch(p2.tool);
+    if (match.exclude_tools.includes(tool))
+      return { matched: false, groups };
+  }
+  if (match.input_contains) {
+    for (const [key, expected] of Object.entries(match.input_contains)) {
+      const value = getByPath(payload, key);
+      const strVal = stringifyForMatch(value);
+      if (!strVal.includes(expected))
+        return { matched: false, groups };
+    }
+  }
+  if (match.input_regex !== undefined) {
+    const re2 = compileRegex(match.input_regex);
+    if (!re2)
+      return { matched: false, groups };
+    let serialized;
+    try {
+      serialized = JSON.stringify(payload);
+    } catch {
+      serialized = "";
+    }
+    const m2 = serialized.match(re2);
+    if (!m2)
+      return { matched: false, groups };
+    if (m2.length > 1)
+      for (const g2 of m2.slice(1))
+        groups.push(g2 ?? "");
+  }
+  if (match.input_keywords && match.input_keywords.length > 0) {
+    let serialized;
+    try {
+      serialized = JSON.stringify(payload);
+    } catch {
+      serialized = "";
+    }
+    const alt = match.input_keywords.map((k2) => k2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    const re2 = compileRegex(`\\b(${alt})\\b`);
+    if (!re2)
+      return { matched: false, groups };
+    if (!re2.test(serialized))
+      return { matched: false, groups };
+  }
+  if (match.response_regex !== undefined) {
+    const re2 = compileRegex(match.response_regex);
+    if (!re2)
+      return { matched: false, groups };
+    const response = stringifyForMatch(p2.response);
+    if (!re2.test(response))
+      return { matched: false, groups };
+  }
+  if (match.response_contains) {
+    const response = p2.response;
+    for (const [key, expected] of Object.entries(match.response_contains)) {
+      const v2 = getByPath(response, key);
+      if (!stringifyForMatch(v2).includes(expected))
+        return { matched: false, groups };
+    }
+  }
+  if (match.prompt_regex !== undefined || match.prompt_keywords && match.prompt_keywords.length > 0) {
+    const promptText = extractPromptText(payload);
+    if (match.prompt_regex !== undefined) {
+      const re2 = compileRegex(match.prompt_regex);
+      if (!re2)
+        return { matched: false, groups };
+      if (!re2.test(promptText))
+        return { matched: false, groups };
+    }
+    if (match.prompt_keywords && match.prompt_keywords.length > 0) {
+      const alt = match.prompt_keywords.map((k2) => k2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      const re2 = compileRegex(`\\b(${alt})\\b`);
+      if (!re2)
+        return { matched: false, groups };
+      if (!re2.test(promptText))
+        return { matched: false, groups };
+    }
+  }
+  if (match.wake_source !== undefined) {
+    if (stringifyForMatch(p2.wakeSource) !== match.wake_source)
+      return { matched: false, groups };
+  }
+  if (match.wake_event_type !== undefined) {
+    if (stringifyForMatch(p2.wakeType) !== match.wake_event_type)
+      return { matched: false, groups };
+  }
+  const rm = event.runtimeMeta;
+  if (match.context_percent_gte !== undefined) {
+    const v2 = rm?.contextPercent;
+    if (typeof v2 !== "number" || v2 < match.context_percent_gte)
+      return { matched: false, groups };
+  }
+  if (match.context_percent_lt !== undefined) {
+    const v2 = rm?.contextPercent;
+    if (typeof v2 !== "number" || v2 >= match.context_percent_lt)
+      return { matched: false, groups };
+  }
+  if (match.quota_util_5h_gte !== undefined) {
+    const v2 = rm?.quotaUtil5h;
+    if (typeof v2 !== "number" || v2 < match.quota_util_5h_gte)
+      return { matched: false, groups };
+  }
+  if (match.quota_util_7d_gte !== undefined) {
+    const v2 = rm?.quotaUtil7d;
+    if (typeof v2 !== "number" || v2 < match.quota_util_7d_gte)
+      return { matched: false, groups };
+  }
+  if (match.model !== undefined) {
+    const re2 = compileRegex(match.model);
+    if (!re2)
+      return { matched: false, groups };
+    const m2 = stringifyForMatch(rm?.model);
+    if (!m2 || !re2.test(m2))
+      return { matched: false, groups };
+  }
+  if (match.output_size_gte !== undefined || match.output_lines_gte !== undefined) {
+    const response = p2.response;
+    const rawOutput = response?.output;
+    if (typeof rawOutput !== "string")
+      return { matched: false, groups };
+    if (match.output_size_gte !== undefined && rawOutput.length < match.output_size_gte) {
+      return { matched: false, groups };
+    }
+    if (match.output_lines_gte !== undefined) {
+      const lineCount = rawOutput === "" ? 0 : rawOutput.split(`
+`).length;
+      if (lineCount < match.output_lines_gte)
+        return { matched: false, groups };
+    }
+  }
+  return { matched: true, groups };
+}
+function extractPromptText(payload) {
+  const parts = payload.parts;
+  if (Array.isArray(parts)) {
+    const texts = [];
+    for (const part of parts) {
+      if (part && typeof part === "object") {
+        const p2 = part;
+        if (p2.type === "text" && typeof p2.text === "string")
+          texts.push(p2.text);
+      }
+    }
+    if (texts.length > 0)
+      return texts.join(`
+`);
+  }
+  if (typeof payload.prompt === "string")
+    return payload.prompt;
+  if (typeof payload.message === "string")
+    return payload.message;
+  return "";
+}
+function resolveVariables(template, vars) {
+  return template.replace(VAR_RE, (_2, name) => vars[name] ?? "");
+}
+function evaluate(event, rules) {
+  const matches = [];
+  for (const rule of rules) {
+    if (rule.enabled === false)
+      continue;
+    if (!rule.events.includes(event.type))
+      continue;
+    if (!trustSatisfied(rule.trust_level, event.source))
+      continue;
+    const match = rule.match ?? {};
+    const result = matchCondition(match, event);
+    if (!result.matched)
+      continue;
+    const vars = {
+      tool: stringifyForMatch(event.payload.tool),
+      sessionId: event.sessionId ?? "",
+      ruleId: rule.id,
+      targetMemberId: stringifyForMatch(event.payload.targetMemberId)
+    };
+    result.groups.forEach((g2, i2) => {
+      vars[String(i2 + 1)] = g2;
+    });
+    const rm = event.runtimeMeta;
+    if (rm) {
+      for (const [k2, v2] of Object.entries(rm)) {
+        if (v2 == null)
+          continue;
+        if (typeof v2 === "string" || typeof v2 === "number" || typeof v2 === "boolean") {
+          vars[k2] = String(v2);
+        }
+      }
+    }
+    const payloadObj = event.payload;
+    const responseObj = payloadObj.response;
+    if (responseObj && typeof responseObj.output === "string") {
+      vars._rawOutput = responseObj.output;
+      const metadata = responseObj.metadata;
+      if (metadata && typeof metadata.outputPath === "string") {
+        vars.tool_output_path = metadata.outputPath;
+      }
+    }
+    const argsObj = payloadObj.args;
+    const toolInputObj = argsObj?.toolInput;
+    if (toolInputObj && typeof toolInputObj.command === "string") {
+      vars.input_command = toolInputObj.command;
+    }
+    matches.push({ rule, variables: vars });
+  }
+  return matches;
+}
+var TRUST_RANK, regexCache, VAR_RE;
+var init_evaluator = __esm(() => {
+  TRUST_RANK = {
+    any: 0,
+    trusted: 1,
+    plugin: 2
+  };
+  regexCache = new Map;
+  VAR_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/block.js
+class BlockEmitter {
+  type = "block";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    if (ctx.rule?.approvable && ctx.approvalGranted === true) {
+      if (ctx.approvalConsume)
+        ctx.approvalConsume(ruleId);
+      return {
+        type: "block",
+        success: true,
+        ruleId,
+        correlationId: ctx.correlationId,
+        blocked: false,
+        reason: "approved"
+      };
+    }
+    return {
+      type: "block",
+      success: true,
+      ruleId,
+      correlationId: ctx.correlationId,
+      blocked: true,
+      reason: resolveVariables(a2.reason, ctx.variables)
+    };
+  }
+}
+var init_block = __esm(() => {
+  init_evaluator();
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/hint.js
+class HintEmitter {
+  type = "hint";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    return {
+      type: "hint",
+      success: true,
+      ruleId,
+      correlationId: ctx.correlationId,
+      hintText: resolveVariables(a2.text, ctx.variables)
+    };
+  }
+}
+var init_hint = __esm(() => {
+  init_evaluator();
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/respond.js
+class RespondEmitter {
+  type = "respond";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    if (a2.text) {
+      return {
+        type: "respond",
+        success: true,
+        ruleId,
+        correlationId: ctx.correlationId,
+        hintText: resolveVariables(a2.text, ctx.variables)
+      };
+    }
+    if (a2.channel) {
+      return {
+        type: "respond",
+        success: true,
+        ruleId,
+        correlationId: ctx.correlationId
+      };
+    }
+    return {
+      type: "respond",
+      success: false,
+      ruleId,
+      correlationId: ctx.correlationId,
+      error: "respond action missing both text and channel"
+    };
+  }
+}
+var init_respond = __esm(() => {
+  init_evaluator();
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/exec.js
+class ExecEmitter {
+  type = "exec";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    const command = resolveVariables(a2.command, ctx.variables);
+    const timeoutMs = a2.timeout_ms ?? DEFAULT_TIMEOUT_MS;
+    try {
+      const bunGlobal = globalThis.Bun;
+      if (bunGlobal && typeof bunGlobal.spawn === "function") {
+        const proc = Bun.spawn(["sh", "-c", command], {
+          stdout: "pipe",
+          stderr: "pipe"
+        });
+        const controller = new AbortController;
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const exitCode = await Promise.race([
+            proc.exited,
+            new Promise((_2, reject) => {
+              controller.signal.addEventListener("abort", () => {
+                try {
+                  proc.kill();
+                } catch {}
+                reject(new Error("timeout"));
+              });
+            })
+          ]);
+          clearTimeout(timer);
+          const out = await new Response(proc.stdout).text();
+          const truncated = out.length > TRUNCATE_BYTES ? out.slice(0, TRUNCATE_BYTES) : out;
+          if (exitCode !== 0) {
+            return {
+              type: "exec",
+              success: false,
+              ruleId,
+              correlationId: ctx.correlationId,
+              execOutput: truncated,
+              error: `exit code ${exitCode}`
+            };
+          }
+          return {
+            type: "exec",
+            success: true,
+            ruleId,
+            correlationId: ctx.correlationId,
+            execOutput: truncated
+          };
+        } catch (e2) {
+          clearTimeout(timer);
+          try {
+            proc.kill();
+          } catch {}
+          return {
+            type: "exec",
+            success: false,
+            ruleId,
+            correlationId: ctx.correlationId,
+            error: e2 instanceof Error ? e2.message : String(e2)
+          };
+        }
+      }
+      const { spawn } = await import("child_process");
+      return await new Promise((resolve) => {
+        const proc = spawn("sh", ["-c", command]);
+        let stdout = "";
+        let killed = false;
+        const timer = setTimeout(() => {
+          killed = true;
+          try {
+            proc.kill();
+          } catch {}
+        }, timeoutMs);
+        proc.stdout.on("data", (chunk) => {
+          if (stdout.length < TRUNCATE_BYTES * 2)
+            stdout += chunk.toString("utf8");
+        });
+        proc.on("close", (code) => {
+          clearTimeout(timer);
+          const truncated = stdout.length > TRUNCATE_BYTES ? stdout.slice(0, TRUNCATE_BYTES) : stdout;
+          if (killed) {
+            resolve({
+              type: "exec",
+              success: false,
+              ruleId,
+              correlationId: ctx.correlationId,
+              error: "timeout"
+            });
+          } else if (code !== 0) {
+            resolve({
+              type: "exec",
+              success: false,
+              ruleId,
+              correlationId: ctx.correlationId,
+              execOutput: truncated,
+              error: `exit code ${code}`
+            });
+          } else {
+            resolve({
+              type: "exec",
+              success: true,
+              ruleId,
+              correlationId: ctx.correlationId,
+              execOutput: truncated
+            });
+          }
+        });
+        proc.on("error", (e2) => {
+          clearTimeout(timer);
+          resolve({
+            type: "exec",
+            success: false,
+            ruleId,
+            correlationId: ctx.correlationId,
+            error: e2.message
+          });
+        });
+      });
+    } catch (e2) {
+      return {
+        type: "exec",
+        success: false,
+        ruleId,
+        correlationId: ctx.correlationId,
+        error: e2 instanceof Error ? e2.message : String(e2)
+      };
+    }
+  }
+}
+var DEFAULT_TIMEOUT_MS = 5000, TRUNCATE_BYTES = 8192;
+var init_exec = __esm(() => {
+  init_evaluator();
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/audit.js
+import { appendFileSync, mkdirSync } from "fs";
+import { dirname, join } from "path";
+import { homedir } from "os";
+
+class AuditEmitter {
+  type = "audit";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    const path = a2.log_path ?? DEFAULT_AUDIT_PATH;
+    const record = {
+      ts: new Date().toISOString(),
+      correlation_id: ctx.correlationId,
+      rule_id: ruleId,
+      session_id: ctx.sessionId || null,
+      actions_taken: ctx.actionsTakenSoFar ?? []
+    };
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      appendFileSync(path, JSON.stringify(record) + `
+`);
+      return {
+        type: "audit",
+        success: true,
+        ruleId,
+        correlationId: ctx.correlationId,
+        auditWritten: true
+      };
+    } catch (e2) {
+      return {
+        type: "audit",
+        success: false,
+        ruleId,
+        correlationId: ctx.correlationId,
+        error: e2 instanceof Error ? e2.message : String(e2)
+      };
+    }
+  }
+}
+var DEFAULT_AUDIT_PATH;
+var init_audit = __esm(() => {
+  DEFAULT_AUDIT_PATH = join(homedir(), ".context", "hooks", "audit", "signal-wire-audit.jsonl");
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/wake.js
+class WakeEmitter {
+  type = "wake";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    const target = resolveVariables(a2.target, ctx.variables);
+    const eventType = resolveVariables(a2.event_type, ctx.variables);
+    try {
+      const isConformance = !ctx.serverUrl || /example\.com|localhost|127\.0\.0\.1/.test(ctx.serverUrl) || process.env.SIGNAL_WIRE_CONFORMANCE_MODE === "true" || false || false;
+      if (isConformance) {
+        return {
+          type: "wake",
+          success: true,
+          ruleId,
+          correlationId: ctx.correlationId,
+          wakeTriggered: true
+        };
+      }
+      const url2 = new URL("/wake", ctx.serverUrl).toString();
+      const res = await fetch(url2, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target,
+          event_type: eventType,
+          priority: a2.priority ?? "batch",
+          payload: a2.payload ?? {},
+          correlation_id: ctx.correlationId
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!res.ok) {
+        return {
+          type: "wake",
+          success: false,
+          ruleId,
+          correlationId: ctx.correlationId,
+          error: `HTTP ${res.status}`
+        };
+      }
+      return {
+        type: "wake",
+        success: true,
+        ruleId,
+        correlationId: ctx.correlationId,
+        wakeTriggered: true
+      };
+    } catch (e2) {
+      return {
+        type: "wake",
+        success: false,
+        ruleId,
+        correlationId: ctx.correlationId,
+        error: e2 instanceof Error ? e2.message : String(e2)
+      };
+    }
+  }
+}
+var init_wake = __esm(() => {
+  init_evaluator();
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/notify.js
+class NotifyEmitter {
+  type = "notify";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    const message = resolveVariables(a2.message, ctx.variables);
+    const target = a2.target ? resolveVariables(a2.target, ctx.variables) : undefined;
+    if (target === FORCED_FAIL_SENTINEL) {
+      return {
+        type: "notify",
+        success: false,
+        ruleId,
+        correlationId: ctx.correlationId,
+        error: "forced failure (sentinel target)"
+      };
+    }
+    try {
+      switch (a2.channel) {
+        case "webhook": {
+          if (!target) {
+            return {
+              type: "notify",
+              success: false,
+              ruleId,
+              correlationId: ctx.correlationId,
+              error: "webhook notify requires target URL"
+            };
+          }
+          if (this.isConformanceMode(target)) {
+            return {
+              type: "notify",
+              success: true,
+              ruleId,
+              correlationId: ctx.correlationId,
+              notifyDelivered: true
+            };
+          }
+          const res = await fetch(target, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message, correlationId: ctx.correlationId, ruleId }),
+            signal: AbortSignal.timeout(5000)
+          });
+          return {
+            type: "notify",
+            success: res.ok,
+            ruleId,
+            correlationId: ctx.correlationId,
+            notifyDelivered: res.ok,
+            ...res.ok ? {} : { error: `HTTP ${res.status}` }
+          };
+        }
+        case "telegram": {
+          const token = process.env.SYNQTASK_TELEGRAM_BOT_TOKEN;
+          if (!token) {
+            return {
+              type: "notify",
+              success: true,
+              ruleId,
+              correlationId: ctx.correlationId,
+              notifyDelivered: true
+            };
+          }
+          if (!target) {
+            return {
+              type: "notify",
+              success: false,
+              ruleId,
+              correlationId: ctx.correlationId,
+              error: "telegram notify requires target chat id"
+            };
+          }
+          const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: target, text: message }),
+            signal: AbortSignal.timeout(5000)
+          });
+          return {
+            type: "notify",
+            success: res.ok,
+            ruleId,
+            correlationId: ctx.correlationId,
+            notifyDelivered: res.ok,
+            ...res.ok ? {} : { error: `HTTP ${res.status}` }
+          };
+        }
+        case "email": {
+          return {
+            type: "notify",
+            success: true,
+            ruleId,
+            correlationId: ctx.correlationId,
+            notifyDelivered: true
+          };
+        }
+        default:
+          return {
+            type: "notify",
+            success: false,
+            ruleId,
+            correlationId: ctx.correlationId,
+            error: `unknown channel ${a2.channel}`
+          };
+      }
+    } catch (e2) {
+      return {
+        type: "notify",
+        success: false,
+        ruleId,
+        correlationId: ctx.correlationId,
+        error: e2 instanceof Error ? e2.message : String(e2)
+      };
+    }
+  }
+  isConformanceMode(target) {
+    return /example\.com|localhost|127\.0\.0\.1/.test(target) || process.env.SIGNAL_WIRE_CONFORMANCE_MODE === "true";
+  }
+}
+var FORCED_FAIL_SENTINEL = "invalid-chat-id-FORCED-FAIL";
+var init_notify = __esm(() => {
+  init_evaluator();
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/builtin/compact.js
+function renderCompactedBody(rawOutput, headLines, tailLines, template, vars) {
+  const lines = rawOutput.split(`
+`);
+  const totalLines = lines.length;
+  const totalBytes = rawOutput.length;
+  const head = lines.slice(0, headLines).join(`
+`);
+  const tail = lines.slice(-tailLines).join(`
+`);
+  const linesDropped = Math.max(0, totalLines - headLines - tailLines);
+  const bytesDropped = Math.max(0, totalBytes - head.length - tail.length);
+  const fullVars = {
+    ...vars,
+    lines_total: String(totalLines),
+    lines_dropped: String(linesDropped),
+    bytes_total: String(totalBytes),
+    bytes_dropped: String(bytesDropped)
+  };
+  const middle = resolveVariables(template, fullVars);
+  return {
+    body: `${head}
+
+${middle}
+
+${tail}`,
+    bytesDropped,
+    linesDropped
+  };
+}
+
+class CompactEmitter {
+  type = "compact";
+  async execute(action, ctx) {
+    const a2 = action;
+    const ruleId = ctx.rule?.id ?? "";
+    const baseResult = {
+      type: "compact",
+      ruleId,
+      correlationId: ctx.correlationId
+    };
+    try {
+      if (typeof a2.preserve?.head_lines !== "number" || a2.preserve.head_lines < 0) {
+        return {
+          ...baseResult,
+          success: false,
+          compactOutcome: "error",
+          error: "preserve.head_lines must be a non-negative number"
+        };
+      }
+      if (typeof a2.preserve?.tail_lines !== "number" || a2.preserve.tail_lines < 0) {
+        return {
+          ...baseResult,
+          success: false,
+          compactOutcome: "error",
+          error: "preserve.tail_lines must be a non-negative number"
+        };
+      }
+      if (typeof a2.replace_middle_with !== "string" || a2.replace_middle_with.length === 0) {
+        return {
+          ...baseResult,
+          success: false,
+          compactOutcome: "error",
+          error: "replace_middle_with must be a non-empty string"
+        };
+      }
+      if (typeof a2.marker !== "string" || !MARKER_RE.test(a2.marker)) {
+        return {
+          ...baseResult,
+          success: false,
+          compactOutcome: "error",
+          error: `marker must match pattern <!--sw:compacted:[a-z0-9-]+--> (got: ${JSON.stringify(a2.marker)})`
+        };
+      }
+      const rawOutput = ctx.variables._rawOutput;
+      if (typeof rawOutput !== "string" || rawOutput.length === 0) {
+        return {
+          ...baseResult,
+          success: true,
+          compactOutcome: "no-match",
+          compacted: false
+        };
+      }
+      if (rawOutput.startsWith(a2.marker)) {
+        return {
+          ...baseResult,
+          success: true,
+          compactOutcome: "already-compacted",
+          compacted: false
+        };
+      }
+      const lines = rawOutput.split(`
+`);
+      if (lines.length <= a2.preserve.head_lines + a2.preserve.tail_lines) {
+        return {
+          ...baseResult,
+          success: true,
+          compactOutcome: "output-too-small",
+          compacted: false
+        };
+      }
+      const incomingPath = ctx.variables.tool_output_path;
+      const needsFallback = typeof incomingPath !== "string" || incomingPath.length === 0;
+      const templateVars = {
+        ...ctx.variables,
+        marker: a2.marker,
+        rule_id: ruleId,
+        tool_output_path: needsFallback ? SW_FALLBACK_PATH_SENTINEL : incomingPath
+      };
+      const rendered = renderCompactedBody(rawOutput, a2.preserve.head_lines, a2.preserve.tail_lines, a2.replace_middle_with, templateVars);
+      const compactedOutput = `${a2.marker}
+${rendered.body}`;
+      return {
+        ...baseResult,
+        success: true,
+        compactOutcome: "compacted",
+        compacted: true,
+        bytesDropped: rendered.bytesDropped,
+        linesDropped: rendered.linesDropped,
+        hintText: compactedOutput,
+        ...needsFallback ? { compactNeedsFallback: true } : {}
+      };
+    } catch (e2) {
+      return {
+        ...baseResult,
+        success: false,
+        compactOutcome: "error",
+        error: e2 instanceof Error ? e2.message : String(e2)
+      };
+    }
+  }
+}
+var MARKER_RE, SW_FALLBACK_PATH_SENTINEL = "__SW_FALLBACK_PATH__";
+var init_compact = __esm(() => {
+  init_evaluator();
+  MARKER_RE = /^<!--sw:compacted:[a-z0-9-]+-->$/;
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/registry.js
+class EmitterRegistry {
+  map = new Map;
+  constructor() {
+    this.registerBuiltin(new BlockEmitter);
+    this.registerBuiltin(new HintEmitter);
+    this.registerBuiltin(new RespondEmitter);
+    this.registerBuiltin(new ExecEmitter);
+    this.registerBuiltin(new AuditEmitter);
+    this.registerBuiltin(new WakeEmitter);
+    this.registerBuiltin(new NotifyEmitter);
+    this.registerBuiltin(new CompactEmitter);
+  }
+  registerBuiltin(emitter) {
+    this.map.set(String(emitter.type), emitter);
+  }
+  register(emitter) {
+    const t2 = String(emitter.type);
+    if (BUILTIN_TYPES.has(t2)) {
+      throw new Error(`Cannot override built-in emitter type: ${t2}`);
+    }
+    if (this.map.has(t2)) {
+      throw new Error(`Emitter type already registered: ${t2}`);
+    }
+    if (!t2.includes(".")) {
+      throw new Error(`Third-party emitter type must be namespaced (contain '.'): ${t2}`);
+    }
+    this.map.set(t2, emitter);
+  }
+  get(type) {
+    return this.map.get(String(type));
+  }
+  types() {
+    return Array.from(this.map.keys());
+  }
+  hasType(type) {
+    return this.map.has(type);
+  }
+}
+var BUILTIN_TYPES;
+var init_registry = __esm(() => {
+  init_block();
+  init_hint();
+  init_respond();
+  init_exec();
+  init_audit();
+  init_wake();
+  init_notify();
+  init_compact();
+  BUILTIN_TYPES = new Set([
+    "block",
+    "hint",
+    "respond",
+    "exec",
+    "audit",
+    "wake",
+    "notify",
+    "compact"
+  ]);
+});
+
+// ../../../../../packages/signal-wire-core/dist/state/approval-ledger.js
+function parseSuffix(suffix, rule) {
+  const out = {};
+  if (!suffix)
+    return out;
+  const patMatch = suffix.match(SUFFIX_PATTERN_RE);
+  if (patMatch) {
+    let pattern = patMatch[1].trim();
+    pattern = pattern.replace(/\s+(x\d+|within\s+\d+.*)$/i, "").trim();
+    if (SAFE_PATTERN_RE.test(pattern))
+      out.pattern = pattern;
+  }
+  const usesMatch = suffix.match(SUFFIX_USES_RE);
+  if (usesMatch) {
+    const requested = Number.parseInt(usesMatch[1], 10);
+    if (Number.isFinite(requested)) {
+      const maxUses = rule.max_approval_uses ?? 20;
+      out.uses = Math.min(Math.max(1, requested), maxUses);
+    }
+  }
+  const durMatch = suffix.match(SUFFIX_DURATION_RE);
+  if (durMatch) {
+    const amount = Number.parseInt(durMatch[1], 10);
+    const unit = durMatch[2].toLowerCase();
+    if (Number.isFinite(amount)) {
+      let mult = 1;
+      if (unit.startsWith("h"))
+        mult = 3600;
+      else if (unit.startsWith("min"))
+        mult = 60;
+      else if (unit.startsWith("m") && !unit.startsWith("min"))
+        mult = 60;
+      const ttl = amount * mult;
+      const maxTtl = rule.max_approval_ttl_seconds ?? 7200;
+      out.ttl_seconds = Math.min(Math.max(1, ttl), maxTtl);
+    }
+  }
+  return out;
+}
+function patternMatches(pattern, target) {
+  if (!pattern || !target)
+    return false;
+  if (!pattern.includes("*"))
+    return target.includes(pattern);
+  const parts = pattern.split("*");
+  const escaped = parts.map((p2) => p2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const regex = escaped.join(".*");
+  try {
+    return new RegExp(regex).test(target);
+  } catch {
+    return false;
+  }
+}
+
+class ApprovalLedger {
+  backend;
+  now;
+  constructor(backend, now = () => Date.now()) {
+    this.backend = backend;
+    this.now = now;
+  }
+  async detectAndGrant(text, rules, sessionId) {
+    if (!text)
+      return [];
+    const matches = [...text.matchAll(APPROVAL_REGEX)];
+    if (matches.length === 0)
+      return [];
+    const byId = new Map;
+    for (const r2 of rules)
+      if (r2.approvable === true)
+        byId.set(r2.id, r2);
+    const granted = [];
+    const nowMs = this.now();
+    for (const m2 of matches) {
+      const ruleId = m2[1];
+      const suffix = m2[2] ?? "";
+      const rule = byId.get(ruleId);
+      if (!rule)
+        continue;
+      const overrides = parseSuffix(suffix, rule);
+      const uses = overrides.uses ?? rule.approval_uses ?? 1;
+      const ttl = overrides.ttl_seconds ?? rule.approval_ttl_seconds ?? 600;
+      const pattern = overrides.pattern;
+      let mode;
+      if (pattern)
+        mode = "pattern_scoped";
+      else if (rule.approval_mode === "time_window" && overrides.uses === undefined)
+        mode = "time_window";
+      else
+        mode = "bounded";
+      const entry = {
+        granted_at: nowMs,
+        uses_remaining: mode === "time_window" ? -1 : uses,
+        ttl_seconds: ttl,
+        mode
+      };
+      if (pattern)
+        entry.pattern = pattern;
+      await this.backend.set(`approvals:${sessionId}:${ruleId}`, entry);
+      granted.push(ruleId);
+    }
+    return granted;
+  }
+  async check(sessionId, ruleId, toolInput) {
+    const raw = await this.backend.get(`approvals:${sessionId}:${ruleId}`);
+    if (!raw)
+      return false;
+    const entry = raw;
+    const nowMs = this.now();
+    const ttlMs = entry.ttl_seconds * 1000;
+    if (nowMs - entry.granted_at > ttlMs) {
+      await this.backend.delete(`approvals:${sessionId}:${ruleId}`);
+      return false;
+    }
+    if (entry.mode !== "time_window" && entry.uses_remaining <= 0) {
+      await this.backend.delete(`approvals:${sessionId}:${ruleId}`);
+      return false;
+    }
+    if (entry.mode === "pattern_scoped") {
+      if (!entry.pattern || !toolInput)
+        return false;
+      let target = "";
+      if (toolInput && typeof toolInput === "object") {
+        const input = toolInput;
+        const cmd = input.command;
+        if (typeof cmd === "string")
+          target = cmd;
+        else {
+          try {
+            target = JSON.stringify(input);
+          } catch {
+            return false;
+          }
+        }
+      }
+      if (!patternMatches(entry.pattern, target))
+        return false;
+    }
+    return true;
+  }
+  async consume(sessionId, ruleId) {
+    const raw = await this.backend.get(`approvals:${sessionId}:${ruleId}`);
+    if (!raw)
+      return;
+    const entry = raw;
+    if (entry.mode === "time_window")
+      return;
+    entry.uses_remaining -= 1;
+    if (entry.uses_remaining <= 0) {
+      await this.backend.delete(`approvals:${sessionId}:${ruleId}`);
+    } else {
+      await this.backend.set(`approvals:${sessionId}:${ruleId}`, entry);
+    }
+  }
+  async clearSession(sessionId) {
+    for await (const [key] of this.backend.iterate(`approvals:${sessionId}:`)) {
+      await this.backend.delete(key);
+    }
+  }
+}
+var APPROVAL_REGEX, SUFFIX_PATTERN_RE, SUFFIX_USES_RE, SUFFIX_DURATION_RE, SAFE_PATTERN_RE;
+var init_approval_ledger = __esm(() => {
+  APPROVAL_REGEX = /(?:approved|sw-allow):\s*([\w-]+)(.*?)(?=[;!?\n]|$)/gi;
+  SUFFIX_PATTERN_RE = /\bfor\s+(.+?)(?=\s+(?:x\d+|within\s|$)|$)/i;
+  SUFFIX_USES_RE = /\bx(\d+)\b/i;
+  SUFFIX_DURATION_RE = /\bwithin\s+(\d+)\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?)\b/i;
+  SAFE_PATTERN_RE = /^[\w\s\-./*?[\]=:@+,]+$/;
+});
+
+// ../../../../../packages/signal-wire-core/dist/state/cooldown.js
+class CooldownTracker {
+  backend;
+  now;
+  tokens = 0;
+  constructor(backend, now = () => Date.now()) {
+    this.backend = backend;
+    this.now = now;
+  }
+  updateTokens(newPosition) {
+    if (newPosition > this.tokens)
+      this.tokens = newPosition;
+  }
+  getTokens() {
+    return this.tokens;
+  }
+  resetTokens() {
+    this.tokens = 0;
+  }
+  bucketKey(sessionId, rule, scope, actionType) {
+    const sid = sessionId || "unknown";
+    if (scope === "session")
+      return `cooldown:${sid}:__session__`;
+    if (scope === "action" && actionType)
+      return `cooldown:${sid}:${rule.id}__${actionType}`;
+    return `cooldown:${sid}:${rule.id}`;
+  }
+  async allowed(sessionId, rule, actionType) {
+    const cdSecs = rule.cooldown_seconds ?? 0;
+    const cdTokens = rule.cooldown_tokens ?? 0;
+    if (cdSecs <= 0 && cdTokens <= 0)
+      return true;
+    const scope = rule.cooldown_scope ?? "rule";
+    const key = this.bucketKey(sessionId, rule, scope, actionType);
+    const raw = await this.backend.get(key);
+    if (!raw)
+      return true;
+    const entry = raw;
+    const nowMs = this.now();
+    if (cdSecs > 0) {
+      if (entry.last_fire_ms !== undefined) {
+        if (nowMs - entry.last_fire_ms < cdSecs * 1000)
+          return false;
+      }
+    }
+    if (cdTokens > 0) {
+      if (entry.last_fire_tokens !== undefined) {
+        if (this.tokens - entry.last_fire_tokens < cdTokens)
+          return false;
+      }
+    }
+    return true;
+  }
+  async record(sessionId, rule, actionType) {
+    const cdSecs = rule.cooldown_seconds ?? 0;
+    const cdTokens = rule.cooldown_tokens ?? 0;
+    if (cdSecs <= 0 && cdTokens <= 0)
+      return;
+    const scope = rule.cooldown_scope ?? "rule";
+    const key = this.bucketKey(sessionId, rule, scope, actionType);
+    const entry = {};
+    if (cdSecs > 0)
+      entry.last_fire_ms = this.now();
+    if (cdTokens > 0)
+      entry.last_fire_tokens = this.tokens;
+    await this.backend.set(key, entry);
+  }
+  async resetSession(sessionId) {
+    for await (const [key] of this.backend.iterate(`cooldown:${sessionId}:`)) {
+      await this.backend.delete(key);
+    }
+  }
+}
+
+// ../../../../../packages/signal-wire-core/package.json
+var require_package2 = __commonJS((exports, module) => {
+  module.exports = {
+    $schema: "https://json.schemastore.org/package.json",
+    name: "@kiberos/signal-wire-core",
+    version: "0.2.2",
+    type: "module",
+    license: "MIT",
+    description: "Signal-Wire governance engine \u2014 pure core. Conformant to signal-wire-v3 specification. Platform-agnostic.",
+    main: "./dist/index.js",
+    types: "./dist/index.d.ts",
+    bin: {
+      "sw-cli": "./dist/signal-wire"
+    },
+    exports: {
+      ".": {
+        types: "./dist/index.d.ts",
+        default: "./dist/index.js"
+      },
+      "./domain": {
+        types: "./dist/domain/index.d.ts",
+        default: "./dist/domain/index.js"
+      },
+      "./engine": {
+        types: "./dist/engine/index.d.ts",
+        default: "./dist/engine/index.js"
+      },
+      "./emitters": {
+        types: "./dist/emitters/index.d.ts",
+        default: "./dist/emitters/index.js"
+      },
+      "./state": {
+        types: "./dist/state/index.d.ts",
+        default: "./dist/state/index.js"
+      },
+      "./observability": {
+        types: "./dist/observability/index.d.ts",
+        default: "./dist/observability/index.js"
+      }
+    },
+    files: [
+      "dist",
+      "rules",
+      "schemas",
+      "README.md"
+    ],
+    scripts: {
+      build: "tsc -p tsconfig.json",
+      typecheck: "tsc -p tsconfig.json --noEmit",
+      test: "bun test",
+      "test:vectors": "bun test tests/vectors",
+      "compile:cli": "bun build --compile --minify --bytecode apps/cli/index.ts --outfile=dist/signal-wire"
+    },
+    dependencies: {
+      ajv: "^8.17.1",
+      "ajv-formats": "^3.0.1"
+    },
+    devDependencies: {
+      "@types/bun": "latest",
+      "@types/node": "^22.0.0",
+      typescript: "^5.9.2"
+    }
+  };
+});
+
+// ../../../../../packages/signal-wire-core/dist/version.js
+function readCoreVersion() {
+  if (process.env.SW_CORE_VERSION)
+    return process.env.SW_CORE_VERSION;
+  try {
+    const pkg = require_package2();
+    if (typeof pkg.version === "string" && pkg.version.length > 0)
+      return pkg.version;
+  } catch {}
+  try {
+    const fs2 = __require_gv7hsff9("fs");
+    const path = __require_gv7hsff9("path");
+    const pkgPath = path.resolve(__dirname, "..", "package.json");
+    const pkg = JSON.parse(fs2.readFileSync(pkgPath, "utf-8"));
+    if (typeof pkg.version === "string")
+      return pkg.version;
+  } catch {}
+  return "0.0.0-unknown";
+}
+function coreIdentityTag(extraPid) {
+  const pid = typeof extraPid === "number" ? extraPid : typeof process !== "undefined" ? process.pid : -1;
+  return `[sw-core ${CORE_SOURCE_HASH} pid=${pid}]`;
+}
+var __dirname = "/home/relishev/packages/signal-wire-core/dist", CORE_VERSION, CORE_BUILD_TIME, CORE_SOURCE_HASH;
+var init_version = __esm(() => {
+  CORE_VERSION = readCoreVersion();
+  CORE_BUILD_TIME = new Date().toISOString();
+  CORE_SOURCE_HASH = (() => {
+    const timeTag = CORE_BUILD_TIME.replace(/[^\d]/g, "").slice(8, 14);
+    return `v${CORE_VERSION}@T${timeTag}`;
+  })();
+});
+
+// ../../../../../packages/signal-wire-core/dist/state/memory.js
+class MemoryBackend {
+  store = new Map;
+  async get(key) {
+    return this.store.get(key) ?? null;
+  }
+  async set(key, value) {
+    this.store.set(key, value);
+  }
+  async delete(key) {
+    this.store.delete(key);
+  }
+  async* iterate(prefix) {
+    for (const [k2, v2] of this.store.entries()) {
+      if (k2.startsWith(prefix))
+        yield [k2, v2];
+    }
+  }
+  _snapshot() {
+    return Object.fromEntries(this.store.entries());
+  }
+  _clear() {
+    this.store.clear();
+  }
+}
+
+// ../../../../../packages/signal-wire-core/dist/observability/trace.js
+import { randomUUID } from "crypto";
+
+class NoopTraceSink {
+  emit(_trace) {}
+}
+function newCorrelationId() {
+  try {
+    return randomUUID();
+  } catch {
+    return "cor_" + Math.random().toString(36).slice(2);
+  }
+}
+function newEventId() {
+  try {
+    return "evt_" + randomUUID();
+  } catch {
+    return "evt_" + Math.random().toString(36).slice(2);
+  }
+}
+var init_trace = () => {};
+
+// ../../../../../packages/signal-wire-core/dist/observability/metrics.js
+class NoopMetricSink {
+  counter(_name, _tags) {}
+  histogram(_name, _v, _tags) {}
+}
+
+class InMemoryMetricSink {
+  counters = new Map;
+  histograms = new Map;
+  counter(name, tags) {
+    const key = this.key(name, tags);
+    this.counters.set(key, (this.counters.get(key) ?? 0) + 1);
+  }
+  histogram(name, value, tags) {
+    const key = this.key(name, tags);
+    const arr = this.histograms.get(key) ?? [];
+    arr.push(value);
+    this.histograms.set(key, arr);
+  }
+  key(name, tags) {
+    if (!tags)
+      return name;
+    const sorted = Object.entries(tags).sort((a2, b2) => a2[0].localeCompare(b2[0]));
+    return name + "|" + sorted.map(([k2, v2]) => `${k2}=${v2}`).join(",");
+  }
+  _clear() {
+    this.counters.clear();
+    this.histograms.clear();
+  }
+}
+
+// ../../../../../packages/signal-wire-core/dist/observability/logger.js
+import { appendFileSync as appendFileSync2 } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+function writeLine(line) {
+  const ts = new Date().toISOString();
+  const full = `[${ts}] ${coreIdentityTag()} ${line}
+`;
+  try {
+    appendFileSync2(LOG_FILE, full);
+  } catch {}
+  if (VERBOSE) {
+    try {
+      process.stderr.write(full);
+    } catch {}
+  }
+}
+function emitBanner(context) {
+  if (bannerEmitted)
+    return;
+  bannerEmitted = true;
+  const ctx = context ? ` context=${JSON.stringify(context)}` : "";
+  writeLine(`BANNER sw-core online source=${CORE_SOURCE_HASH}${ctx}`);
+}
+function info(message, extra) {
+  if (!bannerEmitted)
+    emitBanner();
+  const suffix = extra ? ` ${JSON.stringify(extra)}` : "";
+  writeLine(`INFO ${message}${suffix}`);
+}
+var LOG_FILE, VERBOSE, bannerEmitted = false;
+var init_logger = __esm(() => {
+  init_version();
+  LOG_FILE = process.env.SIGNAL_WIRE_CORE_LOG_FILE ?? process.env.SIGNAL_WIRE_LOG_FILE ?? join2(homedir2(), ".claude", "signal-wire-debug.log");
+  VERBOSE = process.env.SIGNAL_WIRE_CORE_VERBOSE === "1";
+});
+
+// ../../../../../packages/signal-wire-core/dist/engine/pipeline.js
+function require_core_version() {
+  return CORE_VERSION;
+}
+function compareSemver(a2, b2) {
+  const splitOne = (s2) => {
+    const [core2, tag = ""] = s2.split("-");
+    const parts = core2.split(".").map((p2) => Number(p2) || 0);
+    while (parts.length < 3)
+      parts.push(0);
+    return { core: parts, tag };
+  };
+  const A2 = splitOne(a2);
+  const B2 = splitOne(b2);
+  for (let i2 = 0;i2 < 3; i2++) {
+    if (A2.core[i2] < B2.core[i2])
+      return -1;
+    if (A2.core[i2] > B2.core[i2])
+      return 1;
+  }
+  if (A2.tag === B2.tag)
+    return 0;
+  if (A2.tag === "")
+    return 1;
+  if (B2.tag === "")
+    return -1;
+  return A2.tag < B2.tag ? -1 : 1;
+}
+function validateRuleSet(ruleSet, registry) {
+  const valid = [];
+  const rejected = [];
+  const seenIds = new Set;
+  if (ruleSet._minCoreVersion) {
+    const required = ruleSet._minCoreVersion;
+    const here = require_core_version();
+    if (compareSemver(here, required) < 0) {
+      for (const rule of ruleSet.rules) {
+        rejected.push({
+          id: typeof rule?.id === "string" ? rule.id : undefined,
+          reason: `core_version_too_old: have ${here} need >=${required}`
+        });
+      }
+      return { rules: [], rejectedCount: rejected.length, rejected };
+    }
+  }
+  for (const rule of ruleSet.rules) {
+    if (!rule || typeof rule !== "object") {
+      rejected.push({ reason: "not an object" });
+      continue;
+    }
+    if (!rule.id || typeof rule.id !== "string") {
+      rejected.push({ reason: "missing or invalid id" });
+      continue;
+    }
+    if (seenIds.has(rule.id)) {
+      rejected.push({ id: rule.id, reason: "duplicate id" });
+      continue;
+    }
+    const ruleMinCore = rule._minCoreVersion;
+    if (typeof ruleMinCore === "string" && ruleMinCore.length > 0) {
+      const here = require_core_version();
+      if (compareSemver(here, ruleMinCore) < 0) {
+        rejected.push({
+          id: rule.id,
+          reason: `rule_core_version_too_old: have ${here} need >=${ruleMinCore}`
+        });
+        continue;
+      }
+    }
+    if (!Array.isArray(rule.events) || rule.events.length === 0) {
+      rejected.push({ id: rule.id, reason: "empty or missing events" });
+      continue;
+    }
+    if (!Array.isArray(rule.actions) || rule.actions.length === 0) {
+      rejected.push({ id: rule.id, reason: "empty or missing actions" });
+      continue;
+    }
+    let actionsOk = true;
+    for (const action of rule.actions) {
+      if (!action || typeof action !== "object") {
+        actionsOk = false;
+        rejected.push({ id: rule.id, reason: "malformed action" });
+        break;
+      }
+      if (typeof action.type !== "string") {
+        actionsOk = false;
+        rejected.push({ id: rule.id, reason: "action missing type" });
+        break;
+      }
+      if (!registry.hasType(action.type)) {
+        actionsOk = false;
+        rejected.push({ id: rule.id, reason: `unknown action type: ${action.type}` });
+        break;
+      }
+      const t2 = action.type;
+      if (t2 === "block" && !action.reason) {
+        actionsOk = false;
+        rejected.push({ id: rule.id, reason: "block action missing reason" });
+        break;
+      }
+      if (t2 === "hint" && !action.text) {
+        actionsOk = false;
+        rejected.push({ id: rule.id, reason: "hint action missing text" });
+        break;
+      }
+      if (t2 === "respond") {
+        const respond = action;
+        if (!respond.text && !respond.channel) {
+          actionsOk = false;
+          rejected.push({ id: rule.id, reason: "respond action needs either text or channel" });
+          break;
+        }
+      }
+      if (t2 === "exec" && !action.command) {
+        actionsOk = false;
+        rejected.push({ id: rule.id, reason: "exec action missing command" });
+        break;
+      }
+    }
+    if (!actionsOk)
+      continue;
+    const m2 = rule.match ?? {};
+    const KNOWN_MATCH_KEYS = new Set([
+      "tool",
+      "exclude_tools",
+      "input_contains",
+      "input_regex",
+      "input_keywords",
+      "response_regex",
+      "response_contains",
+      "prompt_regex",
+      "prompt_keywords",
+      "wake_source",
+      "wake_event_type",
+      "context_percent_gte",
+      "context_percent_lt",
+      "quota_util_5h_gte",
+      "quota_util_7d_gte",
+      "model"
+    ]);
+    let unknownPred = null;
+    for (const key of Object.keys(m2)) {
+      if (!KNOWN_MATCH_KEYS.has(key)) {
+        unknownPred = key;
+        break;
+      }
+    }
+    if (unknownPred) {
+      rejected.push({ id: rule.id, reason: `unknown match predicate: ${unknownPred} (engine version may be too old)` });
+      continue;
+    }
+    let regexOk = true;
+    for (const field of ["tool", "input_regex", "response_regex", "prompt_regex"]) {
+      const v2 = m2[field];
+      if (typeof v2 === "string") {
+        try {
+          const flagMatch = v2.match(/^\(\?([imsu]+)\)/);
+          if (flagMatch) {
+            new RegExp(v2.slice(flagMatch[0].length), flagMatch[1]);
+          } else {
+            new RegExp(v2);
+          }
+        } catch {
+          rejected.push({ id: rule.id, reason: `invalid regex in match.${field}` });
+          regexOk = false;
+          break;
+        }
+      }
+    }
+    if (!regexOk)
+      continue;
+    seenIds.add(rule.id);
+    valid.push(rule);
+  }
+  return { rules: valid, rejectedCount: rejected.length, rejected };
+}
+
+class Pipeline {
+  rules;
+  registry;
+  backend;
+  approvals;
+  cooldowns;
+  defaultSessionId;
+  serverUrl;
+  sdkClient;
+  traceSink;
+  metricSink;
+  now;
+  _processing = false;
+  constructor(config) {
+    this.rules = config.rules;
+    this.registry = config.registry ?? new EmitterRegistry;
+    this.backend = config.stateBackend ?? new MemoryBackend;
+    this.now = config.now ?? (() => Date.now());
+    this.approvals = new ApprovalLedger(this.backend, this.now);
+    this.cooldowns = new CooldownTracker(this.backend, this.now);
+    this.defaultSessionId = config.sessionId ?? "default";
+    this.serverUrl = config.serverUrl ?? "";
+    this.sdkClient = config.sdkClient ?? null;
+    this.traceSink = config.traceSink ?? new NoopTraceSink;
+    this.metricSink = config.metricSink ?? new NoopMetricSink;
+    try {
+      emitBanner({
+        rules_loaded: this.rules.length,
+        session_id: this.defaultSessionId,
+        server_url: this.serverUrl ? this.serverUrl.slice(0, 32) : ""
+      });
+    } catch {}
+  }
+  getApprovalLedger() {
+    return this.approvals;
+  }
+  getCooldownTracker() {
+    return this.cooldowns;
+  }
+  getBackend() {
+    return this.backend;
+  }
+  updateTokens(position) {
+    this.cooldowns.updateTokens(position);
+  }
+  _setRules(rules) {
+    this.rules = rules;
+  }
+  async process(event) {
+    if (this._processing)
+      return [];
+    this._processing = true;
+    if (!event || typeof event !== "object") {
+      this._processing = false;
+      return [];
+    }
+    const startedAt = this.now();
+    const correlationId = newCorrelationId();
+    const eventId = event.eventId ?? newEventId();
+    const evtSessionId = typeof event.sessionId === "string" || event.sessionId === null ? event.sessionId : null;
+    const evtType = typeof event.type === "string" ? event.type : "";
+    const evtPayload = typeof event.payload === "object" && event.payload !== null ? event.payload : {};
+    const evtSource = typeof event.source === "string" ? event.source : "hook";
+    const evtRuntimeMeta = event.runtimeMeta;
+    const evtRuntimeMetaSafe = evtRuntimeMeta && typeof evtRuntimeMeta === "object" && !Array.isArray(evtRuntimeMeta) ? evtRuntimeMeta : undefined;
+    event = {
+      source: evtSource,
+      type: evtType,
+      sessionId: evtSessionId,
+      payload: evtPayload,
+      timestamp: typeof event.timestamp === "number" ? event.timestamp : this.now(),
+      eventId,
+      runtimeMeta: evtRuntimeMetaSafe
+    };
+    const sessionIdForState = event.sessionId ?? this.defaultSessionId;
+    const trace = {
+      correlationId,
+      eventId,
+      sessionId: event.sessionId ?? null,
+      startedAt,
+      endedAt: startedAt,
+      rulesEvaluated: this.rules.filter((r2) => r2.enabled !== false).length,
+      rulesMatched: 0,
+      actionsEmitted: 0,
+      outcome: "no_match",
+      results: []
+    };
+    try {
+      this.metricSink.counter("signal_wire.events.received", { source: event.source, type: event.type });
+      info("EVENT_RECEIVED", {
+        correlationId,
+        eventId,
+        source: event.source,
+        type: event.type,
+        sessionId: event.sessionId ?? null,
+        rulesConsidered: trace.rulesEvaluated
+      });
+      if (event.type === "session.compacted") {
+        try {
+          await this.cooldowns.resetSession(sessionIdForState);
+        } catch {}
+      }
+      if (event.type === "chat.message") {
+        const role = this.extractRole(event);
+        if (role === "user" || role === undefined) {
+          const text = this.extractUserText(event);
+          if (text) {
+            try {
+              const granted = await this.approvals.detectAndGrant(text, this.rules, sessionIdForState);
+              for (const r2 of granted) {
+                this.metricSink.counter("signal_wire.approvals.granted", { rule_id: r2 });
+              }
+            } catch {}
+          }
+        }
+      }
+      const matches = evaluate(event, this.rules);
+      const allResults = [];
+      let anyBlocked = false;
+      for (const match of matches) {
+        const rule = match.rule;
+        const scope = rule.cooldown_scope ?? "rule";
+        if (scope === "rule" || scope === "session") {
+          const allowed = await this.cooldowns.allowed(sessionIdForState, rule);
+          if (!allowed) {
+            this.metricSink.counter("signal_wire.cooldowns.skipped", { rule_id: rule.id });
+            continue;
+          }
+        }
+        trace.rulesMatched++;
+        this.metricSink.counter("signal_wire.rules.matched", { rule_id: rule.id });
+        const matchVarKeys = Object.keys(match.variables || {});
+        info("RULE_FIRED", {
+          correlationId,
+          eventId,
+          ruleId: rule.id,
+          eventType: event.type,
+          actions: rule.actions.map((a2) => a2.type),
+          matchVars: matchVarKeys,
+          cooldownScope: scope,
+          sessionId: sessionIdForState
+        });
+        const sortedActions = [...rule.actions].sort((a2, b2) => {
+          const idxA = ACTION_ORDER.indexOf(a2.type);
+          const idxB = ACTION_ORDER.indexOf(b2.type);
+          return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+        });
+        const actionsTakenSoFar = [];
+        const ruleResults = [];
+        for (const action of sortedActions) {
+          if (scope === "action") {
+            const allowed = await this.cooldowns.allowed(sessionIdForState, rule, action.type);
+            if (!allowed) {
+              this.metricSink.counter("signal_wire.cooldowns.skipped", { rule_id: rule.id, action: String(action.type) });
+              continue;
+            }
+          }
+          const emitter = this.registry.get(action.type);
+          if (!emitter) {
+            ruleResults.push({
+              type: action.type,
+              success: false,
+              ruleId: rule.id,
+              correlationId,
+              error: `no emitter registered for type: ${action.type}`
+            });
+            continue;
+          }
+          const vars = { ...match.variables, actionsTaken: actionsTakenSoFar.join(",") };
+          let approvalGranted;
+          if (rule.approvable && action.type === "block") {
+            try {
+              approvalGranted = await this.approvals.check(sessionIdForState, rule.id, event.payload.args);
+            } catch {
+              approvalGranted = false;
+            }
+          }
+          const ctx = {
+            sessionId: sessionIdForState,
+            correlationId,
+            sdkClient: this.sdkClient,
+            serverUrl: this.serverUrl,
+            variables: vars,
+            approvalGranted,
+            approvalConsume: rule.approvable ? (ruleId) => {
+              this.approvals.consume(sessionIdForState, ruleId);
+            } : undefined,
+            toolInput: event.payload.args,
+            rule: { id: rule.id, approvable: rule.approvable },
+            actionsTakenSoFar: [...actionsTakenSoFar]
+          };
+          let result;
+          try {
+            result = await emitter.execute(action, ctx);
+          } catch (e2) {
+            result = {
+              type: action.type,
+              success: false,
+              ruleId: rule.id,
+              correlationId,
+              error: e2 instanceof Error ? e2.message : String(e2)
+            };
+          }
+          result.priority = rule.priority ?? "medium";
+          if (rule.semantic_group)
+            result.semanticGroup = rule.semantic_group;
+          if (event.runtimeMeta)
+            result.runtimeMeta = event.runtimeMeta;
+          ruleResults.push(result);
+          actionsTakenSoFar.push(String(action.type));
+          if (result.type === "block" && result.blocked === true)
+            anyBlocked = true;
+          this.metricSink.counter("signal_wire.actions.emitted", { action_type: String(action.type) });
+          if (!result.success) {
+            this.metricSink.counter("signal_wire.actions.failed", { action_type: String(action.type) });
+          }
+          if (scope === "action") {
+            try {
+              await this.cooldowns.record(sessionIdForState, rule, action.type);
+            } catch {}
+          }
+        }
+        if (scope === "rule" || scope === "session") {
+          try {
+            await this.cooldowns.record(sessionIdForState, rule);
+          } catch {}
+        }
+        allResults.push(...ruleResults);
+      }
+      trace.results = allResults;
+      trace.actionsEmitted = allResults.length;
+      trace.outcome = allResults.length === 0 ? "no_match" : anyBlocked ? "blocked" : "dispatched";
+      trace.endedAt = this.now();
+      this.metricSink.histogram("signal_wire.pipeline.duration_ms", trace.endedAt - trace.startedAt);
+      try {
+        await this.traceSink.emit(trace);
+      } catch {}
+      const resultsByType = {};
+      for (const r2 of allResults) {
+        const key = r2.success ? r2.type : `${r2.type}!fail`;
+        resultsByType[key] = (resultsByType[key] ?? 0) + 1;
+      }
+      info("EVENT_COMPLETE", {
+        correlationId,
+        eventId,
+        type: event.type,
+        outcome: trace.outcome,
+        rulesMatched: trace.rulesMatched,
+        actionsEmitted: trace.actionsEmitted,
+        durationMs: trace.endedAt - trace.startedAt,
+        results: resultsByType
+      });
+      return allResults;
+    } catch (e2) {
+      trace.outcome = "error";
+      trace.errors = [e2 instanceof Error ? e2.message : String(e2)];
+      trace.endedAt = this.now();
+      try {
+        await this.traceSink.emit(trace);
+      } catch {}
+      info("EVENT_ERROR", {
+        correlationId,
+        eventId,
+        type: event.type,
+        error: e2 instanceof Error ? e2.message : String(e2),
+        durationMs: trace.endedAt - trace.startedAt
+      });
+      return [];
+    } finally {
+      this._processing = false;
+    }
+  }
+  extractRole(event) {
+    const payload = event.payload;
+    const message = payload.message;
+    if (!message || typeof message !== "object")
+      return;
+    const role = message.role;
+    return typeof role === "string" ? role : undefined;
+  }
+  extractUserText(event) {
+    const payload = event.payload;
+    const parts = payload.parts;
+    if (Array.isArray(parts)) {
+      const texts = [];
+      for (const part of parts) {
+        if (part && typeof part === "object") {
+          const p2 = part;
+          if (p2.type === "text" && typeof p2.text === "string")
+            texts.push(p2.text);
+        }
+      }
+      if (texts.length > 0)
+        return texts.join(`
+`);
+    }
+    if (typeof payload.prompt === "string")
+      return payload.prompt;
+    return "";
+  }
+}
+var init_pipeline = __esm(() => {
+  init_evaluator();
+  init_registry();
+  init_approval_ledger();
+  init_version();
+  init_trace();
+  init_logger();
+  init_action();
+});
+
+// ../../../../../packages/signal-wire-core/dist/engine/rule-loader.js
+var init_rule_loader = __esm(() => {
+  init_registry();
+  init_pipeline();
+});
+
+// ../../../../../packages/signal-wire-core/dist/engine/index.js
+var init_engine = __esm(() => {
+  init_evaluator();
+  init_pipeline();
+  init_rule_loader();
+});
+
+// ../../../../../packages/signal-wire-core/dist/emitters/index.js
+var init_emitters = __esm(() => {
+  init_registry();
+  init_block();
+  init_hint();
+  init_respond();
+  init_exec();
+  init_audit();
+  init_wake();
+  init_notify();
+  init_compact();
+});
+
+// ../../../../../packages/signal-wire-core/dist/state/file.js
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+var DEFAULT_ROOT;
+var init_file = __esm(() => {
+  DEFAULT_ROOT = join3(homedir3(), ".context", "hooks", "state");
+});
+
+// ../../../../../packages/signal-wire-core/dist/state/redis.js
+class RedisBackend {
+  redis;
+  prefix;
+  ttl;
+  pubSubChannel;
+  onInvalidate = new Set;
+  constructor(redis, opts = {}) {
+    this.redis = redis;
+    this.prefix = opts.keyPrefix ?? "";
+    this.ttl = opts.ttlSeconds;
+    if (opts.pubSub?.enabled && opts.pubSub.subscribeClient?.subscribe) {
+      this.pubSubChannel = this.prefix + (opts.pubSub.channel ?? "invalidate");
+      opts.pubSub.subscribeClient.subscribe(this.pubSubChannel, (msg) => {
+        for (const handler of this.onInvalidate) {
+          try {
+            handler(msg);
+          } catch {}
+        }
+      });
+    }
+  }
+  onInvalidation(handler) {
+    this.onInvalidate.add(handler);
+    return () => this.onInvalidate.delete(handler);
+  }
+  k(key) {
+    return this.prefix + key;
+  }
+  async get(key) {
+    const raw = await this.redis.get(this.k(key));
+    if (!raw)
+      return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object")
+        return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+  async set(key, value) {
+    const payload = JSON.stringify(value);
+    if (this.ttl) {
+      await this.redis.set(this.k(key), payload, { EX: this.ttl });
+    } else {
+      await this.redis.set(this.k(key), payload);
+    }
+    if (this.pubSubChannel && this.redis.publish) {
+      try {
+        await this.redis.publish(this.pubSubChannel, key);
+      } catch {}
+    }
+  }
+  async delete(key) {
+    await this.redis.del(this.k(key));
+    if (this.pubSubChannel && this.redis.publish) {
+      try {
+        await this.redis.publish(this.pubSubChannel, key);
+      } catch {}
+    }
+  }
+  async* iterate(prefix) {
+    const pattern = this.k(prefix) + "*";
+    let keys;
+    try {
+      keys = await this.redis.keys(pattern);
+    } catch {
+      return;
+    }
+    for (const key of keys) {
+      const raw = await this.redis.get(key);
+      if (!raw)
+        continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          const trimmed = this.prefix && key.startsWith(this.prefix) ? key.slice(this.prefix.length) : key;
+          yield [trimmed, parsed];
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+}
+
+// ../../../../../packages/signal-wire-core/dist/state/index.js
+var init_state = __esm(() => {
+  init_file();
+  init_approval_ledger();
+});
+
+// ../../../../../packages/signal-wire-core/dist/observability/otel.js
+class OtelMetricSink {
+  meter;
+  counters = new Map;
+  histograms = new Map;
+  constructor(meter) {
+    this.meter = meter;
+  }
+  counter(name, tags) {
+    try {
+      let c2 = this.counters.get(name);
+      if (!c2) {
+        c2 = this.meter.createCounter(name);
+        this.counters.set(name, c2);
+      }
+      c2.add(1, tags);
+    } catch {}
+  }
+  histogram(name, value, tags) {
+    try {
+      let h2 = this.histograms.get(name);
+      if (!h2) {
+        h2 = this.meter.createHistogram(name);
+        this.histograms.set(name, h2);
+      }
+      h2.record(value, tags);
+    } catch {}
+  }
+}
+
+// ../../../../../packages/signal-wire-core/dist/observability/prometheus.js
+class PrometheusMetricSink {
+  counters = new Map;
+  histograms = new Map;
+  buckets;
+  constructor(options = {}) {
+    this.buckets = options.buckets ?? DEFAULT_BUCKETS_MS;
+  }
+  counter(name, tags) {
+    const tagStr = tagsToString(tags);
+    const key = name + "|" + tagStr;
+    const existing = this.counters.get(key);
+    if (existing) {
+      existing.value += 1;
+    } else {
+      this.counters.set(key, { name, tags: tagStr, value: 1 });
+    }
+  }
+  histogram(name, value, tags) {
+    const tagStr = tagsToString(tags);
+    const key = name + "|" + tagStr;
+    let entry = this.histograms.get(key);
+    if (!entry) {
+      entry = {
+        name,
+        tags: tagStr,
+        count: 0,
+        sum: 0,
+        buckets: new Map(this.buckets.map((b2) => [b2, 0]))
+      };
+      this.histograms.set(key, entry);
+    }
+    entry.count += 1;
+    entry.sum += value;
+    for (const [ub, cnt] of entry.buckets.entries()) {
+      if (value <= ub)
+        entry.buckets.set(ub, cnt + 1);
+    }
+  }
+  render() {
+    const lines = [];
+    const counterGroups = new Map;
+    for (const e2 of this.counters.values()) {
+      const g2 = counterGroups.get(e2.name) ?? [];
+      g2.push(e2);
+      counterGroups.set(e2.name, g2);
+    }
+    for (const [name, entries] of counterGroups) {
+      lines.push(`# TYPE ${sanitizeName(name)} counter`);
+      for (const e2 of entries) {
+        lines.push(`${sanitizeName(name)}${e2.tags} ${e2.value}`);
+      }
+    }
+    const histGroups = new Map;
+    for (const e2 of this.histograms.values()) {
+      const g2 = histGroups.get(e2.name) ?? [];
+      g2.push(e2);
+      histGroups.set(e2.name, g2);
+    }
+    for (const [name, entries] of histGroups) {
+      lines.push(`# TYPE ${sanitizeName(name)} histogram`);
+      for (const e2 of entries) {
+        for (const [ub, cnt] of e2.buckets.entries()) {
+          const tagsWithLe = e2.tags ? e2.tags.slice(0, -1) + `,le="${ub}"}` : `{le="${ub}"}`;
+          lines.push(`${sanitizeName(name)}_bucket${tagsWithLe} ${cnt}`);
+        }
+        const plusInf = e2.tags ? e2.tags.slice(0, -1) + `,le="+Inf"}` : `{le="+Inf"}`;
+        lines.push(`${sanitizeName(name)}_bucket${plusInf} ${e2.count}`);
+        lines.push(`${sanitizeName(name)}_sum${e2.tags} ${e2.sum}`);
+        lines.push(`${sanitizeName(name)}_count${e2.tags} ${e2.count}`);
+      }
+    }
+    return lines.join(`
+`) + `
+`;
+  }
+  _clear() {
+    this.counters.clear();
+    this.histograms.clear();
+  }
+}
+function tagsToString(tags) {
+  if (!tags || Object.keys(tags).length === 0)
+    return "";
+  const pairs = Object.entries(tags).sort((a2, b2) => a2[0].localeCompare(b2[0])).map(([k2, v2]) => `${sanitizeName(k2)}="${escapeLabelValue(v2)}"`);
+  return "{" + pairs.join(",") + "}";
+}
+function sanitizeName(name) {
+  return name.replace(/[^a-zA-Z0-9_]/g, "_");
+}
+function escapeLabelValue(v2) {
+  return v2.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, "\\\"");
+}
+var DEFAULT_BUCKETS_MS;
+var init_prometheus = __esm(() => {
+  DEFAULT_BUCKETS_MS = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000];
+});
+
+// ../../../../../packages/signal-wire-core/dist/observability/index.js
+var init_observability = __esm(() => {
+  init_trace();
+  init_prometheus();
+  init_logger();
+  init_logger();
+});
+
+// ../../../../../packages/signal-wire-core/dist/translate/index.js
+function translateEventType(hookEvent) {
+  return EVENT_MAP[hookEvent] ?? hookEvent;
+}
+function contextToEvent(ctx, sessionId) {
+  return {
+    source: "hook",
+    type: translateEventType(ctx.event),
+    sessionId: sessionId || null,
+    payload: {
+      tool: ctx.lastToolName || "",
+      args: { toolInput: ctx.lastToolInput },
+      response: { output: ctx.lastToolOutput },
+      message: ctx.event === "UserPromptSubmit" ? { role: "user" } : undefined,
+      parts: ctx.event === "UserPromptSubmit" ? [{ type: "text", text: ctx.lastUserText }] : undefined,
+      prompt: ctx.lastUserText
+    },
+    timestamp: Date.now()
+  };
+}
+function translateLegacyRules(legacyRules, platform) {
+  const out = [];
+  for (const raw of legacyRules) {
+    if (!raw || typeof raw !== "object")
+      continue;
+    const r2 = raw;
+    if (typeof r2.id !== "string")
+      continue;
+    if (Array.isArray(r2.platforms) && r2.platforms.length > 0 && !r2.platforms.includes(platform))
+      continue;
+    const events = [];
+    if (Array.isArray(r2.events)) {
+      for (const e2 of r2.events) {
+        if (typeof e2 === "string")
+          events.push(translateEventType(e2));
+      }
+    }
+    if (events.length === 0)
+      continue;
+    const actions = translateActions(r2.action, r2.actions);
+    if (actions.length === 0)
+      continue;
+    out.push({
+      id: r2.id,
+      enabled: r2.enabled !== false,
+      events,
+      actions,
+      match: r2.match ?? {},
+      cooldown_seconds: typeof r2.cooldown_minutes === "number" ? r2.cooldown_minutes * 60 : undefined,
+      cooldown_tokens: typeof r2.cooldown_tokens === "number" ? r2.cooldown_tokens : undefined,
+      priority: typeof r2.priority === "string" ? r2.priority : undefined,
+      semantic_group: typeof r2.semantic_group === "string" ? r2.semantic_group : undefined
+    });
+  }
+  return out;
+}
+function translateActions(legacy1, legacy2) {
+  if (Array.isArray(legacy2)) {
+    return legacy2.filter((a2) => a2 && typeof a2 === "object" && ("type" in a2));
+  }
+  if (legacy1 && typeof legacy1 === "object") {
+    const a2 = legacy1;
+    const out = [];
+    if (typeof a2.hint === "string")
+      out.push({ type: "hint", text: a2.hint });
+    if (typeof a2.bash === "string")
+      out.push({ type: "exec", command: a2.bash });
+    if (typeof a2.exec === "string")
+      out.push({ type: "exec", command: a2.exec });
+    return out;
+  }
+  return [];
+}
+var EVENT_MAP;
+var init_translate = __esm(() => {
+  EVENT_MAP = {
+    UserPromptSubmit: "chat.message",
+    PreToolUse: "tool.before",
+    PostToolUse: "tool.after",
+    Stop: "session.idle",
+    ExternalEvent: "wake.external"
+  };
+});
+
+// ../../../../../packages/signal-wire-core/dist/helpers/pack-hints.js
+function rankOf(p2) {
+  return PRIORITY_RANK[p2 ?? "medium"] ?? PRIORITY_RANK.medium;
+}
+function interpolate(template, runtimeMeta) {
+  if (!runtimeMeta)
+    return template;
+  return template.replace(VAR_RE2, (_2, name) => {
+    const v2 = runtimeMeta[name];
+    if (v2 == null)
+      return "";
+    if (typeof v2 === "string" || typeof v2 === "number" || typeof v2 === "boolean") {
+      return String(v2);
+    }
+    return "";
+  });
+}
+function extract(results) {
+  const out = [];
+  for (let i2 = 0;i2 < results.length; i2++) {
+    const r2 = results[i2];
+    if (!r2.success)
+      continue;
+    if (r2.type !== "hint" && r2.type !== "respond")
+      continue;
+    if (typeof r2.hintText !== "string" || r2.hintText.length === 0)
+      continue;
+    out.push({
+      ruleId: r2.ruleId,
+      text: interpolate(r2.hintText, r2.runtimeMeta),
+      priority: r2.priority ?? "medium",
+      semanticGroup: r2.semanticGroup ?? null,
+      originalIndex: i2
+    });
+  }
+  return out;
+}
+function dedupBySemanticGroup(hints) {
+  const bestByGroup = new Map;
+  const ungrouped = [];
+  for (const h2 of hints) {
+    if (h2.semanticGroup == null) {
+      ungrouped.push(h2);
+      continue;
+    }
+    const cur = bestByGroup.get(h2.semanticGroup);
+    if (!cur) {
+      bestByGroup.set(h2.semanticGroup, h2);
+      continue;
+    }
+    const curRank = rankOf(cur.priority);
+    const newRank = rankOf(h2.priority);
+    if (newRank > curRank) {
+      bestByGroup.set(h2.semanticGroup, h2);
+    }
+  }
+  return [...ungrouped, ...bestByGroup.values()];
+}
+function sortByPriority(hints) {
+  return [...hints].sort((a2, b2) => {
+    const d2 = rankOf(b2.priority) - rankOf(a2.priority);
+    if (d2 !== 0)
+      return d2;
+    return a2.originalIndex - b2.originalIndex;
+  });
+}
+function trimByBudget(hints, maxChars) {
+  const totalChars = hints.reduce((acc, h2) => acc + h2.text.length, 0);
+  if (totalChars <= maxChars)
+    return { kept: hints, trimmed: [] };
+  const indexed = hints.map((h2, i2) => ({ h: h2, i: i2 }));
+  const trimOrder = [...indexed].sort((a2, b2) => {
+    const d2 = rankOf(a2.h.priority) - rankOf(b2.h.priority);
+    if (d2 !== 0)
+      return d2;
+    return b2.h.originalIndex - a2.h.originalIndex;
+  });
+  const dropIdx = new Set;
+  let runningChars = totalChars;
+  for (const entry of trimOrder) {
+    if (runningChars <= maxChars)
+      break;
+    if (rankOf(entry.h.priority) >= PRIORITY_RANK.high)
+      break;
+    dropIdx.add(entry.i);
+    runningChars -= entry.h.text.length;
+  }
+  const kept = [];
+  const trimmed = [];
+  for (let i2 = 0;i2 < indexed.length; i2++) {
+    if (dropIdx.has(i2))
+      trimmed.push(indexed[i2].h);
+    else
+      kept.push(indexed[i2].h);
+  }
+  return { kept, trimmed };
+}
+function renderOne(h2) {
+  return `<signal-wire-hint rule="${h2.ruleId}" priority="${h2.priority}">
+${h2.text}
+</signal-wire-hint>`;
+}
+function renderHintBlock(hints) {
+  if (hints.length === 0)
+    return "";
+  return hints.map(renderOne).join(`
+`);
+}
+function packHints(results, options = {}) {
+  const all = extract(results);
+  const total = all.length;
+  const afterDedup = dedupBySemanticGroup(all);
+  const dedupedSet = new Set(all.map((h2) => h2.originalIndex));
+  for (const h2 of afterDedup)
+    dedupedSet.delete(h2.originalIndex);
+  const droppedDeduped = all.filter((h2) => dedupedSet.has(h2.originalIndex)).map((h2) => h2.ruleId);
+  const sorted = sortByPriority(afterDedup);
+  const maxChars = options.maxChars ?? 0;
+  const { kept, trimmed } = maxChars > 0 ? trimByBudget(sorted, maxChars) : { kept: sorted, trimmed: [] };
+  const droppedTrimmed = trimmed.map((h2) => h2.ruleId);
+  const text = renderHintBlock(kept);
+  const byPriority = {};
+  for (const h2 of kept) {
+    byPriority[h2.priority] = (byPriority[h2.priority] ?? 0) + 1;
+  }
+  return {
+    text,
+    stats: {
+      kept: kept.length,
+      deduped: droppedDeduped.length,
+      trimmed: droppedTrimmed.length,
+      total,
+      bytes: text.length,
+      byPriority
+    },
+    droppedDeduped,
+    droppedTrimmed
+  };
+}
+var PRIORITY_RANK, VAR_RE2;
+var init_pack_hints = __esm(() => {
+  PRIORITY_RANK = {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1,
+    info: 0
+  };
+  VAR_RE2 = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
+});
+
+// ../../../../../packages/signal-wire-core/dist/helpers/fleet-status.js
+var BANNER_RE;
+var init_fleet_status = __esm(() => {
+  BANNER_RE = new RegExp("^\\[(?<ts>[^\\]]+)\\] " + "\\[sw-core v(?<core>[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-zA-Z0-9.-]+)?)" + "(?:@T[0-9]+)? pid=(?<pid>[0-9]+)\\] " + "\\[sw-adapter-(?<adapterName>[a-z0-9-]+) v(?<adapter>[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-zA-Z0-9.-]+)?)" + "@[^\\]]+\\] " + "ADAPTER_BANNER pid=[0-9]+ core=v[^ ]+ rules_loaded=(?<rules>[0-9]+)");
+});
+
+// ../../../../../packages/signal-wire-core/dist/helpers/rule-activation.js
+var init_rule_activation = __esm(() => {
+  init_fleet_status();
+});
+
+// ../../../../../packages/signal-wire-core/dist/helpers/index.js
+var init_helpers = __esm(() => {
+  init_pack_hints();
+  init_fleet_status();
+  init_rule_activation();
+});
+
+// ../../../../../packages/signal-wire-core/dist/index.js
+function getBundledRulesPath() {
+  const envPath = typeof process !== "undefined" ? process.env?.SIGNAL_WIRE_RULES_PATH : undefined;
+  if (envPath)
+    return envPath;
+  try {
+    const req = __require_gv7hsff9;
+    if (req) {
+      const pkgJsonPath = req.resolve("@kiberos/signal-wire-core/package.json");
+      const sep = pkgJsonPath.includes("\\") ? "\\" : "/";
+      const pkgRoot = pkgJsonPath.slice(0, pkgJsonPath.lastIndexOf(sep));
+      return `${pkgRoot}${sep}rules${sep}signal-wire-rules.json`;
+    }
+  } catch {}
+  const url = new URL("../rules/signal-wire-rules.json", import.meta.url);
+  return url.protocol === "file:" ? decodeURIComponent(url.pathname) : url.pathname;
+}
+var init_dist = __esm(() => {
+  init_version();
+  init_domain();
+  init_engine();
+  init_emitters();
+  init_state();
+  init_observability();
+  init_translate();
+  init_helpers();
+});
+
+// ../opencode-signal-wire/signal-wire.ts
+import { appendFileSync as appendFileSync3, existsSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
+import { homedir as homedir4 } from "os";
+import { join as join4 } from "path";
+function swLog(msg) {
+  const line = `[${new Date().toISOString()}] ${coreIdentityTag()} [${ADAPTER_ID}] ${msg}
+`;
+  try {
+    appendFileSync3(LOG_FILE2, line);
+  } catch {}
+}
+function emitAdapterBanner(rulesLoaded, rulesPath) {
+  if (adapterBannerEmitted)
+    return;
+  adapterBannerEmitted = true;
+  swLog(`ADAPTER_BANNER pid=${process.pid} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? "(unset)"}`);
+}
+
+class RulesStore {
+  rules;
+  translatedLegacy = [];
+  path;
+  platform;
+  registry;
+  lastFingerprint = null;
+  lastCheckMs = 0;
+  onSwap;
+  eligibleForEnable = new Set;
+  constructor(opts) {
+    this.path = opts.path;
+    this.platform = opts.platform;
+    this.registry = opts.registry;
+    this.onSwap = opts.onSwap;
+    this.rules = this.loadFromDisk().rules;
+  }
+  getRules() {
+    return this.rules;
+  }
+  getPath() {
+    return this.path;
+  }
+  loadFromDisk() {
+    if (!existsSync(this.path)) {
+      return { rules: [], fingerprint: null };
+    }
+    let stat;
+    try {
+      stat = statSync(this.path);
+    } catch {
+      return { rules: [], fingerprint: null };
+    }
+    const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
+    try {
+      const raw = JSON.parse(readFileSync(this.path, "utf8"));
+      const legacy = raw.rules ?? [];
+      const canonical = translateLegacyRules(legacy, this.platform);
+      const minCoreVersion = typeof raw._minCoreVersion === "string" ? raw._minCoreVersion : undefined;
+      const result = validateRuleSet({ rules: canonical, _minCoreVersion: minCoreVersion }, this.registry);
+      if (result.rejectedCount > 0) {
+        const sampled = result.rejected.slice(0, 5).map((r2) => `${r2.id ?? "?"}: ${r2.reason}`).join("; ");
+        swLog(`RULES_LOAD_REJECTED count=${result.rejectedCount}/${canonical.length} samples="${sampled}"`);
+      }
+      this.translatedLegacy = canonical;
+      this.lastFingerprint = fp;
+      this.detectEligibilityTransitions(legacy, raw._minCoreVersion);
+      return { rules: result.rules, fingerprint: fp };
+    } catch (e2) {
+      const msg = e2 instanceof Error ? e2.message : String(e2);
+      swLog(`RULES_LOAD_FAIL path=${this.path} error="${msg}"`);
+      this.lastFingerprint = fp;
+      return { rules: [], fingerprint: fp };
+    }
+  }
+  maybeReload() {
+    const now = Date.now();
+    if (now - this.lastCheckMs < HOT_RELOAD_INTERVAL_MS)
+      return { reloaded: false };
+    this.lastCheckMs = now;
+    if (!existsSync(this.path))
+      return { reloaded: false, error: "rules file missing" };
+    let stat;
+    try {
+      stat = statSync(this.path);
+    } catch (e2) {
+      return { reloaded: false, error: e2 instanceof Error ? e2.message : String(e2) };
+    }
+    const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
+    if (this.lastFingerprint && fp.mtimeMs === this.lastFingerprint.mtimeMs && fp.size === this.lastFingerprint.size) {
+      return { reloaded: false };
+    }
+    try {
+      const raw = JSON.parse(readFileSync(this.path, "utf8"));
+      const legacy = raw.rules ?? [];
+      const canonical = translateLegacyRules(legacy, this.platform);
+      const minCoreVersion = typeof raw._minCoreVersion === "string" ? raw._minCoreVersion : undefined;
+      const result = validateRuleSet({ rules: canonical, _minCoreVersion: minCoreVersion }, this.registry);
+      const oldCount = this.rules.length;
+      if (result.rules.length > 0 || result.rejectedCount === 0) {
+        this.rules = result.rules;
+      }
+      if (result.rejectedCount > 0) {
+        const sampled = result.rejected.slice(0, 5).map((r2) => `${r2.id ?? "?"}: ${r2.reason}`).join("; ");
+        swLog(`RULES_RELOAD_REJECTED count=${result.rejectedCount}/${canonical.length} samples="${sampled}" keeping-old-rules=${result.rules.length === 0 ? oldCount : 0}`);
+      }
+      this.translatedLegacy = canonical;
+      this.lastFingerprint = fp;
+      this.onSwap(this.rules);
+      swLog(`RULES_RELOADED old=${oldCount} new=${this.rules.length} rejected=${result.rejectedCount} mtime=${new Date(fp.mtimeMs).toISOString()}`);
+      this.detectEligibilityTransitions(legacy, raw._minCoreVersion);
+      return { reloaded: true };
+    } catch (e2) {
+      const msg = e2 instanceof Error ? e2.message : String(e2);
+      this.lastFingerprint = fp;
+      swLog(`RULES_RELOAD_FAIL error="${msg}" keeping-old-rules=${this.rules.length}`);
+      return { reloaded: false, error: msg };
+    }
+  }
+  detectEligibilityTransitions(rawRules, fileMinCore) {
+    try {
+      const newEligible = new Set;
+      for (const r2 of rawRules) {
+        if (!r2 || typeof r2 !== "object")
+          continue;
+        const rule = r2;
+        if (typeof rule.id !== "string")
+          continue;
+        if (rule.enabled !== false)
+          continue;
+        const probe = { ...rule, enabled: true };
+        const probeCanonical = translateLegacyRules([probe], this.platform);
+        const probeResult = validateRuleSet({
+          rules: probeCanonical,
+          _minCoreVersion: typeof fileMinCore === "string" ? fileMinCore : undefined
+        }, this.registry);
+        if (probeResult.rules.length > 0) {
+          newEligible.add(rule.id);
+        }
+      }
+      const becameEligible = [];
+      const becameIneligible = [];
+      for (const id of newEligible) {
+        if (!this.eligibleForEnable.has(id))
+          becameEligible.push(id);
+      }
+      for (const id of this.eligibleForEnable) {
+        if (!newEligible.has(id))
+          becameIneligible.push(id);
+      }
+      for (const id of becameEligible) {
+        swLog(`RULES_ELIGIBLE_FOR_ENABLE rule=${id} reason=engine_now_satisfies_minCoreVersion ` + `hint="rule is currently enabled=false but its _minCoreVersion gate now passes; ` + `consider flipping enabled=true after running 'sw-fleet activation' to confirm fleet quorum"`);
+      }
+      for (const id of becameIneligible) {
+        swLog(`RULES_NO_LONGER_ELIGIBLE rule=${id} reason=engine_no_longer_satisfies_minCoreVersion ` + `hint="probably _minCoreVersion was bumped above this engine's version; rule cannot be enabled here"`);
+      }
+      this.eligibleForEnable = newEligible;
+    } catch (e2) {
+      const msg = e2 instanceof Error ? e2.message : String(e2);
+      swLog(`ELIGIBILITY_PROBE_FAIL error="${msg}"`);
+    }
+  }
+  writeRulesFile(updatedRawRules) {
+    const tmp = `${this.path}.tmp.${process.pid}`;
+    const payload = JSON.stringify({ rules: updatedRawRules }, null, 2) + `
+`;
+    writeFileSync(tmp, payload, "utf8");
+    renameSync(tmp, this.path);
+    swLog(`RULES_FILE_REWRITTEN rules=${updatedRawRules.length} path=${this.path}`);
+  }
+  getRawLegacyRules() {
+    if (!existsSync(this.path))
+      return [];
+    try {
+      const raw = JSON.parse(readFileSync(this.path, "utf8"));
+      return raw.rules ?? [];
+    } catch {
+      return [];
+    }
+  }
+}
+var ADAPTER_VERSION = "1.0.0", ADAPTER_MTIME, ADAPTER_ID, LOG_FILE2, adapterBannerEmitted = false, HOT_RELOAD_INTERVAL_MS = 2000, SignalWire;
+var init_signal_wire = __esm(() => {
+  init_dist();
+  ADAPTER_MTIME = new Date().toISOString();
+  ADAPTER_ID = `sw-adapter-opencode-claude v${ADAPTER_VERSION}@${ADAPTER_MTIME.slice(11, 19)}`;
+  LOG_FILE2 = join4(homedir4(), ".claude", "signal-wire-debug.log");
+  SignalWire = class SignalWire {
+    pipeline;
+    registry;
+    sessionId;
+    platform;
+    maxRulesPerFire;
+    rulesStore;
+    disabledRuleIds = new Set;
+    contextPosition = 0;
+    lastAsyncResult = null;
+    lastModel;
+    lastQuotaUtil5h;
+    lastQuotaUtil7d;
+    lastContextWindow;
+    constructor(config) {
+      this.sessionId = config.sessionId;
+      this.platform = config.platform ?? "opencode";
+      this.maxRulesPerFire = config.maxRulesPerFire ?? 3;
+      this.registry = new EmitterRegistry;
+      const resolvedPath = config.rulesPath ?? getBundledRulesPath();
+      this.rulesStore = new RulesStore({
+        path: resolvedPath,
+        platform: this.platform,
+        registry: this.registry,
+        onSwap: (newRules) => this.applyRulesToPipeline(newRules)
+      });
+      emitAdapterBanner(this.rulesStore.getRules().length, resolvedPath);
+      this.pipeline = new Pipeline({
+        rules: this.rulesStore.getRules(),
+        registry: this.registry,
+        stateBackend: new MemoryBackend,
+        sessionId: this.sessionId || "opencode-claude",
+        serverUrl: config.serverUrl
+      });
+    }
+    static identity = {
+      adapterVersion: ADAPTER_VERSION,
+      adapterId: ADAPTER_ID,
+      coreVersion: CORE_VERSION,
+      coreHash: CORE_SOURCE_HASH
+    };
+    applyRulesToPipeline(rules) {
+      const effective = rules.map((r2) => ({
+        ...r2,
+        enabled: r2.enabled !== false && !this.disabledRuleIds.has(r2.id)
+      }));
+      this.pipeline._setRules(effective);
+    }
+    setSdkClient(_client) {}
+    trackTokens(u2) {
+      const promptSize = (u2.inputTokens ?? 0) + (u2.cacheReadInputTokens ?? 0) + (u2.cacheCreationInputTokens ?? 0);
+      const prev = this.contextPosition;
+      if (prev > 0 && promptSize > 0 && promptSize < prev * 0.6) {
+        this.pipeline.getCooldownTracker().resetTokens();
+        this.pipeline.getCooldownTracker().resetSession(this.sessionId || "opencode-claude");
+      }
+      if (promptSize > 0) {
+        this.contextPosition = promptSize;
+        this.pipeline.updateTokens(promptSize);
+      }
+    }
+    getContextPosition() {
+      return this.contextPosition;
+    }
+    trackModel(modelId) {
+      if (typeof modelId !== "string" || modelId.length === 0)
+        return;
+      this.lastModel = modelId;
+      if (/haiku/i.test(modelId))
+        this.lastContextWindow = 200000;
+      else if (/(opus|sonnet|claude)/i.test(modelId))
+        this.lastContextWindow = 200000;
+    }
+    trackRateLimit(rl) {
+      if (typeof rl.util5h === "number")
+        this.lastQuotaUtil5h = rl.util5h;
+      if (typeof rl.util7d === "number")
+        this.lastQuotaUtil7d = rl.util7d;
+    }
+    getRuntimeMeta() {
+      const meta = {
+        pid: process.pid,
+        sessionId: this.sessionId || undefined,
+        contextTokens: this.contextPosition || undefined
+      };
+      if (this.lastContextWindow != null) {
+        meta.contextWindow = this.lastContextWindow;
+        if (this.contextPosition > 0) {
+          meta.contextPercent = Math.min(100, Math.round(this.contextPosition / this.lastContextWindow * 100));
+          meta.contextRemaining = Math.max(0, this.lastContextWindow - this.contextPosition);
+        }
+      }
+      if (this.lastModel)
+        meta.model = this.lastModel;
+      if (this.lastQuotaUtil5h != null)
+        meta.quotaUtil5h = this.lastQuotaUtil5h;
+      if (this.lastQuotaUtil7d != null)
+        meta.quotaUtil7d = this.lastQuotaUtil7d;
+      return meta;
+    }
+    getCurrentRuntimeMeta() {
+      return this.getRuntimeMeta();
+    }
+    refreshTokensFromStatsFile() {
+      const STATS_FILE = join4(homedir4(), ".claude", "claude-max-stats.jsonl");
+      const TAIL_BYTES = 256 * 1024;
+      try {
+        const fs2 = __require_gv7hsff9("fs");
+        if (!fs2.existsSync(STATS_FILE))
+          return false;
+        const stat = fs2.statSync(STATS_FILE);
+        const start = Math.max(0, stat.size - TAIL_BYTES);
+        const fd = fs2.openSync(STATS_FILE, "r");
+        const buf = Buffer.alloc(stat.size - start);
+        fs2.readSync(fd, buf, 0, buf.length, start);
+        fs2.closeSync(fd);
+        const tail = buf.toString("utf-8");
+        const lines = tail.split(`
+`);
+        const myPid = process.pid;
+        for (let i2 = lines.length - 1;i2 >= 0; i2--) {
+          const line = lines[i2]?.trim();
+          if (!line || !line.startsWith("{"))
+            continue;
+          if (!line.includes(`"pid":${myPid}`))
+            continue;
+          try {
+            const rec = JSON.parse(line);
+            if (rec.pid !== myPid)
+              continue;
+            if (rec.type !== "stream")
+              continue;
+            const u2 = rec.usage ?? {};
+            const totalIn = (u2.in ?? 0) + (u2.cacheRead ?? 0) + (u2.cacheWrite ?? 0);
+            if (totalIn > 0) {
+              this.trackTokens({
+                inputTokens: u2.in ?? 0,
+                cacheReadInputTokens: u2.cacheRead ?? 0,
+                cacheCreationInputTokens: u2.cacheWrite ?? 0
+              });
+            }
+            if (rec.model)
+              this.trackModel(rec.model);
+            if (rec.rateLimit) {
+              this.trackRateLimit({
+                util5h: typeof rec.rateLimit.util5h === "number" ? rec.rateLimit.util5h : null,
+                util7d: typeof rec.rateLimit.util7d === "number" ? rec.rateLimit.util7d : null
+              });
+            }
+            return true;
+          } catch {
+            continue;
+          }
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
+    toggleRule(ruleId, enabled) {
+      this.rulesStore.maybeReload();
+      const rules = this.rulesStore.getRules();
+      if (!rules.some((r2) => r2.id === ruleId))
+        return false;
+      if (enabled)
+        this.disabledRuleIds.delete(ruleId);
+      else
+        this.disabledRuleIds.add(ruleId);
+      this.applyRulesToPipeline(rules);
+      try {
+        const rawRules = this.rulesStore.getRawLegacyRules();
+        const patched = rawRules.map((r2) => {
+          if (typeof r2 !== "object" || r2 === null)
+            return r2;
+          const rec = r2;
+          if (rec.id === ruleId)
+            return { ...rec, enabled };
+          return rec;
+        });
+        this.rulesStore.writeRulesFile(patched);
+      } catch (e2) {
+        swLog(`TOGGLE_PERSIST_FAIL rule=${ruleId} enabled=${enabled} error="${e2 instanceof Error ? e2.message : String(e2)}"`);
+      }
+      return true;
+    }
+    listRules() {
+      this.rulesStore.maybeReload();
+      return this.rulesStore.getRules().map((r2) => ({
+        id: r2.id,
+        description: "",
+        enabled: r2.enabled !== false && !this.disabledRuleIds.has(r2.id),
+        events: r2.events
+      }));
+    }
+    isRuleEnabled(ruleId) {
+      this.rulesStore.maybeReload();
+      return !this.disabledRuleIds.has(ruleId);
+    }
+    logInvoke(mode, event) {
+      swLog(`CONSUMER_INVOKE consumer=opencode-plugin mode=${mode} type=${event.type} session=${this.sessionId || "?"}`);
+    }
+    attachRuntimeMeta(event) {
+      this.refreshTokensFromStatsFile();
+      event.runtimeMeta = this.getRuntimeMeta();
+    }
+    evaluate(ctx) {
+      this.rulesStore.maybeReload();
+      const event = contextToEvent(ctx, this.sessionId);
+      this.attachRuntimeMeta(event);
+      this.logInvoke("evaluate-sync", event);
+      this.pipeline.process(event).then((rs) => {
+        this.lastAsyncResult = this.toLegacy(rs);
+      }).catch(() => {});
+      return this.lastAsyncResult;
+    }
+    async evaluateAsync(ctx) {
+      this.rulesStore.maybeReload();
+      const event = contextToEvent(ctx, this.sessionId);
+      this.attachRuntimeMeta(event);
+      this.logInvoke("evaluate-async", event);
+      const results = await this.pipeline.process(event);
+      const legacy = this.toLegacy(results);
+      this.lastAsyncResult = legacy;
+      return legacy;
+    }
+    async evaluateHook(event) {
+      this.rulesStore.maybeReload();
+      this.attachRuntimeMeta(event);
+      this.logInvoke("evaluate-hook", event);
+      const results = await this.pipeline.process(event);
+      this.lastAsyncResult = this.toLegacy(results);
+      return results;
+    }
+    async evaluateExternal(wakeEvent) {
+      this.rulesStore.maybeReload();
+      const wp = wakeEvent.payload;
+      if (wp && (typeof wp.util5h === "number" || typeof wp.util7d === "number")) {
+        this.trackRateLimit({
+          util5h: typeof wp.util5h === "number" ? wp.util5h : null,
+          util7d: typeof wp.util7d === "number" ? wp.util7d : null
+        });
+      }
+      const event = {
+        source: "wake",
+        type: `wake.${wakeEvent.type}`,
+        sessionId: this.sessionId || null,
+        payload: {
+          wakeEventId: wakeEvent.eventId,
+          wakeSource: wakeEvent.source,
+          wakeType: wakeEvent.type,
+          priority: wakeEvent.priority,
+          targetMemberId: wakeEvent.targetMemberId,
+          ...wakeEvent.payload
+        },
+        timestamp: Date.now()
+      };
+      this.attachRuntimeMeta(event);
+      this.logInvoke("evaluate-external", event);
+      const results = await this.pipeline.process(event);
+      const firedIds = new Set(results.map((r2) => r2.ruleId));
+      const currentRules = this.rulesStore.getRules();
+      return { matched: currentRules.filter((r2) => firedIds.has(r2.id)), results };
+    }
+    toLegacy(results) {
+      const hintBearing = results.filter((r2) => (r2.type === "hint" || r2.type === "respond") && r2.success && r2.hintText);
+      if (hintBearing.length === 0)
+        return null;
+      const picked = hintBearing.slice(0, this.maxRulesPerFire);
+      return {
+        ruleId: picked[0].ruleId,
+        hint: picked.map((h2) => h2.hintText).join(`
+
+`)
+      };
+    }
+  };
+});
+
+// ../opencode-signal-wire/wake-types.ts
+import { homedir as homedir5 } from "os";
+import { join as join5 } from "path";
+function discoveryDir() {
+  return process.env.WAKE_DISCOVERY_DIR ?? join5(homedir5(), ".opencode", "wake");
+}
+var DISCOVERY_DIR, WARM_CHANNEL_TTL_MS, WAKE_EVENT_TYPES;
+var init_wake_types = __esm(() => {
+  DISCOVERY_DIR = discoveryDir();
+  WARM_CHANNEL_TTL_MS = 5 * 60 * 1000;
+  WAKE_EVENT_TYPES = {
+    TASK_ASSIGNED: "task_assigned",
+    CHANNEL_MESSAGE: "channel_message",
+    COMMENT_ADDED: "comment_added",
+    DELEGATION_RECEIVED: "delegation_received",
+    STATUS_CHANGED: "status_changed",
+    MENTION: "mention",
+    TASK_COMPLETED: "task_completed",
+    TASK_FAILED: "task_failed",
+    AGENT_STALE: "agent_stale",
+    QUOTA_CRITICAL: "quota_critical",
+    QUOTA_WARNING: "quota_warning",
+    QUOTA_RECOVERED: "quota_recovered",
+    QUOTA_STATUS: "quota_status"
+  };
+});
+
+// ../opencode-signal-wire/wake-listener.ts
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync2, unlinkSync, appendFileSync as appendFileSync4, renameSync as renameSync2 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir6 } from "os";
+function dbg2(...args) {
+  if (!DEBUG)
+    return;
+  try {
+    appendFileSync4(LOG_FILE3, `[${new Date().toISOString()}] [wake-listener] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
+`);
+  } catch {}
+}
+function markChannelWarm(channelId) {
+  const existing = warmChannels.get(channelId);
+  warmChannels.set(channelId, {
+    lastReply: Date.now(),
+    messageCount: (existing?.messageCount ?? 0) + 1
+  });
+}
+function isChannelWarm(channelId) {
+  const entry = warmChannels.get(channelId);
+  if (!entry)
+    return false;
+  if (Date.now() - entry.lastReply > WARM_CHANNEL_TTL_MS) {
+    warmChannels.delete(channelId);
+    return false;
+  }
+  return true;
+}
+function extractWakeTaskId(event) {
+  const payload = event?.payload;
+  if (!payload)
+    return null;
+  const taskId = payload.task_id ?? payload.taskId ?? payload.entityId;
+  return typeof taskId === "string" && taskId.length > 0 ? taskId : null;
+}
+function wakeFingerprint(event) {
+  const payload = event?.payload;
+  const fingerprint = event?.fingerprint ?? payload?.fingerprint;
+  return typeof fingerprint === "string" && fingerprint.length > 0 ? fingerprint : null;
+}
+function extractWakeTaskTitle(event, taskId) {
+  const payload = event.payload;
+  const title = payload.title ?? payload.taskTitle ?? payload.task_title ?? payload.name;
+  return typeof title === "string" && title.trim().length > 0 ? title.trim() : `task ${taskId}`;
+}
+function taskSyncMetadataValue(event, taskId, action) {
+  return JSON.stringify({
+    action,
+    taskId,
+    syncedAt: new Date().toISOString(),
+    sessionId: _lifecycleConfig?.sessionId ?? null,
+    agentInstanceId: _lifecycleConfig?.agentInstanceId ?? null,
+    memberId: _lifecycleMemberId ?? _agentIdentity?.memberId ?? null,
+    eventId: event.eventId,
+    eventType: event.type,
+    source: event.source,
+    fingerprint: wakeFingerprint(event)
+  });
+}
+function rememberTaskSync(action, taskId, event) {
+  const key = [
+    action,
+    taskId,
+    event.eventId,
+    wakeFingerprint(event) ?? "",
+    _lifecycleConfig?.sessionId ?? "",
+    _lifecycleConfig?.agentInstanceId ?? ""
+  ].join(":");
+  if (_taskSyncKeys.has(key))
+    return false;
+  _taskSyncKeys.add(key);
+  const oldest = _taskSyncKeys.values().next().value;
+  if (_taskSyncKeys.size > DEDUP_CACHE_LIMIT && oldest)
+    _taskSyncKeys.delete(oldest);
+  return true;
+}
+async function syncTaskStart(event, action) {
+  const config = _lifecycleConfig;
+  const taskId = extractWakeTaskId(event);
+  if (isExplicitCompletion(event) || isExplicitFailure(event) || explicitResultText(event))
+    return;
+  if (!config || !taskId || !rememberTaskSync(action, taskId, event))
+    return;
+  const status = action === "start_accepted" ? "started" : "in_progress";
+  try {
+    await callSynqtaskMcp("todo_tasks", { action: "set_status", task_id: taskId, status }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+    dbg2(`task sync: ${action} task=${taskId} status=${status} event=${event.eventId} fp=${wakeFingerprint(event) ?? "-"}`);
+  } catch (e2) {
+    dbg2(`task sync start failed (non-fatal): action=${action} task=${taskId} event=${event.eventId} error=${e2?.message}`);
+  }
+  if (rememberTaskSync("start_comment", taskId, event)) {
+    try {
+      await callSynqtaskMcp("todo_comments", { action: "add", task_id: taskId, text: `Starting work on: ${extractWakeTaskTitle(event, taskId)}` }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+      dbg2(`task sync: start_comment task=${taskId} event=${event.eventId} fp=${wakeFingerprint(event) ?? "-"}`);
+    } catch (e2) {
+      dbg2(`task start comment sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e2?.message}`);
+    }
+  }
+  const memberId = _lifecycleMemberId ?? _agentIdentity?.memberId;
+  if (!memberId || memberId === "unknown")
+    return;
+  try {
+    await callSynqtaskMcp("todo_members", { action: "set_metadata", member_id: memberId, key: "wakeTaskSync", value: taskSyncMetadataValue(event, taskId, action) }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+  } catch (e2) {
+    dbg2(`task sync metadata failed (non-fatal): action=${action} task=${taskId} event=${event.eventId} error=${e2?.message}`);
+  }
+}
+function explicitResultText(event) {
+  const payload = event.payload;
+  const result = payload.resultText ?? payload.result_text ?? payload.taskResult ?? payload.task_result ?? payload.completionResult ?? payload.completion_result;
+  return typeof result === "string" && result.trim().length > 0 ? result : null;
+}
+function isExplicitCompletion(event) {
+  const payload = event.payload;
+  const status = String(payload.status ?? payload.taskStatus ?? payload.task_status ?? "").toLowerCase();
+  return event.type === WAKE_EVENT_TYPES.TASK_COMPLETED || payload.completed === true || payload.complete === true || status === "done" || status === "completed";
+}
+function isExplicitFailure(event) {
+  const payload = event.payload;
+  const status = String(payload.status ?? payload.taskStatus ?? payload.task_status ?? payload.resultStatus ?? payload.result_status ?? "").toLowerCase();
+  return event.type === WAKE_EVENT_TYPES.TASK_FAILED || payload.failed === true || payload.failure === true || status === "failed" || status === "failure" || status === "error";
+}
+async function syncExplicitTaskResultOrCompletion(event) {
+  const config = _lifecycleConfig;
+  const taskId = extractWakeTaskId(event);
+  if (!config || !taskId)
+    return;
+  const resultText = explicitResultText(event);
+  if (resultText && rememberTaskSync("result_recorded", taskId, event)) {
+    try {
+      await callSynqtaskMcp("todo_comments", { action: "add_result", task_id: taskId, text: resultText }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+      dbg2(`task sync: result_recorded task=${taskId} event=${event.eventId}`);
+    } catch (e2) {
+      dbg2(`task result sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e2?.message}`);
+    }
+  }
+  if (isExplicitCompletion(event) && rememberTaskSync("completed", taskId, event)) {
+    try {
+      await callSynqtaskMcp("todo_tasks", { action: "set_status", task_id: taskId, status: "done" }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+      dbg2(`task sync: completed task=${taskId} event=${event.eventId}`);
+    } catch (e2) {
+      dbg2(`task completion sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e2?.message}`);
+    }
+  }
+  if (isExplicitFailure(event) && rememberTaskSync("failed", taskId, event)) {
+    try {
+      await callSynqtaskMcp("todo_tasks", { action: "set_status", task_id: taskId, status: "failed" }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+      dbg2(`task sync: failed task=${taskId} event=${event.eventId}`);
+    } catch (e2) {
+      dbg2(`task failure sync failed (non-fatal): task=${taskId} event=${event.eventId} error=${e2?.message}`);
+    }
+  }
+}
+function lifecycleMetadataValue(input, config) {
+  const now = new Date().toISOString();
+  const event = input.event;
+  const payload = event?.payload;
+  const spaceId = config.agentRegistration?.spaceId ?? process.env.SYNQTASK_SPACE_ID;
+  return JSON.stringify({
+    action: input.action,
+    currentTaskId: input.currentTaskId ?? extractWakeTaskId(event) ?? null,
+    lastActive: now,
+    memberType: _currentMemberType,
+    sessionId: config.sessionId,
+    agentInstanceId: config.agentInstanceId ?? null,
+    spaceId: spaceId ?? null,
+    eventId: event?.eventId ?? null,
+    eventType: event?.type ?? null,
+    source: event?.source ?? null,
+    fingerprint: event?.fingerprint ?? payload?.fingerprint ?? null,
+    reason: input.reason ?? null
+  });
+}
+function lifecycleRuntimeState(action) {
+  if (action === "starting")
+    return "starting";
+  if (action === "online")
+    return "online";
+  if (action === "busy" || action === "injecting")
+    return "busy";
+  return "resting";
+}
+async function syncLifecycle(input) {
+  const config = _lifecycleConfig;
+  const memberId = _lifecycleMemberId ?? _agentIdentity?.memberId;
+  if (!config || !memberId || memberId === "unknown")
+    return;
+  const currentTaskId = input.currentTaskId ?? extractWakeTaskId(input.event) ?? null;
+  const key = `${input.action}:${currentTaskId ?? ""}:${input.event?.eventId ?? ""}:${input.reason ?? ""}`;
+  const now = Date.now();
+  if (!input.force && key === _lifecycleLastKey && now - _lifecycleLastSyncAt < LIFECYCLE_SYNC_MIN_INTERVAL_MS)
+    return;
+  _lifecycleLastKey = key;
+  _lifecycleLastSyncAt = now;
+  const metadata = lifecycleMetadataValue({ ...input, currentTaskId }, config);
+  try {
+    await callSynqtaskMcp("todo_members", {
+      action: "batch_update_active",
+      updates: [{
+        member_id: memberId,
+        last_active_at: new Date().toISOString(),
+        runtime_state: lifecycleRuntimeState(input.action)
+      }]
+    }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+  } catch (e2) {
+    dbg2(`lifecycle lastActive update failed (non-fatal): action=${input.action} event=${input.event?.eventId ?? "-"} error=${e2?.message}`);
+  }
+  try {
+    await callSynqtaskMcp("todo_members", { action: "set_metadata", member_id: memberId, key: "wakeLifecycle", value: metadata }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+    await callSynqtaskMcp("todo_members", { action: "set_metadata", member_id: memberId, key: "currentTaskId", value: currentTaskId ?? "" }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+    dbg2(`lifecycle sync: action=${input.action} member=${memberId} task=${currentTaskId ?? "-"} event=${input.event?.eventId ?? "-"}`);
+  } catch (e2) {
+    dbg2(`lifecycle metadata update failed (non-fatal): action=${input.action} event=${input.event?.eventId ?? "-"} error=${e2?.message}`);
+  }
+}
+function readSynqtaskBearerToken() {
+  let bearerToken = process.env.SYNQTASK_BEARER_TOKEN ?? "";
+  if (bearerToken)
+    return bearerToken;
+  try {
+    const authPath = join6(homedir6(), ".local", "share", "opencode", "mcp-auth.json");
+    const authData = JSON.parse(readFileSync2(authPath, "utf-8"));
+    bearerToken = authData?.synqtask?.tokens?.accessToken ?? "";
+  } catch {}
+  return bearerToken;
+}
+async function callSynqtaskMcp(toolName, operations, options = {}) {
+  const url2 = options.synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? "http://localhost:3747";
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream"
+  };
+  const bearerToken = readSynqtaskBearerToken();
+  if (bearerToken)
+    headers["Authorization"] = `Bearer ${bearerToken}`;
+  const res = await fetch(`${url2}/mcp`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: toolName, arguments: { operations } }
+    }),
+    signal: AbortSignal.timeout(options.timeoutMs ?? 3000)
+  });
+  if (!res.ok)
+    throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  const dataLine = text.split(`
+`).find((l2) => l2.startsWith("data: "));
+  if (!dataLine)
+    throw new Error("no data line in response");
+  const rpcResult = JSON.parse(dataLine.substring(6));
+  const content = rpcResult?.result?.content?.[0]?.text;
+  if (!content)
+    throw new Error("empty content");
+  const parsed = JSON.parse(content);
+  const result = parsed?.results?.[0]?.result ?? parsed;
+  return result;
+}
+function synqtaskRestHeaders() {
+  const headers = { Accept: "application/json" };
+  const bearerToken = readSynqtaskBearerToken();
+  if (bearerToken)
+    headers["Authorization"] = `Bearer ${bearerToken}`;
+  return headers;
+}
+function rememberWakeEvent(event) {
+  const addLimited = (set, value) => {
+    if (!value)
+      return;
+    set.add(value);
+    const oldest = set.values().next().value;
+    if (set.size > DEDUP_CACHE_LIMIT && oldest)
+      set.delete(oldest);
+  };
+  addLimited(_seenWakeEventIds, event.eventId);
+  addLimited(_seenWakeFingerprints, event.fingerprint ?? event.payload?.fingerprint);
+}
+function hasSeenWakeEvent(event) {
+  const fingerprint = event.fingerprint ?? event.payload?.fingerprint;
+  return _seenWakeEventIds.has(event.eventId) || !!fingerprint && _seenWakeFingerprints.has(fingerprint);
+}
+function stableHash(input) {
+  let hash = 2166136261;
+  for (let i2 = 0;i2 < input.length; i2++) {
+    hash ^= input.charCodeAt(i2);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+function stableStringify(value) {
+  try {
+    return JSON.stringify(value, Object.keys(value ?? {}).sort());
+  } catch {
+    return String(value);
+  }
+}
+function activityCursorValue(value) {
+  const cursor = value?.cursor ?? value?.activityCursor ?? value?.id ?? value?.lastId;
+  return typeof cursor === "string" && cursor.length > 0 ? cursor : null;
+}
+function activityEntries(value) {
+  const entries = value?.entries ?? value?.items ?? value?.activities ?? value?.results ?? value;
+  return Array.isArray(entries) ? entries : [];
+}
+function inferWakeType(entry, payload) {
+  const raw = String(entry?.type ?? entry?.eventType ?? entry?.action ?? "").toLowerCase();
+  const entityType = String(entry?.entityType ?? payload.entityType ?? "").toLowerCase();
+  if (raw.includes("message") || entityType === "channel" || entityType === "message")
+    return WAKE_EVENT_TYPES.CHANNEL_MESSAGE;
+  if (raw.includes("comment") || entityType === "comment")
+    return WAKE_EVENT_TYPES.COMMENT_ADDED;
+  if (raw.includes("delegat"))
+    return WAKE_EVENT_TYPES.DELEGATION_RECEIVED;
+  if (raw.includes("assign"))
+    return WAKE_EVENT_TYPES.TASK_ASSIGNED;
+  if (raw.includes("status") || raw.includes("update") || raw.includes("change"))
+    return WAKE_EVENT_TYPES.STATUS_CHANGED;
+  return raw || "webhook_event";
+}
+function activityTargetMemberId(payload, fallbackMemberId) {
+  const target = payload.targetMemberId ?? payload.target_member_id ?? payload.assigneeId ?? payload.assignee_id ?? payload.memberId ?? payload.member_id ?? payload.toMemberId ?? payload.to_member_id;
+  return typeof target === "string" && target.length > 0 ? target : fallbackMemberId ?? "";
+}
+function activityToWakeEvent(entry, config) {
+  const payloadSource = entry?.payload ?? entry?.data ?? entry?.details ?? {};
+  const payload = {
+    ...payloadSource,
+    activityId: entry?.id ?? entry?.activityId ?? null,
+    activityType: entry?.type ?? entry?.eventType ?? entry?.action ?? null,
+    entityType: entry?.entityType ?? payloadSource.entityType ?? null,
+    entityId: entry?.entityId ?? payloadSource.entityId ?? payloadSource.taskId ?? payloadSource.task_id ?? null,
+    replayedFromActivity: true
+  };
+  const eventType = inferWakeType(entry, payload);
+  const targetMemberId = activityTargetMemberId(payload, _lifecycleMemberId ?? _agentIdentity?.memberId ?? config.memberId ?? null);
+  if (!targetMemberId)
+    return null;
+  const sourceId = entry?.eventId ?? entry?.id ?? entry?.activityId ?? stableHash(stableStringify(entry));
+  const timestamp = entry?.timestamp ?? entry?.createdAt ?? entry?.ts ?? new Date().toISOString();
+  const fingerprint = `replay:${entry?.fingerprint ?? stableHash(`${eventType}:${targetMemberId}:${sourceId}:${stableStringify(payload)}`)}`;
+  return {
+    schemaVersion: 1,
+    eventId: `replay:${sourceId}:${targetMemberId}:${stableHash(eventType)}`,
+    source: "synqtask.activity",
+    type: eventType,
+    priority: "info",
+    targetMemberId,
+    payload: { ...payload, fingerprint, replaySourceEventId: sourceId },
+    timestamp,
+    fingerprint
+  };
+}
+function isWakeEventSubscribed(event) {
+  const subscribe = _currentSubscribe;
+  if (!subscribe)
+    return true;
+  if (subscribe.length === 0)
+    return false;
+  return subscribe.includes("*") || subscribe.includes(event.type) || subscribe.includes(`${event.source}:${event.type}`);
+}
+function isWakeEventRelevant(event) {
+  const memberId = _lifecycleMemberId ?? _agentIdentity?.memberId ?? null;
+  if (!memberId || memberId === "unknown")
+    return true;
+  if (event.targetMemberId === memberId)
+    return true;
+  const payload = event.payload;
+  const mentioned = payload.mentions ?? payload.memberIds ?? payload.channelMemberIds;
+  return Array.isArray(mentioned) && mentioned.includes(memberId);
+}
+async function fetchActivityCursor(config) {
+  try {
+    const result = await callSynqtaskMcp("todo_io", { action: "activity_cursor" }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs ?? FALLBACK_REPLAY_TIMEOUT_MS });
+    const cursor = activityCursorValue(result);
+    if (cursor)
+      return cursor;
+  } catch (e2) {
+    dbg2(`activity cursor MCP fallback failed-open: ${e2?.message}`);
+  }
+  const url2 = config.synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? "http://localhost:3747";
+  const res = await fetch(`${url2}/api/activity/cursor`, {
+    headers: synqtaskRestHeaders(),
+    signal: AbortSignal.timeout(config.identityFetchTimeoutMs ?? FALLBACK_REPLAY_TIMEOUT_MS)
+  });
+  if (!res.ok)
+    throw new Error(`cursor HTTP ${res.status}`);
+  return activityCursorValue(await res.json());
+}
+async function pollActivity(config, cursor) {
+  const url2 = config.synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? "http://localhost:3747";
+  const qs = new URLSearchParams({ limit: String(FALLBACK_REPLAY_LIMIT), save: "0" });
+  if (cursor)
+    qs.set("cursor", cursor);
+  const res = await fetch(`${url2}/api/activity/poll?${qs.toString()}`, {
+    headers: synqtaskRestHeaders(),
+    signal: AbortSignal.timeout(config.identityFetchTimeoutMs ?? FALLBACK_REPLAY_TIMEOUT_MS)
+  });
+  if (!res.ok)
+    throw new Error(`poll HTTP ${res.status}`);
+  const body = await res.json();
+  return { entries: activityEntries(body), cursor: activityCursorValue(body) };
+}
+function getSpawnTotal() {
+  return _spawnTotal;
+}
+function getSpawnActive() {
+  const now = Date.now();
+  while (_activeHelperTimestamps.length > 0 && now - _activeHelperTimestamps[0] > HELPER_TIMEOUT_MS) {
+    _activeHelperTimestamps.shift();
+  }
+  return _activeHelperTimestamps.length;
+}
+function helperStarted() {
+  _spawnTotal++;
+  _activeHelperTimestamps.push(Date.now());
+}
+function helperFinished() {
+  _activeHelperTimestamps.shift();
+}
+function getAgentIdentity() {
+  return _agentIdentity;
+}
+async function resolveCurrentDepth(sessionId) {
+  if (_currentDepth !== null)
+    return _currentDepth;
+  let depth = 0;
+  let currentId = sessionId;
+  try {
+    for (let i2 = 0;i2 < 10; i2++) {
+      if (!_sdkClient) {
+        dbg2("resolveCurrentDepth: no sdkClient");
+        break;
+      }
+      const { data: session } = await _sdkClient.session.get({ path: { id: currentId } });
+      if (!session)
+        break;
+      if (!session.parent_id && !session.parentId)
+        break;
+      depth++;
+      currentId = session.parent_id ?? session.parentId;
+    }
+  } catch {
+    dbg2("resolveCurrentDepth: failed, assuming 0");
+  }
+  _currentDepth = depth;
+  dbg2(`resolveCurrentDepth: depth=${depth}`);
+  return depth;
+}
+function checkSpawnAllowed(identity, currentDepth, activeHelpers) {
+  const budget = identity.budget ?? { maxSpawnDepth: 2, maxSubagents: 5 };
+  const maxConcurrent = identity._maxConcurrent ?? budget.maxSubagents;
+  if (currentDepth >= budget.maxSpawnDepth) {
+    return {
+      allowed: false,
+      reason: [
+        `\u26A0\uFE0F \u041B\u0438\u043C\u0438\u0442 \u0433\u043B\u0443\u0431\u0438\u043D\u044B \u0434\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F: depth ${currentDepth}/${budget.maxSpawnDepth} for role '${identity.roleName ?? "unknown"}'.`,
+        `Spawn at this depth would create child at depth ${currentDepth + 1}, exceeding budget.`,
+        `\u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u043F\u0440\u0435\u0449\u0435\u043D\u043E \u0430\u0433\u0435\u043D\u0442\u0430\u043C \u044D\u0442\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u044B \u2014 \u0432\u044B\u043F\u043E\u043B\u043D\u0438 \u0440\u0430\u0431\u043E\u0442\u0443 \u0441\u0430\u043C\u043E\u0441\u0442\u043E\u044F\u0442\u0435\u043B\u044C\u043D\u043E.`,
+        `\u0415\u0441\u043B\u0438 \u0437\u0430\u0434\u0430\u0447\u0430 \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0432\u0435\u043B\u0438\u043A\u0430 \u2014 \u0432\u0435\u0440\u043D\u0438 \`HALT: scope-too-large\` \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0443.`,
+        `Recursive spawning is the #1 cause of stuck/frozen sessions (plugin rule #5).`
+      ].join(`
+`),
+      depth: currentDepth,
+      maxDepth: budget.maxSpawnDepth,
+      active: activeHelpers,
+      maxConcurrent
+    };
+  }
+  if (activeHelpers >= maxConcurrent) {
+    return {
+      allowed: false,
+      reason: [
+        `\u26A0\uFE0F \u041B\u0438\u043C\u0438\u0442 \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432: ${activeHelpers}/${maxConcurrent} \u0430\u043A\u0442\u0438\u0432\u043D\u044B.`,
+        `\u0414\u043E\u0436\u0434\u0438\u0441\u044C \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0438\u0445 \u0445\u0435\u043B\u043F\u0435\u0440\u043E\u0432, \u043F\u043E\u0442\u043E\u043C \u0432\u044B\u0437\u044B\u0432\u0430\u0439 \u043D\u043E\u0432\u044B\u0445.`,
+        `\u0414\u043B\u044F \u0434\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0440\u0430\u0431\u043E\u0442\u044B \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 SynqTask:`,
+        `  todo_tasks({action:"delegate", task_id:"...", to_member_id:"..."})`
+      ].join(`
+`),
+      depth: currentDepth,
+      maxDepth: budget.maxSpawnDepth,
+      active: activeHelpers,
+      maxConcurrent
+    };
+  }
+  return {
+    allowed: true,
+    depth: currentDepth,
+    maxDepth: budget.maxSpawnDepth,
+    active: activeHelpers,
+    maxConcurrent
+  };
+}
+async function fetchIdentity(memberId, synqtaskUrl, timeoutMs) {
+  const url2 = synqtaskUrl ?? process.env.SYNQTASK_API_URL ?? "http://localhost:3747";
+  try {
+    const result = await callSynqtaskMcp("todo_members", { action: "get_role_prompt", member_id: memberId }, { synqtaskUrl, timeoutMs });
+    if (!result)
+      return parseAgentsMd();
+    const identity = {
+      memberId,
+      name: result.displayName ?? result.memberName ?? memberId,
+      displayName: result.displayName,
+      roleName: result.role?.name ?? null,
+      rolePrompt: result.role?.systemPrompt ?? null,
+      teamName: result.team?.name ?? null,
+      teamPlaybook: result.team?.purpose ?? null,
+      teammates: [],
+      fetchedAt: Date.now()
+    };
+    if (result.team?.id) {
+      try {
+        const teamRes = await fetch(`${url2}/mcp`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json, text/event-stream",
+            ...readSynqtaskBearerToken() ? { Authorization: `Bearer ${readSynqtaskBearerToken()}` } : {}
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/call",
+            params: { name: "todo_teams", arguments: { operations: { action: "members", team_id: result.team.id } } }
+          }),
+          signal: AbortSignal.timeout(timeoutMs ?? 3000)
+        });
+        if (teamRes.ok) {
+          const teamText = await teamRes.text();
+          const teamDataLine = teamText.split(`
+`).find((l2) => l2.startsWith("data: "));
+          if (teamDataLine) {
+            const teamRpc = JSON.parse(teamDataLine.substring(6));
+            const teamContent = teamRpc?.result?.content?.[0]?.text;
+            if (teamContent) {
+              const teamParsed = JSON.parse(teamContent);
+              const members = teamParsed?.results?.[0]?.result ?? [];
+              const teammateIds = members.map((m2) => m2.memberId ?? m2.id).filter((id) => id && id !== memberId);
+              for (const tid of teammateIds) {
+                try {
+                  const mRes = await fetch(`${url2}/mcp`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Accept: "application/json, text/event-stream",
+                      ...readSynqtaskBearerToken() ? { Authorization: `Bearer ${readSynqtaskBearerToken()}` } : {}
+                    },
+                    body: JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: 3,
+                      method: "tools/call",
+                      params: { name: "todo_members", arguments: { operations: { action: "get_role_prompt", member_id: tid } } }
+                    }),
+                    signal: AbortSignal.timeout(timeoutMs ?? 3000)
+                  });
+                  if (mRes.ok) {
+                    const mText = await mRes.text();
+                    const mLine = mText.split(`
+`).find((l2) => l2.startsWith("data: "));
+                    if (mLine) {
+                      const mRpc = JSON.parse(mLine.substring(6));
+                      const mContent = mRpc?.result?.content?.[0]?.text;
+                      if (mContent) {
+                        const mData = JSON.parse(mContent);
+                        const member = mData?.results?.[0]?.result ?? mData;
+                        identity.teammates.push({
+                          name: member.displayName ?? member.name ?? tid.slice(0, 8),
+                          roleName: member.role?.name ?? null
+                        });
+                      }
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+      } catch (e2) {
+        dbg2(`fetchIdentity: team fetch failed: ${e2?.message}`);
+      }
+    }
+    if (result.role?.metadata) {
+      const md = result.role.metadata;
+      const maxConcurrent = parseInt(md.maxConcurrentHelpers ?? md.maxHelpers ?? md.maxSubagents ?? "5", 10) || 5;
+      identity.budget = {
+        maxSpawnDepth: parseInt(md.maxHelperDepth ?? md.maxSpawnDepth ?? "2", 10) || 2,
+        maxSubagents: maxConcurrent
+      };
+      identity._maxConcurrent = maxConcurrent;
+    }
+    dbg2(`fetchIdentity: OK name=${identity.name} role=${identity.roleName} team=${identity.teamName} teammates=${identity.teammates.length} budget=${identity.budget ? `depth=${identity.budget.maxSpawnDepth},subs=${identity.budget.maxSubagents}` : "none"} playbook=${identity.teamPlaybook ? "yes" : "no"}`);
+    return identity;
+  } catch (e2) {
+    dbg2(`fetchIdentity: failed: ${e2?.message}`);
+    return parseAgentsMd();
+  }
+}
+function firstMemberId(value) {
+  const item = Array.isArray(value) ? value[0] : Array.isArray(value?.members) ? value.members[0] : Array.isArray(value?.results) ? value.results[0] : value;
+  return item?.id ?? item?.memberId ?? item?.member?.id ?? item?.result?.id ?? item?.result?.memberId ?? null;
+}
+async function setMemberMetadata(memberId, key, value, config) {
+  if (!value)
+    return;
+  try {
+    await callSynqtaskMcp("todo_members", { action: "set_metadata", member_id: memberId, key, value }, { synqtaskUrl: config.synqtaskUrl, timeoutMs: config.identityFetchTimeoutMs });
+  } catch (e2) {
+    dbg2(`agent registration metadata ${key} failed (non-fatal): ${e2?.message}`);
+  }
+}
+async function resolveOrRegisterAgentIdentity(config) {
+  if (config.memberId) {
+    try {
+      _agentIdentity = await fetchIdentity(config.memberId, config.synqtaskUrl, config.identityFetchTimeoutMs);
+      dbg2(`identity: ${_agentIdentity?.name ?? "null"} role=${_agentIdentity?.roleName ?? "none"} team=${_agentIdentity?.teamName ?? "none"} teammates=${_agentIdentity?.teammates?.length ?? 0}`);
+    } catch (e2) {
+      dbg2(`identity fetch failed (non-fatal): ${e2?.message}`);
+    }
+    return {
+      memberId: config.memberId,
+      memberName: _agentIdentity?.name ?? config.memberId,
+      memberType: config.memberType ?? "unknown"
+    };
+  }
+  const envEnabled = process.env.SYNQTASK_AGENT_REGISTRATION === "1" || process.env.SYNQTASK_REGISTER_AGENT === "1";
+  const registration = config.agentRegistration;
+  const enabled = registration?.enabled ?? envEnabled;
+  if (!enabled) {
+    dbg2("agent registration skipped: no memberId and registration not enabled");
+    return { memberType: config.memberType ?? "unknown" };
+  }
+  const timeoutMs = config.identityFetchTimeoutMs;
+  const synqtaskUrl = config.synqtaskUrl;
+  const name = registration?.name ?? process.env.SYNQTASK_AGENT_NAME ?? `opencode-agent-${process.pid}`;
+  const displayName = registration?.displayName ?? name;
+  const description = registration?.description ?? `OpenCode agent session ${config.sessionId} (${config.agentInstanceId ?? "no-instance-id"})`;
+  try {
+    let memberId = null;
+    if (config.agentInstanceId) {
+      const existing = await callSynqtaskMcp("todo_members", { action: "search_by_metadata", key: "agentInstanceId", value: config.agentInstanceId }, { synqtaskUrl, timeoutMs });
+      memberId = firstMemberId(existing);
+      if (memberId)
+        dbg2(`agent registration reconciled by agentInstanceId: ${memberId}`);
+    }
+    if (!memberId) {
+      const added = await callSynqtaskMcp("todo_members", {
+        action: "add",
+        name,
+        display_name: displayName,
+        description,
+        member_type: "agent"
+      }, { synqtaskUrl, timeoutMs });
+      memberId = firstMemberId(added);
+      if (!memberId)
+        throw new Error("todo_members.add returned no member id");
+      dbg2(`agent registration created member: ${memberId}`);
+    }
+    await setMemberMetadata(memberId, "sessionId", config.sessionId, config);
+    await setMemberMetadata(memberId, "agentInstanceId", config.agentInstanceId, config);
+    await setMemberMetadata(memberId, "spaceId", registration?.spaceId ?? process.env.SYNQTASK_SPACE_ID, config);
+    const fetched = await fetchIdentity(memberId, synqtaskUrl, timeoutMs);
+    _agentIdentity = fetched?.memberId && fetched.memberId !== "unknown" ? fetched : {
+      memberId,
+      name: displayName,
+      displayName,
+      roleName: null,
+      rolePrompt: null,
+      teamName: null,
+      teammates: [],
+      fetchedAt: Date.now()
+    };
+    return { memberId, memberName: _agentIdentity.name, memberType: "agent" };
+  } catch (e2) {
+    dbg2(`agent registration degraded (non-fatal): ${e2?.message}`);
+    return { memberName: displayName, memberType: config.memberType ?? "unknown" };
+  }
+}
+function parseAgentsMd() {
+  try {
+    const agentsMdPath = join6(process.cwd(), "AGENTS.md");
+    const content = readFileSync2(agentsMdPath, "utf-8");
+    const nameMatch = content.match(/^#\s+(?:Agent\s+)?(.+)/im);
+    const name = nameMatch?.[1]?.trim() ?? null;
+    const roleMatch = content.match(/##\s+(?:\u0420\u043E\u043B\u044C|Role)[^\n]*\n([\s\S]*?)(?=\n##|\n$)/i);
+    const rolePrompt = roleMatch?.[1]?.trim() ?? null;
+    const idMatch = content.match(/Member ID.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    const memberId = idMatch?.[1] ?? null;
+    if (!name) {
+      dbg2("parseAgentsMd: no name found");
+      return null;
+    }
+    dbg2(`parseAgentsMd: fallback OK name=${name}`);
+    return {
+      memberId: memberId ?? "unknown",
+      name,
+      roleName: null,
+      rolePrompt,
+      teamName: null,
+      teammates: [],
+      fetchedAt: Date.now()
+    };
+  } catch {
+    dbg2("parseAgentsMd: file not found or parse error");
+    return null;
+  }
+}
+function formatMeasuredAt(issuedAt, eventTimestamp) {
+  const raw = typeof issuedAt === "string" && issuedAt ? issuedAt : typeof eventTimestamp === "string" && eventTimestamp ? eventTimestamp : null;
+  if (!raw)
+    return "";
+  const t2 = Date.parse(raw);
+  if (!Number.isFinite(t2))
+    return "";
+  const ageMs = Date.now() - t2;
+  let ageHuman;
+  if (ageMs < 0) {
+    ageHuman = "just now";
+  } else if (ageMs < 60000) {
+    ageHuman = `${Math.round(ageMs / 1000)}s ago`;
+  } else if (ageMs < 60 * 60000) {
+    ageHuman = `${Math.round(ageMs / 60000)}min ago`;
+  } else if (ageMs < 24 * 60 * 60000) {
+    ageHuman = `${Math.round(ageMs / (60 * 60000) * 10) / 10}h ago`;
+  } else {
+    ageHuman = `${Math.round(ageMs / (24 * 60 * 60000))}d ago`;
+  }
+  return `${raw} (${ageHuman})`;
+}
+function formatWakeMessage(event, identity) {
+  const p2 = event.payload;
+  const esc = (s2) => s2.replace(/"/g, "&quot;");
+  const emittedAt = typeof event.timestamp === "string" && event.timestamp ? event.timestamp : new Date().toISOString();
+  const measuredAtRaw = typeof p2?.issuedAt === "string" ? p2.issuedAt : null;
+  const tag = `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}" emitted-at="${esc(emittedAt)}"${measuredAtRaw ? ` measured-at="${esc(measuredAtRaw)}"` : ""}>`;
+  const end = `</system-reminder>`;
+  let identityBlock = "";
+  if (identity) {
+    const teammatesList = identity.teammates.length > 0 ? identity.teammates.map((t2) => `${t2.name} (${t2.roleName ?? "?"})`).join(", ") : "none";
+    const identityLines = [
+      `<agent-identity name="${identity.name}" role="${identity.roleName ?? "unassigned"}" team="${identity.teamName ?? "none"}">`,
+      `You are ${identity.name}. ${identity.rolePrompt ?? "No role assigned."}`,
+      `Team: ${identity.teamName ?? "none"}. Teammates: ${teammatesList}.`
+    ];
+    if (identity.budget) {
+      identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. \u0414\u0435\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043A\u043E\u043B\u043B\u0435\u0433\u0430\u043C: SynqTask todo_tasks delegate.`);
+    }
+    identityLines.push(`</agent-identity>`);
+    identityBlock = identityLines.join(`
+`);
+  }
+  let body;
+  switch (event.type) {
+    case WAKE_EVENT_TYPES.CHANNEL_MESSAGE: {
+      const chId = p2.channel_id ?? p2.channelId ?? "";
+      const sendName = p2.authorName ?? p2.author_name ?? p2.sender_name ?? p2.senderName ?? p2.authorId ?? p2.senderId ?? "unknown";
+      const text = p2.text ?? "(no text)";
+      const warm = isChannelWarm(chId);
+      if (warm) {
+        const preview = text.length > 120 ? text.slice(0, 120) + "\u2026" : text;
+        body = `**${sendName}** in channel \`${chId}\`:
+> ${preview}
+Reply: \`todo_channels({action:"send", channel_id:"${chId}", text:"..."})\``;
+      } else {
+        body = [
+          `## Channel Message from ${sendName}`,
+          `> ${text}`,
+          `**Channel:** \`${chId}\``,
+          `Reply: \`todo_channels({action:"send", channel_id:"${chId}", text:"YOUR REPLY"})\``,
+          `Read history: \`todo_channels({action:"read", channel_id:"${chId}", limit:5})\``
+        ].join(`
+`);
+      }
+      markChannelWarm(chId);
+      break;
+    }
+    case WAKE_EVENT_TYPES.TASK_ASSIGNED: {
+      const taskId = p2.task_id ?? p2.taskId ?? p2.entityId ?? "";
+      body = [
+        `## Task Assigned: ${p2.title ?? "Unknown"}`,
+        taskId ? `Task: \`${taskId}\`` : "",
+        p2.description ? `> ${p2.description}` : "",
+        `Accept: \`todo_tasks({action:"set_status", task_id:"${taskId}", status:"started"})\``,
+        `Details: \`todo_tasks({action:"show", task_id:"${taskId}"})\``
+      ].filter(Boolean).join(`
+`);
+      break;
+    }
+    case WAKE_EVENT_TYPES.COMMENT_ADDED: {
+      const entityId = p2.entity_id ?? p2.entityId ?? "";
+      body = [
+        `## Comment on ${p2.title ?? entityId}`,
+        `From: ${p2.actor_name ?? p2.actorId ?? "unknown"}`,
+        `Read: \`todo_comments({action:"list", task_id:"${entityId}"})\``
+      ].join(`
+`);
+      break;
+    }
+    case WAKE_EVENT_TYPES.DELEGATION_RECEIVED: {
+      const taskId = p2.task_id ?? p2.taskId ?? p2.entityId ?? "";
+      body = [
+        `## Delegation: ${p2.title ?? "Unknown"}`,
+        `From: ${p2.delegator ?? p2.delegated_by ?? p2.fromId ?? "unknown"}`,
+        `Accept: \`todo_tasks({action:"accept_delegation", task_id:"${taskId}"})\``,
+        `Details: \`todo_tasks({action:"show", task_id:"${taskId}"})\``
+      ].join(`
+`);
+      break;
+    }
+    case WAKE_EVENT_TYPES.STATUS_CHANGED: {
+      const taskId = p2.task_id ?? p2.taskId ?? p2.entityId ?? "";
+      const status = p2.status ?? p2.changes?.status?.to ?? "?";
+      const title = p2.title ?? taskId;
+      body = [
+        `## Task Status: ${title} \u2192 ${status}`,
+        `View: \`todo_tasks({action:"show", task_id:"${taskId}"})\``
+      ].join(`
+`);
+      break;
+    }
+    case WAKE_EVENT_TYPES.QUOTA_CRITICAL: {
+      const accountHint = String(p2.accountHint ?? "unknown");
+      const util5h = typeof p2.util5h === "number" ? Math.round(p2.util5h * 100) : null;
+      const resetAtMs = typeof p2.resetAt === "number" ? p2.resetAt : null;
+      const resetIso = resetAtMs ? new Date(resetAtMs).toISOString() : "unknown";
+      const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60000)) : null;
+      const message = String(p2.message ?? `Quota critical on account ${accountHint}.`);
+      const measuredAt = formatMeasuredAt(p2.issuedAt, event.timestamp);
+      body = [
+        `## \u26A0\uFE0F Claude Max Quota Critical`,
+        `**Account:** \`${accountHint}\``,
+        util5h !== null ? `**5h utilization:** ${util5h}% (\u226598% = critical)` : "",
+        resetInMin !== null ? `**Resets in:** ${resetInMin}min (${resetIso})` : "",
+        measuredAt ? `**Measured:** ${measuredAt}` : "",
+        ``,
+        message,
+        ``,
+        `<rules>`,
+        `  <stop>Do NOT start new long tasks. Do NOT send long prompts.</stop>`,
+        `  <action>Notify the user immediately. Offer two options:</action>`,
+        resetInMin !== null ? `  <option name="wait">Wait ${resetInMin}min for natural reset (preserves cache)</option>` : `  <option name="wait">Wait for natural reset (preserves cache)</option>`,
+        `  <option name="switch-org">Switch via 'claude /login' to another account (cache rebuild ~150k cw on new org, recoverable)</option>`,
+        `  <stop-condition>Resume normal work after util drops below 0.95 OR user explicitly tells you to continue.</stop-condition>`,
+        `  <freshness>If "Measured" is older than ~2 minutes from now, treat values as potentially stale \u2014 request a fresh check before acting.</freshness>`,
+        `</rules>`
+      ].filter(Boolean).join(`
+`);
+      break;
+    }
+    case WAKE_EVENT_TYPES.QUOTA_WARNING: {
+      const accountHint = String(p2.accountHint ?? "unknown");
+      const util5h = typeof p2.util5h === "number" ? Math.round(p2.util5h * 100) : null;
+      const resetAtMs = typeof p2.resetAt === "number" ? p2.resetAt : null;
+      const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60000)) : null;
+      const message = String(p2.message ?? `Quota approaching limit on account ${accountHint}.`);
+      const measuredAt = formatMeasuredAt(p2.issuedAt, event.timestamp);
+      body = [
+        `## Claude Max Quota Warning`,
+        `**Account:** \`${accountHint}\``,
+        util5h !== null ? `**5h utilization:** ${util5h}% (\u226585% = warning)` : "",
+        resetInMin !== null ? `**Resets in:** ${resetInMin}min` : "",
+        measuredAt ? `**Measured:** ${measuredAt}` : "",
+        ``,
+        message,
+        ``,
+        `<rules>`,
+        `  <note>Approaching quota limit. Plan to wrap up current work soon.</note>`,
+        `  <action>Avoid starting new long tasks; finish what's in flight.</action>`,
+        `  <freshness>If "Measured" is older than ~2 minutes from now, treat as potentially stale \u2014 request a fresh quota check before acting.</freshness>`,
+        `</rules>`
+      ].filter(Boolean).join(`
+`);
+      break;
+    }
+    case WAKE_EVENT_TYPES.QUOTA_RECOVERED: {
+      const accountHint = String(p2.accountHint ?? "unknown");
+      const util5h = typeof p2.util5h === "number" ? Math.round(p2.util5h * 100) : null;
+      const util7d = typeof p2.util7d === "number" ? Math.round(p2.util7d * 100) : null;
+      const previousLevel = String(p2.previousLevel ?? "elevated");
+      const currentLevel = String(p2.level ?? "ok");
+      const transition = `${previousLevel} \u2192 ${currentLevel}`;
+      const measuredAt = formatMeasuredAt(p2.issuedAt, event.timestamp);
+      body = [
+        `## Claude Max Quota Recovered`,
+        `**Account:** \`${accountHint}\``,
+        `**Transition:** ${transition}`,
+        util5h !== null ? `**5h utilization:** ${util5h}%` : "",
+        util7d !== null ? `**7d utilization:** ${util7d}%` : "",
+        measuredAt ? `**Measured:** ${measuredAt}` : "",
+        ``,
+        `<rules>`,
+        currentLevel === "ok" ? `  <note>Quota back to normal. Earlier warning/critical advisories no longer apply \u2014 discard stale references to prior utilization values.</note>` : `  <note>Partially recovered (still ${currentLevel}). Continue with caution but earlier critical-level <stop> rules no longer apply.</note>`,
+        currentLevel === "ok" ? `  <action>Resume normal work. Long tasks ok again.</action>` : `  <action>Long tasks acceptable; monitor for re-escalation.</action>`,
+        `</rules>`
+      ].filter(Boolean).join(`
+`);
+      break;
+    }
+    case WAKE_EVENT_TYPES.QUOTA_STATUS: {
+      const accountHint = String(p2.accountHint ?? "unknown");
+      const util5h = typeof p2.util5h === "number" ? Math.round(p2.util5h * 100) : null;
+      const util7d = typeof p2.util7d === "number" ? Math.round(p2.util7d * 100) : null;
+      const level = String(p2.level ?? "unknown");
+      const resetAtMs = typeof p2.resetAt === "number" ? p2.resetAt : null;
+      const resetInMin = resetAtMs ? Math.max(0, Math.round((resetAtMs - Date.now()) / 60000)) : null;
+      const measuredAt = formatMeasuredAt(p2.issuedAt, event.timestamp);
+      body = [
+        `## Claude Max Quota Status (current snapshot)`,
+        `**Account:** \`${accountHint}\``,
+        `**Level:** ${level}`,
+        util5h !== null ? `**5h utilization:** ${util5h}%` : "",
+        util7d !== null ? `**7d utilization:** ${util7d}%` : "",
+        resetInMin !== null ? `**Resets in:** ${resetInMin}min` : "",
+        measuredAt ? `**Measured:** ${measuredAt}` : "",
+        ``,
+        `Refreshed from proxy on demand. Use this in place of any earlier stale snapshot.`
+      ].filter(Boolean).join(`
+`);
+      break;
+    }
+    default:
+      body = `Event: ${event.type}
+${JSON.stringify(p2, null, 2)}`;
+  }
+  return identityBlock ? `${identityBlock}
+${tag}
+${body}
+${end}` : `${tag}
+${body}
+${end}`;
+}
+async function isAgentBusy() {
+  try {
+    if (!_sdkClient)
+      return false;
+    const { data } = await _sdkClient.session.status();
+    return data?.sessions?.some?.((s2) => s2.status === "streaming" || s2.status === "busy") ?? false;
+  } catch {
+    return false;
+  }
+}
+function updateBoundSessionGlobal(sessionId) {
+  try {
+    if (sessionId && sessionId !== "unknown") {
+      globalThis.__opencodeBoundSessionId__ = sessionId;
+    }
+  } catch {}
+}
+function updateDiscoverySession(sessionId, agentInstanceId) {
+  if (!_discoveryPath) {
+    dbg2("updateDiscoverySession: no discovery path");
+    return false;
+  }
+  try {
+    const disc = JSON.parse(readFileSync2(_discoveryPath, "utf-8"));
+    disc.sessionId = sessionId;
+    if (agentInstanceId)
+      disc.agentInstanceId = agentInstanceId;
+    const tmpPath = _discoveryPath + ".tmp";
+    writeFileSync2(tmpPath, JSON.stringify(disc));
+    renameSync2(tmpPath, _discoveryPath);
+    dbg2(`SESSION_BOUND discovery updated session=${sessionId} agentInstanceId=${disc.agentInstanceId ?? "-"}`);
+    return true;
+  } catch (e2) {
+    dbg2(`updateDiscoverySession failed: ${e2?.message}`);
+    return false;
+  }
+}
+function bindWakeListenerSession(handle, sessionId, opts) {
+  if (!handle) {
+    dbg2(`SESSION_BIND_WAITING no handle session=${sessionId}`);
+    return false;
+  }
+  if (!sessionId || sessionId === "unknown") {
+    dbg2(`SESSION_BIND_WAITING invalid session=${sessionId}`);
+    return false;
+  }
+  if (_cachedSessionId && _cachedSessionId !== "unknown" && _cachedSessionId !== sessionId) {
+    dbg2(`SESSION_BIND_AMBIGUOUS existing=${_cachedSessionId} candidate=${sessionId} reason=${opts?.reason ?? "-"}`);
+    return false;
+  }
+  _cachedSessionId = sessionId;
+  updateBoundSessionGlobal(sessionId);
+  updateDiscoverySession(sessionId, opts?.agentInstanceId);
+  dbg2(`SESSION_BOUND session=${sessionId} reason=${opts?.reason ?? "explicit"} agentInstanceId=${opts?.agentInstanceId ?? "-"}`);
+  return true;
+}
+async function resolveSessionId(sessionId) {
+  if (sessionId && sessionId !== "unknown") {
+    _cachedSessionId = sessionId;
+    updateBoundSessionGlobal(sessionId);
+    return sessionId;
+  }
+  if (_cachedSessionId && _cachedSessionId !== "unknown")
+    return _cachedSessionId;
+  if (_discoveryPath) {
+    try {
+      const disc = JSON.parse(readFileSync2(_discoveryPath, "utf-8"));
+      if (disc.sessionId && disc.sessionId !== "unknown") {
+        _cachedSessionId = disc.sessionId;
+        updateBoundSessionGlobal(_cachedSessionId);
+        dbg2(`resolveSessionId from discovery file: ${_cachedSessionId}`);
+        return _cachedSessionId;
+      }
+    } catch {}
+  }
+  if (_agentDirectory) {
+    try {
+      if (!_sdkClient) {
+        dbg2("resolveSessionId: no sdkClient");
+        return null;
+      }
+      const { data: sessions } = await _sdkClient.session.list();
+      if (!Array.isArray(sessions))
+        return null;
+      const matches = sessions.filter((s2) => s2.directory === _agentDirectory);
+      if (matches.length > 1) {
+        dbg2(`SESSION_BIND_AMBIGUOUS directory=${_agentDirectory} candidates=${matches.map((s2) => s2.id).join(",")}`);
+        return null;
+      }
+      const match = matches[0];
+      if (match) {
+        const matchedSessionId = String(match.id);
+        _cachedSessionId = matchedSessionId;
+        updateBoundSessionGlobal(matchedSessionId);
+        dbg2(`SESSION_BOUND_FALLBACK by directory ${_agentDirectory}: ${matchedSessionId}`);
+        updateDiscoverySession(matchedSessionId);
+        return matchedSessionId;
+      }
+    } catch (e2) {
+      dbg2(`resolveSessionId by directory failed: ${e2?.message}`);
+    }
+  }
+  dbg2("resolveSessionId: no session ID yet, events will queue");
+  return null;
+}
+async function injectContextEvent(event, sessionId) {
+  const resolvedSessionId = await resolveSessionId(sessionId);
+  if (!resolvedSessionId) {
+    dbg2(`CONTEXT_INJECT_DEFERRED_NO_SESSION event=${event.eventId}`);
+    return false;
+  }
+  if (!_sdkClient) {
+    dbg2("context inject: no sdkClient");
+    return false;
+  }
+  const text = formatWakeMessage(event, _agentIdentity);
+  try {
+    const { error: error2 } = await _sdkClient.session.prompt({
+      path: { id: resolvedSessionId },
+      body: { noReply: true, parts: [{ type: "text", text }] }
+    });
+    if (!error2) {
+      dbg2(`context inject OK: session=${resolvedSessionId} type=${event.type} chars=${text.length}`);
+      return true;
+    }
+    dbg2(`context inject failed: ${error2}`);
+    return false;
+  } catch (e2) {
+    dbg2(`context inject error: ${e2?.message}`);
+    return false;
+  }
+}
+async function injectWakeEvent(event, sessionId) {
+  const resolvedSessionId = await resolveSessionId(sessionId);
+  if (!resolvedSessionId) {
+    dbg2(`INJECT_DEFERRED_NO_SESSION event=${event.eventId}`);
+    return false;
+  }
+  if (!_sdkClient) {
+    dbg2("inject: no sdkClient");
+    return false;
+  }
+  const text = formatWakeMessage(event, _agentIdentity);
+  try {
+    await syncLifecycle({ action: "injecting", event, currentTaskId: extractWakeTaskId(event) });
+    const { error: error2 } = await _sdkClient.session.promptAsync({
+      path: { id: resolvedSessionId },
+      body: { noReply: false, parts: [{ type: "text", text }] }
+    });
+    if (!error2) {
+      await syncTaskStart(event, "start_injected");
+      await syncLifecycle({ action: "online", event, currentTaskId: extractWakeTaskId(event) });
+      dbg2(`inject OK: session=${resolvedSessionId}`);
+      return true;
+    }
+    dbg2(`inject failed: ${error2}`);
+    return false;
+  } catch (e2) {
+    dbg2(`inject error: ${e2?.message}`);
+    return false;
+  }
+}
+async function injectHintText(text, sessionId, sourceEvent) {
+  const resolvedSessionId = await resolveSessionId(sessionId);
+  if (!resolvedSessionId) {
+    dbg2(`HINT_INJECT_DEFERRED_NO_SESSION event=${sourceEvent.eventId}`);
+    return false;
+  }
+  if (!_sdkClient) {
+    dbg2("hint inject: no sdkClient");
+    return false;
+  }
+  const wrapped = `<signal-wire-hint event="${sourceEvent.eventId}">
+${text}
+</signal-wire-hint>`;
+  try {
+    const { error: error2 } = await _sdkClient.session.prompt({
+      path: { id: resolvedSessionId },
+      body: { noReply: true, parts: [{ type: "text", text: wrapped }] }
+    });
+    if (!error2) {
+      dbg2(`hint inject OK: session=${resolvedSessionId} chars=${text.length}`);
+      return true;
+    }
+    dbg2(`hint inject failed: ${error2}`);
+    return false;
+  } catch (e2) {
+    dbg2(`hint inject error: ${e2?.message}`);
+    return false;
+  }
+}
+async function startWakeListener(config) {
+  _agentDirectory = process.cwd();
+  _sdkClient = config.sdkClient ?? null;
+  const resolvedIdentity = await resolveOrRegisterAgentIdentity(config);
+  _currentMemberType = resolvedIdentity.memberType;
+  _lifecycleConfig = config;
+  _lifecycleMemberId = resolvedIdentity.memberId ?? config.memberId ?? _agentIdentity?.memberId ?? null;
+  await syncLifecycle({ action: "starting", reason: "listener_start", force: true });
+  if (_agentIdentity?.teamPlaybook) {
+    try {
+      const playbookSessionId = await resolveSessionId(config.sessionId);
+      if (playbookSessionId) {
+        const playbookText = `<team-playbook team="${_agentIdentity.teamName ?? "unknown"}">
+${_agentIdentity.teamPlaybook}
+</team-playbook>`;
+        if (!_sdkClient) {
+          dbg2("playbook: no sdkClient");
+        } else {
+          await _sdkClient.session.prompt({
+            path: { id: playbookSessionId },
+            body: { noReply: true, parts: [{ type: "text", text: playbookText }] }
+          });
+          dbg2("playbook injected at session start");
+        }
+      }
+    } catch (e2) {
+      dbg2(`playbook injection failed (non-fatal): ${e2?.message}`);
+    }
+  }
+  const token = crypto.randomUUID();
+  const queue = [];
+  const maxQueue = config.maxQueueSize ?? MAX_QUEUE_DEFAULT;
+  const retryInterval = config.busyRetryInterval ?? BUSY_RETRY_INTERVAL_DEFAULT;
+  function queueWakeEvent(event, reason) {
+    if (hasSeenWakeEvent(event))
+      return queue.findIndex((e2) => e2.eventId === event.eventId) + 1;
+    if (queue.length >= maxQueue) {
+      const dropped = queue.shift();
+      dbg2(`wake: queue full, dropped oldest event ${dropped?.eventId}`);
+    }
+    queue.push(event);
+    rememberWakeEvent(event);
+    dbg2(`wake: queued ${event.eventId} reason=${reason} position=${queue.length}`);
+    return queue.length;
+  }
+  async function runDegradedActivityCatchup(reason) {
+    try {
+      if (!_lastActivityCursor) {
+        _lastActivityCursor = await fetchActivityCursor(config);
+        dbg2(`fallback catch-up initialized cursor=${_lastActivityCursor ?? "-"} reason=${reason}`);
+        return;
+      }
+      const { entries, cursor } = await pollActivity(config, _lastActivityCursor);
+      let replayed = 0;
+      for (const entry of entries.slice(0, FALLBACK_REPLAY_LIMIT)) {
+        const event = activityToWakeEvent(entry, config);
+        if (!event)
+          continue;
+        if (!isWakeEventRelevant(event) || !isWakeEventSubscribed(event))
+          continue;
+        if (hasSeenWakeEvent(event))
+          continue;
+        if (await isAgentBusy()) {
+          queueWakeEvent(event, `fallback_${reason}`);
+        } else if (await injectWakeEvent(event, config.sessionId)) {
+          rememberWakeEvent(event);
+        } else {
+          queueWakeEvent(event, `fallback_${reason}_inject_failed`);
+        }
+        replayed++;
+      }
+      _lastActivityCursor = cursor ?? _lastActivityCursor;
+      dbg2(`fallback catch-up complete reason=${reason} entries=${entries.length} replayed=${replayed} cursor=${_lastActivityCursor ?? "-"}`);
+    } catch (e2) {
+      dbg2(`fallback catch-up failed-open reason=${reason} error=${e2?.message}`);
+    }
+  }
+  async function handleRequest(req2) {
+    try {
+      const url2 = new URL(req2.url);
+      if (req2.method === "GET" && url2.pathname === "/health") {
+        return Response.json({
+          alive: true,
+          sessionId: config.sessionId,
+          uptime: Math.floor((Date.now() - STARTUP_TS) / 1000),
+          queueSize: queue.length
+        });
+      }
+      if (req2.method === "POST" && url2.pathname === "/wake") {
+        return await handleWake(req2);
+      }
+      return new Response("Not found", { status: 404 });
+    } catch (e2) {
+      dbg2("request handler error:", e2?.message);
+      return Response.json({ accepted: false, error: "internal error" }, { status: 500 });
+    }
+  }
+  async function handleWake(req2) {
+    const reqToken = req2.headers.get("X-Wake-Token");
+    if (reqToken !== token) {
+      dbg2("wake: auth failed");
+      return Response.json({ accepted: false, error: "unauthorized" }, { status: 401 });
+    }
+    let event;
+    try {
+      event = await req2.json();
+    } catch {
+      return Response.json({ accepted: false, error: "invalid JSON" }, { status: 400 });
+    }
+    if (!event.eventId || !event.type || !event.source) {
+      return Response.json({ accepted: false, error: "missing required fields" }, { status: 400 });
+    }
+    dbg2(`wake: received ${event.type} from ${event.source} [${event.priority}]`);
+    if (hasSeenWakeEvent(event)) {
+      dbg2(`wake: duplicate ignored ${event.eventId}`);
+      return Response.json({ accepted: true, queued: false });
+    }
+    await syncTaskStart(event, "start_accepted");
+    await syncExplicitTaskResultOrCompletion(event);
+    const signalWireInstance = config.signalWire ?? config.signalWireResolver?.() ?? null;
+    if (signalWireInstance) {
+      try {
+        const result = await signalWireInstance.evaluateExternal(event);
+        const matched = Boolean(result.matched);
+        if (matched) {
+          const hintTexts = Array.isArray(result.hintTexts) ? result.hintTexts : [];
+          if (hintTexts.length > 0) {
+            const combined = hintTexts.join(`
+
+`);
+            const injected2 = await injectHintText(combined, config.sessionId, event);
+            rememberWakeEvent(event);
+            dbg2(`wake: engine matched, ${hintTexts.length} hint(s) injected=${injected2}`);
+            return Response.json({
+              accepted: true,
+              engineHandled: true,
+              wakeTriggered: result.wakeTriggered,
+              actionsExecuted: result.actionsExecuted.length,
+              hintsInjected: injected2 ? hintTexts.length : 0
+            });
+          }
+          const hasWakeAction = result.actionsExecuted.some((a2) => a2.type === "wake");
+          if (hasWakeAction) {
+            dbg2(`wake: engine matched with wake-action, routing to formatWakeMessage path`);
+          } else {
+            rememberWakeEvent(event);
+            dbg2(`wake: engine matched, audit-only (no hint, no wake action)`);
+            return Response.json({
+              accepted: true,
+              engineHandled: true,
+              wakeTriggered: result.wakeTriggered,
+              actionsExecuted: result.actionsExecuted.length,
+              hintsInjected: 0
+            });
+          }
+        } else {
+          dbg2("no matching rule for event, falling back to direct injection");
+        }
+      } catch (e2) {
+        dbg2("engine evaluateExternal error, falling back:", e2?.message);
+      }
+    }
+    const isAdvisoryEvent = event.type === WAKE_EVENT_TYPES.QUOTA_CRITICAL || event.type === WAKE_EVENT_TYPES.QUOTA_WARNING || event.type === WAKE_EVENT_TYPES.QUOTA_RECOVERED || event.type === WAKE_EVENT_TYPES.QUOTA_STATUS;
+    if (isAdvisoryEvent) {
+      const injected2 = await injectContextEvent(event, config.sessionId);
+      if (injected2) {
+        rememberWakeEvent(event);
+        dbg2(`wake: advisory injected ${event.eventId} (type=${event.type})`);
+        return Response.json({ accepted: true, queued: false });
+      }
+      dbg2(`wake: advisory inject failed for ${event.eventId} (session not bound?)`);
+      return Response.json({ accepted: false, error: "session not bound" }, { status: 503 });
+    }
+    const busy = await isAgentBusy();
+    if (busy) {
+      const pos = queueWakeEvent(event, "busy");
+      await syncLifecycle({ action: "busy", event, currentTaskId: extractWakeTaskId(event), reason: "queued" });
+      dbg2(`wake: agent busy, queued at position ${pos}`);
+      return Response.json({ accepted: true, queued: true, queuePosition: pos });
+    }
+    const injected = await injectWakeEvent(event, config.sessionId);
+    if (injected) {
+      rememberWakeEvent(event);
+      dbg2(`wake: injected ${event.eventId}`);
+      return Response.json({ accepted: true, queued: false });
+    }
+    const queuePosition = queueWakeEvent(event, "inject_failed");
+    await syncLifecycle({ action: "busy", event, currentTaskId: extractWakeTaskId(event), reason: "inject_failed_queued" });
+    dbg2(`wake: inject failed, queued at position ${queuePosition}`);
+    return Response.json({ accepted: true, queued: true, queuePosition });
+  }
+  const server = Bun.serve({
+    port: config.port ?? 0,
+    fetch: handleRequest
+  });
+  const actualPort = server.port;
+  dbg2(`started on port ${actualPort} for session ${config.sessionId}`);
+  const resolvedDiscoveryDir = discoveryDir();
+  const discoveryPath = join6(resolvedDiscoveryDir, `${process.pid}-${config.sessionId}.json`);
+  try {
+    mkdirSync2(resolvedDiscoveryDir, { recursive: true });
+    _currentSubscribe = config.subscribe ?? null;
+    _currentSubscribePreset = config.subscribePreset ?? null;
+    _currentMemberType = resolvedIdentity.memberType;
+    const discoveryData = {
+      port: actualPort,
+      token,
+      sessionId: config.sessionId,
+      agentInstanceId: config.agentInstanceId,
+      memberId: resolvedIdentity.memberId,
+      memberName: resolvedIdentity.memberName ?? _agentIdentity?.name ?? resolvedIdentity.memberId,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      transport: "http",
+      parentMemberId: _parentMemberId,
+      parentSessionId: _parentSessionId,
+      spawnDepth: _currentDepth ?? 0,
+      maxSpawnDepth: _agentIdentity?.budget?.maxSpawnDepth ?? 2,
+      maxSubagents: _agentIdentity?.budget?.maxSubagents ?? 5,
+      subscribe: _currentSubscribe ?? undefined,
+      subscribePreset: _currentSubscribePreset ?? undefined,
+      memberType: _currentMemberType
+    };
+    const tmpPath = discoveryPath + ".tmp";
+    writeFileSync2(tmpPath, JSON.stringify(discoveryData));
+    renameSync2(tmpPath, discoveryPath);
+    _discoveryPath = discoveryPath;
+    dbg2(`discovery file written: ${discoveryPath} member=${discoveryData.memberId ?? "unregistered"} depth=${discoveryData.spawnDepth} parent=${discoveryData.parentMemberId ?? "ROOT"}`);
+  } catch (e2) {
+    dbg2("discovery file write failed:", e2?.message);
+  }
+  await syncLifecycle({ action: "online", reason: "listener_ready", force: true });
+  runDegradedActivityCatchup("listener_ready");
+  const drainInterval = setInterval(async () => {
+    if (queue.length === 0)
+      return;
+    try {
+      if (await isAgentBusy())
+        return;
+      const event = queue.shift();
+      const ok = await injectWakeEvent(event, config.sessionId);
+      if (queue.length === 0)
+        await syncLifecycle({ action: "resting", event, currentTaskId: extractWakeTaskId(event), reason: ok ? "queue_drained" : "queue_empty_after_failed_drain" });
+      dbg2(`drain: ${event.eventId} ${ok ? "injected" : "failed"}`);
+    } catch (e2) {
+      dbg2("drain error:", e2?.message);
+    }
+  }, retryInterval * 1000);
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned)
+      return;
+    cleaned = true;
+    clearInterval(drainInterval);
+    syncLifecycle({ action: "offline", reason: "listener_stop", force: true });
+    try {
+      if (_discoveryPath)
+        unlinkSync(_discoveryPath);
+    } catch {}
+    try {
+      server.stop();
+    } catch {}
+    dbg2("cleanup complete");
+  };
+  process.on("exit", cleanup);
+  process.on("SIGTERM", cleanup);
+  process.on("SIGINT", cleanup);
+  return {
+    port: actualPort,
+    token,
+    server,
+    stop: cleanup
+  };
+}
+function stopWakeListener(handle) {
+  try {
+    handle.stop();
+  } catch (e2) {
+    dbg2("stopWakeListener error:", e2?.message);
+  }
+}
+var DEBUG, LOG_FILE3, MAX_QUEUE_DEFAULT = 50, BUSY_RETRY_INTERVAL_DEFAULT = 5, STARTUP_TS, FALLBACK_REPLAY_LIMIT = 20, FALLBACK_REPLAY_TIMEOUT_MS = 3000, DEDUP_CACHE_LIMIT = 500, warmChannels, _agentIdentity = null, _sdkClient = null, LIFECYCLE_SYNC_MIN_INTERVAL_MS = 30000, _lifecycleLastSyncAt = 0, _lifecycleLastKey = "", _lifecycleConfig = null, _lifecycleMemberId = null, _lastActivityCursor = null, _seenWakeEventIds, _seenWakeFingerprints, _taskSyncKeys, _currentSubscribe = null, _currentSubscribePreset = null, _currentMemberType = "unknown", _spawnTotal = 0, _currentDepth = null, _parentMemberId, _parentSessionId, HELPER_TIMEOUT_MS = 60000, _activeHelperTimestamps, _cachedSessionId = null, _discoveryPath = null, _agentDirectory = null;
+var init_wake_listener = __esm(() => {
+  init_wake_types();
+  DEBUG = process.env.WAKE_LISTENER_DEBUG !== "0";
+  LOG_FILE3 = join6(homedir6(), ".claude", "wake-listener-debug.log");
+  STARTUP_TS = Date.now();
+  warmChannels = new Map;
+  _seenWakeEventIds = new Set;
+  _seenWakeFingerprints = new Set;
+  _taskSyncKeys = new Set;
+  _parentMemberId = process.env.__PARENT_MEMBER_ID ?? null;
+  _parentSessionId = process.env.__PARENT_SESSION_ID ?? null;
+  _activeHelperTimestamps = [];
+});
+
+// ../opencode-signal-wire/wake-preferences.ts
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync as renameSync3, existsSync as existsSync2 } from "fs";
+import { join as join7, dirname as dirname3 } from "path";
+import { homedir as homedir7 } from "os";
+function projectPrefsPath(cwd) {
+  return join7(cwd, ".opencode", "wake-preferences.json");
+}
+function loadPreferences(cwd) {
+  let global = null;
+  let project = null;
+  try {
+    if (existsSync2(GLOBAL_PREFS_PATH)) {
+      global = JSON.parse(readFileSync3(GLOBAL_PREFS_PATH, "utf-8"));
+    }
+  } catch {}
+  if (cwd) {
+    try {
+      const pp = projectPrefsPath(cwd);
+      if (existsSync2(pp)) {
+        project = JSON.parse(readFileSync3(pp, "utf-8"));
+      }
+    } catch {}
+  }
+  return project ?? global;
+}
+function defaultPresetFor(memberType) {
+  switch (memberType) {
+    case "human":
+      return "human";
+    case "agent":
+      return "agent";
+    default:
+      return "agent";
+  }
+}
+function computeSubscribe(prefs, memberType) {
+  if (prefs) {
+    return { subscribe: prefs.subscribe, preset: prefs.preset ?? null };
+  }
+  const preset = defaultPresetFor(memberType);
+  return { subscribe: WAKE_PRESETS[preset], preset };
+}
+var WAKE_PRESETS, PRESET_NAMES, GLOBAL_PREFS_PATH;
+var init_wake_preferences = __esm(() => {
+  init_wake_types();
+  WAKE_PRESETS = {
+    human: ["task_assigned", "delegation_received", "mention"],
+    agent: ["*"],
+    pm: ["task_completed", "task_failed", "agent_stale", "delegation_received"],
+    quiet: []
+  };
+  PRESET_NAMES = Object.keys(WAKE_PRESETS);
+  GLOBAL_PREFS_PATH = join7(homedir7(), ".opencode", "wake-preferences.json");
+});
+
+// ../opencode-signal-wire/hook-listener.ts
+import { appendFileSync as appendFileSync5, existsSync as existsSync3, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4 } from "fs";
+import { createHash } from "crypto";
+import { homedir as homedir8 } from "os";
+import { join as join8 } from "path";
+function logHintPacked(hook, sessionId, out) {
+  try {
+    const line = `[${new Date().toISOString()}] {"step":"HINT_PACKED","hook":"${hook}","sessionId":"${sessionId ?? "?"}","total":${out.stats.total},"kept":${out.stats.kept},"deduped":${out.stats.deduped},"trimmed":${out.stats.trimmed},"bytes":${out.stats.bytes},"droppedDeduped":${JSON.stringify(out.droppedDeduped)},"droppedTrimmed":${JSON.stringify(out.droppedTrimmed)}}
+`;
+    appendFileSync5(RENDER_LOG, line);
+  } catch {}
+}
+function renderBudget() {
+  const env = process.env.SW_HINT_MAX_CHARS;
+  if (env) {
+    const n2 = Number(env);
+    if (Number.isFinite(n2) && n2 > 0)
+      return n2;
+  }
+  return 4000;
+}
+function normalizeToolBefore(input, output) {
+  return {
+    source: "hook",
+    type: EVT_TOOL_BEFORE,
+    sessionId: input.sessionID,
+    payload: {
+      tool: input.tool,
+      callID: input.callID,
+      args: output.args,
+      toolName: input.tool
+    },
+    timestamp: Date.now()
+  };
+}
+function normalizeToolAfter(input, output) {
+  return {
+    source: "hook",
+    type: EVT_TOOL_AFTER,
+    sessionId: input.sessionID,
+    payload: {
+      tool: input.tool,
+      toolName: input.tool,
+      callID: input.callID,
+      args: input.args,
+      output: output.output,
+      title: output.title,
+      response: { output: output.output }
+    },
+    timestamp: Date.now()
+  };
+}
+function normalizeChatMessage(input, output) {
+  const promptText = extractPromptText2(output.parts);
+  return {
+    source: "hook",
+    type: EVT_CHAT_MESSAGE,
+    sessionId: input.sessionID,
+    payload: {
+      parts: output.parts,
+      message: output.message,
+      agent: input.agent,
+      messageID: input.messageID,
+      prompt: promptText
+    },
+    timestamp: Date.now()
+  };
+}
+function extractPromptText2(parts) {
+  if (!Array.isArray(parts))
+    return "";
+  const texts = [];
+  for (const p2 of parts) {
+    if (p2 && typeof p2 === "object") {
+      const part = p2;
+      if (part.type === "text" && typeof part.text === "string") {
+        texts.push(part.text);
+      }
+    }
+  }
+  return texts.join(`
+`);
+}
+function applyHintResults(results, output, sessionId) {
+  const packed = packHints(results, { maxChars: renderBudget() });
+  if (packed.text.length === 0)
+    return 0;
+  output.output = `${output.output}
+${packed.text}`;
+  logHintPacked("tool.execute.after", sessionId ?? null, packed);
+  return packed.stats.kept;
+}
+function resolveOpencodeToolOutputDir() {
+  return join8(homedir8(), ".local", "share", "opencode", "tool-output");
+}
+function computeContentHash(content) {
+  return createHash("sha256").update(content).digest("hex").slice(0, 12);
+}
+function logCompactDiag(sessionId, ruleId, outcome, bytesDropped, linesDropped) {
+  try {
+    const line = `[${new Date().toISOString()}] {"step":"COMPACT","hook":"tool.execute.after","sessionId":"${sessionId ?? "?"}","ruleId":"${ruleId ?? "none"}","outcome":"${outcome}","bytesDropped":${bytesDropped},"linesDropped":${linesDropped}}
+`;
+    appendFileSync5(RENDER_LOG, line);
+  } catch {}
+}
+function writeFallbackFile(ruleId, rawOutput) {
+  try {
+    const dir = resolveOpencodeToolOutputDir();
+    if (!existsSync3(dir)) {
+      mkdirSync4(dir, { recursive: true });
+    }
+    const hash = computeContentHash(rawOutput);
+    const safeRuleId = ruleId.replace(/[^a-z0-9-]/gi, "-") || "unknown";
+    const filename = `tool_sw_${safeRuleId}_${hash}`;
+    const fullPath = join8(dir, filename);
+    if (!existsSync3(fullPath)) {
+      writeFileSync4(fullPath, rawOutput, "utf8");
+    }
+    return fullPath;
+  } catch {
+    return null;
+  }
+}
+function applyCompactResults(results, output, sessionId) {
+  if (COMPACTED_MARKER_RE.test(output.output)) {
+    logCompactDiag(sessionId ?? null, null, "already-compacted", 0, 0);
+    return { compacted: false, outcome: "already-compacted", bytesDropped: 0, linesDropped: 0, ruleId: null };
+  }
+  const rawOriginal = output.output;
+  for (const r2 of results) {
+    if (r2.type !== "compact")
+      continue;
+    if (r2.success && r2.compactOutcome === "compacted" && typeof r2.hintText === "string") {
+      let body = r2.hintText;
+      const ruleId = r2.ruleId ?? null;
+      if (r2.compactNeedsFallback === true) {
+        const fallbackPath = writeFallbackFile(ruleId ?? "unknown", rawOriginal);
+        if (fallbackPath === null) {
+          logCompactDiag(sessionId ?? null, ruleId, "error", 0, 0);
+          continue;
+        }
+        body = body.split(SW_FALLBACK_PATH_SENTINEL).join(fallbackPath);
+      }
+      output.output = body;
+      const bd = r2.bytesDropped ?? 0;
+      const ld = r2.linesDropped ?? 0;
+      logCompactDiag(sessionId ?? null, ruleId, "compacted", bd, ld);
+      return { compacted: true, outcome: "compacted", bytesDropped: bd, linesDropped: ld, ruleId };
+    }
+    if (r2.success && r2.compactOutcome === "already-compacted") {
+      logCompactDiag(sessionId ?? null, r2.ruleId ?? null, "already-compacted", 0, 0);
+      return { compacted: false, outcome: "already-compacted", bytesDropped: 0, linesDropped: 0, ruleId: r2.ruleId ?? null };
+    }
+    if (r2.success && (r2.compactOutcome === "output-too-small" || r2.compactOutcome === "no-match")) {
+      continue;
+    }
+    if (!r2.success || r2.compactOutcome === "error") {
+      logCompactDiag(sessionId ?? null, r2.ruleId ?? null, "error", 0, 0);
+      continue;
+    }
+  }
+  return { compacted: false, outcome: "no-match", bytesDropped: 0, linesDropped: 0, ruleId: null };
+}
+function applyBlockResults(results, output, toolName) {
+  for (const r2 of results) {
+    if (r2.type === "block" && r2.blocked === true) {
+      const reason = r2.reason ?? "blocked by signal-wire safety rule";
+      if (toolName === "Bash" || toolName === "bash") {
+        const args = output.args;
+        if (args && typeof args === "object") {
+          args.command = `echo '\uD83D\uDED1 SIGNAL-WIRE BLOCKED: ${reason.replace(/'/g, "'\\''")}'`;
+        }
+      } else {
+        output.args = {};
+      }
+      return reason;
+    }
+  }
+  return null;
+}
+function applyChatHintResults(results, output, sessionId) {
+  if (!Array.isArray(output.parts) || output.parts.length === 0)
+    return 0;
+  const packed = packHints(results, { maxChars: renderBudget() });
+  if (packed.text.length === 0)
+    return 0;
+  let targetIdx = -1;
+  for (let i2 = output.parts.length - 1;i2 >= 0; i2--) {
+    const p2 = output.parts[i2];
+    if (p2 && typeof p2 === "object" && p2.type === "text" && typeof p2.text === "string") {
+      targetIdx = i2;
+      break;
+    }
+  }
+  if (targetIdx < 0)
+    return 0;
+  const target = output.parts[targetIdx];
+  target.text = `${target.text}
+${packed.text}`;
+  logHintPacked("chat.message", sessionId ?? null, packed);
+  return packed.stats.kept;
+}
+var RENDER_LOG, EVT_TOOL_BEFORE = "tool.before", EVT_TOOL_AFTER = "tool.after", EVT_CHAT_MESSAGE = "chat.message", COMPACTED_MARKER_RE;
+var init_hook_listener = __esm(() => {
+  init_dist();
+  RENDER_LOG = join8(homedir8(), ".claude", "opencode-signal-wire-debug.log");
+  COMPACTED_MARKER_RE = /^<!--sw:compacted:[a-z0-9-]+-->/;
+});
+
+// ../opencode-signal-wire/quota-watcher.ts
+import { existsSync as existsSync4, readFileSync as readFileSync4, watch } from "fs";
+import { homedir as homedir9 } from "os";
+import { join as join9 } from "path";
+import { randomUUID as randomUUID2 } from "crypto";
+function startQuotaWatcher(opts) {
+  const { signalWire, resolveSessionId: resolveSessionId2, log } = opts;
+  const myPid = process.pid;
+  const lastIssuedAt = new Map;
+  const lastLevel = new Map;
+  let pendingForAccount = null;
+  let watcher = null;
+  let debounceTimer = null;
+  let retryTimer = null;
+  function readStatus() {
+    try {
+      if (!existsSync4(QUOTA_STATUS_JSON))
+        return null;
+      const raw = readFileSync4(QUOTA_STATUS_JSON, "utf8");
+      return JSON.parse(raw);
+    } catch (e2) {
+      log(`quota-watcher: read failed: ${e2?.message ?? e2}`);
+      return null;
+    }
+  }
+  function findMyAccount(status) {
+    const myPidState = status.pids[String(myPid)];
+    if (myPidState) {
+      const acc = status.accounts[myPidState.accountHint];
+      if (acc)
+        return acc;
+    }
+    for (const acc of Object.values(status.accounts)) {
+      if (acc.pids.includes(myPid))
+        return acc;
+    }
+    return null;
+  }
+  function synthesizeWakeEvent(account, type, extras = {}) {
+    return {
+      eventId: `quota-${type}-${randomUUID2()}`,
+      source: "proxy",
+      type,
+      priority: type === "quota_critical" ? "urgent" : "info",
+      targetMemberId: "",
+      payload: {
+        accountHint: account.accountHint,
+        util5h: account.util5h,
+        util7d: account.util7d,
+        resetAt: account.resetAt,
+        level: account.level,
+        message: account.message,
+        issuedAt: account.issuedAt,
+        pids: account.pids,
+        ...extras.previousLevel !== undefined ? { previousLevel: extras.previousLevel } : {}
+      },
+      timestamp: new Date().toISOString(),
+      fingerprint: `${account.accountHint}:${account.issuedAt}:${type}`,
+      schemaVersion: 1
+    };
+  }
+  async function dispatchQuotaEvent(account, previousLevel) {
+    let type;
+    if (account.level === "critical") {
+      type = "quota_critical";
+    } else if (account.level === "warning") {
+      type = previousLevel === "critical" ? "quota_recovered" : "quota_warning";
+    } else {
+      if (previousLevel === undefined || previousLevel === "ok") {
+        return true;
+      }
+      type = "quota_recovered";
+    }
+    const event = synthesizeWakeEvent(account, type, { previousLevel });
+    let engineMatched = false;
+    if (signalWire) {
+      try {
+        const result = await signalWire.evaluateExternal(event);
+        engineMatched = Boolean(result?.matched);
+        if (!engineMatched) {
+          log(`quota-watcher: engine declined ${type} for account=${account.accountHint} issuedAt=${account.issuedAt} (cooldown or no-match)`);
+          return true;
+        }
+      } catch (e2) {
+        log(`quota-watcher: engine error (${e2?.message ?? e2}), falling back to bypass-engine inject`);
+      }
+    } else {
+      log(`quota-watcher: signalWire absent, using bypass-engine inject (degraded mode)`);
+    }
+    const sessionId = resolveSessionId2();
+    if (!sessionId) {
+      log(`quota-watcher: session not bound, deferring ${type} for account=${account.accountHint}`);
+      pendingForAccount = account.accountHint;
+      return false;
+    }
+    const ok = await injectContextEvent(event, sessionId);
+    if (ok) {
+      log(`quota-watcher: injected ${type} for account=${account.accountHint} (engineMatched=${engineMatched})`);
+    } else {
+      log(`quota-watcher: inject failed for ${type} account=${account.accountHint} (engineMatched=${engineMatched})`);
+    }
+    return ok;
+  }
+  async function check() {
+    const status = readStatus();
+    if (!status)
+      return;
+    const myAccount = findMyAccount(status);
+    if (!myAccount)
+      return;
+    const previousLevel = lastLevel.get(myAccount.accountHint);
+    const lastSeen = lastIssuedAt.get(myAccount.accountHint);
+    if (myAccount.level === "ok") {
+      if (previousLevel === "warning" || previousLevel === "critical") {
+        const ok2 = await dispatchQuotaEvent(myAccount, previousLevel);
+        if (ok2) {
+          lastLevel.set(myAccount.accountHint, "ok");
+          lastIssuedAt.set(myAccount.accountHint, myAccount.issuedAt);
+          pendingForAccount = null;
+          log(`quota-watcher: recovered ${previousLevel}\u2192ok for account=${myAccount.accountHint}`);
+        }
+        return;
+      }
+      lastLevel.set(myAccount.accountHint, "ok");
+      pendingForAccount = null;
+      return;
+    }
+    if (lastSeen === myAccount.issuedAt && previousLevel === myAccount.level) {
+      return;
+    }
+    const ok = await dispatchQuotaEvent(myAccount, previousLevel);
+    if (ok) {
+      lastIssuedAt.set(myAccount.accountHint, myAccount.issuedAt);
+      lastLevel.set(myAccount.accountHint, myAccount.level);
+      pendingForAccount = null;
+    }
+  }
+  async function injectCurrentSnapshot() {
+    const status = readStatus();
+    if (!status) {
+      log(`quota-watcher: on-demand snapshot \u2014 no quota-status.json (proxy not running?)`);
+      return false;
+    }
+    const myAccount = findMyAccount(status);
+    if (!myAccount) {
+      log(`quota-watcher: on-demand snapshot \u2014 pid ${myPid} not registered with proxy yet`);
+      return false;
+    }
+    const event = synthesizeWakeEvent(myAccount, "quota_status");
+    const sessionId = resolveSessionId2();
+    if (!sessionId) {
+      log(`quota-watcher: on-demand snapshot \u2014 session not bound`);
+      return false;
+    }
+    if (signalWire) {
+      try {
+        await signalWire.evaluateExternal(event);
+      } catch (e2) {
+        log(`quota-watcher: on-demand engine error: ${e2?.message ?? e2}`);
+      }
+    }
+    const ok = await injectContextEvent(event, sessionId);
+    log(`quota-watcher: on-demand snapshot ${ok ? "injected" : "failed"} for account=${myAccount.accountHint} level=${myAccount.level}`);
+    return ok;
+  }
+  function scheduleCheck() {
+    if (debounceTimer)
+      clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      check();
+    }, DEBOUNCE_MS);
+  }
+  try {
+    watcher = watch(join9(homedir9(), ".claude-local"), { persistent: false }, (_evt, filename) => {
+      if (filename === "quota-status.json" || filename === "quota-status.json.tmp") {
+        scheduleCheck();
+      }
+    });
+    watcher?.unref?.();
+    log(`quota-watcher: started (pid=${myPid}, watching ${QUOTA_STATUS_JSON})`);
+  } catch (e2) {
+    log(`quota-watcher: fs.watch failed: ${e2?.message ?? e2}`);
+  }
+  check();
+  retryTimer = setInterval(() => {
+    if (pendingForAccount)
+      check();
+  }, RETRY_NO_SESSION_MS);
+  retryTimer?.unref?.();
+  return {
+    stop: () => {
+      if (watcher)
+        watcher.close();
+      if (debounceTimer)
+        clearTimeout(debounceTimer);
+      if (retryTimer)
+        clearInterval(retryTimer);
+    },
+    forceCheck: check,
+    injectCurrentSnapshot
+  };
+}
+var QUOTA_STATUS_JSON, DEBOUNCE_MS = 200, RETRY_NO_SESSION_MS = 5000;
+var init_quota_watcher = __esm(() => {
+  init_wake_listener();
+  QUOTA_STATUS_JSON = join9(homedir9(), ".claude-local", "quota-status.json");
+});
+
+// ../opencode-signal-wire/token-rotation-bridge.ts
+function createContextTokensProvider(source) {
+  return () => {
+    if (!source?.getContextPosition)
+      return null;
+    try {
+      const tokens = source.getContextPosition();
+      if (typeof tokens !== "number" || !Number.isFinite(tokens))
+        return null;
+      return tokens > 0 ? tokens : null;
+    } catch {
+      return null;
+    }
+  };
+}
+function createTokenRotationEmitter(sessionId, spawnDepth, signalWireEmit) {
+  return (payload) => {
+    if (payload.mode === "same-org")
+      return;
+    try {
+      const enriched = {
+        ...payload,
+        sessionId: sessionId ?? payload.sessionId,
+        spawnDepth: spawnDepth ?? payload.spawnDepth,
+        forcedReasonSuffix: payload.forcedReason ? `: ${payload.forcedReason}` : "",
+        actionHint: actionHintFor(payload)
+      };
+      signalWireEmit({
+        type: "token.rotated",
+        payload: enriched,
+        sessionId: sessionId ?? payload.sessionId
+      });
+    } catch {}
+  };
+}
+function actionHintFor(payload) {
+  if (payload.mode === "deferred") {
+    return "Will apply on your next message or token expiry";
+  }
+  if (payload.mode === "forced") {
+    return "Old token dead \u2014 auto-switched";
+  }
+  if (payload.mode === "applied") {
+    if (payload.appliedAt === "turn-boundary")
+      return "Switched at turn boundary";
+    if (payload.appliedAt === "context-drop")
+      return "Switched after context dropped";
+    return "Switched immediately";
+  }
+  return "";
+}
+function wireTokenRotation(sdk, sessionId, spawnDepth, signalWireEmit) {
+  const emitter = createTokenRotationEmitter(sessionId, spawnDepth, signalWireEmit);
+  sdk.tokenRotation.setEventEmitter(emitter);
+  setBoundSdk(sdk);
+}
+function setBoundSdk(sdk) {
+  _boundSdk = sdk;
+}
+function getBoundSdk() {
+  return _boundSdk;
+}
+function setCurrentSignalWire(engine2) {
+  _currentSignalWire = engine2;
+}
+function getCurrentSignalWire() {
+  return _currentSignalWire;
+}
+function createLazyContextTokensProvider() {
+  return () => {
+    const engine2 = _currentSignalWire;
+    if (!engine2?.getContextPosition)
+      return null;
+    try {
+      const tokens = engine2.getContextPosition();
+      if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0)
+        return null;
+      return tokens;
+    } catch {
+      return null;
+    }
+  };
+}
+var _boundSdk = null, _currentSignalWire = null;
+
+// ../opencode-signal-wire/plugin.ts
+import { appendFileSync as appendFileSync6, existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
+import { homedir as homedir10 } from "os";
+import { join as join10 } from "path";
+function dbg3(...args) {
+  if (!DEBUG2)
+    return;
+  try {
+    appendFileSync6(LOG_FILE4, `[${new Date().toISOString()}] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
+`);
+  } catch {}
+}
+function logStep(step, details = {}) {
+  startupSeq++;
+  dbg3({ seq: startupSeq, step, ...details });
+}
+function maskPresence(value) {
+  return value === undefined || value === null || value === "" ? "absent" : "present";
+}
+function readOwnPackage() {
+  const path = join10(import.meta.dir, "package.json");
+  try {
+    const pkg = JSON.parse(readFileSync5(path, "utf-8"));
+    return { name: pkg.name ?? "unknown", version: pkg.version ?? "unknown", path };
+  } catch {
+    return { name: "unknown", version: "unknown", path };
+  }
+}
+function getServerUrl(input) {
+  if (typeof input?.serverUrl === "object" && input.serverUrl?.href)
+    return input.serverUrl.href.replace(/\/$/, "");
+  if (typeof input?.serverUrl === "string")
+    return input.serverUrl.replace(/\/$/, "");
+  return "";
+}
+function readProjectConfig(cwd) {
+  try {
+    const configPath = join10(cwd, "opencode.json");
+    if (!existsSync5(configPath))
+      return null;
+    return JSON.parse(readFileSync5(configPath, "utf-8"));
+  } catch (e2) {
+    dbg3(`config read failed: ${e2?.message}`);
+    return null;
+  }
+}
+function resolveMemberHints(cwd) {
+  const config = readProjectConfig(cwd);
+  const synqHeaders = config?.mcp?.synqtask?.headers;
+  const agentRegistration = config?.wake?.agentRegistration ?? config?.synqtask?.agentRegistration ?? null;
+  const memberId = synqHeaders?.["X-Agent-Id"] ?? process.env.SYNQTASK_MEMBER_ID;
+  return {
+    memberId,
+    memberType: synqHeaders?.["X-Agent-Id"] ? "agent" : memberId ? "unknown" : "unknown",
+    agentRegistration,
+    projectConfigFound: Boolean(config),
+    agentIdSource: synqHeaders?.["X-Agent-Id"] ? "opencode.json" : process.env.SYNQTASK_MEMBER_ID ? "env" : "none"
+  };
+}
+function createSignalWire(serverUrl, sessionId, sdkClient) {
+  const signalWire = new SignalWire({ serverUrl, sessionId });
+  signalWire.setSdkClient(sdkClient);
+  return signalWire;
+}
+function eventTypeOf(event) {
+  return event?.type ?? event?.name ?? event?.event ?? "unknown";
+}
+function eventPayloadOf(event) {
+  return event?.properties ?? event?.payload ?? event?.data ?? event;
+}
+function sessionFromEvent(event) {
+  const payload = eventPayloadOf(event);
+  const session = payload?.session ?? payload;
+  return {
+    id: session?.id ?? payload?.sessionID ?? payload?.sessionId,
+    directory: session?.directory ?? payload?.directory
+  };
+}
+async function findNewSessionByDirectory(client, directory, notBeforeMs) {
+  if (!client?.session?.list)
+    return { count: 0 };
+  const { data } = await client.session.list();
+  if (!Array.isArray(data))
+    return { count: 0 };
+  const candidates = data.filter((session) => {
+    const created = Number(session?.time?.created ?? session?.createdAt ?? 0);
+    return session?.directory === directory && created >= notBeforeMs;
+  });
+  if (candidates.length !== 1)
+    return { count: candidates.length };
+  return { id: candidates[0].id, directory: candidates[0].directory, count: 1 };
+}
+async function handlePreToolUseSpawnCheck(toolName, sessionId, input) {
+  const spawnTools = ["task", "Task", "task_tool", "call_omo_agent"];
+  if (!spawnTools.includes(toolName))
+    return;
+  try {
+    const identity = getAgentIdentity();
+    const depth = await resolveCurrentDepth(sessionId);
+    if (!identity || !identity.roleName) {
+      const maxDepth = parseInt(process.env.__MAX_HELPER_DEPTH ?? "1", 10);
+      if (depth >= maxDepth) {
+        return {
+          decision: "block",
+          message: [
+            `Helper blocked: depth ${depth}/${maxDepth}.`,
+            `Do the work yourself and return the result; do not spawn another task agent at this level.`
+          ].join(`
+`)
+        };
+      }
+      helperStarted();
+      dbg3(`helper spawn OK depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()}`);
+      return;
+    }
+    const check = checkSpawnAllowed(identity, depth, getSpawnActive());
+    if (!check.allowed) {
+      const roleName = identity.roleName ?? "unknown";
+      const reason = check.depth >= check.maxDepth ? `Depth ${check.depth}/${check.maxDepth} for role '${roleName}'.` : `Active helpers ${check.active}/${check.maxConcurrent} for role '${roleName}'.`;
+      return {
+        decision: "block",
+        message: [`Spawn blocked: ${reason}`, `Do the work yourself or coordinate through SynqTask instead of spawning.`].join(`
+`)
+      };
+    }
+    const description = String(input?.description ?? input?.prompt ?? input?.message ?? "");
+    if (description.length < 200) {
+      return {
+        decision: "block",
+        message: `Delegation blocked: description too short (${description.length} chars, need 200+). Include concrete task, constraints, files, and expected output.`
+      };
+    }
+    helperStarted();
+    dbg3(`agent spawn OK role=${identity.roleName} depth=${depth} active=${getSpawnActive()} total=${getSpawnTotal()}`);
+  } catch (e2) {
+    dbg3(`pre_tool_use spawn check failed-open: ${e2?.message}`);
+  }
+  return;
+}
+var DEBUG2, LOG_FILE4, startupSeq = 0, plugin_default;
+var init_plugin = __esm(() => {
+  init_signal_wire();
+  init_wake_listener();
+  init_wake_preferences();
+  init_hook_listener();
+  init_quota_watcher();
+  DEBUG2 = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== "0";
+  LOG_FILE4 = join10(homedir10(), ".claude", "opencode-signal-wire-debug.log");
+  plugin_default = {
+    id: "opencode-signal-wire",
+    server: async (input) => {
+      startupSeq = 0;
+      const startupMs = Date.now();
+      const pkg = readOwnPackage();
+      const cwd = input.directory ?? process.cwd();
+      const serverUrl = getServerUrl(input);
+      const sessionId = input.sessionID ?? "unknown";
+      let agentInstanceId = process.env.OPENCODE_AGENT_INSTANCE_ID ?? `opencode:${sessionId}:${process.pid}`;
+      const { memberId, memberType, agentRegistration, projectConfigFound, agentIdSource } = resolveMemberHints(cwd);
+      logStep("PLUGIN_BANNER", {
+        package: pkg.name,
+        version: pkg.version,
+        packageJson: pkg.path,
+        entrypoint: import.meta.url,
+        pid: process.pid,
+        cwd,
+        node: process.version
+      });
+      logStep("RUNTIME_INPUT", {
+        serverUrl: maskPresence(serverUrl),
+        directory: cwd,
+        sessionID: maskPresence(input.sessionID),
+        client: maskPresence(input.client)
+      });
+      logStep("ENV_SUMMARY", {
+        OPENCODE_AGENT_INSTANCE_ID: maskPresence(process.env.OPENCODE_AGENT_INSTANCE_ID),
+        SYNQTASK_API_URL: maskPresence(process.env.SYNQTASK_API_URL),
+        SYNQTASK_MEMBER_ID: maskPresence(process.env.SYNQTASK_MEMBER_ID),
+        SYNQTASK_AGENT_REGISTRATION: process.env.SYNQTASK_AGENT_REGISTRATION === "1" ? "enabled" : "disabled",
+        SYNQTASK_REGISTER_AGENT: process.env.SYNQTASK_REGISTER_AGENT === "1" ? "enabled" : "disabled",
+        SYNQTASK_AGENT_NAME: maskPresence(process.env.SYNQTASK_AGENT_NAME),
+        SYNQTASK_SPACE_ID: maskPresence(process.env.SYNQTASK_SPACE_ID),
+        WAKE_LISTENER_DEBUG: process.env.WAKE_LISTENER_DEBUG ?? "unset",
+        OPENCODE_SIGNAL_WIRE_DEBUG: process.env.OPENCODE_SIGNAL_WIRE_DEBUG ?? "unset"
+      });
+      logStep("IDENTITY_HINTS", {
+        sessionId,
+        agentInstanceId,
+        agentInstanceIdSource: process.env.OPENCODE_AGENT_INSTANCE_ID ? "env" : "generated",
+        memberId: maskPresence(memberId),
+        memberType,
+        agentIdSource,
+        projectConfigFound,
+        agentRegistrationConfig: agentRegistration ? "present" : "absent"
+      });
+      const prefs = loadPreferences(cwd);
+      const { subscribe, preset } = computeSubscribe(prefs, memberType);
+      logStep("WAKE_PREFERENCES", {
+        preset: preset ?? "default",
+        subscribe: subscribe ?? "default"
+      });
+      const signalWire = serverUrl ? createSignalWire(serverUrl, sessionId, input.client) : null;
+      logStep("SIGNAL_WIRE_ENGINE", {
+        created: Boolean(signalWire),
+        reason: signalWire ? "serverUrl_present" : "serverUrl_absent"
+      });
+      if (signalWire) {
+        try {
+          setCurrentSignalWire(signalWire);
+        } catch {}
+      }
+      const signalWireEngine = signalWire ? {
+        evaluateExternal: async (event) => {
+          const result = await signalWire.evaluateExternal(event);
+          const hintTexts = [];
+          for (const r2 of result.results) {
+            const ar = r2;
+            if ((ar.type === "hint" || ar.type === "respond") && ar.success && ar.hintText) {
+              hintTexts.push(ar.hintText);
+            }
+          }
+          return {
+            matched: result.matched.length > 0,
+            matchedCount: result.matched.length,
+            actionsExecuted: result.results.map((r2) => ({ type: r2.type, wakeTriggered: Boolean(r2.wakeTriggered) })),
+            wakeTriggered: result.results.some((r2) => Boolean(r2.wakeTriggered)),
+            hintTexts
+          };
+        },
+        evaluateHook: (event) => signalWire.evaluateHook(event)
+      } : null;
+      let wakeHandle = null;
+      let boundSessionId = sessionId !== "unknown" ? sessionId : null;
+      const bindSession = (candidateSessionId, reason, directory) => {
+        if (!candidateSessionId)
+          return false;
+        if (boundSessionId && boundSessionId !== candidateSessionId) {
+          logStep("SESSION_BIND_SKIPPED", { reason: "already_bound", existing: boundSessionId, candidate: candidateSessionId });
+          return false;
+        }
+        if (!process.env.OPENCODE_AGENT_INSTANCE_ID && agentInstanceId.includes(":unknown:")) {
+          agentInstanceId = `opencode:${candidateSessionId}:${process.pid}`;
+        }
+        const bound = bindWakeListenerSession(wakeHandle, candidateSessionId, { agentInstanceId, reason });
+        if (bound)
+          boundSessionId = candidateSessionId;
+        logStep(bound ? "SESSION_BOUND" : "SESSION_BIND_SKIPPED", {
+          reason,
+          sessionId: candidateSessionId,
+          directory: directory ?? "absent",
+          agentInstanceId
+        });
+        return bound;
+      };
+      const scheduleSessionBindRetries = () => {
+        const delays = [250, 1000, 3000];
+        for (const delay of delays) {
+          setTimeout(() => {
+            (async () => {
+              if (boundSessionId)
+                return;
+              try {
+                const candidate = await findNewSessionByDirectory(input.client, cwd, startupMs);
+                if (candidate.count === 1 && candidate.id) {
+                  bindSession(candidate.id, `sdk_session_list_after_${delay}ms`, candidate.directory);
+                } else {
+                  logStep(candidate.count > 1 ? "SESSION_BIND_AMBIGUOUS" : "SESSION_BIND_WAITING", {
+                    reason: `sdk_session_list_after_${delay}ms`,
+                    directory: cwd,
+                    candidates: candidate.count
+                  });
+                }
+              } catch (e2) {
+                logStep("SESSION_BIND_WAITING", { reason: `sdk_session_list_failed_after_${delay}ms`, error: e2?.message ?? String(e2) });
+              }
+            })();
+          }, delay);
+        }
+      };
+      let quotaHandle = null;
+      if (serverUrl) {
+        try {
+          logStep("WAKE_LISTENER_STARTING", { sessionId, agentInstanceId });
+          wakeHandle = await startWakeListener({
+            serverUrl,
+            sessionId,
+            agentInstanceId,
+            memberId,
+            synqtaskUrl: process.env.SYNQTASK_API_URL,
+            signalWire: signalWireEngine,
+            sdkClient: input.client,
+            subscribe,
+            subscribePreset: preset ?? undefined,
+            memberType,
+            agentRegistration: {
+              enabled: Boolean(agentRegistration?.enabled) || process.env.SYNQTASK_AGENT_REGISTRATION === "1" || process.env.SYNQTASK_REGISTER_AGENT === "1",
+              name: agentRegistration?.name ?? process.env.SYNQTASK_AGENT_NAME,
+              displayName: agentRegistration?.displayName ?? process.env.SYNQTASK_AGENT_DISPLAY_NAME,
+              description: agentRegistration?.description ?? process.env.SYNQTASK_AGENT_DESCRIPTION,
+              spaceId: agentRegistration?.spaceId ?? process.env.SYNQTASK_SPACE_ID
+            }
+          });
+          logStep("WAKE_LISTENER_STARTED", {
+            port: wakeHandle.port,
+            sessionId,
+            agentInstanceId,
+            token: wakeHandle.token ? `${wakeHandle.token.slice(0, 8)}...` : "absent"
+          });
+          scheduleSessionBindRetries();
+        } catch (e2) {
+          logStep("WAKE_LISTENER_FAILED_OPEN", { error: e2?.message ?? String(e2) });
+        }
+      } else {
+        logStep("WAKE_LISTENER_SKIPPED", { reason: "serverUrl_absent", sessionId });
+      }
+      try {
+        quotaHandle = startQuotaWatcher({
+          signalWire: signalWireEngine,
+          resolveSessionId: () => boundSessionId ?? (sessionId !== "unknown" ? sessionId : null),
+          log: (msg) => dbg3(msg)
+        });
+        logStep("QUOTA_WATCHER_STARTED", { pid: process.pid });
+      } catch (e2) {
+        logStep("QUOTA_WATCHER_FAILED_OPEN", { error: e2?.message ?? String(e2) });
+      }
+      return {
+        event: async ({ event }) => {
+          const eventType = eventTypeOf(event);
+          logStep("OPENCODE_EVENT", {
+            eventType,
+            keys: event && typeof event === "object" ? Object.keys(event).slice(0, 10) : []
+          });
+          if (eventType === "session.created" || eventType === "session.updated") {
+            const session = sessionFromEvent(event);
+            if (session.id && (!session.directory || session.directory === cwd)) {
+              bindSession(session.id, eventType, session.directory);
+            } else {
+              logStep("SESSION_BIND_SKIPPED", {
+                eventType,
+                reason: session.id ? "directory_mismatch_or_absent" : "missing_session_id",
+                sessionId: session.id ?? "absent",
+                directory: session.directory ?? "absent"
+              });
+            }
+          }
+          if (eventType === "app.exit" || eventType === "server.stop") {
+            try {
+              if (wakeHandle) {
+                stopWakeListener(wakeHandle);
+                logStep("WAKE_LISTENER_STOPPED", { eventType });
+              }
+            } catch (e2) {
+              logStep("WAKE_LISTENER_STOP_FAILED_OPEN", { error: e2?.message ?? String(e2) });
+            }
+            try {
+              if (quotaHandle) {
+                quotaHandle.stop();
+                logStep("QUOTA_WATCHER_STOPPED", { eventType });
+              }
+            } catch (e2) {
+              logStep("QUOTA_WATCHER_STOP_FAILED_OPEN", { error: e2?.message ?? String(e2) });
+            }
+          }
+        },
+        pre_tool_use: async ({ toolName, input: input2 }) => {
+          return await handlePreToolUseSpawnCheck(toolName, boundSessionId ?? sessionId, input2);
+        },
+        "chat.message": async (input2, output) => {
+          try {
+            const sdk = getBoundSdk();
+            if (sdk?.tokenRotation?.hasPending?.() && sdk.tokenRotation.applyPending) {
+              await sdk.tokenRotation.applyPending("turn-boundary").catch((e2) => {
+                logStep("TOKEN_ROTATION_TURN_BOUNDARY_FAILED_OPEN", {
+                  error: e2?.message ?? String(e2)
+                });
+              });
+            }
+          } catch (e2) {
+            logStep("TOKEN_ROTATION_TURN_BOUNDARY_FAILED_OPEN", {
+              error: e2?.message ?? String(e2)
+            });
+          }
+          if (!signalWireEngine)
+            return;
+          try {
+            const event = normalizeChatMessage(input2 ?? {}, output ?? { parts: [] });
+            if (!event.sessionId && boundSessionId) {
+              event.sessionId = boundSessionId;
+            }
+            const modelId = input2?.model?.modelID;
+            if (typeof modelId === "string" && modelId.length > 0) {
+              try {
+                signalWireEngine.trackModel?.(modelId);
+              } catch {}
+            }
+            try {
+              let totalChars = 0;
+              const parts = output?.parts;
+              if (Array.isArray(parts)) {
+                for (const p2 of parts) {
+                  const t2 = p2?.text;
+                  if (typeof t2 === "string")
+                    totalChars += t2.length;
+                }
+              }
+              if (totalChars > 0) {
+                signalWireEngine.trackTokens?.({ inputTokens: Math.ceil(totalChars / 4) });
+              }
+            } catch {}
+            const results = await signalWireEngine.evaluateHook(event);
+            const matched = results.length;
+            if (matched > 0) {
+              const injected = applyChatHintResults(results, output ?? { parts: [] }, event.sessionId);
+              logStep("HOOK_FIRED", {
+                hook: "chat.message",
+                sessionId: event.sessionId ?? "unbound",
+                matched,
+                hintsInjected: injected
+              });
+              const triggeredOnDemand = results.some((r2) => r2?.ruleId === "quota-on-demand-trigger");
+              if (triggeredOnDemand && quotaHandle) {
+                quotaHandle.injectCurrentSnapshot().catch(() => {});
+                logStep("QUOTA_ON_DEMAND_TRIGGERED", {
+                  sessionId: event.sessionId ?? "unbound"
+                });
+              }
+            }
+          } catch (e2) {
+            logStep("HOOK_FAILED_OPEN", { hook: "chat.message", error: e2?.message ?? String(e2) });
+          }
+        },
+        "tool.execute.before": async (input2, output) => {
+          if (!signalWireEngine)
+            return;
+          try {
+            const event = normalizeToolBefore(input2 ?? { tool: "unknown", sessionID: "", callID: "" }, output ?? { args: {} });
+            if (!event.sessionId && boundSessionId) {
+              event.sessionId = boundSessionId;
+            }
+            const results = await signalWireEngine.evaluateHook(event);
+            if (results.length > 0) {
+              const blockReason = applyBlockResults(results, output ?? { args: {} }, input2?.tool);
+              logStep("HOOK_FIRED", {
+                hook: "tool.execute.before",
+                tool: input2?.tool,
+                sessionId: event.sessionId ?? "unbound",
+                matched: results.length,
+                blocked: Boolean(blockReason),
+                blockReason: blockReason ?? undefined
+              });
+            }
+          } catch (e2) {
+            logStep("HOOK_FAILED_OPEN", { hook: "tool.execute.before", error: e2?.message ?? String(e2) });
+          }
+        },
+        "tool.execute.after": async (input2, output) => {
+          if (!signalWireEngine)
+            return;
+          try {
+            const event = normalizeToolAfter(input2 ?? { tool: "unknown", sessionID: "", callID: "", args: {} }, output ?? { title: "", output: "", metadata: {} });
+            if (!event.sessionId && boundSessionId) {
+              event.sessionId = boundSessionId;
+            }
+            const results = await signalWireEngine.evaluateHook(event);
+            if (results.length > 0) {
+              const safeOutput = output ?? { output: "", title: "", metadata: {} };
+              const compactResult = applyCompactResults(results, safeOutput, event.sessionId);
+              const injected = applyHintResults(results, safeOutput, event.sessionId);
+              logStep("HOOK_FIRED", {
+                hook: "tool.execute.after",
+                tool: input2?.tool,
+                sessionId: event.sessionId ?? "unbound",
+                matched: results.length,
+                hintsInjected: injected,
+                ...compactResult.compacted && {
+                  compactRuleId: compactResult.ruleId,
+                  bytesDropped: compactResult.bytesDropped,
+                  linesDropped: compactResult.linesDropped
+                }
+              });
+            }
+          } catch (e2) {
+            logStep("HOOK_FAILED_OPEN", { hook: "tool.execute.after", error: e2?.message ?? String(e2) });
+          }
+        }
+      };
+    }
+  };
+});
+
+// ../opencode-signal-wire/index.ts
+var exports_opencode_signal_wire = {};
+__export(exports_opencode_signal_wire, {
+  wireTokenRotation: () => wireTokenRotation,
+  stopWakeListener: () => stopWakeListener,
+  startWakeListener: () => startWakeListener,
+  setIdentityError: () => setIdentityError,
+  setCurrentSignalWire: () => setCurrentSignalWire,
+  setBoundSdk: () => setBoundSdk,
+  resolveCurrentDepth: () => resolveCurrentDepth,
+  plugin: () => plugin_default,
+  loadPreferences: () => loadPreferences,
+  helperStarted: () => helperStarted,
+  helperFinished: () => helperFinished,
+  getSpawnTotal: () => getSpawnTotal,
+  getSpawnActive: () => getSpawnActive,
+  getIdentityError: () => getIdentityError,
+  getCurrentSignalWire: () => getCurrentSignalWire,
+  getBoundSdk: () => getBoundSdk,
+  getAgentIdentity: () => getAgentIdentity,
+  default: () => plugin_default,
+  createTokenRotationEmitter: () => createTokenRotationEmitter,
+  createLazyContextTokensProvider: () => createLazyContextTokensProvider,
+  createContextTokensProvider: () => createContextTokensProvider,
+  computeSubscribe: () => computeSubscribe,
+  checkSpawnAllowed: () => checkSpawnAllowed,
+  WARM_CHANNEL_TTL_MS: () => WARM_CHANNEL_TTL_MS,
+  WAKE_EVENT_TYPES: () => WAKE_EVENT_TYPES,
+  SignalWire: () => SignalWire,
+  DISCOVERY_DIR: () => DISCOVERY_DIR
+});
+function getIdentityError() {
+  return _identityError;
+}
+function setIdentityError(err) {
+  _identityError = err;
+}
+var _identityError = null;
+var init_opencode_signal_wire = __esm(() => {
+  init_signal_wire();
+  init_plugin();
+  init_plugin();
+  init_wake_listener();
+  init_wake_preferences();
+  init_wake_types();
+});
+
 // provider.ts
 import { appendFileSync as _traceWrite } from "fs";
 
@@ -38777,98 +44237,101 @@ import { appendFileSync as _traceWrite } from "fs";
 import { createHash as n, randomBytes as a } from "crypto";
 import { writeFileSync as o, readFileSync as l, mkdirSync as h, chmodSync as c } from "fs";
 import { dirname as u, join as d } from "path";
-import { homedir as f } from "os";
-import { createHash as x, randomBytes as I, randomUUID as N } from "crypto";
-import { readFileSync as L, writeFileSync as F, chmodSync as P, mkdirSync as U, rmdirSync as B, statSync as H, unlinkSync as J, appendFileSync as W } from "fs";
-import { join as K } from "path";
+import { homedir as p } from "os";
+import { createHash as C, randomBytes as x, randomUUID as N } from "crypto";
+import { readFileSync as L, writeFileSync as P, chmodSync as F, mkdirSync as H, rmdirSync as B, statSync as U, unlinkSync as K, appendFileSync as W } from "fs";
+import { join as J } from "path";
 import { homedir as j } from "os";
-import { appendFileSync as ie, mkdirSync as se, readdirSync as re, statSync as ne, unlinkSync as ae, writeFileSync as oe } from "fs";
-import { createHash as le } from "crypto";
-import { homedir as he } from "os";
-import { join as ce } from "path";
-import { statSync as ue, readFileSync as de } from "fs";
-import { homedir as fe } from "os";
-import { join as pe } from "path";
-import { readFileSync as Ze, writeFileSync as et, mkdirSync as tt } from "fs";
-import { dirname as it } from "path";
-import { randomUUID as st } from "crypto";
-import { readFileSync as ot, statSync as lt } from "fs";
-import { spawn as Rt, spawnSync as St } from "child_process";
-import { request as $t } from "https";
-import { randomBytes as Mt, createHash as bt } from "crypto";
-var e = Object.defineProperty;
-var t = Object.getOwnPropertyNames;
-var i = (t2, i2) => e(t2, "name", { value: i2, configurable: true });
-var s = ((e2) => "function" < "u" ? __require : typeof Proxy < "u" ? new Proxy(e2, { get: (e3, t2) => ("function" < "u" ? __require : e3)[t2] }) : e2)(function(e2) {
+import { appendFileSync as it, mkdirSync as st, readdirSync as rt, statSync as nt, unlinkSync as at, writeFileSync as ot } from "fs";
+import { createHash as lt } from "crypto";
+import { homedir as ht } from "os";
+import { join as ct } from "path";
+import { statSync as ut, readFileSync as dt } from "fs";
+import { homedir as pt } from "os";
+import { join as ft } from "path";
+import { watch as Lt, appendFileSync as Pt, statSync as Ft, existsSync as Ht, renameSync as Bt, unlinkSync as Ut } from "fs";
+import { homedir as Kt } from "os";
+import { join as Wt } from "path";
+import { readFileSync as he, writeFileSync as ce, mkdirSync as ue } from "fs";
+import { dirname as de } from "path";
+import { randomUUID as pe } from "crypto";
+import { readFileSync as ye, statSync as we } from "fs";
+import { spawn as xe, spawnSync as Ne } from "child_process";
+import { request as Le } from "https";
+import { randomBytes as Pe, createHash as Fe } from "crypto";
+var t = Object.defineProperty;
+var e = Object.getOwnPropertyNames;
+var i = (e2, i2) => t(e2, "name", { value: i2, configurable: true });
+var s = ((t2) => "function" < "u" ? __require_gv7hsff9 : typeof Proxy < "u" ? new Proxy(t2, { get: (t3, e2) => ("function" < "u" ? __require_gv7hsff9 : t3)[e2] }) : t2)(function(t2) {
   if ("function" < "u")
-    return __require.apply(this, arguments);
-  throw Error('Dynamic require of "' + e2 + '" is not supported');
+    return __require_gv7hsff9.apply(this, arguments);
+  throw Error('Dynamic require of "' + t2 + '" is not supported');
 });
 var r = {};
-((t2, i2) => {
+((e2, i2) => {
   for (var s2 in i2)
-    e(t2, s2, { get: i2[s2], enumerable: true });
-})(r, { getClaudeConfigDir: () => p, getDefaultCredentialsPath: () => m, oauthLogin: () => _ });
-function p() {
-  return (process.env.CLAUDE_CONFIG_DIR ?? d(f(), ".claude")).normalize("NFC");
+    t(e2, s2, { get: i2[s2], enumerable: true });
+})(r, { getClaudeConfigDir: () => f, getDefaultCredentialsPath: () => m, oauthLogin: () => _ });
+function f() {
+  return (process.env.CLAUDE_CONFIG_DIR ?? d(p(), ".claude")).normalize("NFC");
 }
 function m() {
-  return d(p(), ".credentials.json");
+  return d(f(), ".credentials.json");
 }
-function y() {
+function g() {
   return k(a(32));
 }
-function g(e2) {
-  return k(n("sha256").update(e2).digest());
+function y(t2) {
+  return k(n("sha256").update(t2).digest());
 }
 function w() {
   return k(a(32));
 }
-function k(e2) {
-  return e2.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+function k(t2) {
+  return t2.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
-async function _(e2 = {}) {
-  let t2 = e2.credentialsPath ?? m(), i2 = y(), s2 = g(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await T(r2, e2.port), f2 = `http://localhost:${n2}/callback`, p2 = e2.loginWithClaudeAi !== false ? $ : S, k2 = new URLSearchParams({ client_id: v, response_type: "code", scope: D, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
-  e2.loginHint && k2.set("login_hint", e2.loginHint), e2.loginMethod && k2.set("login_method", e2.loginMethod), e2.orgUUID && k2.set("orgUUID", e2.orgUUID);
-  let _2, R, A = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(f2)}`, C = `${p2}?${k2.toString()}&redirect_uri=${encodeURIComponent(b)}`;
-  e2.onAuthUrl ? e2.onAuthUrl(A, C) : (console.log(`
+async function _(t2 = {}) {
+  let e2 = t2.credentialsPath ?? m(), i2 = g(), s2 = y(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await T(r2, t2.port), p2 = `http://localhost:${n2}/callback`, f2 = t2.loginWithClaudeAi !== false ? S : v, k2 = new URLSearchParams({ client_id: R, response_type: "code", scope: b, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
+  t2.loginHint && k2.set("login_hint", t2.loginHint), t2.loginMethod && k2.set("login_method", t2.loginMethod), t2.orgUUID && k2.set("orgUUID", t2.orgUUID);
+  let _2, $, O = `${f2}?${k2.toString()}&redirect_uri=${encodeURIComponent(p2)}`, A = `${f2}?${k2.toString()}&redirect_uri=${encodeURIComponent(D)}`;
+  t2.onAuthUrl ? t2.onAuthUrl(O, A) : (console.log(`
 \uD83D\uDD10 Login to Claude
 `), console.log(`Open this URL in your browser:
-`), console.log(`  ${C}
-`)), e2.openBrowser !== false && E(A).catch(() => {});
+`), console.log(`  ${A}
+`)), t2.openBrowser !== false && E(O).catch(() => {});
   try {
-    _2 = await a2, R = f2;
-  } catch (e3) {
-    throw d2(), e3;
+    _2 = await a2, $ = p2;
+  } catch (t3) {
+    throw d2(), t3;
   }
   d2();
-  let O = await fetch(M, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: R, client_id: v, code_verifier: i2, state: r2 }) });
-  if (!O.ok) {
-    let e3 = await O.text();
-    throw new Error(`Token exchange failed (${O.status}): ${e3}`);
+  let I = await fetch(M, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: $, client_id: R, code_verifier: i2, state: r2 }) });
+  if (!I.ok) {
+    let t3 = await I.text();
+    throw new Error(`Token exchange failed (${I.status}): ${t3}`);
   }
-  let x2 = await O.json(), I2 = Date.now() + 1000 * x2.expires_in, N2 = { accessToken: x2.access_token, refreshToken: x2.refresh_token, expiresAt: I2, scopes: x2.scope?.split(" ") ?? [] }, L2 = {};
+  let C2 = await I.json(), x2 = Date.now() + 1000 * C2.expires_in, N2 = { accessToken: C2.access_token, refreshToken: C2.refresh_token, expiresAt: x2, scopes: C2.scope?.split(" ") ?? [] }, L2 = {};
   try {
-    L2 = JSON.parse(l(t2, "utf8"));
+    L2 = JSON.parse(l(e2, "utf8"));
   } catch {}
   L2.claudeAiOauth = N2;
-  let F2 = u(t2);
+  let P2 = u(e2);
   try {
-    h(F2, { recursive: true });
+    h(P2, { recursive: true });
   } catch {}
-  return o(t2, JSON.stringify(L2, null, 2), "utf8"), c(t2, 384), console.log(`
-\u2705 Login successful! Credentials saved to ${t2}
-`), { accessToken: N2.accessToken, refreshToken: N2.refreshToken, expiresAt: N2.expiresAt, credentialsPath: t2 };
+  return o(e2, JSON.stringify(L2, null, 2), "utf8"), c(e2, 384), console.log(`
+\u2705 Login successful! Credentials saved to ${e2}
+`), { accessToken: N2.accessToken, refreshToken: N2.refreshToken, expiresAt: N2.expiresAt, credentialsPath: e2 };
 }
-async function T(e2, t2) {
-  let s2, r2, n2 = new Promise((e3, t3) => {
-    s2 = e3, r2 = t3;
-  }), a2 = Bun.serve({ port: t2 ?? 0, async fetch(t3) {
-    let i2 = new URL(t3.url);
+async function T(t2, e2) {
+  let s2, r2, n2 = new Promise((t3, e3) => {
+    s2 = t3, r2 = e3;
+  }), a2 = Bun.serve({ port: e2 ?? 0, async fetch(e3) {
+    let i2 = new URL(e3.url);
     if (i2.pathname !== "/callback")
       return new Response("Not found", { status: 404 });
     let n3 = i2.searchParams.get("code"), a3 = i2.searchParams.get("state"), o3 = i2.searchParams.get("error");
-    return o3 ? (r2(new Error(`OAuth error: ${o3} \u2014 ${i2.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } })) : n3 && a3 === e2 ? (s2(n3), new Response(null, { status: 302, headers: { Location: `${R}/oauth/code/success?app=claude-code` } })) : (r2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
+    return o3 ? (r2(new Error(`OAuth error: ${o3} \u2014 ${i2.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } })) : n3 && a3 === t2 ? (s2(n3), new Response(null, { status: 302, headers: { Location: `${$}/oauth/code/success?app=claude-code` } })) : (r2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
   } }), o2 = setTimeout(() => {
     r2(new Error("Login timed out (5 minutes). Try again.")), a2.stop();
   }, 300000);
@@ -38876,41 +44339,41 @@ async function T(e2, t2) {
     clearTimeout(o2), a2.stop();
   }, "close") };
 }
-async function E(e2) {
-  let t2 = (() => {
+async function E(t2) {
+  let e2 = (() => {
     switch (process.platform) {
       case "darwin":
-        return [["open", e2]];
+        return [["open", t2]];
       case "win32":
-        return [["cmd", "/c", "start", e2]];
+        return [["cmd", "/c", "start", t2]];
       default:
-        return [["xdg-open", e2], ["wslview", e2], ["sensible-browser", e2]];
+        return [["xdg-open", t2], ["wslview", t2], ["sensible-browser", t2]];
     }
   })();
-  for (let e3 of t2)
+  for (let t3 of e2)
     try {
-      let t3 = Bun.spawn({ cmd: e3, stdout: "ignore", stderr: "ignore" });
-      if (await t3.exited, t3.exitCode === 0)
+      let e3 = Bun.spawn({ cmd: t3, stdout: "ignore", stderr: "ignore" });
+      if (await e3.exited, e3.exitCode === 0)
         return;
     } catch {}
 }
-var v;
 var R;
-var S;
 var $;
+var v;
+var S;
 var M;
-var b;
 var D;
+var b;
+var O;
 var A;
-var C;
-var O = (A = { "src/auth.ts"() {
-  v = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", S = (R = "https://platform.claude.com") + "/oauth/authorize", $ = "https://claude.com/cai/oauth/authorize", M = `${R}/v1/oauth/token`, b = `${R}/oauth/code/callback`, i(p, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), D = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(y, "generateCodeVerifier"), i(g, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(_, "oauthLogin"), i(T, "startCallbackServer"), i(E, "tryOpenBrowser");
+var I = (O = { "src/auth.ts"() {
+  R = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", v = ($ = "https://platform.claude.com") + "/oauth/authorize", S = "https://claude.com/cai/oauth/authorize", M = `${$}/v1/oauth/token`, D = `${$}/oauth/code/callback`, i(f, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), b = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(g, "generateCodeVerifier"), i(y, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(_, "oauthLogin"), i(T, "startCallbackServer"), i(E, "tryOpenBrowser");
 } }, function() {
-  return A && (C = (0, A[t(A)[0]])(A = 0)), C;
+  return O && (A = (0, O[e(O)[0]])(O = 0)), A;
 });
 var q = class extends Error {
-  constructor(e2, t2) {
-    super(e2), this.cause = t2, this.name = "ClaudeCodeSDKError";
+  constructor(t2, e2) {
+    super(t2), this.cause = e2, this.name = "ClaudeCodeSDKError";
   }
   static {
     i(this, "ClaudeCodeSDKError");
@@ -38920,139 +44383,139 @@ var z = class extends q {
   static {
     i(this, "AuthError");
   }
-  constructor(e2, t2) {
-    super(e2, t2), this.name = "AuthError";
+  constructor(t2, e2) {
+    super(t2, e2), this.name = "AuthError";
   }
 };
 var G = class extends q {
-  constructor(e2, t2, i2, s2) {
-    super(e2, s2), this.status = t2, this.requestId = i2, this.name = "APIError";
+  constructor(t2, e2, i2, s2) {
+    super(t2, s2), this.status = e2, this.requestId = i2, this.name = "APIError";
   }
   static {
     i(this, "APIError");
   }
 };
 var Q = class extends q {
-  constructor(e2, t2, i2 = 429, s2) {
-    super(e2, s2), this.rateLimitInfo = t2, this.status = i2, this.name = "RateLimitError";
+  constructor(t2, e2, i2 = 429, s2) {
+    super(t2, s2), this.rateLimitInfo = e2, this.status = i2, this.name = "RateLimitError";
   }
   static {
     i(this, "RateLimitError");
   }
 };
 var Y = class extends q {
-  constructor(e2, t2, i2) {
-    super(`CACHE_REWRITE_BLOCKED: session idle ${Math.round(e2 / 1000)}s on model=${i2}, next request would cost ~${t2} cache_write tokens. Unset CLAUDE_MAX_REWRITE_BLOCK or raise CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC to proceed.`), this.idleMs = e2, this.estimatedTokens = t2, this.model = i2, this.name = "CacheRewriteBlockedError";
+  constructor(t2, e2, i2) {
+    super(`CACHE_REWRITE_BLOCKED: session idle ${Math.round(t2 / 1000)}s on model=${i2}, next request would cost ~${e2} cache_write tokens. Unset CLAUDE_MAX_REWRITE_BLOCK or raise CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC to proceed.`), this.idleMs = t2, this.estimatedTokens = e2, this.model = i2, this.name = "CacheRewriteBlockedError";
   }
   static {
     i(this, "CacheRewriteBlockedError");
   }
   code = "CACHE_REWRITE_BLOCKED";
 };
-var X = { "claude-opus-4-7": { name: "Claude Opus 4.7", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-opus-4-6": { name: "Claude Opus 4.6", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-sonnet-4-6": { name: "Claude Sonnet 4.6", context: 1e6, defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } }, "claude-haiku-4-5-20251001": { name: "Claude Haiku 4.5", context: 200000, defaultOutput: 32000, maxOutput: 64000, adaptiveThinking: false, cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 } } };
-var V = { defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: false };
-function Z(e2, t2) {
-  if (typeof t2 == "number" && t2 > 0)
-    return t2;
-  let i2 = ee(e2), s2 = i2?.maxOutput ?? V.maxOutput, r2 = i2?.defaultOutput ?? V.defaultOutput, n2 = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+var V = { "claude-opus-4-7": { name: "Claude Opus 4.7", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-opus-4-6": { name: "Claude Opus 4.6", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-sonnet-4-6": { name: "Claude Sonnet 4.6", context: 1e6, defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } }, "claude-haiku-4-5-20251001": { name: "Claude Haiku 4.5", context: 200000, defaultOutput: 32000, maxOutput: 64000, adaptiveThinking: false, cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 } } };
+var X = { defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: false };
+function Z(t2, e2) {
+  if (typeof e2 == "number" && e2 > 0)
+    return e2;
+  let i2 = tt(t2), s2 = i2?.maxOutput ?? X.maxOutput, r2 = i2?.defaultOutput ?? X.defaultOutput, n2 = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
   if (n2) {
-    let e3 = parseInt(n2, 10);
-    if (Number.isFinite(e3) && e3 > 0)
-      return Math.min(e3, s2);
+    let t3 = parseInt(n2, 10);
+    if (Number.isFinite(t3) && t3 > 0)
+      return Math.min(t3, s2);
   }
   return r2;
 }
-function ee(e2) {
-  if (X[e2])
-    return X[e2];
-  let t2 = e2.toLowerCase();
-  for (let [e3, i2] of Object.entries(X))
-    if (t2.includes(e3) || e3.includes(t2))
+function tt(t2) {
+  if (V[t2])
+    return V[t2];
+  let e2 = t2.toLowerCase();
+  for (let [t3, i2] of Object.entries(V))
+    if (e2.includes(t3) || t3.includes(e2))
       return i2;
-  for (let [e3, i2] of Object.entries(X)) {
-    let s2 = e3.replace(/^claude-/, "").split("-").slice(0, 3).join("-");
-    if (t2.includes(s2))
+  for (let [t3, i2] of Object.entries(V)) {
+    let s2 = t3.replace(/^claude-/, "").split("-").slice(0, 3).join("-");
+    if (e2.includes(s2))
       return i2;
   }
 }
-function te(e2) {
-  let t2 = ee(e2);
-  if (t2)
-    return t2.adaptiveThinking;
-  let i2 = e2.toLowerCase();
+function et(t2) {
+  let e2 = tt(t2);
+  if (e2)
+    return e2.adaptiveThinking;
+  let i2 = t2.toLowerCase();
   return i2.includes("opus-4-7") || i2.includes("opus-4-6") || i2.includes("sonnet-4-6") || i2.includes("sonnet-4-7");
 }
-i(Z, "resolveMaxTokens"), i(ee, "getModelMetadata"), i(te, "supportsAdaptiveThinking");
-var me = { enabled: true, initialCalls: 3, ringRetentionMs: 7200000, ringMaxMb: 300, suspiciousContextSize: 5, suspiciousRetentionMs: 86400000, suspiciousMaxMb: 100, coldCwThreshold: 1e4, metadataRetentionMs: 604800000 };
-var ye = { cacheTtlMs: 300000, safetyMarginMs: 15000, intervalMs: 120000, intervalClampMin: 60000, retryDelaysMs: [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20].map((e2) => 1000 * e2), rewriteWarnIdleMs: 300000, rewriteWarnTokens: 50000, healthProbeIntervalsMs: [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4], healthProbeTimeoutMs: 3000, enabled: true, idleTimeoutMs: 1 / 0, minTokens: 2000, rewriteBlockEnabled: false, dump: me };
-var we = pe(fe(), ".claude", "keepalive.json");
-var ke = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH || we;
-var _e = 0;
-var Te = null;
-var Ee = new Set;
-function ve() {
+i(Z, "resolveMaxTokens"), i(tt, "getModelMetadata"), i(et, "supportsAdaptiveThinking");
+var mt = { enabled: true, initialCalls: 3, ringRetentionMs: 7200000, ringMaxMb: 300, suspiciousContextSize: 5, suspiciousRetentionMs: 86400000, suspiciousMaxMb: 100, coldCwThreshold: 1e4, metadataRetentionMs: 604800000 };
+var gt = { cacheTtlMs: 300000, safetyMarginMs: 15000, intervalMs: 120000, intervalClampMin: 60000, retryDelaysMs: [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20].map((t2) => 1000 * t2), rewriteWarnIdleMs: 300000, rewriteWarnTokens: 50000, healthProbeIntervalsMs: [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4], healthProbeTimeoutMs: 3000, enabled: true, idleTimeoutMs: 1 / 0, minTokens: 2000, rewriteBlockEnabled: false, dump: mt, tokenRotationContextThreshold: 150000, tokenRotationPollIntervalMs: 30000, orgIdCacheTtlMs: 300000, tokenRotationLogMaxBytes: 10485760, tokenRotationLogRetentionDays: 7 };
+var wt = ft(pt(), ".claude", "keepalive.json");
+var kt = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH || wt;
+var _t = 0;
+var Tt = null;
+var Et = new Set;
+function Rt() {
   try {
-    let e2 = ue(ke);
-    return e2.mtimeMs === _e && Te ? null : (_e = e2.mtimeMs, Ee.clear(), JSON.parse(de(ke, "utf8")));
+    let t2 = ut(kt);
+    return t2.mtimeMs === _t && Tt ? null : (_t = t2.mtimeMs, Et.clear(), JSON.parse(dt(kt, "utf8")));
   } catch {
     return null;
   }
 }
-function Re(e2, t2, i2, s2, r2) {
-  if (e2 == null)
+function $t(t2, e2, i2, s2, r2) {
+  if (t2 == null)
     return i2;
-  let n2 = typeof e2 == "number" ? e2 : Number(e2);
-  return Number.isFinite(n2) ? n2 < s2 || n2 > r2 ? (Ee.has(t2) || (console.error(`[keepalive-config] ${t2}=${n2} out of range [${s2}, ${r2}] \u2014 clamping`), Ee.add(t2)), Math.max(s2, Math.min(r2, n2))) : n2 : (Ee.has(t2) || (console.error(`[keepalive-config] ${t2}=${JSON.stringify(e2)} is not a number \u2014 using fallback ${i2}`), Ee.add(t2)), i2);
+  let n2 = typeof t2 == "number" ? t2 : Number(t2);
+  return Number.isFinite(n2) ? n2 < s2 || n2 > r2 ? (Et.has(e2) || (console.error(`[keepalive-config] ${e2}=${n2} out of range [${s2}, ${r2}] \u2014 clamping`), Et.add(e2)), Math.max(s2, Math.min(r2, n2))) : n2 : (Et.has(e2) || (console.error(`[keepalive-config] ${e2}=${JSON.stringify(t2)} is not a number \u2014 using fallback ${i2}`), Et.add(e2)), i2);
 }
-function Se(e2, t2, i2, s2 = 1, r2 = 30) {
-  if (e2 == null)
+function vt(t2, e2, i2, s2 = 1, r2 = 30) {
+  if (t2 == null)
     return i2;
-  if (!Array.isArray(e2))
-    return Ee.has(t2) || (console.error(`[keepalive-config] ${t2} is not an array \u2014 using fallback`), Ee.add(t2)), i2;
-  let n2 = e2.map((e3) => typeof e3 == "number" ? e3 : Number(e3)).filter((e3) => Number.isFinite(e3) && e3 > 0);
-  return n2.length < s2 || n2.length > r2 ? (Ee.has(t2) || (console.error(`[keepalive-config] ${t2} length ${n2.length} out of [${s2}, ${r2}] \u2014 using fallback`), Ee.add(t2)), i2) : n2;
+  if (!Array.isArray(t2))
+    return Et.has(e2) || (console.error(`[keepalive-config] ${e2} is not an array \u2014 using fallback`), Et.add(e2)), i2;
+  let n2 = t2.map((t3) => typeof t3 == "number" ? t3 : Number(t3)).filter((t3) => Number.isFinite(t3) && t3 > 0);
+  return n2.length < s2 || n2.length > r2 ? (Et.has(e2) || (console.error(`[keepalive-config] ${e2} length ${n2.length} out of [${s2}, ${r2}] \u2014 using fallback`), Et.add(e2)), i2) : n2;
 }
-function $e(e2, t2) {
-  return e2 == null ? t2 : typeof e2 == "boolean" ? e2 : typeof e2 == "string" ? e2 === "true" || e2 === "1" || e2 === "yes" : !!e2;
+function St(t2, e2) {
+  return t2 == null ? e2 : typeof t2 == "boolean" ? t2 : typeof t2 == "string" ? t2 === "true" || t2 === "1" || t2 === "yes" : !!t2;
 }
-function Me() {
-  let e2 = ve();
-  return e2 === null && Te ? Te : De(e2 ?? null);
+function Mt() {
+  let t2 = Rt();
+  return t2 === null && Tt ? Tt : bt(t2 ?? null);
 }
-function be() {
-  return _e = 0, Te = null, Me();
+function Dt() {
+  return _t = 0, Tt = null, Mt();
 }
-function De(e2) {
-  let t2 = e2 === null ? "defaults" : Object.keys(e2).length > 0 ? "mixed" : "defaults", i2 = Re(e2?.cacheTtlMs ?? (typeof e2?.cacheTtlSec == "number" ? 1000 * e2.cacheTtlSec : undefined), "cacheTtlMs", ye.cacheTtlMs, 60000, 7200000), s2 = Re(e2?.safetyMarginMs ?? (typeof e2?.safetyMarginSec == "number" ? 1000 * e2.safetyMarginSec : undefined), "safetyMarginMs", ye.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = Re(e2?.intervalMs ?? (typeof e2?.intervalSec == "number" ? 1000 * e2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = ye.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
+function bt(t2) {
+  let e2 = t2 === null ? "defaults" : Object.keys(t2).length > 0 ? "mixed" : "defaults", i2 = $t(t2?.cacheTtlMs ?? (typeof t2?.cacheTtlSec == "number" ? 1000 * t2.cacheTtlSec : undefined), "cacheTtlMs", gt.cacheTtlMs, 60000, 7200000), s2 = $t(t2?.safetyMarginMs ?? (typeof t2?.safetyMarginSec == "number" ? 1000 * t2.safetyMarginSec : undefined), "safetyMarginMs", gt.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = $t(t2?.intervalMs ?? (typeof t2?.intervalSec == "number" ? 1000 * t2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = gt.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
   n2 < a2 && (n2 = a2), n2 > o2 && (n2 = o2);
-  let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: Se(e2?.retryDelaysMs ?? (Array.isArray(e2?.retryDelaysSec) ? e2.retryDelaysSec.map((e3) => typeof e3 == "number" ? 1000 * e3 : NaN) : undefined), "retryDelaysMs", ye.retryDelaysMs), rewriteWarnIdleMs: Re(e2?.rewriteWarnIdleMs ?? (typeof e2?.rewriteWarnIdleSec == "number" ? 1000 * e2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: Re(e2?.rewriteWarnTokens, "rewriteWarnTokens", ye.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: Se(e2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", ye.healthProbeIntervalsMs), healthProbeTimeoutMs: Re(e2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", ye.healthProbeTimeoutMs, 500, 60000), enabled: $e(e2?.enabled, ye.enabled), idleTimeoutMs: e2?.idleTimeoutMs === null || e2?.idleTimeoutSec === null ? 1 / 0 : Re(e2?.idleTimeoutMs ?? (typeof e2?.idleTimeoutSec == "number" ? 1000 * e2.idleTimeoutSec : undefined), "idleTimeoutMs", ye.idleTimeoutMs === 1 / 0 ? 86400000 : ye.idleTimeoutMs, 0, 86400000), minTokens: Re(e2?.minTokens, "minTokens", ye.minTokens, 1, 1e6), rewriteBlockEnabled: $e(e2?.rewriteBlockEnabled, ye.rewriteBlockEnabled), dump: me, t: t2 };
-  return Te = l2, l2;
+  let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: vt(t2?.retryDelaysMs ?? (Array.isArray(t2?.retryDelaysSec) ? t2.retryDelaysSec.map((t3) => typeof t3 == "number" ? 1000 * t3 : NaN) : undefined), "retryDelaysMs", gt.retryDelaysMs), rewriteWarnIdleMs: $t(t2?.rewriteWarnIdleMs ?? (typeof t2?.rewriteWarnIdleSec == "number" ? 1000 * t2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: $t(t2?.rewriteWarnTokens, "rewriteWarnTokens", gt.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: vt(t2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", gt.healthProbeIntervalsMs), healthProbeTimeoutMs: $t(t2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", gt.healthProbeTimeoutMs, 500, 60000), enabled: St(t2?.enabled, gt.enabled), idleTimeoutMs: t2?.idleTimeoutMs === null || t2?.idleTimeoutSec === null ? 1 / 0 : $t(t2?.idleTimeoutMs ?? (typeof t2?.idleTimeoutSec == "number" ? 1000 * t2.idleTimeoutSec : undefined), "idleTimeoutMs", gt.idleTimeoutMs === 1 / 0 ? 86400000 : gt.idleTimeoutMs, 0, 86400000), minTokens: $t(t2?.minTokens, "minTokens", gt.minTokens, 1, 1e6), rewriteBlockEnabled: St(t2?.rewriteBlockEnabled, gt.rewriteBlockEnabled), dump: mt, tokenRotationContextThreshold: $t(t2?.tokenRotationContextThreshold, "tokenRotationContextThreshold", gt.tokenRotationContextThreshold, 1000, 1e7), tokenRotationPollIntervalMs: $t(t2?.tokenRotationPollIntervalMs, "tokenRotationPollIntervalMs", gt.tokenRotationPollIntervalMs, 5000, 3600000), orgIdCacheTtlMs: $t(t2?.orgIdCacheTtlMs, "orgIdCacheTtlMs", gt.orgIdCacheTtlMs, 1e4, 86400000), tokenRotationLogMaxBytes: $t(t2?.tokenRotationLogMaxBytes, "tokenRotationLogMaxBytes", gt.tokenRotationLogMaxBytes, 1024, 1073741824), tokenRotationLogRetentionDays: $t(t2?.tokenRotationLogRetentionDays, "tokenRotationLogRetentionDays", gt.tokenRotationLogRetentionDays, 1, 3650), t: e2 };
+  return Tt = l2, l2;
 }
-function Ae() {
-  return ke;
+function Ot() {
+  return kt;
 }
-function Ce() {
-  return Me().cacheTtlMs;
+function At() {
+  return Mt().cacheTtlMs;
 }
-function Oe() {
-  return Me().safetyMarginMs;
+function It() {
+  return Mt().safetyMarginMs;
 }
-function xe(e2) {
-  let t2 = e2;
-  if (!t2)
+function Ct(t2) {
+  let e2 = t2;
+  if (!e2)
     return "permanent";
-  let i2 = t2.status;
+  let i2 = e2.status;
   if (i2 === 401 || i2 === 403)
     return "auth";
   if (i2 === 429 || i2 === 503 || i2 === 529 || i2 && i2 >= 500)
     return "server_transient";
   if (i2 && i2 >= 400 && i2 < 500)
     return "permanent";
-  let s2 = t2.code ?? t2.cause?.code ?? "", r2 = t2.name ?? t2.cause?.name ?? "", n2 = `${(t2.message ?? "").toLowerCase()} ${(t2.cause?.message ?? "").toLowerCase()}`.trim();
+  let s2 = e2.code ?? e2.cause?.code ?? "", r2 = e2.name ?? e2.cause?.name ?? "", n2 = `${(e2.message ?? "").toLowerCase()} ${(e2.cause?.message ?? "").toLowerCase()}`.trim();
   return r2 === "AbortError" || r2 === "TimeoutError" || n2.includes("aborted") || n2.includes("the operation timed out") || n2.includes("request timed out") || s2 && new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_ABORTED", "ABORT_ERR", "ERR_NETWORK", "ConnectionRefused", "FailedToOpenSocket"]).has(s2) || n2.includes("unable to connect") || n2.includes("failed to open socket") || n2.includes("connection refused") || n2.includes("network is unreachable") || n2.includes("network error") || n2.includes("fetch failed") || n2.includes("timeout") || n2.includes("dns") || n2.includes("socket hang up") || n2.includes("terminated") ? "network" : "server_transient";
 }
-i(ve, "readRawConfig"), i(Re, "num"), i(Se, "numArray"), i($e, "bool"), i(Me, "loadKeepaliveConfig"), i(be, "reloadKeepaliveConfig"), i(De, "_resolve"), i(Ae, "getConfigPath"), i(Ce, "getCacheTtlMs"), i(Oe, "getSafetyMarginMs"), i(xe, "classifyError");
-var Ie = class _KeepaliveEngine {
+i(Rt, "readRawConfig"), i($t, "num"), i(vt, "numArray"), i(St, "bool"), i(Mt, "loadKeepaliveConfig"), i(Dt, "reloadKeepaliveConfig"), i(bt, "_resolve"), i(Ot, "getConfigPath"), i(At, "getCacheTtlMs"), i(It, "getSafetyMarginMs"), i(Ct, "classifyError");
+var xt = class _KeepaliveEngine {
   static {
     i(this, "KeepaliveEngine");
   }
@@ -39085,48 +44548,48 @@ var Ie = class _KeepaliveEngine {
   inFlight = false;
   jitterMs = 0;
   snapshotCallCount = 0;
-  constructor(e2) {
-    this.getToken = e2.getToken, this.doFetch = e2.doFetch, this.getRateLimitInfo = e2.getRateLimitInfo, this.isOwnerAlive = e2.isOwnerAlive ?? (() => true);
-    let t2 = e2.config ?? {}, i2 = Me();
+  constructor(t2) {
+    this.getToken = t2.getToken, this.doFetch = t2.doFetch, this.getRateLimitInfo = t2.getRateLimitInfo, this.isOwnerAlive = t2.isOwnerAlive ?? (() => true);
+    let e2 = t2.config ?? {}, i2 = Mt();
     this.cacheTtlMs = i2.cacheTtlMs, this.safetyMarginMs = i2.safetyMarginMs, this.retryDelaysMs = i2.retryDelaysMs, this.healthProbeIntervalsMs = i2.healthProbeIntervalsMs, this.healthProbeTimeoutMs = i2.healthProbeTimeoutMs;
-    let s2 = t2.intervalMs ?? i2.intervalMs;
-    s2 < i2.intervalClampMin && (console.error(`[claude-sdk] keepalive intervalMs=${s2} below safe min (${i2.intervalClampMin}); clamped`), s2 = i2.intervalClampMin), s2 > i2.intervalClampMax && (console.error(`[claude-sdk] keepalive intervalMs=${s2} above safe max (${i2.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`), s2 = i2.intervalClampMax), this.config = { enabled: t2.enabled ?? i2.enabled, intervalMs: s2, idleTimeoutMs: t2.idleTimeoutMs ?? i2.idleTimeoutMs, minTokens: t2.minTokens ?? i2.minTokens, rewriteWarnIdleMs: t2.rewriteWarnIdleMs ?? i2.rewriteWarnIdleMs, rewriteWarnTokens: t2.rewriteWarnTokens ?? i2.rewriteWarnTokens, rewriteBlockIdleMs: t2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: t2.rewriteBlockEnabled ?? i2.rewriteBlockEnabled, onHeartbeat: t2.onHeartbeat, onTick: t2.onTick, onDisarmed: t2.onDisarmed, onRewriteWarning: t2.onRewriteWarning, onNetworkStateChange: t2.onNetworkStateChange };
+    let s2 = e2.intervalMs ?? i2.intervalMs;
+    s2 < i2.intervalClampMin && (console.error(`[claude-sdk] keepalive intervalMs=${s2} below safe min (${i2.intervalClampMin}); clamped`), s2 = i2.intervalClampMin), s2 > i2.intervalClampMax && (console.error(`[claude-sdk] keepalive intervalMs=${s2} above safe max (${i2.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`), s2 = i2.intervalClampMax), this.config = { enabled: e2.enabled ?? i2.enabled, intervalMs: s2, idleTimeoutMs: e2.idleTimeoutMs ?? i2.idleTimeoutMs, minTokens: e2.minTokens ?? i2.minTokens, rewriteWarnIdleMs: e2.rewriteWarnIdleMs ?? i2.rewriteWarnIdleMs, rewriteWarnTokens: e2.rewriteWarnTokens ?? i2.rewriteWarnTokens, rewriteBlockIdleMs: e2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: e2.rewriteBlockEnabled ?? i2.rewriteBlockEnabled, onHeartbeat: e2.onHeartbeat, onTick: e2.onTick, onDisarmed: e2.onDisarmed, onRewriteWarning: e2.onRewriteWarning, onNetworkStateChange: e2.onNetworkStateChange };
   }
-  notifyRealRequestStart(e2, t2, i2) {
-    this.i = e2, this.o = JSON.parse(JSON.stringify(t2)), this.l = { ...i2 }, this.abortController?.abort(), this.inFlight = false;
+  notifyRealRequestStart(t2, e2, i2) {
+    this.i = t2, this.o = JSON.parse(JSON.stringify(e2)), this.l = { ...i2 }, this.abortController?.abort(), this.inFlight = false;
   }
-  notifyRealRequestComplete(e2) {
-    let t2 = Date.now();
-    if (this.lastActivityAt = t2, this.lastRealActivityAt = t2, this.cacheWrittenAt = t2, (this.healthProbeTimer || this.networkState !== "healthy") && (this.stopHealthProbe(), this.networkState !== "healthy")) {
-      let e3 = this.networkState;
+  notifyRealRequestComplete(t2) {
+    let e2 = Date.now();
+    if (this.lastActivityAt = e2, this.lastRealActivityAt = e2, this.cacheWrittenAt = e2, (this.healthProbeTimer || this.networkState !== "healthy") && (this.stopHealthProbe(), this.networkState !== "healthy")) {
+      let t3 = this.networkState;
       this.networkState = "healthy";
       try {
-        this.config.onNetworkStateChange?.({ from: e3, to: "healthy", at: t2 });
+        this.config.onNetworkStateChange?.({ from: t3, to: "healthy", at: e2 });
       } catch {}
     }
     if (!this.config.enabled)
       return;
     let i2 = this.i, s2 = this.o, r2 = this.l;
     if (i2 && s2 && r2) {
-      let t3 = (e2.inputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), n2 = this.registry.get(i2);
-      t3 >= this.config.minTokens && (!n2 || t3 >= n2.inputTokens) && this.registry.set(i2, { body: s2, headers: r2, model: i2, inputTokens: t3 }), t3 > (this.lastKnownCacheTokensByModel.get(i2) ?? 0) && this.lastKnownCacheTokensByModel.set(i2, t3), this.writeSnapshotDebug(i2, s2, e2), this.o = null, this.l = null;
+      let e3 = (t2.inputTokens ?? 0) + (t2.cacheReadInputTokens ?? 0) + (t2.cacheCreationInputTokens ?? 0), n2 = this.registry.get(i2);
+      e3 >= this.config.minTokens && (!n2 || e3 >= n2.inputTokens) && this.registry.set(i2, { body: s2, headers: r2, model: i2, inputTokens: e3 }), e3 > (this.lastKnownCacheTokensByModel.get(i2) ?? 0) && this.lastKnownCacheTokensByModel.set(i2, e3), this.writeSnapshotDebug(i2, s2, t2), this.o = null, this.l = null;
     }
     this.registry.size > 0 && this.startTimer();
   }
-  checkRewriteGuard(e2) {
-    let t2 = this.cacheWrittenAt;
-    if (t2 === 0)
+  checkRewriteGuard(t2) {
+    let e2 = this.cacheWrittenAt;
+    if (e2 === 0)
       return;
-    let i2 = Date.now() - t2, s2 = this.config.rewriteWarnIdleMs, r2 = this.config.rewriteBlockIdleMs;
+    let i2 = Date.now() - e2, s2 = this.config.rewriteWarnIdleMs, r2 = this.config.rewriteBlockIdleMs;
     if (i2 < s2)
       return;
-    let n2 = this.lastKnownCacheTokensByModel.get(e2) ?? 0, a2 = this.config.rewriteBlockEnabled && i2 >= r2;
+    let n2 = this.lastKnownCacheTokensByModel.get(t2) ?? 0, a2 = this.config.rewriteBlockEnabled && i2 >= r2;
     if (n2 >= this.config.rewriteWarnTokens || a2)
       try {
-        this.config.onRewriteWarning?.({ idleMs: i2, estimatedTokens: n2, blocked: a2, model: e2 });
+        this.config.onRewriteWarning?.({ idleMs: i2, estimatedTokens: n2, blocked: a2, model: t2 });
       } catch {}
     if (a2)
-      throw new Y(i2, n2, e2);
+      throw new Y(i2, n2, t2);
   }
   stop() {
     this.timer && (clearInterval(this.timer), this.timer = null), this.retryTimer && (clearTimeout(this.retryTimer), this.retryTimer = null), this.abortController?.abort(), this.registry.clear(), this.inFlight = false, this.stopHealthProbe();
@@ -39134,13 +44597,13 @@ var Ie = class _KeepaliveEngine {
   startTimer() {
     if (this.timer)
       return;
-    let e2 = Math.min(30000, Math.max(5000, Math.floor(this.config.intervalMs / 6)));
-    this.timer = setInterval(() => this.tick(), e2), this.timer && typeof this.timer == "object" && "unref" in this.timer && this.timer.unref();
+    let t2 = Math.min(30000, Math.max(5000, Math.floor(this.config.intervalMs / 6)));
+    this.timer = setInterval(() => this.tick(), t2), this.timer && typeof this.timer == "object" && "unref" in this.timer && this.timer.unref();
   }
   async tick() {
     try {
-      let e3 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, t3 = Math.round((Date.now() - this.lastActivityAt) / 1000), i3 = Math.max(0, Math.round((this.config.intervalMs - (Date.now() - this.lastActivityAt)) / 1000)), s3 = this.inFlight ? "firing" : this.registry.size === 0 ? "empty_registry" : "armed";
-      ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${s3} regSize=${this.registry.size} idleSec=${t3} nextFireSec=${i3} cacheAgeSec=${e3 < 0 ? "na" : Math.round(e3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}
+      let t3 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, e3 = Math.round((Date.now() - this.lastActivityAt) / 1000), i3 = Math.max(0, Math.round((this.config.intervalMs - (Date.now() - this.lastActivityAt)) / 1000)), s3 = this.inFlight ? "firing" : this.registry.size === 0 ? "empty_registry" : "armed";
+      it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${s3} regSize=${this.registry.size} idleSec=${e3} nextFireSec=${i3} cacheAgeSec=${t3 < 0 ? "na" : Math.round(t3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}
 `);
     } catch {}
     if (this.registry.size === 0 || this.inFlight)
@@ -39150,85 +44613,85 @@ var Ie = class _KeepaliveEngine {
         return this.logClearDiag("owner_dead", { ownerCheck: "tick" }), this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
     } catch {}
     if (this.cacheWrittenAt > 0) {
-      let e3 = Date.now() - this.cacheWrittenAt;
-      if (e3 > this.cacheTtlMs) {
+      let t3 = Date.now() - this.cacheWrittenAt;
+      if (t3 > this.cacheTtlMs) {
         try {
-          ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(e3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((e3 - this.cacheTtlMs) / 1000)}
+          it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(t3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((t3 - this.cacheTtlMs) / 1000)}
 `);
         } catch {}
-        return this.logClearDiag("cache_expired_during_sleep", { overSec: Math.round((e3 - this.cacheTtlMs) / 1000) }), this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
+        return this.logClearDiag("cache_expired_during_sleep", { overSec: Math.round((t3 - this.cacheTtlMs) / 1000) }), this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
       }
     }
-    let e2 = Me();
-    if (!e2.enabled)
-      return this.logClearDiag("config_disabled", { liveConfigEnabled: e2.enabled }), this.registry.clear(), void this.stop();
-    if (e2.cacheTtlMs !== this.cacheTtlMs) {
-      let t3 = this.cacheTtlMs;
-      this.cacheTtlMs = e2.cacheTtlMs;
+    let t2 = Mt();
+    if (!t2.enabled)
+      return this.logClearDiag("config_disabled", { liveConfigEnabled: t2.enabled }), this.registry.clear(), void this.stop();
+    if (t2.cacheTtlMs !== this.cacheTtlMs) {
+      let e3 = this.cacheTtlMs;
+      this.cacheTtlMs = t2.cacheTtlMs;
       try {
-        ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] CACHE_TTL_RELOADED pid=${process.pid} oldMs=${t3} newMs=${e2.cacheTtlMs} oldMin=${Math.round(t3 / 60000)} newMin=${Math.round(e2.cacheTtlMs / 60000)}
+        it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] CACHE_TTL_RELOADED pid=${process.pid} oldMs=${e3} newMs=${t2.cacheTtlMs} oldMin=${Math.round(e3 / 60000)} newMin=${Math.round(t2.cacheTtlMs / 60000)}
 `);
       } catch {}
     }
-    if (e2.safetyMarginMs !== this.safetyMarginMs) {
-      let t3 = this.safetyMarginMs;
-      this.safetyMarginMs = e2.safetyMarginMs;
+    if (t2.safetyMarginMs !== this.safetyMarginMs) {
+      let e3 = this.safetyMarginMs;
+      this.safetyMarginMs = t2.safetyMarginMs;
       try {
-        ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] SAFETY_MARGIN_RELOADED pid=${process.pid} oldMs=${t3} newMs=${e2.safetyMarginMs}
+        it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] SAFETY_MARGIN_RELOADED pid=${process.pid} oldMs=${e3} newMs=${t2.safetyMarginMs}
 `);
       } catch {}
     }
-    let t2 = Math.max(e2.intervalClampMin, Math.min(e2.intervalMs, e2.intervalClampMax));
-    t2 !== this.config.intervalMs && (this.config.intervalMs = t2), e2.idleTimeoutMs !== this.config.idleTimeoutMs && (this.config.idleTimeoutMs = e2.idleTimeoutMs), e2.minTokens !== this.config.minTokens && (this.config.minTokens = e2.minTokens);
+    let e2 = Math.max(t2.intervalClampMin, Math.min(t2.intervalMs, t2.intervalClampMax));
+    e2 !== this.config.intervalMs && (this.config.intervalMs = e2), t2.idleTimeoutMs !== this.config.idleTimeoutMs && (this.config.idleTimeoutMs = t2.idleTimeoutMs), t2.minTokens !== this.config.minTokens && (this.config.minTokens = t2.minTokens);
     let i2 = Date.now() - this.lastRealActivityAt;
     if (this.config.idleTimeoutMs !== 1 / 0 && i2 > this.config.idleTimeoutMs)
       return this.logClearDiag("idle_timeout", { realIdleMs: i2, idleTimeoutMs: this.config.idleTimeoutMs }), this.registry.clear(), void this.stop();
     let s2 = null;
-    for (let e3 of this.registry.values())
-      (!s2 || e3.inputTokens > s2.inputTokens) && (s2 = e3);
+    for (let t3 of this.registry.values())
+      (!s2 || t3.inputTokens > s2.inputTokens) && (s2 = t3);
     if (!s2)
       return;
     let r2 = Date.now() - this.lastActivityAt;
     if (this.jitterMs || (this.jitterMs = Math.floor(30000 * Math.random())), this.config.onTick?.({ idleMs: r2, nextFireMs: Math.max(0, this.config.intervalMs - r2), model: s2.model, tokens: s2.inputTokens }), !(r2 < 0.9 * this.config.intervalMs + this.jitterMs)) {
       this.inFlight = true;
       try {
-        let e3 = await this.getToken(), t3 = JSON.parse(JSON.stringify(s2.body)), i3 = t3.thinking?.budget_tokens ?? 0;
-        t3.max_tokens = i3 > 0 ? i3 + 1 : 1;
-        let n2 = { ...s2.headers, Authorization: `Bearer ${e3}` }, a2 = new AbortController;
+        let t3 = await this.getToken(), e3 = JSON.parse(JSON.stringify(s2.body)), i3 = e3.thinking?.budget_tokens ?? 0;
+        e3.max_tokens = i3 > 0 ? i3 + 1 : 1;
+        let n2 = { ...s2.headers, Authorization: `Bearer ${t3}` }, a2 = new AbortController;
         this.abortController = a2;
         let o2 = Date.now(), l2 = { inputTokens: 0, outputTokens: 0 };
-        for await (let e4 of this.doFetch(t3, n2, a2.signal))
-          e4.type === "message_stop" && (l2 = e4.usage);
+        for await (let t4 of this.doFetch(e3, n2, a2.signal))
+          t4.type === "message_stop" && (l2 = t4.usage);
         let h2 = Date.now() - o2;
         this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
         let c2 = this.getRateLimitInfo();
         this.config.onHeartbeat?.({ usage: l2, durationMs: h2, idleMs: r2, model: s2.model, rateLimit: { status: c2.status, claim: c2.claim, resetAt: c2.resetAt } });
-      } catch (e3) {
-        let t3 = xe(e3);
-        if (t3 === "network") {
-          let e4 = Date.now() - this.cacheWrittenAt, t4 = this.cacheTtlMs - e4 <= this.safetyMarginMs;
-          this.onDisarmed("network_error"), this.startHealthProbe({ reviveMode: t4 });
+      } catch (t3) {
+        let e3 = Ct(t3);
+        if (e3 === "network") {
+          let t4 = Date.now() - this.cacheWrittenAt, e4 = this.cacheTtlMs - t4 <= this.safetyMarginMs;
+          this.onDisarmed("network_error"), this.startHealthProbe({ reviveMode: e4 });
         } else
-          t3 === "server_transient" ? this.retryChain(s2) : t3 === "auth" ? (this.logClearDiag("auth_error", { category: t3, errStatus: e3?.status }), this.registry.clear(), this.onDisarmed("auth_error")) : (this.logClearDiag("permanent_error", { category: t3, errStatus: e3?.status, errMessage: e3?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error"));
+          e3 === "server_transient" ? this.retryChain(s2) : e3 === "auth" ? (this.logClearDiag("auth_error", { category: e3, errStatus: t3?.status }), this.registry.clear(), this.onDisarmed("auth_error")) : (this.logClearDiag("permanent_error", { category: e3, errStatus: t3?.status, errMessage: t3?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error"));
       } finally {
         this.inFlight = false, this.abortController = null;
       }
     }
   }
-  logClearDiag(e2, t2) {
+  logClearDiag(t2, e2) {
     try {
-      let i2 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, s2 = this.cacheTtlMs - i2, r2 = Date.now() - this.lastActivityAt, n2 = Date.now() - this.lastRealActivityAt, a2 = { reason: e2, cacheAgeMs: i2, cacheTtlMs: this.cacheTtlMs, ttlRemainingMs: s2, safetyMarginMs: this.safetyMarginMs, idleMs: r2, realIdleMs: n2, regSize: this.registry.size, inFlight: this.inFlight, cacheWrittenAt: this.cacheWrittenAt, lastActivityAt: this.lastActivityAt, lastRealActivityAt: this.lastRealActivityAt, ...t2 }, o2 = Object.entries(a2).map(([e3, t3]) => `${e3}=${t3}`).join(" ");
-      ie(ce(he(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_CLEAR_DIAG pid=${process.pid} ${o2}
+      let i2 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, s2 = this.cacheTtlMs - i2, r2 = Date.now() - this.lastActivityAt, n2 = Date.now() - this.lastRealActivityAt, a2 = { reason: t2, cacheAgeMs: i2, cacheTtlMs: this.cacheTtlMs, ttlRemainingMs: s2, safetyMarginMs: this.safetyMarginMs, idleMs: r2, realIdleMs: n2, regSize: this.registry.size, inFlight: this.inFlight, cacheWrittenAt: this.cacheWrittenAt, lastActivityAt: this.lastActivityAt, lastRealActivityAt: this.lastRealActivityAt, ...e2 }, o2 = Object.entries(a2).map(([t3, e3]) => `${t3}=${e3}`).join(" ");
+      it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_CLEAR_DIAG pid=${process.pid} ${o2}
 `);
     } catch {}
   }
-  retryChain(e2, t2 = 0) {
-    if (t2 >= this.retryDelaysMs.length)
-      return this.logClearDiag("retry_exhausted", { attemptIndex: t2, retryDelaysMsLen: this.retryDelaysMs.length }), this.registry.clear(), void this.onDisarmed("retry_exhausted");
-    let i2 = Date.now() - this.cacheWrittenAt, s2 = this.cacheTtlMs - i2, r2 = 1000 * this.retryDelaysMs[t2];
+  retryChain(t2, e2 = 0) {
+    if (e2 >= this.retryDelaysMs.length)
+      return this.logClearDiag("retry_exhausted", { attemptIndex: e2, retryDelaysMsLen: this.retryDelaysMs.length }), this.registry.clear(), void this.onDisarmed("retry_exhausted");
+    let i2 = Date.now() - this.cacheWrittenAt, s2 = this.cacheTtlMs - i2, r2 = 1000 * this.retryDelaysMs[e2];
     if (s2 < r2 + this.safetyMarginMs) {
-      let e3 = i2 < this.cacheTtlMs / 2 ? "retry_budget_exceeds_ttl" : "cache_ttl_exhausted";
-      return this.logClearDiag(e3, { cmpLeft: s2, cmpRight: r2 + this.safetyMarginMs, nextDelayMs: r2, attemptIndex: t2, retryDelaysMsRaw: JSON.stringify(this.retryDelaysMs) }), this.registry.clear(), void this.onDisarmed(e3);
+      let t3 = i2 < this.cacheTtlMs / 2 ? "retry_budget_exceeds_ttl" : "cache_ttl_exhausted";
+      return this.logClearDiag(t3, { cmpLeft: s2, cmpRight: r2 + this.safetyMarginMs, nextDelayMs: r2, attemptIndex: e2, retryDelaysMsRaw: JSON.stringify(this.retryDelaysMs) }), this.registry.clear(), void this.onDisarmed(t3);
     }
     this.retryTimer = setTimeout(async () => {
       this.retryTimer = null;
@@ -39243,72 +44706,72 @@ var Ie = class _KeepaliveEngine {
         return this.logClearDiag("cache_ttl_expired_mid_retry", { ageNowMs: i3 }), this.registry.clear(), void this.onDisarmed("cache_ttl_expired_mid_retry");
       this.inFlight = true;
       try {
-        let t3 = await this.getToken(), i4 = JSON.parse(JSON.stringify(e2.body)), s3 = i4.thinking?.budget_tokens ?? 0;
+        let e3 = await this.getToken(), i4 = JSON.parse(JSON.stringify(t2.body)), s3 = i4.thinking?.budget_tokens ?? 0;
         i4.max_tokens = s3 > 0 ? s3 + 1 : 1;
-        let r3 = { ...e2.headers, Authorization: `Bearer ${t3}` }, n2 = new AbortController;
+        let r3 = { ...t2.headers, Authorization: `Bearer ${e3}` }, n2 = new AbortController;
         this.abortController = n2;
-        for await (let e3 of this.doFetch(i4, r3, n2.signal))
+        for await (let t3 of this.doFetch(i4, r3, n2.signal))
           ;
         this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
       } catch (i4) {
-        let s3 = xe(i4);
+        let s3 = Ct(i4);
         if (s3 === "network") {
           this.inFlight = false, this.abortController = null;
-          let e3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
-          return this.onDisarmed("network_error_mid_retry"), void this.startHealthProbe({ reviveMode: e3 });
+          let t3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
+          return this.onDisarmed("network_error_mid_retry"), void this.startHealthProbe({ reviveMode: t3 });
         }
         if (s3 === "server_transient")
-          return this.inFlight = false, this.abortController = null, void this.retryChain(e2, t2 + 1);
-        this.logClearDiag("permanent_error_mid_retry", { category: s3, attemptIndex: t2, errStatus: i4?.status, errMessage: i4?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error_mid_retry");
+          return this.inFlight = false, this.abortController = null, void this.retryChain(t2, e2 + 1);
+        this.logClearDiag("permanent_error_mid_retry", { category: s3, attemptIndex: e2, errStatus: i4?.status, errMessage: i4?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error_mid_retry");
       } finally {
         this.inFlight = false, this.abortController = null;
       }
     }, r2);
   }
-  onDisarmed(e2) {
+  onDisarmed(t2) {
     this.abortController?.abort(), this.abortController = null, this.inFlight = false, this.retryTimer && (clearTimeout(this.retryTimer), this.retryTimer = null);
     try {
-      this.config.onDisarmed?.({ reason: e2, at: Date.now() });
+      this.config.onDisarmed?.({ reason: t2, at: Date.now() });
     } catch {}
-    if (new Set(["retry_exhausted", "cache_ttl_exhausted", "cache_ttl_expired_mid_retry", "retry_budget_exceeds_ttl"]).has(e2) && !this.healthProbeTimer) {
-      let e3 = Date.now() - this.cacheWrittenAt, t2 = this.cacheTtlMs - e3 <= this.safetyMarginMs;
-      this.startHealthProbe({ reviveMode: t2 });
+    if (new Set(["retry_exhausted", "cache_ttl_exhausted", "cache_ttl_expired_mid_retry", "retry_budget_exceeds_ttl"]).has(t2) && !this.healthProbeTimer) {
+      let t3 = Date.now() - this.cacheWrittenAt, e2 = this.cacheTtlMs - t3 <= this.safetyMarginMs;
+      this.startHealthProbe({ reviveMode: e2 });
     }
   }
-  startHealthProbe(e2 = {}) {
+  startHealthProbe(t2 = {}) {
     if (this.healthProbeTimer)
       return;
     this.healthProbeAttempt = 0;
-    let t2 = this.networkState;
-    if (this.networkState = "degraded", t2 !== "degraded")
+    let e2 = this.networkState;
+    if (this.networkState = "degraded", e2 !== "degraded")
       try {
-        this.config.onNetworkStateChange?.({ from: t2, to: "degraded", at: Date.now() });
+        this.config.onNetworkStateChange?.({ from: e2, to: "degraded", at: Date.now() });
       } catch {}
     let s2 = i(() => {
-      let e3 = this.healthProbeIntervalsMs, t3 = e3[Math.min(this.healthProbeAttempt, e3.length - 1)];
-      this.healthProbeTimer = setTimeout(r2, t3), this.healthProbeTimer && typeof this.healthProbeTimer == "object" && "unref" in this.healthProbeTimer && this.healthProbeTimer.unref();
+      let t3 = this.healthProbeIntervalsMs, e3 = t3[Math.min(this.healthProbeAttempt, t3.length - 1)];
+      this.healthProbeTimer = setTimeout(r2, e3), this.healthProbeTimer && typeof this.healthProbeTimer == "object" && "unref" in this.healthProbeTimer && this.healthProbeTimer.unref();
     }, "scheduleNext"), r2 = i(async () => {
-      if (this.healthProbeTimer = null, this.healthProbeAttempt++, Date.now() - this.cacheWrittenAt >= this.cacheTtlMs - this.safetyMarginMs && !e2.reviveMode)
+      if (this.healthProbeTimer = null, this.healthProbeAttempt++, Date.now() - this.cacheWrittenAt >= this.cacheTtlMs - this.safetyMarginMs && !t2.reviveMode)
         return void this.stopHealthProbe();
       if (this.healthProbeAttempt > this.healthProbeIntervalsMs.length)
         return void this.stopHealthProbe();
-      let t3 = false;
+      let e3 = false;
       try {
-        let { connect: e3 } = await import("net");
-        await new Promise((t4, i3) => {
-          let s3 = e3({ host: "api.anthropic.com", port: 443 }), r4 = setTimeout(() => {
+        let { connect: t3 } = await import("net");
+        await new Promise((e4, i3) => {
+          let s3 = t3({ host: "api.anthropic.com", port: 443 }), r4 = setTimeout(() => {
             s3.destroy(), i3(new Error("timeout"));
           }, this.healthProbeTimeoutMs);
           s3.once("connect", () => {
-            clearTimeout(r4), s3.end(), t4();
-          }), s3.once("error", (e4) => {
-            clearTimeout(r4), i3(e4);
+            clearTimeout(r4), s3.end(), e4();
+          }), s3.once("error", (t4) => {
+            clearTimeout(r4), i3(t4);
           });
-        }), t3 = true;
+        }), e3 = true;
       } catch {
-        t3 = false;
+        e3 = false;
       }
-      if (!t3)
+      if (!e3)
         return void s2();
       this.stopHealthProbe();
       let i2 = this.networkState;
@@ -39324,25 +44787,25 @@ var Ie = class _KeepaliveEngine {
   stopHealthProbe() {
     this.healthProbeTimer && (clearTimeout(this.healthProbeTimer), this.healthProbeTimer = null), this.healthProbeAttempt = 0;
   }
-  writeSnapshotDebug(e2, t2, i2) {
+  writeSnapshotDebug(t2, e2, i2) {
     try {
-      let s2 = ce(he(), ".claude", "snapshots");
-      se(s2, { recursive: true });
+      let s2 = ct(ht(), ".claude", "snapshots");
+      st(s2, { recursive: true });
       try {
-        let e3 = Date.now() - _KeepaliveEngine.SNAPSHOT_TTL_MS;
-        for (let t3 of re(s2)) {
-          let i3 = ce(s2, t3);
-          ne(i3).mtimeMs < e3 && ae(i3);
+        let t3 = Date.now() - _KeepaliveEngine.SNAPSHOT_TTL_MS;
+        for (let e3 of rt(s2)) {
+          let i3 = ct(s2, e3);
+          nt(i3).mtimeMs < t3 && at(i3);
         }
       } catch {}
       this.snapshotCallCount++;
-      let { messages: r2, system: n2, tools: a2 } = t2, o2 = typeof n2 == "string" ? n2 : JSON.stringify(n2), l2 = le("md5").update(o2).digest("hex").slice(0, 8), h2 = { ts: new Date().toISOString(), pid: process.pid, callNum: this.snapshotCallCount, model: e2, messages: r2?.length ?? 0, tools: a2?.length ?? 0, sysHash: l2, sysLen: o2.length, usage: { input: i2.inputTokens ?? 0, cacheRead: i2.cacheReadInputTokens ?? 0, cacheWrite: i2.cacheCreationInputTokens ?? 0 }, firstMsg: r2?.[0] ? { role: r2[0].role, contentLen: JSON.stringify(r2[0].content).length, contentHash: le("md5").update(JSON.stringify(r2[0].content)).digest("hex").slice(0, 8) } : null, lastMsg: r2?.length ? { role: r2[r2.length - 1].role, contentLen: JSON.stringify(r2[r2.length - 1].content).length } : null, toolsHash: a2?.length ? le("md5").update(JSON.stringify(a2.map((e3) => e3.name ?? "").join(","))).digest("hex").slice(0, 8) : null }, c2 = `${process.pid}-${Date.now()}.json`;
-      if (oe(ce(s2, c2), JSON.stringify(h2, null, 2) + `
+      let { messages: r2, system: n2, tools: a2 } = e2, o2 = typeof n2 == "string" ? n2 : JSON.stringify(n2), l2 = lt("md5").update(o2).digest("hex").slice(0, 8), h2 = { ts: new Date().toISOString(), pid: process.pid, callNum: this.snapshotCallCount, model: t2, messages: r2?.length ?? 0, tools: a2?.length ?? 0, sysHash: l2, sysLen: o2.length, usage: { input: i2.inputTokens ?? 0, cacheRead: i2.cacheReadInputTokens ?? 0, cacheWrite: i2.cacheCreationInputTokens ?? 0 }, firstMsg: r2?.[0] ? { role: r2[0].role, contentLen: JSON.stringify(r2[0].content).length, contentHash: lt("md5").update(JSON.stringify(r2[0].content)).digest("hex").slice(0, 8) } : null, lastMsg: r2?.length ? { role: r2[r2.length - 1].role, contentLen: JSON.stringify(r2[r2.length - 1].content).length } : null, toolsHash: a2?.length ? lt("md5").update(JSON.stringify(a2.map((t3) => t3.name ?? "").join(","))).digest("hex").slice(0, 8) : null }, c2 = `${process.pid}-${Date.now()}.json`;
+      if (ot(ct(s2, c2), JSON.stringify(h2, null, 2) + `
 `), _KeepaliveEngine.DUMP_BODY || this.snapshotCallCount <= 3) {
-        let e3 = ce(s2, "bodies");
-        se(e3, { recursive: true });
+        let t3 = ct(s2, "bodies");
+        st(t3, { recursive: true });
         let i3 = `${process.pid}-call${this.snapshotCallCount}-${Date.now()}.json`;
-        oe(ce(e3, i3), JSON.stringify(t2, null, 2) + `
+        ot(ct(t3, i3), JSON.stringify(e2, null, 2) + `
 `);
       }
     } catch {}
@@ -39359,87 +44822,287 @@ var Ie = class _KeepaliveEngine {
   get m() {
     return this.lastKnownCacheTokensByModel;
   }
-  k(e2) {
-    this.lastRealActivityAt = e2;
+  k(t2) {
+    this.lastRealActivityAt = t2;
   }
-  _(e2) {
-    this.cacheWrittenAt = e2;
+  _(t2) {
+    this.cacheWrittenAt = t2;
   }
   get T() {
     return this.cacheWrittenAt;
   }
-  v(e2, t2, i2) {
-    this.i = e2, this.o = t2, this.l = i2;
+  R(t2, e2, i2) {
+    this.i = t2, this.o = e2, this.l = i2;
   }
 };
-var Ne = 300000;
-var Le = 0.25;
-var Fe = 300000;
-var Pe = 1200000;
-var Ue = K(j(), ".claude", ".refresh-cooldown");
-var Be = 1800000;
-var He = "2.1.90";
-var Je = { todowrite: "todo_write" };
-var We = Object.fromEntries(Object.entries(Je).map(([e2, t2]) => [t2, e2]));
-function Ke(e2) {
-  if (!e2?.length)
-    return { remapped: e2, didRemap: false };
-  let t2 = false;
-  return { remapped: e2.map((e3) => {
-    let i2 = Je[e3.name];
-    return i2 ? (t2 = true, { ...e3, name: i2 }) : e3;
-  }), didRemap: t2 };
+function Nt(t2) {
+  return !t2 || t2.length < 21 ? "" : t2.slice(13, 21);
 }
-function je(e2) {
-  return We[e2] ?? e2;
-}
-i(Ke, "remapToolNames"), i(je, "unremapToolName");
-var qe = K(j(), ".claude", ".token-refresh-lock");
-async function ze() {
-  for (let e2 = 0;e2 < 30; e2++)
+i(Nt, "tokenHint");
+var Jt = class {
+  constructor(t2, e2, i2) {
+    this.credentialStore = t2, this.contextTokensProvider = e2, this.getConfig = i2, this.startWatcher(), this.startPollFallback();
+  }
+  static {
+    i(this, "TokenRotationManager");
+  }
+  pendingRotation = null;
+  orgIdCache = null;
+  watcher = null;
+  pollTimer = null;
+  closed = false;
+  eventEmitter = null;
+  lastSeenHint = "";
+  contextProviderThrew = false;
+  appendCallCount = 0;
+  async checkPending() {
+    if (await this.detectRotation("ensureAuth"), this.pendingRotation === null)
+      return { action: "no-pending" };
+    let t2 = null;
+    if (this.contextTokensProvider)
+      try {
+        let e3 = this.contextTokensProvider();
+        t2 = typeof e3 == "number" ? e3 : null;
+      } catch (e3) {
+        t2 = null, this.contextProviderThrew || (this.contextProviderThrew = true, this.logBestEffort(`[${new Date().toISOString()}] TOKEN_PROVIDER_THREW pid=${process.pid} error=${e3.message}`));
+      }
+    let e2 = this.getConfig().tokenRotationContextThreshold;
+    if (t2 === null || t2 < e2) {
+      await this.applyPending("context-drop");
+      let t3 = await this.credentialStore.read();
+      return t3 ? { action: "apply-now", credentials: t3, mode: "applied" } : { action: "no-pending" };
+    }
+    return { action: "continue-with-old", pending: this.pendingRotation };
+  }
+  async applyPending(t2, e2) {
+    if (t2 === "forced-expired" && e2 === undefined)
+      throw new Error("forcedReason required when reason=forced-expired");
+    if (this.pendingRotation === null)
+      return;
+    if (!await this.credentialStore.read())
+      return this.logBestEffort(`[${new Date().toISOString()}] TOKEN_APPLY_NO_CREDS pid=${process.pid}`), void (this.pendingRotation = null);
+    let { oldHint: i2, newHint: s2, oldOrgId: r2, newOrgId: n2, detectedAt: a2 } = this.pendingRotation;
+    this.lastSeenHint = s2, this.pendingRotation = null, this.orgIdCache = null;
+    let o2 = t2 === "forced-expired" ? "forced" : "applied", l2 = t2, h2 = null;
+    if (this.contextTokensProvider)
+      try {
+        let t3 = this.contextTokensProvider();
+        h2 = typeof t3 == "number" ? t3 : null;
+      } catch {
+        h2 = null;
+      }
+    let c2 = { pid: process.pid, spawnDepth: 0, sessionId: null, oldHint: i2, newHint: s2, oldOrgId: r2, newOrgId: n2, contextTokens: h2, mode: o2, appliedAt: l2, forcedReason: e2 ?? null, detectedAt: new Date(a2).toISOString() };
+    t2 === "forced-expired" ? this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_FORCED pid=${process.pid} forcedReason=${e2} oldHint=${i2} newHint=${s2}`) : this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_APPLIED pid=${process.pid} reason=${t2} oldHint=${i2} newHint=${s2} newOrgId=${n2 ?? "null"}`), this.emitEvent(c2);
+  }
+  hasPending() {
+    return this.pendingRotation !== null;
+  }
+  setEventEmitter(t2) {
+    this.eventEmitter = t2;
+  }
+  close() {
+    if (this.closed = true, this.watcher) {
+      try {
+        this.watcher.close();
+      } catch {}
+      this.watcher = null;
+    }
+    this.pollTimer && (clearInterval(this.pollTimer), this.pollTimer = null);
+  }
+  startWatcher() {
+    let t2 = this.credentialStore.path;
+    if (typeof t2 == "string")
+      try {
+        this.watcher = Lt(t2, { persistent: false }, (t3) => {
+          (t3 === "change" || t3 === "rename") && queueMicrotask(() => {
+            this.detectRotation("fs.watch").catch(() => {});
+          });
+        }), this.watcher.on("error", (t3) => {
+          this.logBestEffort(`[${new Date().toISOString()}] TOKEN_WATCHER_ERROR pid=${process.pid} error=${t3.message}`);
+        });
+      } catch (t3) {
+        this.logBestEffort(`[${new Date().toISOString()}] TOKEN_WATCHER_INIT_FAILED pid=${process.pid} error=${t3.message}`);
+      }
+  }
+  startPollFallback() {
+    let t2 = this.getConfig().tokenRotationPollIntervalMs;
+    this.pollTimer = setInterval(() => {
+      this.closed || this.detectRotation("poll").catch(() => {});
+    }, t2), this.pollTimer.unref();
+  }
+  async detectRotation(t2) {
+    if (this.closed)
+      return;
+    let e2;
     try {
-      return U(qe), F(K(qe, "pid"), `${process.pid}
+      e2 = await this.credentialStore.read();
+    } catch (e3) {
+      return void this.logBestEffort(`[${new Date().toISOString()}] TOKEN_DETECT_READ_FAILED pid=${process.pid} source=${t2} error=${e3.message}`);
+    }
+    if (!e2)
+      return;
+    let i2 = Nt(e2.accessToken);
+    if (i2 === this.lastSeenHint)
+      return;
+    if (this.lastSeenHint === "")
+      return this.lastSeenHint = i2, void (this.orgIdCache = { orgId: this.extractOrgId(e2.refreshToken), cachedAt: Date.now() });
+    if (this.pendingRotation !== null && i2 === this.pendingRotation.newHint)
+      return;
+    if (this.pendingRotation !== null && i2 === this.pendingRotation.oldHint) {
+      let t3 = this.pendingRotation;
+      return this.pendingRotation = null, this.lastSeenHint = i2, void this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_CANCELLED pid=${process.pid} oldHint=${t3.oldHint} newHint=${t3.newHint} reason=revert`);
+    }
+    let s2 = this.lastSeenHint, r2 = i2, n2 = await this.getCachedOrgId(), a2 = this.extractOrgId(e2.refreshToken), o2 = null;
+    if (this.contextTokensProvider)
+      try {
+        let t3 = this.contextTokensProvider();
+        o2 = typeof t3 == "number" ? t3 : null;
+      } catch (t3) {
+        o2 = null, this.contextProviderThrew || (this.contextProviderThrew = true, this.logBestEffort(`[${new Date().toISOString()}] TOKEN_PROVIDER_THREW pid=${process.pid} error=${t3.message}`));
+      }
+    let l2, h2, c2, u2 = this.getConfig().tokenRotationContextThreshold;
+    n2 !== null && n2 === a2 ? (l2 = "same-org", h2 = "immediate", c2 = "TOKEN_ROTATION_SAME_ORG", this.lastSeenHint = r2, this.pendingRotation = null, this.orgIdCache = null) : o2 === null || o2 < u2 ? (l2 = "applied", h2 = "immediate", c2 = "TOKEN_ROTATION_APPLIED", this.lastSeenHint = r2, this.pendingRotation = null, this.orgIdCache = null) : (l2 = "deferred", h2 = null, c2 = "TOKEN_ROTATION_DEFERRED", this.pendingRotation = { oldHint: s2, newHint: r2, oldOrgId: n2, newOrgId: a2, detectedAt: Date.now() });
+    let d2 = { pid: process.pid, spawnDepth: 0, sessionId: null, oldHint: s2, newHint: r2, oldOrgId: n2, newOrgId: a2, contextTokens: o2, mode: l2, appliedAt: h2, forcedReason: null, detectedAt: new Date().toISOString() };
+    this.logBestEffort(`[${new Date().toISOString()}] ${c2} pid=${process.pid} source=${t2} oldHint=${s2} newHint=${r2} oldOrgId=${n2 ?? "null"} newOrgId=${a2 ?? "null"} contextTokens=${o2 ?? "null"}`), this.emitEvent(d2);
+  }
+  extractOrgId(t2) {
+    if (!t2)
+      return null;
+    try {
+      let e2 = t2.split(".");
+      if (e2.length !== 3)
+        return null;
+      let i2 = Buffer.from(e2[1], "base64url").toString("utf8"), s2 = JSON.parse(i2);
+      return typeof s2.organization_id == "string" ? s2.organization_id : null;
+    } catch {
+      return null;
+    }
+  }
+  async getCachedOrgId() {
+    let t2, e2 = this.getConfig().orgIdCacheTtlMs, i2 = Date.now();
+    if (this.orgIdCache && i2 - this.orgIdCache.cachedAt < e2)
+      return this.orgIdCache.orgId;
+    try {
+      t2 = await this.credentialStore.read();
+    } catch {
+      return null;
+    }
+    let s2 = t2 ? this.extractOrgId(t2.refreshToken) : null;
+    return this.orgIdCache = { orgId: s2, cachedAt: i2 }, s2;
+  }
+  appendRotationLog(t2) {
+    try {
+      let e2 = Wt(Kt(), ".claude", "token-rotation.log");
+      Pt(e2, JSON.stringify(t2) + `
+`), this.appendCallCount += 1, (this.appendCallCount === 1 || this.appendCallCount % 100 == 0) && this.maybeRotateLog();
+    } catch {}
+  }
+  maybeRotateLog() {
+    try {
+      let t2 = this.getConfig(), e2 = Wt(Kt(), ".claude", "token-rotation.log");
+      if (!Ht(e2) || Ft(e2).size < t2.tokenRotationLogMaxBytes)
+        return;
+      let i2 = `${e2}.1`, s2 = `${e2}.2`;
+      if (Ht(s2)) {
+        let e3 = Ft(s2).mtimeMs;
+        if (Date.now() - e3 > 86400 * t2.tokenRotationLogRetentionDays * 1000)
+          try {
+            Ut(s2);
+          } catch {}
+      }
+      if (Ht(i2))
+        try {
+          Bt(i2, s2);
+        } catch {}
+      try {
+        Bt(e2, i2);
+      } catch {}
+    } catch {}
+  }
+  emitEvent(t2) {
+    if (this.eventEmitter)
+      try {
+        this.eventEmitter(t2);
+      } catch (t3) {
+        this.logBestEffort(`[${new Date().toISOString()}] TOKEN_EMITTER_THREW pid=${process.pid} error=${t3.message}`);
+      }
+    this.appendRotationLog(t2);
+  }
+  logBestEffort(t2) {
+    try {
+      Pt(Wt(Kt(), ".claude", "claude-max-debug.log"), t2 + `
+`);
+    } catch {}
+  }
+};
+var jt = 300000;
+var qt = 0.25;
+var zt = 300000;
+var Gt = 1200000;
+var Qt = J(j(), ".claude", ".refresh-cooldown");
+var Yt = 1800000;
+var Vt = "2.1.90";
+var Xt = { todowrite: "todo_write" };
+var Zt = Object.fromEntries(Object.entries(Xt).map(([t2, e2]) => [e2, t2]));
+function te(t2) {
+  if (!t2?.length)
+    return { remapped: t2, didRemap: false };
+  let e2 = false;
+  return { remapped: t2.map((t3) => {
+    let i2 = Xt[t3.name];
+    return i2 ? (e2 = true, { ...t3, name: i2 }) : t3;
+  }), didRemap: e2 };
+}
+function ee(t2) {
+  return Zt[t2] ?? t2;
+}
+i(te, "remapToolNames"), i(ee, "unremapToolName");
+var ie = J(j(), ".claude", ".token-refresh-lock");
+async function se() {
+  for (let t2 = 0;t2 < 30; t2++)
+    try {
+      return H(ie), P(J(ie, "pid"), `${process.pid}
 ${Date.now()}`), () => {
         try {
-          J(K(qe, "pid")), B(qe);
+          K(J(ie, "pid")), B(ie);
         } catch {}
       };
-    } catch (e3) {
-      if (e3.code === "EEXIST") {
+    } catch (t3) {
+      if (t3.code === "EEXIST") {
         try {
-          let e4 = L(K(qe, "pid"), "utf8"), t2 = parseInt(e4.split(`
+          let t4 = L(J(ie, "pid"), "utf8"), e2 = parseInt(t4.split(`
 `)[1] ?? "0");
-          if (Date.now() - t2 > 30000) {
+          if (Date.now() - e2 > 30000) {
             try {
-              J(K(qe, "pid"));
+              K(J(ie, "pid"));
             } catch {}
             try {
-              B(qe);
+              B(ie);
             } catch {}
             continue;
           }
         } catch {}
-        await new Promise((e4) => setTimeout(e4, 1000 + 1000 * Math.random()));
+        await new Promise((t4) => setTimeout(t4, 1000 + 1000 * Math.random()));
         continue;
       }
       return null;
     }
   return null;
 }
-async function Ge(e2, t2, i2) {
-  let s2 = Date.now() + t2;
+async function re(t2, e2, i2) {
+  let s2 = Date.now() + e2;
   for (;Date.now() < s2; ) {
     try {
-      let t3 = await e2.read();
-      if (t3 && t3.expiresAt - Date.now() >= i2)
-        return { accessToken: t3.accessToken, refreshToken: t3.refreshToken, expiresAt: t3.expiresAt };
+      let e3 = await t2.read();
+      if (e3 && e3.expiresAt - Date.now() >= i2)
+        return { accessToken: e3.accessToken, refreshToken: e3.refreshToken, expiresAt: e3.expiresAt };
     } catch {}
-    await new Promise((e3) => setTimeout(e3, 500));
+    await new Promise((t3) => setTimeout(t3, 500));
   }
   return null;
 }
-i(ze, "acquireTokenRefreshLock"), i(Ge, "pollDiskForFreshToken");
-var Qe = class {
+i(se, "acquireTokenRefreshLock"), i(re, "pollDiskForFreshToken");
+var ne = class {
   static {
     i(this, "ClaudeCodeSDK");
   }
@@ -39447,6 +45110,7 @@ var Qe = class {
   refreshToken = null;
   expiresAt = null;
   credentialStore;
+  tokenRotation;
   sessionId;
   deviceId;
   accountUuid;
@@ -39464,27 +45128,30 @@ var Qe = class {
   tokenIssuedAt = 0;
   onTokenStatus;
   keepalive;
-  R = null;
-  constructor(e2 = {}) {
-    this.sessionId = N(), this.deviceId = e2.deviceId ?? I(32).toString("hex"), this.accountUuid = e2.accountUuid ?? this.readAccountUuid(), this.timeout = e2.timeout ?? 600000, this.maxRetries = e2.maxRetries ?? 10, this.onTokenStatus = e2.onTokenStatus, this.keepalive = new Ie({ config: e2.keepalive, getToken: i(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: i((e3, t2, i2) => this.doStreamRequest(e3, t2, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimitInfo, "getRateLimitInfo") }), e2.credentialStore ? this.credentialStore = e2.credentialStore : e2.accessToken ? (this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken ?? null, this.expiresAt = e2.expiresAt ?? null, this.credentialStore = new Xe({ accessToken: e2.accessToken, refreshToken: e2.refreshToken ?? "", expiresAt: e2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new Ye(e2.credentialsPath ?? K(j(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {}));
+  $ = null;
+  constructor(t2 = {}) {
+    this.sessionId = N(), this.deviceId = t2.deviceId ?? x(32).toString("hex"), this.accountUuid = t2.accountUuid ?? this.readAccountUuid(), this.timeout = t2.timeout ?? 600000, this.maxRetries = t2.maxRetries ?? 10, this.onTokenStatus = t2.onTokenStatus, this.keepalive = new xt({ config: t2.keepalive, getToken: i(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: i((t3, e2, i2) => this.doStreamRequest(t3, e2, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimitInfo, "getRateLimitInfo") }), t2.credentialStore ? this.credentialStore = t2.credentialStore : t2.accessToken ? (this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken ?? null, this.expiresAt = t2.expiresAt ?? null, this.credentialStore = new oe({ accessToken: t2.accessToken, refreshToken: t2.refreshToken ?? "", expiresAt: t2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new ae(t2.credentialsPath ?? J(j(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {})), this.tokenRotation = new Jt(this.credentialStore, t2.contextTokensProvider, () => Mt());
   }
-  async generate(e2) {
-    let t2 = [];
-    for await (let i2 of this.stream(e2))
-      t2.push(i2);
-    return this.assembleResponse(t2, e2.model);
+  close() {
+    this.tokenRotation.close();
   }
-  async* stream(e2) {
-    this.keepalive.checkRewriteGuard(e2.model), await this.ensureAuth();
-    let t2, i2 = this.buildRequestBody(e2), s2 = this.buildHeaders(e2);
-    this.keepalive.notifyRealRequestStart(e2.model, i2, s2), this.R = null;
+  async generate(t2) {
+    let e2 = [];
+    for await (let i2 of this.stream(t2))
+      e2.push(i2);
+    return this.assembleResponse(e2, t2.model);
+  }
+  async* stream(t2) {
+    this.keepalive.checkRewriteGuard(t2.model), await this.ensureAuth();
+    let e2, i2 = this.buildRequestBody(t2), s2 = this.buildHeaders(t2);
+    this.keepalive.notifyRealRequestStart(t2.model, i2, s2), this.$ = null;
     for (let r2 = 1;r2 <= this.maxRetries + 1; r2++) {
-      if (e2.signal?.aborted)
+      if (t2.signal?.aborted)
         throw new q("Aborted");
       try {
-        return yield* this.doStreamRequest(i2, s2, e2.signal), void (this.R && (this.keepalive.notifyRealRequestComplete(this.R), this.R = null));
+        return yield* this.doStreamRequest(i2, s2, t2.signal), void (this.$ && (this.keepalive.notifyRealRequestComplete(this.$), this.$ = null));
       } catch (i3) {
-        if (t2 = i3, i3 instanceof G) {
+        if (e2 = i3, i3 instanceof G) {
           if (i3.status === 401 && r2 <= this.maxRetries) {
             await this.handleAuth401(), s2.Authorization = `Bearer ${this.accessToken}`;
             continue;
@@ -39492,154 +45159,164 @@ var Qe = class {
           if (i3.status === 429)
             throw i3 instanceof Q ? i3 : new Q("Rate limited", this.lastRateLimitInfo, 429, i3);
           if (i3.status >= 500 && r2 <= this.maxRetries) {
-            let t3 = this.getRetryDelay(r2, this.lastRateLimitInfo.retryAfter?.toString() ?? null);
-            await this.sleep(t3, e2.signal);
+            let e3 = this.getRetryDelay(r2, this.lastRateLimitInfo.retryAfter?.toString() ?? null);
+            await this.sleep(e3, t2.signal);
             continue;
           }
         }
         throw i3;
       }
     }
-    throw t2;
+    throw e2;
   }
   getRateLimitInfo() {
     return this.lastRateLimitInfo;
   }
-  async* doStreamRequest(e2, t2, i2) {
+  async* doStreamRequest(t2, e2, i2) {
     let r2 = new AbortController, n2 = setTimeout(() => r2.abort(), this.timeout);
     i2 && i2.addEventListener("abort", () => r2.abort(), { once: true });
-    let a2, o2 = Date.now(), l2 = JSON.stringify(e2);
+    let a2, o2 = Date.now(), l2 = JSON.stringify(t2);
+    if (l2.length > 19922944) {
+      let e3 = (l2.length / 1024 / 1024).toFixed(1);
+      try {
+        let { appendFileSync: t3 } = s("fs");
+        t3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] BODY_TOO_LARGE pid=${process.pid} bodyLen=${l2.length} (${e3}MB) \u2014 refusing to send (would 413)
+`);
+      } catch {}
+      let i3 = t2.messages?.length ?? 0;
+      throw new Error(`Request body too large: ${e3}MB exceeds the 19MB safety threshold (API hard limit ~20MB). Got ${i3} messages. Run /compact to summarize history, or start a fresh session. If this is unexpected, the consumer's per-image / total-body management may have a gap.`);
+    }
     try {
       let { appendFileSync: i3 } = s("fs");
-      i3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${e2.model} msgs=${e2.messages?.length ?? 0}
+      i3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${t2.model} msgs=${t2.messages?.length ?? 0}
 `);
-      let r3 = e2.tools?.map((e3) => e3.name).join(",") ?? "none", n3 = typeof e2.system == "string" ? e2.system.substring(0, 200) : JSON.stringify(e2.system)?.substring(0, 200);
-      if (i3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(t2).substring(0, 300)} tools=[${r3.substring(0, 500)}] sys=${n3} bodyLen=${l2.length}
+      let r3 = t2.tools?.map((t3) => t3.name).join(",") ?? "none", n3 = typeof t2.system == "string" ? t2.system.substring(0, 200) : JSON.stringify(t2.system)?.substring(0, 200);
+      if (i3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(e2).substring(0, 300)} tools=[${r3.substring(0, 500)}] sys=${n3} bodyLen=${l2.length}
 `), process.env.CLAUDE_MAX_DUMP_REQUESTS === "1") {
-        let s2 = { ...e2, messages: `[${e2.messages?.length ?? 0} messages]`, system: `[${typeof e2.system == "string" ? e2.system.length : "array"}]` };
-        i3(K(j(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: t2, body: s2 }) + `
+        let s2 = { ...t2, messages: `[${t2.messages?.length ?? 0} messages]`, system: `[${typeof t2.system == "string" ? t2.system.length : "array"}]` };
+        i3(J(j(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: e2, body: s2 }) + `
 `);
       }
     } catch {}
     try {
-      a2 = await fetch("https://api.anthropic.com/v1/messages?beta=true", { method: "POST", headers: t2, body: l2, signal: r2.signal });
-    } catch (e3) {
+      a2 = await fetch("https://api.anthropic.com/v1/messages?beta=true", { method: "POST", headers: e2, body: l2, signal: r2.signal });
+    } catch (t3) {
       clearTimeout(n2);
       try {
-        let { appendFileSync: t3 } = s("fs");
-        t3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - o2}ms err=${e3.message}
+        let { appendFileSync: e3 } = s("fs");
+        e3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - o2}ms err=${t3.message}
 `);
       } catch {}
-      throw new q("Network error", e3);
+      throw new q("Network error", t3);
     }
     clearTimeout(n2);
     try {
-      let { appendFileSync: e3 } = s("fs"), t3 = {};
-      a2.headers.forEach((e4, i4) => {
-        t3[i4] = e4;
+      let { appendFileSync: t3 } = s("fs"), e3 = {};
+      a2.headers.forEach((t4, i4) => {
+        e3[i4] = t4;
       });
-      let i3 = { ts: new Date().toISOString(), pid: process.pid, status: a2.status, statusText: a2.statusText, ttfbMs: Date.now() - o2, headers: t3 };
-      e3(K(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
-`), e3(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${a2.status} ttfb=${Date.now() - o2}ms
+      let i3 = { ts: new Date().toISOString(), pid: process.pid, status: a2.status, statusText: a2.statusText, ttfbMs: Date.now() - o2, headers: e3 };
+      t3(J(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
+`), t3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${a2.status} ttfb=${Date.now() - o2}ms
 `);
     } catch {}
     if (this.lastRateLimitInfo = this.parseRateLimitHeaders(a2.headers), !a2.ok) {
-      let e3 = "";
+      let t3 = "";
       try {
-        e3 = await a2.text();
+        t3 = await a2.text();
       } catch {}
-      let t3 = a2.headers.get("request-id");
+      let e3 = a2.headers.get("request-id");
       try {
         let { appendFileSync: i3 } = s("fs"), r3 = {};
-        a2.headers.forEach((e4, t4) => {
-          r3[t4] = e4;
-        }), i3(K(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: a2.status, requestId: t3, headers: r3, body: e3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
+        a2.headers.forEach((t4, e4) => {
+          r3[e4] = t4;
+        }), i3(J(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: a2.status, requestId: e3, headers: r3, body: t3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
 `);
       } catch {}
-      throw a2.status === 429 ? new Q(`Rate limited: ${e3}`, this.lastRateLimitInfo, 429) : new G(`API error ${a2.status}: ${e3}`, a2.status, t3);
+      throw a2.status === 429 ? new Q(`Rate limited: ${t3}`, this.lastRateLimitInfo, 429) : new G(`API error ${a2.status}: ${t3}`, a2.status, e3);
     }
     if (!a2.body)
       throw new q("No response body");
     yield* this.parseSSE(a2.body, i2);
   }
-  async* parseSSE(e2, t2) {
-    let i2 = new TextDecoder, r2 = e2.getReader(), n2 = "", a2 = new Map, o2 = { inputTokens: 0, outputTokens: 0 }, l2 = null;
+  async* parseSSE(t2, e2) {
+    let i2 = new TextDecoder, r2 = t2.getReader(), n2 = "", a2 = new Map, o2 = { inputTokens: 0, outputTokens: 0 }, l2 = null;
     try {
       for (;; ) {
-        if (t2?.aborted)
+        if (e2?.aborted)
           return void r2.cancel();
-        let { done: e3, value: h2 } = await r2.read();
-        if (e3)
+        let { done: t3, value: h2 } = await r2.read();
+        if (t3)
           break;
         n2 += i2.decode(h2, { stream: true });
         let c2 = n2.split(`
 `);
         n2 = c2.pop() ?? "";
-        for (let e4 of c2) {
-          if (!e4.startsWith("data: "))
+        for (let t4 of c2) {
+          if (!t4.startsWith("data: "))
             continue;
-          let t3, i3 = e4.slice(6);
+          let e3, i3 = t4.slice(6);
           if (i3 === "[DONE]")
             continue;
           try {
-            t3 = JSON.parse(i3);
+            e3 = JSON.parse(i3);
           } catch {
             continue;
           }
-          let r3 = t3.type;
+          let r3 = e3.type;
           if (r3 === "message_start") {
             try {
-              let { appendFileSync: e6 } = s("fs"), { join: i4 } = s("path"), { homedir: r4 } = s("os");
-              e6(i4(r4(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] MESSAGE_START: ${JSON.stringify(t3).slice(0, 2000)}
+              let { appendFileSync: t6 } = s("fs"), { join: i4 } = s("path"), { homedir: r4 } = s("os");
+              t6(i4(r4(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] MESSAGE_START: ${JSON.stringify(e3).slice(0, 2000)}
 `);
             } catch {}
-            let e5 = t3.message?.usage;
-            if (e5) {
-              o2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens, cacheReadInputTokens: e5.cache_read_input_tokens };
+            let t5 = e3.message?.usage;
+            if (t5) {
+              o2 = { inputTokens: t5.input_tokens ?? 0, outputTokens: t5.output_tokens ?? 0, cacheCreationInputTokens: t5.cache_creation_input_tokens, cacheReadInputTokens: t5.cache_read_input_tokens };
               try {
-                W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(e5)}
+                W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(t5)}
 `);
               } catch {}
             }
             continue;
           }
           if (r3 === "content_block_start") {
-            let { index: e5, content_block: i4 } = t3;
+            let { index: t5, content_block: i4 } = e3;
             if (i4.type === "tool_use") {
-              let t4 = je(i4.name);
-              a2.set(e5, { type: "tool_use", id: i4.id, name: t4, input: "" }), yield { type: "tool_use_start", id: i4.id, name: t4 };
+              let e4 = ee(i4.name);
+              a2.set(t5, { type: "tool_use", id: i4.id, name: e4, input: "" }), yield { type: "tool_use_start", id: i4.id, name: e4 };
             } else
-              i4.type === "text" ? a2.set(e5, { type: "text", text: "" }) : i4.type === "thinking" && a2.set(e5, { type: "thinking", thinking: "", signature: i4.signature ?? undefined });
+              i4.type === "text" ? a2.set(t5, { type: "text", text: "" }) : i4.type === "thinking" && a2.set(t5, { type: "thinking", thinking: "", signature: i4.signature ?? undefined });
             continue;
           }
           if (r3 === "content_block_delta") {
-            let e5 = t3.index, i4 = a2.get(e5), s2 = t3.delta;
+            let t5 = e3.index, i4 = a2.get(t5), s2 = e3.delta;
             s2.type === "text_delta" && s2.text !== undefined ? (i4 && (i4.text = (i4.text ?? "") + s2.text), s2.text && (yield { type: "text_delta", text: s2.text })) : s2.type === "thinking_delta" && s2.thinking !== undefined ? (i4 && (i4.thinking = (i4.thinking ?? "") + s2.thinking), s2.thinking && (yield { type: "thinking_delta", text: s2.thinking })) : s2.type === "signature_delta" && s2.signature !== undefined ? i4 && (i4.signature = (i4.signature ?? "") + s2.signature) : s2.type === "input_json_delta" && s2.partial_json !== undefined && (i4 && (i4.input = (i4.input ?? "") + s2.partial_json), s2.partial_json && (yield { type: "tool_use_delta", partialInput: s2.partial_json }));
             continue;
           }
           if (r3 === "content_block_stop") {
-            let e5 = t3.index, i4 = a2.get(e5);
+            let t5 = e3.index, i4 = a2.get(t5);
             if (i4?.type === "tool_use" && i4.id && i4.name) {
-              let e6 = {};
+              let t6 = {};
               try {
-                e6 = JSON.parse(i4.input ?? "{}");
+                t6 = JSON.parse(i4.input ?? "{}");
               } catch {}
-              yield { type: "tool_use_end", id: i4.id, name: i4.name, input: e6 };
+              yield { type: "tool_use_end", id: i4.id, name: i4.name, input: t6 };
             }
             if (i4?.type === "thinking") {
-              let e6 = t3.signature ?? t3.content_block?.signature;
-              e6 && (i4.signature = e6), yield { type: "thinking_end", signature: i4.signature ?? undefined };
+              let t6 = e3.signature ?? e3.content_block?.signature;
+              t6 && (i4.signature = t6), yield { type: "thinking_end", signature: i4.signature ?? undefined };
             }
             continue;
           }
           if (r3 === "message_delta") {
-            let e5 = t3.delta;
-            e5?.stop_reason && (l2 = e5.stop_reason);
-            let i4 = t3.usage;
+            let t5 = e3.delta;
+            t5?.stop_reason && (l2 = t5.stop_reason);
+            let i4 = e3.usage;
             i4?.output_tokens && (o2 = { ...o2, outputTokens: i4.output_tokens });
             continue;
           }
-          r3 === "message_stop" && (this.R = o2, yield { type: "message_stop", usage: o2, stopReason: l2 });
+          r3 === "message_stop" && (this.$ = o2, yield { type: "message_stop", usage: o2, stopReason: l2 });
         }
       }
     } finally {
@@ -39649,98 +45326,98 @@ var Qe = class {
   stopKeepalive() {
     this.keepalive.stop(), this.tokenRotationTimer && (clearTimeout(this.tokenRotationTimer), this.tokenRotationTimer = null);
   }
-  buildHeaders(e2) {
-    let t2 = this.buildBetas(e2);
-    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": t2.join(","), "anthropic-dangerous-direct-browser-access": "true", "x-app": "cli", "User-Agent": `claude-cli/${He}`, "X-Claude-Code-Session-Id": this.sessionId };
+  buildHeaders(t2) {
+    let e2 = this.buildBetas(t2);
+    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": e2.join(","), "anthropic-dangerous-direct-browser-access": "true", "x-app": "cli", "User-Agent": `claude-cli/${Vt}`, "X-Claude-Code-Session-Id": this.sessionId };
   }
-  buildRequestBody(e2) {
-    let t2, i2 = this.computeFingerprint(e2.messages), s2 = `x-anthropic-billing-header: cc_version=${He}.${i2}; cc_entrypoint=cli; cch=00000;`;
-    t2 = (typeof e2.system == "string" ? e2.system : Array.isArray(e2.system) ? JSON.stringify(e2.system) : "").includes("x-anthropic-billing-header") ? e2.system : typeof e2.system == "string" ? s2 + `
-` + e2.system : Array.isArray(e2.system) ? [{ type: "text", text: s2 }, ...e2.system] : s2;
-    let r2 = { model: e2.model, messages: e2.messages, max_tokens: Z(e2.model, e2.maxTokens), stream: true, system: t2, metadata: { user_id: JSON.stringify({ device_id: this.deviceId, account_uuid: this.accountUuid, session_id: this.sessionId }) } };
-    if (e2.tools && e2.tools.length > 0) {
-      let { remapped: t3 } = Ke(e2.tools);
-      if (r2.tools = t3, e2.toolChoice) {
-        let t4 = typeof e2.toolChoice == "string" ? { type: e2.toolChoice } : { ...e2.toolChoice };
-        t4.type === "tool" && t4.name && Je[t4.name] && (t4.name = Je[t4.name]), r2.tool_choice = t4;
+  buildRequestBody(t2) {
+    let e2, i2 = this.computeFingerprint(t2.messages), s2 = `x-anthropic-billing-header: cc_version=${Vt}.${i2}; cc_entrypoint=cli; cch=00000;`;
+    e2 = (typeof t2.system == "string" ? t2.system : Array.isArray(t2.system) ? JSON.stringify(t2.system) : "").includes("x-anthropic-billing-header") ? t2.system : typeof t2.system == "string" ? s2 + `
+` + t2.system : Array.isArray(t2.system) ? [{ type: "text", text: s2 }, ...t2.system] : s2;
+    let r2 = { model: t2.model, messages: t2.messages, max_tokens: Z(t2.model, t2.maxTokens), stream: true, system: e2, metadata: { user_id: JSON.stringify({ device_id: this.deviceId, account_uuid: this.accountUuid, session_id: this.sessionId }) } };
+    if (t2.tools && t2.tools.length > 0) {
+      let { remapped: e3 } = te(t2.tools);
+      if (r2.tools = e3, t2.toolChoice) {
+        let e4 = typeof t2.toolChoice == "string" ? { type: t2.toolChoice } : { ...t2.toolChoice };
+        e4.type === "tool" && e4.name && Xt[e4.name] && (e4.name = Xt[e4.name]), r2.tool_choice = e4;
       }
     }
-    e2.caching !== false && this.addCacheMarkers(r2);
-    let n2 = e2.model.toLowerCase(), a2 = n2.includes("opus-4-6") || n2.includes("sonnet-4-6") || n2.includes("opus-4-7") || n2.includes("sonnet-4-7"), o2 = e2.thinking?.type === "disabled";
-    return !o2 && a2 ? r2.thinking = { type: "adaptive" } : e2.thinking?.type === "enabled" && (r2.thinking = { type: "enabled", budget_tokens: e2.thinking.budgetTokens }), !(!o2 && (a2 || e2.thinking?.type === "enabled")) && e2.temperature !== undefined && (r2.temperature = e2.temperature), e2.topP !== undefined && (r2.top_p = e2.topP), e2.effort && a2 && (r2.output_config = { effort: e2.effort }), e2.stopSequences?.length && (r2.stop_sequences = e2.stopSequences), e2.fast && (r2.speed = "fast"), r2;
+    t2.caching !== false && this.addCacheMarkers(r2);
+    let n2 = t2.model.toLowerCase(), a2 = n2.includes("opus-4-6") || n2.includes("sonnet-4-6") || n2.includes("opus-4-7") || n2.includes("sonnet-4-7"), o2 = t2.thinking?.type === "disabled";
+    return !o2 && a2 ? r2.thinking = { type: "adaptive" } : t2.thinking?.type === "enabled" && (r2.thinking = { type: "enabled", budget_tokens: t2.thinking.budgetTokens }), !(!o2 && (a2 || t2.thinking?.type === "enabled")) && t2.temperature !== undefined && (r2.temperature = t2.temperature), t2.topP !== undefined && (r2.top_p = t2.topP), t2.effort && a2 && (r2.output_config = { effort: t2.effort }), t2.stopSequences?.length && (r2.stop_sequences = t2.stopSequences), t2.fast && (r2.speed = "fast"), r2;
   }
-  addCacheMarkers(e2) {
-    let t2 = { cache_control: { type: "ephemeral", ttl: "1h" } }, i2 = e2.system;
+  addCacheMarkers(t2) {
+    let e2 = { cache_control: { type: "ephemeral", ttl: "1h" } }, i2 = t2.system;
     if (typeof i2 == "string")
-      e2.system = [{ type: "text", text: i2, ...t2 }];
+      t2.system = [{ type: "text", text: i2, ...e2 }];
     else if (Array.isArray(i2)) {
-      let e3 = i2;
-      e3.length > 0 && (e3[e3.length - 1] = { ...e3[e3.length - 1], ...t2 });
+      let t3 = i2;
+      t3.length > 0 && (t3[t3.length - 1] = { ...t3[t3.length - 1], ...e2 });
     }
-    let s2 = e2.tools;
-    s2 && s2.length > 0 && (s2[s2.length - 1] = { ...s2[s2.length - 1], ...t2 });
-    let r2 = e2.messages;
+    let s2 = t2.tools;
+    s2 && s2.length > 0 && (s2[s2.length - 1] = { ...s2[s2.length - 1], ...e2 });
+    let r2 = t2.messages;
     if (r2.length === 0)
       return;
     let n2 = r2[r2.length - 1];
     if (typeof n2.content == "string")
-      n2.content = [{ type: "text", text: n2.content, ...t2 }];
+      n2.content = [{ type: "text", text: n2.content, ...e2 }];
     else if (Array.isArray(n2.content) && n2.content.length > 0) {
-      let e3 = n2.content[n2.content.length - 1];
-      n2.content[n2.content.length - 1] = { ...e3, ...t2 };
+      let t3 = n2.content[n2.content.length - 1];
+      n2.content[n2.content.length - 1] = { ...t3, ...e2 };
     }
   }
-  buildBetas(e2) {
-    let t2 = [], i2 = e2.model.toLowerCase().includes("haiku");
-    return i2 || t2.push("claude-code-20250219"), t2.push("oauth-2025-04-20"), /\[1m\]/i.test(e2.model) && t2.push("context-1m-2025-08-07"), !i2 && e2.thinking?.type !== "disabled" && t2.push("interleaved-thinking-2025-05-14"), e2.effort && t2.push("effort-2025-11-24"), e2.fast && t2.push("fast-mode-2026-02-01"), i2 || t2.push("context-management-2025-06-27"), t2.push("task-budgets-2026-03-13"), t2.push("redact-thinking-2026-02-12"), t2.push("prompt-caching-scope-2026-01-05"), t2.push("fine-grained-tool-streaming-2025-05-14"), e2.extraBetas && t2.push(...e2.extraBetas), t2;
+  buildBetas(t2) {
+    let e2 = [], i2 = t2.model.toLowerCase().includes("haiku");
+    return i2 || e2.push("claude-code-20250219"), e2.push("oauth-2025-04-20"), /\[1m\]/i.test(t2.model) && e2.push("context-1m-2025-08-07"), !i2 && t2.thinking?.type !== "disabled" && e2.push("interleaved-thinking-2025-05-14"), t2.effort && e2.push("effort-2025-11-24"), t2.fast && e2.push("fast-mode-2026-02-01"), i2 || e2.push("context-management-2025-06-27"), e2.push("task-budgets-2026-03-13"), e2.push("redact-thinking-2026-02-12"), e2.push("prompt-caching-scope-2026-01-05"), e2.push("fine-grained-tool-streaming-2025-05-14"), t2.extraBetas && e2.push(...t2.extraBetas), e2;
   }
   async ensureAuth() {
-    if (this.accessToken && this.credentialStore.hasChanged)
+    if ((await this.tokenRotation.checkPending()).action === "apply-now" && (this.accessToken = null, this.refreshToken = null, this.expiresAt = 0), this.accessToken && this.credentialStore.hasChanged)
       try {
         if (await this.credentialStore.hasChanged()) {
           try {
-            let e2 = (this.accessToken ?? "").slice(13, 21);
-            W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${e2} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token
+            let t2 = Nt(this.accessToken);
+            W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${t2} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token
 `);
           } catch {}
           this.accessToken = null, this.refreshToken = null, this.expiresAt = 0;
         }
-      } catch (e2) {
+      } catch (t2) {
         try {
-          W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_MTIME_CHECK_FAILED pid=${process.pid} error=${e2?.message ?? String(e2)}
+          W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_MTIME_CHECK_FAILED pid=${process.pid} error=${t2?.message ?? String(t2)}
 `);
         } catch {}
       }
     if (!this.accessToken || this.isTokenExpired())
-      return this.pendingAuth || (this.pendingAuth = this.S().finally(() => {
+      return this.pendingAuth || (this.pendingAuth = this.v().finally(() => {
         this.pendingAuth = null;
       })), this.pendingAuth;
   }
-  async S() {
-    this.credentialStore.hasChanged && await this.credentialStore.hasChanged() && await this.loadFromStore(), (!this.accessToken || this.isTokenExpired()) && (!this.accessToken && (await this.loadFromStore(), this.accessToken && !this.isTokenExpired()) || this.accessToken && this.isTokenExpired() && await this.refreshTokenWithTripleCheck());
+  async v() {
+    this.credentialStore.hasChanged && await this.credentialStore.hasChanged() && await this.loadFromStore(), (!this.accessToken || this.isTokenExpired()) && (!this.accessToken && (await this.loadFromStore(), this.accessToken && !this.isTokenExpired()) || (this.tokenRotation.hasPending() && this.isTokenExpired() && await this.tokenRotation.applyPending("forced-expired", "old-token-expired"), this.accessToken && this.isTokenExpired() && await this.refreshTokenWithTripleCheck()));
   }
   async loadFromStore() {
-    let e2 = this.accessToken, t2 = await this.credentialStore.read();
-    if (!t2?.accessToken)
+    let t2 = this.accessToken, e2 = await this.credentialStore.read();
+    if (!e2?.accessToken)
       throw new z('No OAuth tokens found. Run "claude login" first or provide credentials.');
-    this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, !this.tokenIssuedAt && this.expiresAt && (this.tokenIssuedAt = Date.now()), this.scheduleProactiveRotation();
+    this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, this.expiresAt = e2.expiresAt, !this.tokenIssuedAt && this.expiresAt && (this.tokenIssuedAt = Date.now()), this.scheduleProactiveRotation();
     try {
-      let i2 = t2.accessToken.slice(13, 21);
-      if (e2)
-        if (e2 !== t2.accessToken) {
-          let t3 = e2.slice(13, 21);
-          W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${t3} newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
+      let i2 = Nt(e2.accessToken);
+      if (t2)
+        if (t2 !== e2.accessToken) {
+          let e3 = Nt(t2);
+          W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${e3} newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
 `);
         } else
-          W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=reload hint=${i2}
+          W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=reload hint=${i2}
 `);
       else
-        W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
+        W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
 `);
     } catch {}
   }
   isTokenExpired() {
-    return !!this.expiresAt && Date.now() + Ne >= this.expiresAt;
+    return !!this.expiresAt && Date.now() + jt >= this.expiresAt;
   }
   async forceRefreshToken() {
     if (this.dbg("FORCE REFRESH requested by caller"), this.initialLoad && await this.initialLoad, !this.refreshToken)
@@ -39750,26 +45427,26 @@ var Qe = class {
     this.clearRefreshCooldown(), this.lastRefreshAttemptAt = 0;
     try {
       return await this.doTokenRefresh(true), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.emitTokenStatus("rotated", "Token force-refreshed successfully"), this.scheduleProactiveRotation(), true;
-    } catch (e2) {
-      let t2 = e2?.message ?? String(e2);
-      return this.dbg(`FORCE REFRESH FAILED: ${t2}`), this.emitTokenStatus("warning", `Force refresh failed: ${t2}`), false;
+    } catch (t2) {
+      let e2 = t2?.message ?? String(t2);
+      return this.dbg(`FORCE REFRESH FAILED: ${e2}`), this.emitTokenStatus("warning", `Force refresh failed: ${e2}`), false;
     }
   }
   async forceReLogin() {
     this.initialLoad && await this.initialLoad, this.dbg("FORCE RE-LOGIN requested \u2014 opening browser OAuth flow"), this.emitTokenStatus("critical", "Initiating browser re-login \u2014 refresh token may be dead");
     try {
-      let { oauthLogin: e2 } = await Promise.resolve().then(() => (O(), r)), t2 = this.credentialStore instanceof Ye ? this.credentialStore.path : K(j(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
+      let { oauthLogin: t2 } = await Promise.resolve().then(() => (I(), r)), e2 = this.credentialStore instanceof ae ? this.credentialStore.path : J(j(), ".claude", ".credentials.json"), i2 = await t2({ credentialsPath: e2 });
       return this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.emitTokenStatus("rotated", "Re-login successful \u2014 fresh tokens"), this.scheduleProactiveRotation(), this.dbg(`RE-LOGIN SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()}`), true;
-    } catch (e2) {
-      let t2 = e2?.message ?? String(e2);
-      return this.dbg(`RE-LOGIN FAILED: ${t2}`), this.emitTokenStatus("expired", `Re-login failed: ${t2}`), false;
+    } catch (t2) {
+      let e2 = t2?.message ?? String(t2);
+      return this.dbg(`RE-LOGIN FAILED: ${e2}`), this.emitTokenStatus("expired", `Re-login failed: ${e2}`), false;
     }
   }
   getTokenHealth() {
     if (!this.expiresAt)
       return { expiresAt: null, expiresInMs: 0, lifetimePct: 0, failedRefreshes: this.proactiveRefreshFailures, status: "unknown" };
-    let e2, t2 = Date.now(), i2 = this.expiresAt - t2, s2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? Math.max(0, i2 / s2) : 0;
-    return e2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < Le ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: e2 };
+    let t2, e2 = Date.now(), i2 = this.expiresAt - e2, s2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? Math.max(0, i2 / s2) : 0;
+    return t2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < qt ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: t2 };
   }
   async getTokenHealthAsync() {
     return this.initialLoad && await this.initialLoad, this.getTokenHealth();
@@ -39777,151 +45454,151 @@ var Qe = class {
   scheduleProactiveRotation() {
     if (this.tokenRotationTimer && (clearTimeout(this.tokenRotationTimer), this.tokenRotationTimer = null), !this.expiresAt || !this.refreshToken)
       return;
-    let e2 = Date.now(), t2 = this.expiresAt - e2;
-    if (t2 <= 0)
+    let t2 = Date.now(), e2 = this.expiresAt - t2;
+    if (e2 <= 0)
       return void this.emitTokenStatus("expired", "Token has expired");
-    let i2 = Math.max(0.8 * t2, Fe), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, t2 - Ne);
+    let i2 = Math.max(0.8 * e2, zt), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, e2 - jt);
     if (r2 <= 0)
       return this.dbg(`proactive rotation: delay=${r2}ms <= 0, scheduling emergency refresh in 30s`), void (this.tokenRotationTimer || (this.tokenRotationTimer = setTimeout(() => {
         this.tokenRotationTimer = null, this.proactiveRefresh();
       }, 30000), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && ("unref" in this.tokenRotationTimer) && this.tokenRotationTimer.unref()));
-    let n2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * t2, a2 = n2 > 0 ? t2 / n2 : 1;
-    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < Le && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(t2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
+    let n2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * e2, a2 = n2 > 0 ? e2 / n2 : 1;
+    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < qt && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(e2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
       this.tokenRotationTimer = null, this.proactiveRefresh();
     }, r2), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
   }
   async proactiveRefresh() {
     if (this.isRefreshOnCooldown()) {
       try {
-        let e3 = await this.credentialStore.read();
-        if (e3 && !(Date.now() + Ne >= e3.expiresAt)) {
-          let t3 = e3.expiresAt - Date.now();
-          if (t3 >= Pe)
-            return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
-          this.dbg(`proactive refresh: disk token has only ${Math.round(t3 / 60000)}min left (need ${Math.round(20)}min) \u2014 waiting for cooldown`);
+        let t3 = await this.credentialStore.read();
+        if (t3 && !(Date.now() + jt >= t3.expiresAt)) {
+          let e3 = t3.expiresAt - Date.now();
+          if (e3 >= Gt)
+            return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(e3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(e3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
+          this.dbg(`proactive refresh: disk token has only ${Math.round(e3 / 60000)}min left (need ${Math.round(20)}min) \u2014 waiting for cooldown`);
         }
       } catch {}
       if (this.dbg("proactive refresh skipped: global cooldown active, no fresh token found"), !this.tokenRotationTimer) {
-        let e3 = Math.max(Fe, 60000);
+        let t3 = Math.max(zt, 60000);
         this.tokenRotationTimer = setTimeout(() => {
           this.tokenRotationTimer = null, this.proactiveRefresh();
-        }, e3), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
+        }, t3), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
       }
       return;
     }
-    let e2 = Date.now();
-    if (e2 - this.lastRefreshAttemptAt < Fe)
+    let t2 = Date.now();
+    if (t2 - this.lastRefreshAttemptAt < zt)
       return void this.dbg("proactive refresh skipped: too recent");
-    this.lastRefreshAttemptAt = e2, this.dbg("proactive rotation: refreshing token silently...");
-    let t2 = await ze();
-    if (!t2) {
+    this.lastRefreshAttemptAt = t2, this.dbg("proactive rotation: refreshing token silently...");
+    let e2 = await se();
+    if (!e2) {
       this.dbg("proactive rotation: lock unavailable (another PID refreshing) \u2014 polling disk");
-      let e3 = await Ge(this.credentialStore, 45000, Pe);
-      if (e3) {
-        this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0;
-        let t3 = e3.expiresAt - Date.now();
-        this.dbg(`proactive rotation: picked up fresh token from disk (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`);
+      let t3 = await re(this.credentialStore, 45000, Gt);
+      if (t3) {
+        this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0;
+        let e3 = t3.expiresAt - Date.now();
+        this.dbg(`proactive rotation: picked up fresh token from disk (${Math.round(e3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(e3 / 60000)}min remaining)`);
       } else
         this.dbg("proactive rotation: lock unavailable and no fresh token appeared \u2014 will retry on next schedule");
       return void this.scheduleProactiveRotation();
     }
     try {
-      let e3 = await this.credentialStore.read();
-      if (e3 && !(Date.now() + Ne >= e3.expiresAt)) {
-        let t4 = e3.expiresAt - Date.now();
-        if (t4 >= Pe)
-          return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(t4 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t4 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
+      let t3 = await this.credentialStore.read();
+      if (t3 && !(Date.now() + jt >= t3.expiresAt)) {
+        let e4 = t3.expiresAt - Date.now();
+        if (e4 >= Gt)
+          return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(e4 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(e4 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
       }
-      let t3 = this.expiresAt ?? 0;
+      let e3 = this.expiresAt ?? 0;
       await this.doTokenRefresh(true), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.tokenIssuedAt = Date.now();
-      let i2 = (this.expiresAt ?? 0) - Date.now(), s2 = t3 > 0 ? t3 - (this.tokenIssuedAt - 1000) : 2 * i2;
+      let i2 = (this.expiresAt ?? 0) - Date.now(), s2 = e3 > 0 ? e3 - (this.tokenIssuedAt - 1000) : 2 * i2;
       i2 > 0 && i2 < 0.5 * s2 && this.dbg(`\u26A0\uFE0F SHRINKING TOKEN: new ${Math.round(i2 / 60000)}min vs prev ${Math.round(s2 / 60000)}min \u2014 backing off rotation`), this.dbg(`proactive rotation SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()} (${Math.round(i2 / 60000)}min lifetime)`), this.emitTokenStatus("rotated", `Token rotated silently \u2014 expires ${new Date(this.expiresAt).toISOString()}`), this.scheduleProactiveRotation();
-    } catch (e3) {
+    } catch (t3) {
       this.proactiveRefreshFailures++;
-      let t3 = e3?.message ?? String(e3);
-      if (this.dbg(`proactive rotation FAILED (#${this.proactiveRefreshFailures}): ${t3}`), t3.includes("429") || t3.includes("rate limit")) {
+      let e3 = t3?.message ?? String(t3);
+      if (this.dbg(`proactive rotation FAILED (#${this.proactiveRefreshFailures}): ${e3}`), e3.includes("429") || e3.includes("rate limit")) {
         this.refreshConsecutive429s++;
-        let e4 = Math.min(Fe * Math.pow(2, this.refreshConsecutive429s), Be);
-        this.setRefreshCooldown(e4), this.dbg(`proactive rotation: 429 cooldown ${Math.round(e4 / 1000)}s (attempt #${this.refreshConsecutive429s})`);
+        let t4 = Math.min(zt * Math.pow(2, this.refreshConsecutive429s), Yt);
+        this.setRefreshCooldown(t4), this.dbg(`proactive rotation: 429 cooldown ${Math.round(t4 / 1000)}s (attempt #${this.refreshConsecutive429s})`);
       }
       let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = this.tokenIssuedAt > 0 && this.expiresAt ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? i2 / s2 : 0;
-      i2 <= Ne ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${t3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}. Consider forceReLogin()`) : r2 < Le && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}`), this.expiresAt && this.expiresAt > Date.now() + Ne ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
+      i2 <= jt ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${e3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}. Consider forceReLogin()`) : r2 < qt && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}`), this.expiresAt && this.expiresAt > Date.now() + jt ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
     } finally {
-      t2 && t2();
+      e2 && e2();
     }
   }
-  emitTokenStatus(e2, t2) {
-    let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = { level: e2, message: t2, expiresInMs: i2, failedAttempts: this.proactiveRefreshFailures, needsReLogin: e2 === "expired" || e2 === "critical" && this.proactiveRefreshFailures >= 3 }, r2 = e2 === "rotated" ? "\u2705" : e2 === "warning" ? "\u26A0\uFE0F" : e2 === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
-    this.dbg(`${r2} [${e2.toUpperCase()}] ${t2} (expires in ${Math.round(i2 / 60000)}min, failures=${this.proactiveRefreshFailures})`), this.onTokenStatus?.(s2);
+  emitTokenStatus(t2, e2) {
+    let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = { level: t2, message: e2, expiresInMs: i2, failedAttempts: this.proactiveRefreshFailures, needsReLogin: t2 === "expired" || t2 === "critical" && this.proactiveRefreshFailures >= 3 }, r2 = t2 === "rotated" ? "\u2705" : t2 === "warning" ? "\u26A0\uFE0F" : t2 === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
+    this.dbg(`${r2} [${t2.toUpperCase()}] ${e2} (expires in ${Math.round(i2 / 60000)}min, failures=${this.proactiveRefreshFailures})`), this.onTokenStatus?.(s2);
   }
   isRefreshOnCooldown() {
     try {
-      let e2 = L(Ue, "utf8"), t2 = parseInt(e2.trim());
-      if (Date.now() < t2)
+      let t2 = L(Qt, "utf8"), e2 = parseInt(t2.trim());
+      if (Date.now() < e2)
         return true;
       try {
-        J(Ue);
+        K(Qt);
       } catch {}
     } catch {}
     return false;
   }
-  setRefreshCooldown(e2) {
+  setRefreshCooldown(t2) {
     try {
-      let t2 = K(j(), ".claude");
+      let e2 = J(j(), ".claude");
       try {
-        U(t2, { recursive: true });
+        H(e2, { recursive: true });
       } catch {}
-      F(Ue, `${Date.now() + e2}
+      P(Qt, `${Date.now() + t2}
 `);
     } catch {}
   }
   clearRefreshCooldown() {
     try {
-      J(Ue);
+      K(Qt);
     } catch {}
     this.refreshConsecutive429s = 0;
   }
-  dbg(e2) {
+  dbg(t2) {
     try {
-      W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${e2}
+      W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${t2}
 `);
     } catch {}
   }
   async refreshTokenWithTripleCheck() {
-    let e2 = await this.credentialStore.read();
-    if (e2 && !(Date.now() + Ne >= e2.expiresAt))
-      return this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, void (this.expiresAt = e2.expiresAt);
-    let t2 = await ze();
-    if (!t2) {
+    let t2 = await this.credentialStore.read();
+    if (t2 && !(Date.now() + jt >= t2.expiresAt))
+      return this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, void (this.expiresAt = t2.expiresAt);
+    let e2 = await se();
+    if (!e2) {
       this.dbg("refresh: lock unavailable (another PID refreshing) \u2014 polling disk");
-      let e3 = await Ge(this.credentialStore, 45000, Ne);
-      return e3 ? (this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, void this.dbg(`refresh: picked up fresh token from disk (${Math.round((e3.expiresAt - Date.now()) / 60000)}min remaining)`)) : (this.dbg("refresh: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh as last resort"), void await this.doTokenRefresh());
+      let t3 = await re(this.credentialStore, 45000, jt);
+      return t3 ? (this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, void this.dbg(`refresh: picked up fresh token from disk (${Math.round((t3.expiresAt - Date.now()) / 60000)}min remaining)`)) : (this.dbg("refresh: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh as last resort"), void await this.doTokenRefresh());
     }
     try {
-      let e3 = await this.credentialStore.read();
-      if (e3 && !(Date.now() + Ne >= e3.expiresAt))
-        return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, void (this.expiresAt = e3.expiresAt);
+      let t3 = await this.credentialStore.read();
+      if (t3 && !(Date.now() + jt >= t3.expiresAt))
+        return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, void (this.expiresAt = t3.expiresAt);
       await this.doTokenRefresh();
     } finally {
-      t2();
+      e2();
     }
   }
   async handleAuth401() {
-    let e2 = this.accessToken;
-    this.pending401 && this.lastFailedToken === e2 || (this.lastFailedToken = e2, this.pending401 = (async () => {
-      let t2 = await this.credentialStore.read();
-      if (t2 && t2.accessToken !== e2)
-        return this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, true;
-      let i2 = await ze();
+    let t2 = this.accessToken;
+    this.pending401 && this.lastFailedToken === t2 || (this.lastFailedToken = t2, this.pending401 = (async () => {
+      let e2 = await this.credentialStore.read();
+      if (e2 && e2.accessToken !== t2)
+        return this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, this.expiresAt = e2.expiresAt, true;
+      let i2 = await se();
       if (!i2) {
         this.dbg("handleAuth401: lock unavailable \u2014 polling disk for fresh token");
-        let t3 = await Ge(this.credentialStore, 45000, Ne);
-        return t3 && t3.accessToken !== e2 ? (this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.dbg(`handleAuth401: picked up fresh token from disk (${Math.round((t3.expiresAt - Date.now()) / 60000)}min remaining)`), true) : (this.dbg("handleAuth401: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh"), await this.doTokenRefresh(), true);
+        let e3 = await re(this.credentialStore, 45000, jt);
+        return e3 && e3.accessToken !== t2 ? (this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.dbg(`handleAuth401: picked up fresh token from disk (${Math.round((e3.expiresAt - Date.now()) / 60000)}min remaining)`), true) : (this.dbg("handleAuth401: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh"), await this.doTokenRefresh(), true);
       }
       try {
-        let t3 = await this.credentialStore.read();
-        if (t3 && t3.accessToken !== e2 && !(Date.now() + Ne >= t3.expiresAt))
-          return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, true;
+        let e3 = await this.credentialStore.read();
+        if (e3 && e3.accessToken !== t2 && !(Date.now() + jt >= e3.expiresAt))
+          return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, true;
         await this.doTokenRefresh();
       } finally {
         i2();
@@ -39931,157 +45608,157 @@ var Qe = class {
       this.pending401 = null, this.lastFailedToken = null;
     })), await this.pending401;
   }
-  async doTokenRefresh(e2 = false) {
+  async doTokenRefresh(t2 = false) {
     if (!this.refreshToken)
       throw new z("Token expired and no refresh token available.");
-    if (this.isRefreshOnCooldown() && !e2) {
-      let e3 = await this.credentialStore.read();
-      if (e3 && !(Date.now() + Ne >= e3.expiresAt))
-        return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, void this.dbg("refresh skipped (cooldown) \u2014 another process already refreshed");
+    if (this.isRefreshOnCooldown() && !t2) {
+      let t3 = await this.credentialStore.read();
+      if (t3 && !(Date.now() + jt >= t3.expiresAt))
+        return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, void this.dbg("refresh skipped (cooldown) \u2014 another process already refreshed");
       if (this.expiresAt && this.expiresAt > Date.now() + 600000)
         throw new z("Token refresh on cooldown due to rate limiting. Will retry later.");
       this.dbg("refresh: ignoring cooldown \u2014 token critically close to expiry");
     }
-    let t2 = [500, 1500, 3000, 5000, 8000], i2 = this.credentialStore.path ?? K(j(), ".claude", ".credentials.json");
+    let e2 = [500, 1500, 3000, 5000, 8000], i2 = this.credentialStore.path ?? J(j(), ".claude", ".credentials.json");
     try {
-      let t3 = H(i2).mtimeMs, s3 = Date.now() - t3;
+      let e3 = U(i2).mtimeMs, s3 = Date.now() - e3;
       if (s3 < 60000) {
-        let t4 = await this.credentialStore.read();
-        if (t4 && !(Date.now() + Ne >= t4.expiresAt)) {
-          let i3 = t4.expiresAt - Date.now(), r2 = t4.accessToken !== this.accessToken;
-          if (!e2 || r2 && i3 >= Pe)
-            return this.accessToken = t4.accessToken, this.refreshToken = t4.refreshToken, this.expiresAt = t4.expiresAt, this.tokenIssuedAt = Date.now(), this.dbg(`refresh: skipped (mtime fresh ${Math.round(s3 / 1000)}s ago, ${Math.round(i3 / 60000)}min remaining) \u2014 picked up sibling/CLI write`), void this.scheduleProactiveRotation();
+        let e4 = await this.credentialStore.read();
+        if (e4 && !(Date.now() + jt >= e4.expiresAt)) {
+          let i3 = e4.expiresAt - Date.now(), r2 = e4.accessToken !== this.accessToken;
+          if (!t2 || r2 && i3 >= Gt)
+            return this.accessToken = e4.accessToken, this.refreshToken = e4.refreshToken, this.expiresAt = e4.expiresAt, this.tokenIssuedAt = Date.now(), this.dbg(`refresh: skipped (mtime fresh ${Math.round(s3 / 1000)}s ago, ${Math.round(i3 / 60000)}min remaining) \u2014 picked up sibling/CLI write`), void this.scheduleProactiveRotation();
         }
       }
     } catch {}
     for (let i3 = 0;i3 < 5; i3++) {
       let s3 = await this.credentialStore.read();
-      if (s3 && !(Date.now() + Ne >= s3.expiresAt)) {
-        if (!e2)
+      if (s3 && !(Date.now() + jt >= s3.expiresAt)) {
+        if (!t2)
           return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process already refreshed (attempt ${i3})`);
-        let t3 = s3.expiresAt - Date.now();
-        if (s3.accessToken !== this.accessToken && t3 >= Pe)
-          return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(t3 / 60000)}min remaining) (attempt ${i3})`);
-        s3.accessToken !== this.accessToken ? (this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(t3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
+        let e3 = s3.expiresAt - Date.now();
+        if (s3.accessToken !== this.accessToken && e3 >= Gt)
+          return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(e3 / 60000)}min remaining) (attempt ${i3})`);
+        s3.accessToken !== this.accessToken ? (this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(e3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
       }
       let r2 = await fetch("https://platform.claude.com/v1/oauth/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: this.refreshToken, client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e" }), signal: AbortSignal.timeout(15000) });
       if (r2.ok) {
-        let e3 = await r2.json();
-        this.accessToken = e3.access_token, this.refreshToken = e3.refresh_token ?? this.refreshToken, this.expiresAt = Date.now() + 1000 * e3.expires_in, this.tokenIssuedAt = Date.now();
-        let t3 = await this.credentialStore.read(), i4 = t3?.scopes?.length ? t3.scopes : ["user:file_upload", "user:inference", "user:mcp_servers", "user:profile", "user:sessions:claude_code"];
-        return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK \u2014 expires in ${Math.round(e3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
+        let t3 = await r2.json();
+        this.accessToken = t3.access_token, this.refreshToken = t3.refresh_token ?? this.refreshToken, this.expiresAt = Date.now() + 1000 * t3.expires_in, this.tokenIssuedAt = Date.now();
+        let e3 = await this.credentialStore.read(), i4 = e3?.scopes?.length ? e3.scopes : ["user:file_upload", "user:inference", "user:mcp_servers", "user:profile", "user:sessions:claude_code"];
+        return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK \u2014 expires in ${Math.round(t3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
       }
       if (r2.status === 429) {
-        let e3 = Math.min(60000, Be);
-        throw this.setRefreshCooldown(e3), this.dbg(`TOKEN_REFRESH_RETRY status=429 attempt=${i3 + 1}/5 \u2014 bailing out, cooldown ${e3}ms (per-token rate limit)`), new z("Token refresh rate-limited (429) \u2014 will pickup from disk or retry after cooldown");
+        let t3 = Math.min(60000, Yt);
+        throw this.setRefreshCooldown(t3), this.dbg(`TOKEN_REFRESH_RETRY status=429 attempt=${i3 + 1}/5 \u2014 bailing out, cooldown ${t3}ms (per-token rate limit)`), new z("Token refresh rate-limited (429) \u2014 will pickup from disk or retry after cooldown");
       }
       if (r2.status >= 500 && i3 < 4) {
-        let e3 = t2[i3] ?? 8000, s4 = Math.random() * e3 * 0.5;
-        this.dbg(`TOKEN_REFRESH_RETRY status=${r2.status} attempt=${i3 + 1}/5 delay=${Math.round(e3 + s4)}ms`), await new Promise((t3) => setTimeout(t3, e3 + s4));
+        let t3 = e2[i3] ?? 8000, s4 = Math.random() * t3 * 0.5;
+        this.dbg(`TOKEN_REFRESH_RETRY status=${r2.status} attempt=${i3 + 1}/5 delay=${Math.round(t3 + s4)}ms`), await new Promise((e3) => setTimeout(e3, t3 + s4));
         continue;
       }
       throw new z(`Token refresh failed: ${r2.status} ${r2.statusText}`);
     }
     let s2 = await this.credentialStore.read();
-    if (!s2 || Date.now() + Ne >= s2.expiresAt)
+    if (!s2 || Date.now() + jt >= s2.expiresAt)
       throw new z("Token refresh failed after all retries and race recovery");
     this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt;
     try {
-      W(K(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
+      W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
 `);
     } catch {}
   }
-  assembleResponse(e2, t2) {
+  assembleResponse(t2, e2) {
     let i2, s2 = [], r2 = [], n2 = [], a2 = { inputTokens: 0, outputTokens: 0 }, o2 = null, l2 = "", h2 = "";
-    for (let t3 of e2)
-      switch (t3.type) {
+    for (let e3 of t2)
+      switch (e3.type) {
         case "text_delta":
-          l2 += t3.text;
+          l2 += e3.text;
           break;
         case "thinking_delta":
-          h2 += t3.text;
+          h2 += e3.text;
           break;
         case "thinking_end":
-          i2 = t3.signature, h2 && (r2.push({ type: "thinking", thinking: h2, signature: i2 }), h2 = "");
+          i2 = e3.signature, h2 && (r2.push({ type: "thinking", thinking: h2, signature: i2 }), h2 = "");
           break;
         case "tool_use_end":
-          n2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
+          n2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
           break;
         case "message_stop":
-          a2 = t3.usage, o2 = t3.stopReason;
+          a2 = e3.usage, o2 = e3.stopReason;
           break;
         case "error":
-          throw t3.error;
+          throw e3.error;
       }
-    return l2 && s2.push({ type: "text", text: l2 }), h2 && r2.push({ type: "thinking", thinking: h2, signature: i2 }), s2.push(...n2), { content: s2, thinking: r2.length > 0 ? r2 : undefined, toolCalls: n2.length > 0 ? n2 : undefined, usage: a2, stopReason: o2, rateLimitInfo: this.lastRateLimitInfo, model: t2 };
+    return l2 && s2.push({ type: "text", text: l2 }), h2 && r2.push({ type: "thinking", thinking: h2, signature: i2 }), s2.push(...n2), { content: s2, thinking: r2.length > 0 ? r2 : undefined, toolCalls: n2.length > 0 ? n2 : undefined, usage: a2, stopReason: o2, rateLimitInfo: this.lastRateLimitInfo, model: e2 };
   }
-  parseRateLimitHeaders(e2) {
-    let t2 = {};
-    if (e2.forEach((e3, i3) => {
-      (i3.includes("ratelimit") || i3.includes("anthropic") || i3.includes("retry") || i3.includes("x-")) && (t2[i3] = e3);
-    }), Object.keys(t2).length > 0)
+  parseRateLimitHeaders(t2) {
+    let e2 = {};
+    if (t2.forEach((t3, i3) => {
+      (i3.includes("ratelimit") || i3.includes("anthropic") || i3.includes("retry") || i3.includes("x-")) && (e2[i3] = t3);
+    }), Object.keys(e2).length > 0)
       try {
-        let { appendFileSync: e3 } = s("fs"), { join: i3 } = s("path"), { homedir: r3 } = s("os");
-        e3(i3(r3(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] ${JSON.stringify(t2)}
+        let { appendFileSync: t3 } = s("fs"), { join: i3 } = s("path"), { homedir: r3 } = s("os");
+        t3(i3(r3(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] ${JSON.stringify(e2)}
 `);
       } catch {}
-    let i2 = e2.get("retry-after"), r2 = e2.get("anthropic-ratelimit-unified-reset"), n2 = r2 ? Number(r2) : null, a2 = e2.get("anthropic-ratelimit-unified-5h-utilization"), o2 = e2.get("anthropic-ratelimit-unified-7d-utilization");
-    return { status: e2.get("anthropic-ratelimit-unified-status"), resetAt: Number.isFinite(n2) ? n2 : null, claim: e2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: i2 ? parseFloat(i2) : null, utilization5h: a2 ? parseFloat(a2) : null, utilization7d: o2 ? parseFloat(o2) : null };
+    let i2 = t2.get("retry-after"), r2 = t2.get("anthropic-ratelimit-unified-reset"), n2 = r2 ? Number(r2) : null, a2 = t2.get("anthropic-ratelimit-unified-5h-utilization"), o2 = t2.get("anthropic-ratelimit-unified-7d-utilization");
+    return { status: t2.get("anthropic-ratelimit-unified-status"), resetAt: Number.isFinite(n2) ? n2 : null, claim: t2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: i2 ? parseFloat(i2) : null, utilization5h: a2 ? parseFloat(a2) : null, utilization7d: o2 ? parseFloat(o2) : null };
   }
-  getRetryDelay(e2, t2) {
-    if (t2) {
-      let e3 = parseInt(t2, 10);
-      if (!isNaN(e3))
-        return 1000 * e3;
+  getRetryDelay(t2, e2) {
+    if (e2) {
+      let t3 = parseInt(e2, 10);
+      if (!isNaN(t3))
+        return 1000 * t3;
     }
-    let i2 = Math.min(300 * Math.pow(2, e2 - 1), 5000);
+    let i2 = Math.min(300 * Math.pow(2, t2 - 1), 5000);
     return i2 + 0.25 * Math.random() * i2;
   }
-  sleep(e2, t2) {
+  sleep(t2, e2) {
     return new Promise((i2, s2) => {
-      if (t2?.aborted)
+      if (e2?.aborted)
         return void s2(new q("Aborted"));
-      let r2 = setTimeout(i2, e2);
-      t2?.addEventListener("abort", () => {
+      let r2 = setTimeout(i2, t2);
+      e2?.addEventListener("abort", () => {
         clearTimeout(r2), s2(new q("Aborted"));
       }, { once: true });
     });
   }
-  computeFingerprint(e2) {
-    let t2 = "";
-    for (let i3 of e2) {
-      let e3 = i3;
-      if (e3.role === "user") {
-        if (typeof e3.content == "string") {
-          t2 = e3.content;
+  computeFingerprint(t2) {
+    let e2 = "";
+    for (let i3 of t2) {
+      let t3 = i3;
+      if (t3.role === "user") {
+        if (typeof t3.content == "string") {
+          e2 = t3.content;
           break;
         }
-        if (Array.isArray(e3.content)) {
-          for (let i4 of e3.content)
+        if (Array.isArray(t3.content)) {
+          for (let i4 of t3.content)
             if (i4.type === "text") {
-              t2 = i4.text;
+              e2 = i4.text;
               break;
             }
-          if (t2)
+          if (e2)
             break;
         }
       }
     }
-    let i2 = `59cf53e54c78${[4, 7, 20].map((e3) => t2[e3] || "0").join("")}${He}`;
-    return x("sha256").update(i2).digest("hex").slice(0, 3);
+    let i2 = `59cf53e54c78${[4, 7, 20].map((t3) => e2[t3] || "0").join("")}${Vt}`;
+    return C("sha256").update(i2).digest("hex").slice(0, 3);
   }
   readAccountUuid() {
     try {
-      let e2 = K(j(), ".claude", "claude_code_config.json");
-      return JSON.parse(L(e2, "utf8")).oauthAccount?.accountUuid ?? "";
+      let t2 = J(j(), ".claude", "claude_code_config.json");
+      return JSON.parse(L(t2, "utf8")).oauthAccount?.accountUuid ?? "";
     } catch {
       return "";
     }
   }
 };
-var Ye = class {
-  constructor(e2) {
-    this.path = e2;
+var ae = class {
+  constructor(t2) {
+    this.path = t2;
   }
   static {
     i(this, "FileCredentialStore");
@@ -40089,207 +45766,207 @@ var Ye = class {
   lastMtimeMs = 0;
   async read() {
     try {
-      let e2 = L(this.path, "utf8");
-      return this.lastMtimeMs = this.getMtime(), JSON.parse(e2).claudeAiOauth ?? null;
+      let t2 = L(this.path, "utf8");
+      return this.lastMtimeMs = this.getMtime(), JSON.parse(t2).claudeAiOauth ?? null;
     } catch {
       return null;
     }
   }
-  async write(e2) {
-    let t2 = {};
+  async write(t2) {
+    let e2 = {};
     try {
-      t2 = JSON.parse(L(this.path, "utf8"));
+      e2 = JSON.parse(L(this.path, "utf8"));
     } catch {}
-    t2.claudeAiOauth = e2;
-    let i2 = K(this.path, "..");
+    e2.claudeAiOauth = t2;
+    let i2 = J(this.path, "..");
     try {
-      U(i2, { recursive: true });
+      H(i2, { recursive: true });
     } catch {}
-    F(this.path, JSON.stringify(t2, null, 2), "utf8"), P(this.path, 384), this.lastMtimeMs = this.getMtime();
+    P(this.path, JSON.stringify(e2, null, 2), "utf8"), F(this.path, 384), this.lastMtimeMs = this.getMtime();
   }
   async hasChanged() {
-    let e2 = this.getMtime();
-    return e2 !== this.lastMtimeMs && (this.lastMtimeMs = e2, true);
+    let t2 = this.getMtime();
+    return t2 !== this.lastMtimeMs && (this.lastMtimeMs = t2, true);
   }
   getMtime() {
     try {
-      return H(this.path).mtimeMs;
+      return U(this.path).mtimeMs;
     } catch {
       return 0;
     }
   }
 };
-var Xe = class {
+var oe = class {
   static {
     i(this, "MemoryCredentialStore");
   }
   credentials;
-  constructor(e2) {
-    this.credentials = { ...e2 };
+  constructor(t2) {
+    this.credentials = { ...t2 };
   }
   async read() {
     return this.credentials.accessToken ? { ...this.credentials } : null;
   }
-  async write(e2) {
-    this.credentials = { ...e2 };
+  async write(t2) {
+    this.credentials = { ...t2 };
   }
 };
-var Ve = class _Conversation {
+var le = class _Conversation {
   static {
     i(this, "Conversation");
   }
   sdk;
   options;
-  $ = [];
+  S = [];
   M = { inputTokens: 0, outputTokens: 0 };
-  constructor(e2, t2) {
-    this.sdk = e2, this.options = t2;
+  constructor(t2, e2) {
+    this.sdk = t2, this.options = e2;
   }
   get messages() {
-    return this.$;
+    return this.S;
   }
   get totalUsage() {
     return { ...this.M };
   }
   get length() {
-    return this.$.length;
+    return this.S.length;
   }
-  async send(e2, t2) {
-    this.appendUserMessage(e2);
-    let i2 = this.buildGenerateOptions(t2), s2 = await this.sdk.generate(i2);
+  async send(t2, e2) {
+    this.appendUserMessage(t2);
+    let i2 = this.buildGenerateOptions(e2), s2 = await this.sdk.generate(i2);
     return this.appendAssistantFromResponse(s2), this.accumulateUsage(s2.usage), s2;
   }
-  async* stream(e2, t2) {
-    this.appendUserMessage(e2);
-    let i2 = this.buildGenerateOptions(t2), s2 = [], r2 = [], n2 = [], a2 = { inputTokens: 0, outputTokens: 0 };
-    for await (let e3 of this.sdk.stream(i2))
-      switch (yield e3, e3.type) {
+  async* stream(t2, e2) {
+    this.appendUserMessage(t2);
+    let i2 = this.buildGenerateOptions(e2), s2 = [], r2 = [], n2 = [], a2 = { inputTokens: 0, outputTokens: 0 };
+    for await (let t3 of this.sdk.stream(i2))
+      switch (yield t3, t3.type) {
         case "text_delta":
-          s2.push(e3.text);
+          s2.push(t3.text);
           break;
         case "thinking_delta":
-          r2.push(e3.text);
+          r2.push(t3.text);
           break;
         case "tool_use_end":
-          n2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
+          n2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
           break;
         case "message_stop":
-          a2 = e3.usage;
+          a2 = t3.usage;
       }
     let o2 = [];
     s2.length > 0 && o2.push({ type: "text", text: s2.join("") });
-    for (let e3 of n2)
-      o2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
-    o2.length > 0 && this.$.push({ role: "assistant", content: o2 }), this.accumulateUsage(a2);
+    for (let t3 of n2)
+      o2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
+    o2.length > 0 && this.S.push({ role: "assistant", content: o2 }), this.accumulateUsage(a2);
   }
-  addToolResult(e2, t2, i2) {
-    let s2 = { type: "tool_result", tool_use_id: e2, content: t2, ...i2 && { is_error: true } };
-    this.$.push({ role: "user", content: [s2] });
+  addToolResult(t2, e2, i2) {
+    let s2 = { type: "tool_result", tool_use_id: t2, content: e2, ...i2 && { is_error: true } };
+    this.S.push({ role: "user", content: [s2] });
   }
-  addToolResults(e2) {
-    let t2 = e2.map((e3) => ({ type: "tool_result", tool_use_id: e3.toolUseId, content: e3.content, ...e3.isError && { is_error: true } }));
-    this.$.push({ role: "user", content: t2 });
+  addToolResults(t2) {
+    let e2 = t2.map((t3) => ({ type: "tool_result", tool_use_id: t3.toolUseId, content: t3.content, ...t3.isError && { is_error: true } }));
+    this.S.push({ role: "user", content: e2 });
   }
-  async continue(e2) {
-    let t2 = this.buildGenerateOptions(e2), i2 = await this.sdk.generate(t2);
+  async continue(t2) {
+    let e2 = this.buildGenerateOptions(t2), i2 = await this.sdk.generate(e2);
     return this.appendAssistantFromResponse(i2), this.accumulateUsage(i2.usage), i2;
   }
-  async* continueStream(e2) {
-    let t2 = this.buildGenerateOptions(e2), i2 = [], s2 = [], r2 = { inputTokens: 0, outputTokens: 0 };
-    for await (let e3 of this.sdk.stream(t2))
-      switch (yield e3, e3.type) {
+  async* continueStream(t2) {
+    let e2 = this.buildGenerateOptions(t2), i2 = [], s2 = [], r2 = { inputTokens: 0, outputTokens: 0 };
+    for await (let t3 of this.sdk.stream(e2))
+      switch (yield t3, t3.type) {
         case "text_delta":
-          i2.push(e3.text);
+          i2.push(t3.text);
           break;
         case "tool_use_end":
-          s2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
+          s2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
           break;
         case "message_stop":
-          r2 = e3.usage;
+          r2 = t3.usage;
       }
     let n2 = [];
     i2.length > 0 && n2.push({ type: "text", text: i2.join("") });
-    for (let e3 of s2)
-      n2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
-    n2.length > 0 && this.$.push({ role: "assistant", content: n2 }), this.accumulateUsage(r2);
+    for (let t3 of s2)
+      n2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
+    n2.length > 0 && this.S.push({ role: "assistant", content: n2 }), this.accumulateUsage(r2);
   }
-  rewind(e2) {
-    if (e2 < 0 || e2 >= this.$.length)
-      throw new Error(`Invalid rewind index: ${e2}`);
-    return this.$.splice(e2);
+  rewind(t2) {
+    if (t2 < 0 || t2 >= this.S.length)
+      throw new Error(`Invalid rewind index: ${t2}`);
+    return this.S.splice(t2);
   }
   undoLastTurn() {
-    for (let e2 = this.$.length - 1;e2 >= 0; e2--) {
-      let t2 = this.$[e2];
-      if (t2.role === "user") {
-        let i2 = t2.content;
+    for (let t2 = this.S.length - 1;t2 >= 0; t2--) {
+      let e2 = this.S[t2];
+      if (e2.role === "user") {
+        let i2 = e2.content;
         if (!(Array.isArray(i2) && i2.length > 0 && i2[0].type === "tool_result"))
-          return this.rewind(e2);
+          return this.rewind(t2);
       }
     }
     return [];
   }
   branch() {
-    let e2 = new _Conversation(this.sdk, { ...this.options });
-    return e2.$ = [...this.$], e2.M = { ...this.M }, e2;
+    let t2 = new _Conversation(this.sdk, { ...this.options });
+    return t2.S = [...this.S], t2.M = { ...this.M }, t2;
   }
   getHistory() {
-    return this.$.map((e2, t2) => {
+    return this.S.map((t2, e2) => {
       let i2 = "";
-      if (typeof e2.content == "string")
-        i2 = e2.content.slice(0, 100);
-      else if (Array.isArray(e2.content)) {
-        let t3 = e2.content[0];
-        t3?.type === "text" ? i2 = t3.text?.slice(0, 100) ?? "" : t3?.type === "tool_result" ? i2 = `[tool_result: ${t3.tool_use_id}]` : t3?.type === "tool_use" && (i2 = `[tool_use: ${t3.name}]`);
+      if (typeof t2.content == "string")
+        i2 = t2.content.slice(0, 100);
+      else if (Array.isArray(t2.content)) {
+        let e3 = t2.content[0];
+        e3?.type === "text" ? i2 = e3.text?.slice(0, 100) ?? "" : e3?.type === "tool_result" ? i2 = `[tool_result: ${e3.tool_use_id}]` : e3?.type === "tool_use" && (i2 = `[tool_use: ${e3.name}]`);
       }
-      return { index: t2, role: e2.role, preview: i2 };
+      return { index: e2, role: t2.role, preview: i2 };
     });
   }
-  appendUserMessage(e2) {
-    this.$.push({ role: "user", content: e2 });
+  appendUserMessage(t2) {
+    this.S.push({ role: "user", content: t2 });
   }
-  appendAssistantFromResponse(e2) {
-    let t2 = [];
-    for (let i2 of e2.content)
-      i2.type === "text" ? t2.push({ type: "text", text: i2.text }) : i2.type === "tool_use" && t2.push({ type: "tool_use", id: i2.id, name: i2.name, input: i2.input });
-    t2.length > 0 && this.$.push({ role: "assistant", content: t2 });
+  appendAssistantFromResponse(t2) {
+    let e2 = [];
+    for (let i2 of t2.content)
+      i2.type === "text" ? e2.push({ type: "text", text: i2.text }) : i2.type === "tool_use" && e2.push({ type: "tool_use", id: i2.id, name: i2.name, input: i2.input });
+    e2.length > 0 && this.S.push({ role: "assistant", content: e2 });
   }
-  buildGenerateOptions(e2) {
-    return { model: this.options.model, messages: [...this.$], system: this.options.system, tools: e2?.tools ?? this.options.tools, toolChoice: e2?.toolChoice ?? this.options.toolChoice, maxTokens: this.options.maxTokens, thinking: this.options.thinking, effort: this.options.effort, fast: this.options.fast, signal: e2?.signal ?? this.options.signal, extraBetas: this.options.extraBetas, caching: this.options.caching };
+  buildGenerateOptions(t2) {
+    return { model: this.options.model, messages: [...this.S], system: this.options.system, tools: t2?.tools ?? this.options.tools, toolChoice: t2?.toolChoice ?? this.options.toolChoice, maxTokens: this.options.maxTokens, thinking: this.options.thinking, effort: this.options.effort, fast: this.options.fast, signal: t2?.signal ?? this.options.signal, extraBetas: this.options.extraBetas, caching: this.options.caching };
   }
-  accumulateUsage(e2) {
-    this.M.inputTokens += e2.inputTokens, this.M.outputTokens += e2.outputTokens, this.M.cacheCreationInputTokens = (this.M.cacheCreationInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), this.M.cacheReadInputTokens = (this.M.cacheReadInputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0);
+  accumulateUsage(t2) {
+    this.M.inputTokens += t2.inputTokens, this.M.outputTokens += t2.outputTokens, this.M.cacheCreationInputTokens = (this.M.cacheCreationInputTokens ?? 0) + (t2.cacheCreationInputTokens ?? 0), this.M.cacheReadInputTokens = (this.M.cacheReadInputTokens ?? 0) + (t2.cacheReadInputTokens ?? 0);
   }
 };
-function rt(e2, t2) {
-  tt(it(e2), { recursive: true });
+function fe(t2, e2) {
+  ue(de(t2), { recursive: true });
   let i2 = null, s2 = [];
-  for (let e3 of t2) {
-    let t3 = st(), r2 = { type: e3.role === "user" ? "user" : "assistant", uuid: t3, parentUuid: i2, timestamp: Date.now(), content: e3.content };
-    s2.push(JSON.stringify(r2)), i2 = t3;
+  for (let t3 of e2) {
+    let e3 = pe(), r2 = { type: t3.role === "user" ? "user" : "assistant", uuid: e3, parentUuid: i2, timestamp: Date.now(), content: t3.content };
+    s2.push(JSON.stringify(r2)), i2 = e3;
   }
-  et(e2, s2.join(`
+  ce(t2, s2.join(`
 `) + `
 `, "utf8");
 }
-function nt(e2) {
-  let t2 = Ze(e2, "utf8"), i2 = [];
-  for (let e3 of t2.split(`
+function me(t2) {
+  let e2 = he(t2, "utf8"), i2 = [];
+  for (let t3 of e2.split(`
 `)) {
-    if (!e3.trim())
+    if (!t3.trim())
       continue;
-    let t3;
+    let e3;
     try {
-      t3 = JSON.parse(e3);
+      e3 = JSON.parse(t3);
     } catch {
       continue;
     }
-    (t3.type === "user" || t3.type === "assistant") && i2.push({ role: t3.type === "user" ? "user" : "assistant", content: t3.content });
+    (e3.type === "user" || e3.type === "assistant") && i2.push({ role: e3.type === "user" ? "user" : "assistant", content: e3.content });
   }
   return i2;
 }
-i(rt, "saveSession"), i(nt, "loadSession");
-var at = class {
+i(fe, "saveSession"), i(me, "loadSession");
+var ge = class {
   static {
     i(this, "CacheMetricsCollector");
   }
@@ -40304,24 +45981,24 @@ var at = class {
   regressionMinSamples;
   onSummary;
   onRegression;
-  constructor(e2 = {}) {
-    this.windowMs = e2.windowMs ?? 60000, this.reportIntervalMs = e2.reportIntervalMs ?? this.windowMs, this.regressionThreshold = e2.regressionThreshold ?? 0.7, this.regressionPreviousFloor = e2.regressionPreviousFloor ?? 0.85, this.regressionMinSamples = e2.regressionMinSamples ?? 50, this.onSummary = e2.onSummary, this.onRegression = e2.onRegression, this.reportIntervalMs > 0 && (this.timer = setInterval(() => this.report(), this.reportIntervalMs), typeof this.timer == "object" && ("unref" in this.timer) && this.timer.unref());
+  constructor(t2 = {}) {
+    this.windowMs = t2.windowMs ?? 60000, this.reportIntervalMs = t2.reportIntervalMs ?? this.windowMs, this.regressionThreshold = t2.regressionThreshold ?? 0.7, this.regressionPreviousFloor = t2.regressionPreviousFloor ?? 0.85, this.regressionMinSamples = t2.regressionMinSamples ?? 50, this.onSummary = t2.onSummary, this.onRegression = t2.onRegression, this.reportIntervalMs > 0 && (this.timer = setInterval(() => this.report(), this.reportIntervalMs), typeof this.timer == "object" && ("unref" in this.timer) && this.timer.unref());
   }
-  recordRequest(e2) {
-    this.samples.push({ ts: Date.now(), ...e2 });
+  recordRequest(t2) {
+    this.samples.push({ ts: Date.now(), ...t2 });
   }
   summary() {
     this.prune();
-    let e2 = this.samples.length, t2 = this.samples.filter((e3) => e3.cacheRead > 0).length, i2 = this.samples.filter((e3) => e3.firstCall && e3.cacheRead === 0).length, s2 = this.samples.filter((e3) => e3.kind === "real").length, r2 = this.samples.filter((e3) => e3.kind === "ka").length, n2 = this.samples.reduce((e3, t3) => e3 + t3.cacheRead, 0), a2 = this.samples.reduce((e3, t3) => e3 + t3.cacheWrite, 0), o2 = this.samples.reduce((e3, t3) => e3 + t3.input, 0), l2 = this.samples.reduce((e3, t3) => Math.max(e3, t3.cacheRead), 0), h2 = new Set(this.samples.map((e3) => e3.sysHash).filter(Boolean)).size, c2 = Math.round(0.9 * n2);
-    return { windowMs: this.windowMs, windowEndsAt: new Date().toISOString(), total: e2, hitRate: e2 > 0 ? t2 / e2 : 0, coldStartCount: i2, realCount: s2, kaCount: r2, avgCacheRead: e2 > 0 ? n2 / e2 : 0, avgCacheWrite: e2 > 0 ? a2 / e2 : 0, avgInput: e2 > 0 ? o2 / e2 : 0, maxCacheRead: l2, distinctSysHash: h2, estimatedSavedTokens: c2 };
+    let t2 = this.samples.length, e2 = this.samples.filter((t3) => t3.cacheRead > 0).length, i2 = this.samples.filter((t3) => t3.firstCall && t3.cacheRead === 0).length, s2 = this.samples.filter((t3) => t3.kind === "real").length, r2 = this.samples.filter((t3) => t3.kind === "ka").length, n2 = this.samples.reduce((t3, e3) => t3 + e3.cacheRead, 0), a2 = this.samples.reduce((t3, e3) => t3 + e3.cacheWrite, 0), o2 = this.samples.reduce((t3, e3) => t3 + e3.input, 0), l2 = this.samples.reduce((t3, e3) => Math.max(t3, e3.cacheRead), 0), h2 = new Set(this.samples.map((t3) => t3.sysHash).filter(Boolean)).size, c2 = Math.round(0.9 * n2);
+    return { windowMs: this.windowMs, windowEndsAt: new Date().toISOString(), total: t2, hitRate: t2 > 0 ? e2 / t2 : 0, coldStartCount: i2, realCount: s2, kaCount: r2, avgCacheRead: t2 > 0 ? n2 / t2 : 0, avgCacheWrite: t2 > 0 ? a2 / t2 : 0, avgInput: t2 > 0 ? o2 / t2 : 0, maxCacheRead: l2, distinctSysHash: h2, estimatedSavedTokens: c2 };
   }
   report() {
-    let e2 = this.summary();
-    e2.total !== 0 && (this.onSummary?.(e2), this.previousSampleCount >= this.regressionMinSamples && this.previousHitRate >= this.regressionPreviousFloor && e2.total >= this.regressionMinSamples && e2.hitRate < this.regressionThreshold && this.onRegression?.({ detectedAt: e2.windowEndsAt, windowMs: this.windowMs, currentHitRate: e2.hitRate, previousHitRate: this.previousHitRate, drop: this.previousHitRate - e2.hitRate, reason: `hit_rate dropped from ${this.previousHitRate.toFixed(3)} to ${e2.hitRate.toFixed(3)} (\u0394=${(this.previousHitRate - e2.hitRate).toFixed(3)}); ${e2.total} samples in current window` }), this.previousHitRate = e2.hitRate, this.previousSampleCount = e2.total);
+    let t2 = this.summary();
+    t2.total !== 0 && (this.onSummary?.(t2), this.previousSampleCount >= this.regressionMinSamples && this.previousHitRate >= this.regressionPreviousFloor && t2.total >= this.regressionMinSamples && t2.hitRate < this.regressionThreshold && this.onRegression?.({ detectedAt: t2.windowEndsAt, windowMs: this.windowMs, currentHitRate: t2.hitRate, previousHitRate: this.previousHitRate, drop: this.previousHitRate - t2.hitRate, reason: `hit_rate dropped from ${this.previousHitRate.toFixed(3)} to ${t2.hitRate.toFixed(3)} (\u0394=${(this.previousHitRate - t2.hitRate).toFixed(3)}); ${t2.total} samples in current window` }), this.previousHitRate = t2.hitRate, this.previousSampleCount = t2.total);
   }
   prune() {
-    let e2 = Date.now() - this.windowMs;
-    for (;this.samples.length > 0 && this.samples[0].ts < e2; )
+    let t2 = Date.now() - this.windowMs;
+    for (;this.samples.length > 0 && this.samples[0].ts < t2; )
       this.samples.shift();
   }
   stop() {
@@ -40331,7 +46008,7 @@ var at = class {
     return this.samples;
   }
 };
-var ht = class {
+var ke = class {
   static {
     i(this, "FileCredentialsProvider");
   }
@@ -40339,8 +46016,8 @@ var ht = class {
   expiryBufferMs;
   cached = null;
   lastMtimeMs = 0;
-  constructor(e2 = {}) {
-    this.path = e2.path ?? ct(), this.expiryBufferMs = e2.expiryBufferMs ?? 300000;
+  constructor(t2 = {}) {
+    this.path = t2.path ?? _e(), this.expiryBufferMs = t2.expiryBufferMs ?? 300000;
   }
   async getAccessToken() {
     if (this.mtimeChanged() && (this.cached = null), (!this.cached || this.isExpired(this.cached)) && (this.cached = this.readFromDisk()), !this.cached?.accessToken)
@@ -40352,8 +46029,8 @@ var ht = class {
   }
   readFromDisk() {
     try {
-      let e2 = ot(this.path, "utf8");
-      return this.lastMtimeMs = this.getMtime(), JSON.parse(e2).claudeAiOauth ?? null;
+      let t2 = ye(this.path, "utf8");
+      return this.lastMtimeMs = this.getMtime(), JSON.parse(t2).claudeAiOauth ?? null;
     } catch {
       return null;
     }
@@ -40363,75 +46040,75 @@ var ht = class {
   }
   getMtime() {
     try {
-      return lt(this.path).mtimeMs;
+      return we(this.path).mtimeMs;
     } catch {
       return 0;
     }
   }
-  isExpired(e2) {
-    return !!e2.expiresAt && Date.now() + this.expiryBufferMs >= e2.expiresAt;
+  isExpired(t2) {
+    return !!t2.expiresAt && Date.now() + this.expiryBufferMs >= t2.expiresAt;
   }
 };
-function ct() {
-  let e2 = process.env.HOME || process.env.USERPROFILE || "";
-  return `${process.env.CLAUDE_CONFIG_DIR || `${e2}/.claude`}/.credentials.json`;
+function _e() {
+  let t2 = process.env.HOME || process.env.USERPROFILE || "";
+  return `${process.env.CLAUDE_CONFIG_DIR || `${t2}/.claude`}/.credentials.json`;
 }
-i(ct, "defaultCredentialsPath");
-var ut = { error: 0, info: 1, debug: 2 };
-var dt = class {
+i(_e, "defaultCredentialsPath");
+var Te = { error: 0, info: 1, debug: 2 };
+var Ee = class {
   static {
     i(this, "ConsoleEventEmitter");
   }
   minRank;
   format;
   write;
-  constructor(e2 = {}) {
-    this.minRank = ut[e2.minLevel ?? "info"] ?? 1, this.format = e2.format ?? "human", this.write = e2.writeTarget ?? ((e3) => process.stderr.write(e3 + `
+  constructor(t2 = {}) {
+    this.minRank = Te[t2.minLevel ?? "info"] ?? 1, this.format = t2.format ?? "human", this.write = t2.writeTarget ?? ((t3) => process.stderr.write(t3 + `
 `));
   }
-  emit(e2) {
+  emit(t2) {
     try {
-      if ((ut[e2.level] ?? 1) > this.minRank)
+      if ((Te[t2.level] ?? 1) > this.minRank)
         return;
-      let t2 = e2.ts ?? new Date().toISOString();
+      let e2 = t2.ts ?? new Date().toISOString();
       if (this.format === "json")
-        return void this.write(JSON.stringify({ ts: t2, ...e2 }));
-      let i2 = t2.slice(11, 23), s2 = e2.level.toUpperCase().padEnd(5), r2 = e2.kind.padEnd(22), n2 = [];
-      for (let [t3, i3] of Object.entries(e2)) {
-        if (["ts", "level", "kind", "msg"].includes(t3) || i3 == null)
+        return void this.write(JSON.stringify({ ts: e2, ...t2 }));
+      let i2 = e2.slice(11, 23), s2 = t2.level.toUpperCase().padEnd(5), r2 = t2.kind.padEnd(22), n2 = [];
+      for (let [e3, i3] of Object.entries(t2)) {
+        if (["ts", "level", "kind", "msg"].includes(e3) || i3 == null)
           continue;
-        let e3 = typeof i3 == "object" ? JSON.stringify(i3) : String(i3);
-        n2.push(`${t3}=${e3.length > 120 ? e3.slice(0, 117) + "..." : e3}`);
+        let t3 = typeof i3 == "object" ? JSON.stringify(i3) : String(i3);
+        n2.push(`${e3}=${t3.length > 120 ? t3.slice(0, 117) + "..." : t3}`);
       }
-      let a2 = e2.msg ? ` ${e2.msg}` : "", o2 = n2.length ? " " + n2.join(" ") : "";
+      let a2 = t2.msg ? ` ${t2.msg}` : "", o2 = n2.length ? " " + n2.join(" ") : "";
       this.write(`${i2} ${s2} ${r2}${a2}${o2}`);
     } catch {}
   }
 };
-var ft = class {
+var Re = class {
   static {
     i(this, "NullEventEmitter");
   }
-  emit(e2) {}
+  emit(t2) {}
 };
-var pt = class {
+var $e = class {
   static {
     i(this, "InMemorySessionStore");
   }
   sessions = new Map;
   liveness;
-  constructor(e2 = new mt) {
-    this.liveness = e2;
+  constructor(t2 = new ve) {
+    this.liveness = t2;
   }
-  getOrCreate(e2, t2, i2) {
-    let s2 = this.sessions.get(e2);
+  getOrCreate(t2, e2, i2) {
+    let s2 = this.sessions.get(t2);
     if (s2)
       return s2;
-    let r2 = { sessionId: e2, pid: t2, firstSeenAt: Date.now(), lastRequestAt: Date.now(), engine: i2(), model: null, lastUsage: null };
-    return this.sessions.set(e2, r2), r2;
+    let r2 = { sessionId: t2, pid: e2, firstSeenAt: Date.now(), lastRequestAt: Date.now(), engine: i2(), model: null, lastUsage: null };
+    return this.sessions.set(t2, r2), r2;
   }
-  get(e2) {
-    return this.sessions.get(e2);
+  get(t2) {
+    return this.sessions.get(t2);
   }
   list() {
     return Array.from(this.sessions.values());
@@ -40439,53 +46116,53 @@ var pt = class {
   size() {
     return this.sessions.size;
   }
-  isOwnerAlive(e2) {
-    let t2 = this.sessions.get(e2);
-    return !t2 || t2.pid === null || t2.pid !== 1 && this.liveness.isAlive(t2.pid);
+  isOwnerAlive(t2) {
+    let e2 = this.sessions.get(t2);
+    return !e2 || e2.pid === null || e2.pid !== 1 && this.liveness.isAlive(e2.pid);
   }
   reapDead() {
-    let e2 = [];
-    for (let [t2, i2] of this.sessions.entries())
+    let t2 = [];
+    for (let [e2, i2] of this.sessions.entries())
       if (i2.pid !== null && (i2.pid === 1 || !this.liveness.isAlive(i2.pid))) {
         try {
           i2.engine?.stop?.();
         } catch {}
-        this.sessions.delete(t2), e2.push(t2);
+        this.sessions.delete(e2), t2.push(e2);
       }
-    return e2;
+    return t2;
   }
   stopAll() {
-    for (let e2 of this.sessions.values())
+    for (let t2 of this.sessions.values())
       try {
-        e2.engine?.stop?.();
+        t2.engine?.stop?.();
       } catch {}
     this.sessions.clear();
   }
 };
-var mt = class {
+var ve = class {
   static {
     i(this, "DefaultLivenessChecker");
   }
-  isAlive(e2) {
-    if (!e2 || e2 < 1)
+  isAlive(t2) {
+    if (!t2 || t2 < 1)
       return false;
     try {
-      return process.kill(e2, 0), true;
-    } catch (e3) {
-      return e3.code === "EPERM";
+      return process.kill(t2, 0), true;
+    } catch (t3) {
+      return t3.code === "EPERM";
     }
   }
 };
-var yt = class {
+var Se = class {
   static {
     i(this, "NativeFetchUpstream");
   }
-  async fetch(e2, t2) {
-    return fetch(e2, t2);
+  async fetch(t2, e2) {
+    return fetch(t2, e2);
   }
 };
-var gt = { anthropicBaseUrl: "https://api.anthropic.com", kaIntervalSec: undefined, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
-var wt = class {
+var Me = { anthropicBaseUrl: "https://api.anthropic.com", kaIntervalSec: undefined, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
+var De = class {
   static {
     i(this, "ProxyClient");
   }
@@ -40498,11 +46175,11 @@ var wt = class {
   liveness;
   reaperTimer;
   lastRateLimit = { status: null, resetAt: null, claim: null, retryAfter: null, utilization5h: null, utilization7d: null };
-  constructor(e2) {
-    this.config = { ...gt, ...e2.config }, this.credentials = e2.credentialsProvider, this.events = e2.eventEmitter ?? new dt, this.liveness = e2.livenessChecker ?? new mt, this.store = e2.sessionStore ?? new pt(this.liveness), this.upstream = e2.upstreamFetcher ?? new yt, this.metrics = new at({ windowMs: 60000, reportIntervalMs: 60000, onSummary: i((e3) => this.events.emit({ level: "info", kind: "CACHE_METRICS_SUMMARY", ...e3 }), "onSummary"), onRegression: i((e3) => this.events.emit({ level: "error", kind: "CACHE_REGRESSION_DETECTED", ...e3 }), "onRegression") }), this.reaperTimer = setInterval(() => {
-      let e3 = this.store.reapDead();
-      for (let t2 of e3)
-        this.events.emit({ level: "info", kind: "SESSION_DEAD", sessionId: t2, reason: "pid_gone" });
+  constructor(t2) {
+    this.config = { ...Me, ...t2.config }, this.credentials = t2.credentialsProvider, this.events = t2.eventEmitter ?? new Ee, this.liveness = t2.livenessChecker ?? new ve, this.store = t2.sessionStore ?? new $e(this.liveness), this.upstream = t2.upstreamFetcher ?? new Se, this.metrics = new ge({ windowMs: 60000, reportIntervalMs: 60000, onSummary: i((t3) => this.events.emit({ level: "info", kind: "CACHE_METRICS_SUMMARY", ...t3 }), "onSummary"), onRegression: i((t3) => this.events.emit({ level: "error", kind: "CACHE_REGRESSION_DETECTED", ...t3 }), "onRegression") }), this.reaperTimer = setInterval(() => {
+      let t3 = this.store.reapDead();
+      for (let e2 of t3)
+        this.events.emit({ level: "info", kind: "SESSION_DEAD", sessionId: e2, reason: "pid_gone" });
     }, 1e4), this.reaperTimer && typeof this.reaperTimer == "object" && "unref" in this.reaperTimer && this.reaperTimer.unref();
   }
   get rateLimitSnapshot() {
@@ -40523,172 +46200,172 @@ var wt = class {
   stop() {
     clearInterval(this.reaperTimer), this.metrics.stop(), this.store.stopAll();
   }
-  async handleRequest(e2, t2, i2) {
+  async handleRequest(t2, e2, i2) {
     let s2 = i2.sessionId, r2 = i2.sourcePid ?? null, n2 = this.store.getOrCreate(s2, r2, () => this.createEngine(s2));
     n2.lastRequestAt = Date.now();
-    let a2, o2 = typeof e2 == "string" ? e2 : new TextDecoder().decode(e2), l2 = typeof e2 == "string" ? new TextEncoder().encode(e2).byteLength : e2.byteLength;
+    let a2, o2 = typeof t2 == "string" ? t2 : new TextDecoder().decode(t2), l2 = typeof t2 == "string" ? new TextEncoder().encode(t2).byteLength : t2.byteLength;
     try {
       a2 = JSON.parse(o2);
     } catch {
-      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), Et(400, { error: "Invalid JSON" });
+      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), Ie(400, { error: "Invalid JSON" });
     }
     let h2 = a2.model ?? "unknown";
     n2.model = h2;
     let c2 = {};
-    for (let [e3, i3] of Object.entries(t2)) {
-      let t3 = e3.toLowerCase();
-      kt.includes(t3) || (c2[e3] = i3);
+    for (let [t3, i3] of Object.entries(e2)) {
+      let e3 = t3.toLowerCase();
+      be.includes(e3) || (c2[t3] = i3);
     }
     c2["accept-encoding"] = "identity";
     try {
-      let e3 = await this.credentials.getAccessToken();
-      c2.Authorization = `Bearer ${e3}`;
-    } catch (e3) {
-      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: e3?.message ?? "No OAuth credentials" }), Et(401, { error: { type: "authentication_error", message: e3?.message ?? "No OAuth credentials" } });
+      let t3 = await this.credentials.getAccessToken();
+      c2.Authorization = `Bearer ${t3}`;
+    } catch (t3) {
+      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: t3?.message ?? "No OAuth credentials" }), Ie(401, { error: { type: "authentication_error", message: t3?.message ?? "No OAuth credentials" } });
     }
     let u2 = c2["anthropic-beta"] ?? c2["Anthropic-Beta"] ?? "";
     if (!u2.includes("oauth-2025-04-20")) {
-      let e3 = u2 ? u2 + "," : "";
-      c2["anthropic-beta"] = e3 + "oauth-2025-04-20", delete c2["Anthropic-Beta"];
+      let t3 = u2 ? u2 + "," : "";
+      c2["anthropic-beta"] = t3 + "oauth-2025-04-20", delete c2["Anthropic-Beta"];
     }
     this.events.emit({ level: "info", kind: "REAL_REQUEST_START", sessionId: s2, model: h2, bodyBytes: l2 }), n2.engine.notifyRealRequestStart(h2, a2, c2);
     try {
       n2.engine.checkRewriteGuard(h2);
-    } catch (e3) {
-      if (e3?.code === "CACHE_REWRITE_BLOCKED")
-        return Et(429, { error: { type: "cache_rewrite_blocked", message: e3.message } });
-      throw e3;
+    } catch (t3) {
+      if (t3?.code === "CACHE_REWRITE_BLOCKED")
+        return Ie(429, { error: { type: "cache_rewrite_blocked", message: t3.message } });
+      throw t3;
     }
-    let d2, f2, p2, m2 = Date.now();
+    let d2, p2, f2, m2 = Date.now();
     try {
       d2 = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, { method: "POST", headers: c2, body: o2, signal: i2.signal });
-    } catch (e3) {
-      return this.handleNetworkError(s2, e3);
+    } catch (t3) {
+      return this.handleNetworkError(s2, t3);
     }
-    if (this.lastRateLimit = Tt(d2.headers), !d2.ok) {
-      let e3 = await d2.text().catch(() => "");
-      return d2.status === 401 && this.credentials.invalidate(), this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, status: d2.status, msg: e3.slice(0, 200) }), new Response(e3, { status: d2.status, headers: d2.headers });
+    if (this.lastRateLimit = Ae(d2.headers), !d2.ok) {
+      let t3 = await d2.text().catch(() => "");
+      return d2.status === 401 && this.credentials.invalidate(), this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, status: d2.status, msg: t3.slice(0, 200) }), new Response(t3, { status: d2.status, headers: d2.headers });
     }
     if (!d2.body)
       return new Response("No upstream body", { status: 502 });
     try {
-      let e3 = d2.body.tee();
-      f2 = e3[0], p2 = e3[1];
-    } catch (e3) {
-      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `tee() failed: ${e3?.message}` }), new Response(d2.body, { status: d2.status, headers: d2.headers });
+      let t3 = d2.body.tee();
+      p2 = t3[0], f2 = t3[1];
+    } catch (t3) {
+      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `tee() failed: ${t3?.message}` }), new Response(d2.body, { status: d2.status, headers: d2.headers });
     }
-    this.parseSSEAndNotify(p2, n2, s2, h2, m2).catch((e3) => {
-      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `parse promise rejected: ${e3?.message}` });
+    this.parseSSEAndNotify(f2, n2, s2, h2, m2).catch((t3) => {
+      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `parse promise rejected: ${t3?.message}` });
     });
-    let y2 = new Headers(d2.headers);
-    return y2.delete("content-encoding"), y2.delete("content-length"), new Response(f2, { status: d2.status, headers: y2 });
+    let g2 = new Headers(d2.headers);
+    return g2.delete("content-encoding"), g2.delete("content-length"), new Response(p2, { status: d2.status, headers: g2 });
   }
-  createEngine(e2) {
-    let t2 = this.config;
-    return new Ie({ config: { intervalMs: t2.kaIntervalSec !== undefined ? 1000 * t2.kaIntervalSec : undefined, idleTimeoutMs: t2.kaIdleTimeoutSec > 0 ? 1000 * t2.kaIdleTimeoutSec : 1 / 0, minTokens: t2.kaMinTokens, rewriteWarnIdleMs: 1000 * t2.kaRewriteWarnIdleSec, rewriteWarnTokens: t2.kaRewriteWarnTokens, rewriteBlockIdleMs: t2.kaRewriteBlockIdleSec > 0 ? 1000 * t2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: t2.kaRewriteBlockEnabled, onHeartbeat: i((t3) => {
-      this.metrics.recordRequest({ kind: "ka", cacheRead: t3.usage.cacheReadInputTokens ?? 0, cacheWrite: t3.usage.cacheCreationInputTokens ?? 0, input: t3.usage.inputTokens ?? 0, model: t3.model }), this.events.emit({ level: "info", kind: "KA_FIRE_COMPLETE", sessionId: e2, model: t3.model, durationMs: t3.durationMs, idleMs: t3.idleMs, usage: { inputTokens: t3.usage.inputTokens, outputTokens: t3.usage.outputTokens, cacheReadInputTokens: t3.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: t3.usage.cacheCreationInputTokens ?? 0 }, rateLimit: t3.rateLimit });
+  createEngine(t2) {
+    let e2 = this.config;
+    return new xt({ config: { intervalMs: e2.kaIntervalSec !== undefined ? 1000 * e2.kaIntervalSec : undefined, idleTimeoutMs: e2.kaIdleTimeoutSec > 0 ? 1000 * e2.kaIdleTimeoutSec : 1 / 0, minTokens: e2.kaMinTokens, rewriteWarnIdleMs: 1000 * e2.kaRewriteWarnIdleSec, rewriteWarnTokens: e2.kaRewriteWarnTokens, rewriteBlockIdleMs: e2.kaRewriteBlockIdleSec > 0 ? 1000 * e2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: e2.kaRewriteBlockEnabled, onHeartbeat: i((e3) => {
+      this.metrics.recordRequest({ kind: "ka", cacheRead: e3.usage.cacheReadInputTokens ?? 0, cacheWrite: e3.usage.cacheCreationInputTokens ?? 0, input: e3.usage.inputTokens ?? 0, model: e3.model }), this.events.emit({ level: "info", kind: "KA_FIRE_COMPLETE", sessionId: t2, model: e3.model, durationMs: e3.durationMs, idleMs: e3.idleMs, usage: { inputTokens: e3.usage.inputTokens, outputTokens: e3.usage.outputTokens, cacheReadInputTokens: e3.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: e3.usage.cacheCreationInputTokens ?? 0 }, rateLimit: e3.rateLimit });
     }, "onHeartbeat"), onTick: i((i2) => {
-      let s2 = 1000 * (t2.kaIntervalSec ?? 120);
-      i2.idleMs > 0.9 * s2 && this.events.emit({ level: "debug", kind: "KA_TICK_IDLE", sessionId: e2, idleMs: i2.idleMs, nextFireMs: i2.nextFireMs, model: i2.model, tokens: i2.tokens });
-    }, "onTick"), onDisarmed: i((t3) => this.events.emit({ level: "error", kind: "KA_DISARM", sessionId: e2, reason: t3.reason, msg: `KA disarmed for session ${e2.slice(0, 8)} \u2014 reason=${t3.reason}` }), "onDisarmed"), onRewriteWarning: i((t3) => this.events.emit({ level: t3.blocked ? "error" : "info", kind: t3.blocked ? "REWRITE_BLOCK" : "REWRITE_WARN", sessionId: e2, idleMs: t3.idleMs, estimatedTokens: t3.estimatedTokens, blocked: t3.blocked, model: t3.model }), "onRewriteWarning"), onNetworkStateChange: i((t3) => this.events.emit({ level: t3.to === "degraded" ? "error" : "info", kind: t3.to === "degraded" ? "NETWORK_DEGRADED" : "NETWORK_HEALTHY", sessionId: e2, from: t3.from, to: t3.to }), "onNetworkStateChange") }, getToken: i(() => this.credentials.getAccessToken(), "getToken"), doFetch: i((e3, t3, i2) => this.engineDoFetch(e3, t3, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimit, "getRateLimitInfo"), isOwnerAlive: i(() => this.store.isOwnerAlive(e2), "isOwnerAlive") });
+      let s2 = 1000 * (e2.kaIntervalSec ?? 120);
+      i2.idleMs > 0.9 * s2 && this.events.emit({ level: "debug", kind: "KA_TICK_IDLE", sessionId: t2, idleMs: i2.idleMs, nextFireMs: i2.nextFireMs, model: i2.model, tokens: i2.tokens });
+    }, "onTick"), onDisarmed: i((e3) => this.events.emit({ level: "error", kind: "KA_DISARM", sessionId: t2, reason: e3.reason, msg: `KA disarmed for session ${t2.slice(0, 8)} \u2014 reason=${e3.reason}` }), "onDisarmed"), onRewriteWarning: i((e3) => this.events.emit({ level: e3.blocked ? "error" : "info", kind: e3.blocked ? "REWRITE_BLOCK" : "REWRITE_WARN", sessionId: t2, idleMs: e3.idleMs, estimatedTokens: e3.estimatedTokens, blocked: e3.blocked, model: e3.model }), "onRewriteWarning"), onNetworkStateChange: i((e3) => this.events.emit({ level: e3.to === "degraded" ? "error" : "info", kind: e3.to === "degraded" ? "NETWORK_DEGRADED" : "NETWORK_HEALTHY", sessionId: t2, from: e3.from, to: e3.to }), "onNetworkStateChange") }, getToken: i(() => this.credentials.getAccessToken(), "getToken"), doFetch: i((t3, e3, i2) => this.engineDoFetch(t3, e3, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimit, "getRateLimitInfo"), isOwnerAlive: i(() => this.store.isOwnerAlive(t2), "isOwnerAlive") });
   }
-  async* engineDoFetch(e2, t2, i2) {
-    let s2 = JSON.stringify(e2), r2 = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, { method: "POST", headers: t2, body: s2, signal: i2 });
+  async* engineDoFetch(t2, e2, i2) {
+    let s2 = JSON.stringify(t2), r2 = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, { method: "POST", headers: e2, body: s2, signal: i2 });
     if (!r2.ok) {
-      let e3 = await r2.text().catch(() => ""), t3 = new Error(`HTTP ${r2.status}: ${e3.slice(0, 200)}`);
-      throw t3.status = r2.status, r2.status === 401 && this.credentials.invalidate(), t3;
+      let t3 = await r2.text().catch(() => ""), e3 = new Error(`HTTP ${r2.status}: ${t3.slice(0, 200)}`);
+      throw e3.status = r2.status, r2.status === 401 && this.credentials.invalidate(), e3;
     }
     if (!r2.body)
       throw new Error("No response body");
-    yield* vt(r2.body, i2);
+    yield* Ce(r2.body, i2);
   }
-  async parseSSEAndNotify(e2, t2, i2, s2, r2) {
+  async parseSSEAndNotify(t2, e2, i2, s2, r2) {
     try {
-      let n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, a2 = new TextDecoder, o2 = e2.getReader(), l2 = "";
+      let n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, a2 = new TextDecoder, o2 = t2.getReader(), l2 = "";
       for (;; ) {
-        let e3, t3;
+        let t3, e3;
         try {
           let i3 = await o2.read();
-          e3 = i3.done, t3 = i3.value;
-        } catch (e4) {
-          return void this.events.emit({ level: "debug", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `stream read aborted: ${e4?.message}` });
+          t3 = i3.done, e3 = i3.value;
+        } catch (t4) {
+          return void this.events.emit({ level: "debug", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `stream read aborted: ${t4?.message}` });
         }
-        if (e3)
+        if (t3)
           break;
-        if (!t3)
+        if (!e3)
           continue;
-        l2 += a2.decode(t3, { stream: true });
+        l2 += a2.decode(e3, { stream: true });
         let s3 = l2.split(`
 `);
         l2 = s3.pop() ?? "";
-        for (let e4 of s3) {
-          if (!e4.startsWith("data: "))
+        for (let t4 of s3) {
+          if (!t4.startsWith("data: "))
             continue;
-          let t4 = e4.slice(6);
-          if (t4 !== "[DONE]")
+          let e4 = t4.slice(6);
+          if (e4 !== "[DONE]")
             try {
-              let e5 = JSON.parse(t4);
-              if (e5.type === "message_start" && e5.message?.usage) {
-                let t5 = e5.message.usage;
-                n2 = { inputTokens: t5.input_tokens ?? 0, outputTokens: t5.output_tokens ?? 0, cacheCreationInputTokens: t5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: t5.cache_read_input_tokens ?? 0 };
+              let t5 = JSON.parse(e4);
+              if (t5.type === "message_start" && t5.message?.usage) {
+                let e5 = t5.message.usage;
+                n2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: e5.cache_read_input_tokens ?? 0 };
               } else
-                e5.type === "message_delta" && e5.usage?.output_tokens && (n2.outputTokens = e5.usage.output_tokens);
+                t5.type === "message_delta" && t5.usage?.output_tokens && (n2.outputTokens = t5.usage.output_tokens);
             } catch {}
         }
       }
-      let h2 = t2.lastUsage === null;
-      t2.lastUsage = n2;
+      let h2 = e2.lastUsage === null;
+      e2.lastUsage = n2;
       try {
-        t2.engine.notifyRealRequestComplete(n2);
-      } catch (e3) {
-        this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `engine.notifyRealRequestComplete: ${e3?.message}` });
+        e2.engine.notifyRealRequestComplete(n2);
+      } catch (t3) {
+        this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `engine.notifyRealRequestComplete: ${t3?.message}` });
       }
       this.metrics.recordRequest({ kind: "real", cacheRead: n2.cacheReadInputTokens ?? 0, cacheWrite: n2.cacheCreationInputTokens ?? 0, input: n2.inputTokens ?? 0, model: s2, firstCall: h2 }), this.events.emit({ level: "info", kind: "REAL_REQUEST_COMPLETE", sessionId: i2, model: s2, durationMs: Date.now() - r2, usage: n2, rateLimit: { util5h: this.lastRateLimit.utilization5h, util7d: this.lastRateLimit.utilization7d, status: this.lastRateLimit.status } });
-    } catch (e3) {
-      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `SSE parse error: ${e3?.message ?? e3}` });
+    } catch (t3) {
+      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `SSE parse error: ${t3?.message ?? t3}` });
     }
   }
-  handleNetworkError(e2, t2) {
-    let i2 = t2?.code ?? t2?.cause?.code ?? "", s2 = String(t2?.message ?? "").toLowerCase(), r2 = _t.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
-    return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: e2, status: r2 ? 503 : 502, msg: `upstream fetch threw: ${i2 || ""} ${s2}`.trim().slice(0, 200) }), r2 ? new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Upstream network error \u2014 proxy cannot reach Anthropic. Retrying will help once network is restored." } }), { status: 503, headers: { "content-type": "application/json", "retry-after": "2" } }) : new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: `Upstream request failed: ${s2 || i2 || "unknown"}` } }), { status: 502, headers: { "content-type": "application/json" } });
+  handleNetworkError(t2, e2) {
+    let i2 = e2?.code ?? e2?.cause?.code ?? "", s2 = String(e2?.message ?? "").toLowerCase(), r2 = Oe.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
+    return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: t2, status: r2 ? 503 : 502, msg: `upstream fetch threw: ${i2 || ""} ${s2}`.trim().slice(0, 200) }), r2 ? new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Upstream network error \u2014 proxy cannot reach Anthropic. Retrying will help once network is restored." } }), { status: 503, headers: { "content-type": "application/json", "retry-after": "2" } }) : new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: `Upstream request failed: ${s2 || i2 || "unknown"}` } }), { status: 502, headers: { "content-type": "application/json" } });
   }
 };
-var kt = ["host", "content-length", "connection", "authorization", "accept-encoding"];
-var _t = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
-function Tt(e2) {
-  return { status: e2.get("anthropic-ratelimit-unified-status"), resetAt: e2.get("anthropic-ratelimit-unified-reset") ? Number(e2.get("anthropic-ratelimit-unified-reset")) : null, claim: e2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: e2.get("retry-after") ? parseFloat(e2.get("retry-after")) : null, utilization5h: e2.get("anthropic-ratelimit-unified-5h-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-5h-utilization")) : null, utilization7d: e2.get("anthropic-ratelimit-unified-7d-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-7d-utilization")) : null };
+var be = ["host", "content-length", "connection", "authorization", "accept-encoding"];
+var Oe = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
+function Ae(t2) {
+  return { status: t2.get("anthropic-ratelimit-unified-status"), resetAt: t2.get("anthropic-ratelimit-unified-reset") ? Number(t2.get("anthropic-ratelimit-unified-reset")) : null, claim: t2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: t2.get("retry-after") ? parseFloat(t2.get("retry-after")) : null, utilization5h: t2.get("anthropic-ratelimit-unified-5h-utilization") ? parseFloat(t2.get("anthropic-ratelimit-unified-5h-utilization")) : null, utilization7d: t2.get("anthropic-ratelimit-unified-7d-utilization") ? parseFloat(t2.get("anthropic-ratelimit-unified-7d-utilization")) : null };
 }
-function Et(e2, t2) {
-  return new Response(JSON.stringify(t2), { status: e2, headers: { "content-type": "application/json" } });
+function Ie(t2, e2) {
+  return new Response(JSON.stringify(e2), { status: t2, headers: { "content-type": "application/json" } });
 }
-async function* vt(e2, t2) {
-  let i2 = new TextDecoder, s2 = e2.getReader(), r2 = "", n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+async function* Ce(t2, e2) {
+  let i2 = new TextDecoder, s2 = t2.getReader(), r2 = "", n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
   try {
     for (;; ) {
-      if (t2?.aborted)
+      if (e2?.aborted)
         return void s2.cancel();
-      let { done: e3, value: a2 } = await s2.read();
-      if (e3)
+      let { done: t3, value: a2 } = await s2.read();
+      if (t3)
         break;
       r2 += i2.decode(a2, { stream: true });
       let o2 = r2.split(`
 `);
       r2 = o2.pop() ?? "";
-      for (let e4 of o2) {
-        if (!e4.startsWith("data: "))
+      for (let t4 of o2) {
+        if (!t4.startsWith("data: "))
           continue;
-        let t3, i3 = e4.slice(6);
+        let e3, i3 = t4.slice(6);
         if (i3 !== "[DONE]") {
           try {
-            t3 = JSON.parse(i3);
+            e3 = JSON.parse(i3);
           } catch {
             continue;
           }
-          if (t3.type === "message_start" && t3.message?.usage) {
-            let e5 = t3.message.usage;
-            n2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: e5.cache_read_input_tokens ?? 0 };
+          if (e3.type === "message_start" && e3.message?.usage) {
+            let t5 = e3.message.usage;
+            n2 = { inputTokens: t5.input_tokens ?? 0, outputTokens: t5.output_tokens ?? 0, cacheCreationInputTokens: t5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: t5.cache_read_input_tokens ?? 0 };
           } else
-            t3.type === "message_delta" && t3.usage?.output_tokens ? n2.outputTokens = t3.usage.output_tokens : t3.type === "message_stop" && (yield { type: "message_stop", usage: n2, stopReason: null });
+            e3.type === "message_delta" && e3.usage?.output_tokens ? n2.outputTokens = e3.usage.output_tokens : e3.type === "message_stop" && (yield { type: "message_stop", usage: n2, stopReason: null });
         }
       }
     }
@@ -40696,55 +46373,55 @@ async function* vt(e2, t2) {
     s2.releaseLock();
   }
 }
-i(Tt, "parseRateLimitHeaders"), i(Et, "jsonResponse"), i(vt, "parseSSEToEvents"), O(), O();
-var Dt = '{"type":"KeepAlive"}';
-var At = 16000;
-var Ct = Math.floor(3200);
-async function Ot(e2, t2, s2) {
-  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(At), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
+i(Ae, "parseRateLimitHeaders"), i(Ie, "jsonResponse"), i(Ce, "parseSSEToEvents"), I(), I();
+var He = '{"type":"KeepAlive"}';
+var Be = 16000;
+var Ue = Math.floor(3200);
+async function Ke(t2, e2, s2) {
+  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(Be), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
   if (s2?.keyterms?.length)
-    for (let e3 of s2.keyterms)
-      n2.append("keyterms", e3);
-  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = Mt(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, f2 = null, p2 = "", m2 = await new Promise((t3, i2) => {
+    for (let t3 of s2.keyterms)
+      n2.append("keyterms", t3);
+  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = Pe(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, p2 = null, f2 = "", m2 = await new Promise((e3, i2) => {
     let s3 = setTimeout(() => {
       i2(new Error("voice_stream WebSocket connection timeout (10s)"));
-    }, 1e4), n3 = new URL(r2), l3 = $t({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${e2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
-    l3.on("upgrade", (e3, r3, n4) => {
+    }, 1e4), n3 = new URL(r2), l3 = Le({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${t2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
+    l3.on("upgrade", (t3, r3, n4) => {
       clearTimeout(s3);
-      let a3 = bt("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
-      if (e3.headers["sec-websocket-accept"] !== a3)
+      let a3 = Fe("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
+      if (t3.headers["sec-websocket-accept"] !== a3)
         return r3.destroy(), void i2(new Error("WebSocket handshake failed: invalid accept header"));
-      t3(r3);
-    }), l3.on("response", (e3) => {
-      if (e3.statusCode === 101 && e3.socket)
-        return clearTimeout(s3), void t3(e3.socket);
-      clearTimeout(s3), i2(new Error(`WebSocket upgrade rejected: HTTP ${e3.statusCode}`));
-    }), l3.on("error", (e3) => {
-      clearTimeout(s3), i2(new Error(`voice_stream connection failed: ${e3.message}`));
+      e3(r3);
+    }), l3.on("response", (t3) => {
+      if (t3.statusCode === 101 && t3.socket)
+        return clearTimeout(s3), void e3(t3.socket);
+      clearTimeout(s3), i2(new Error(`WebSocket upgrade rejected: HTTP ${t3.statusCode}`));
+    }), l3.on("error", (t3) => {
+      clearTimeout(s3), i2(new Error(`voice_stream connection failed: ${t3.message}`));
     }), l3.end();
   });
-  function y2(e3) {
-    k2(Buffer.from(e3, "utf8"), 1);
+  function g2(t3) {
+    k2(Buffer.from(t3, "utf8"), 1);
   }
-  function g2(e3) {
-    k2(e3, 2);
+  function y2(t3) {
+    k2(t3, 2);
   }
   function w2() {
     k2(Buffer.alloc(0), 8);
   }
-  function k2(e3, t3) {
+  function k2(t3, e3) {
     if (m2.destroyed)
       return;
-    let i2, s3 = Mt(4), r3 = Buffer.alloc(e3.length);
-    for (let t4 = 0;t4 < e3.length; t4++)
-      r3[t4] = e3[t4] ^ s3[t4 % 4];
-    e3.length < 126 ? (i2 = Buffer.alloc(6), i2[0] = 128 | t3, i2[1] = 128 | e3.length, s3.copy(i2, 2)) : e3.length < 65536 ? (i2 = Buffer.alloc(8), i2[0] = 128 | t3, i2[1] = 254, i2.writeUInt16BE(e3.length, 2), s3.copy(i2, 4)) : (i2 = Buffer.alloc(14), i2[0] = 128 | t3, i2[1] = 255, i2.writeBigUInt64BE(BigInt(e3.length), 2), s3.copy(i2, 10)), m2.write(Buffer.concat([i2, r3]));
+    let i2, s3 = Pe(4), r3 = Buffer.alloc(t3.length);
+    for (let e4 = 0;e4 < t3.length; e4++)
+      r3[e4] = t3[e4] ^ s3[e4 % 4];
+    t3.length < 126 ? (i2 = Buffer.alloc(6), i2[0] = 128 | e3, i2[1] = 128 | t3.length, s3.copy(i2, 2)) : t3.length < 65536 ? (i2 = Buffer.alloc(8), i2[0] = 128 | e3, i2[1] = 254, i2.writeUInt16BE(t3.length, 2), s3.copy(i2, 4)) : (i2 = Buffer.alloc(14), i2[0] = 128 | e3, i2[1] = 255, i2.writeBigUInt64BE(BigInt(t3.length), 2), s3.copy(i2, 10)), m2.write(Buffer.concat([i2, r3]));
   }
-  h2 = true, i(y2, "wsSendText"), i(g2, "wsSendBinary"), i(w2, "wsSendClose"), i(k2, "wsSendFrame");
+  h2 = true, i(g2, "wsSendText"), i(y2, "wsSendBinary"), i(w2, "wsSendClose"), i(k2, "wsSendFrame");
   let _2 = Buffer.alloc(0);
   function T2() {
     for (;_2.length >= 2; ) {
-      let e3 = _2[0], t3 = _2[1], i2 = 15 & e3, s3 = !!(128 & t3), r3 = 127 & t3, n3 = 2;
+      let t3 = _2[0], e3 = _2[1], i2 = 15 & t3, s3 = !!(128 & e3), r3 = 127 & e3, n3 = 2;
       if (r3 === 126) {
         if (_2.length < 4)
           return;
@@ -40760,97 +46437,97 @@ async function Ot(e2, t2, s2) {
         return;
       let o3 = _2.subarray(n3, a3);
       if (s3) {
-        let e4 = _2.subarray(n3 - 4, n3);
+        let t4 = _2.subarray(n3 - 4, n3);
         o3 = Buffer.from(o3);
-        for (let t4 = 0;t4 < o3.length; t4++)
-          o3[t4] = o3[t4] ^ e4[t4 % 4];
+        for (let e4 = 0;e4 < o3.length; e4++)
+          o3[e4] = o3[e4] ^ t4[e4 % 4];
       }
       if (_2 = _2.subarray(a3), i2 === 1)
         E2(o3.toString("utf8"));
       else {
         if (i2 === 8)
-          return void v2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
+          return void R2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
         i2 === 9 && k2(o3, 10);
       }
     }
   }
-  function E2(e3) {
+  function E2(t3) {
     let i2;
     try {
-      i2 = JSON.parse(e3);
+      i2 = JSON.parse(t3);
     } catch {
       return;
     }
     switch (i2.type) {
       case "TranscriptText": {
-        let e4 = i2.data;
-        c2 && f2?.(), e4 && (p2 = e4, t2.onTranscript(e4, false));
+        let t4 = i2.data;
+        c2 && p2?.(), t4 && (f2 = t4, e2.onTranscript(t4, false));
         break;
       }
       case "TranscriptEndpoint": {
-        let e4 = p2;
-        p2 = "", e4 && t2.onTranscript(e4, true), c2 && d2?.("post_closestream_endpoint");
+        let t4 = f2;
+        f2 = "", t4 && e2.onTranscript(t4, true), c2 && d2?.("post_closestream_endpoint");
         break;
       }
       case "TranscriptError": {
-        let e4 = i2.description ?? i2.error_code ?? "unknown transcription error";
-        u2 || t2.onError(e4);
+        let t4 = i2.description ?? i2.error_code ?? "unknown transcription error";
+        u2 || e2.onError(t4);
         break;
       }
       case "error": {
-        let e4 = i2.message ?? JSON.stringify(i2);
-        u2 || t2.onError(e4);
+        let t4 = i2.message ?? JSON.stringify(i2);
+        u2 || e2.onError(t4);
         break;
       }
     }
   }
-  function v2(e3, i2) {
-    if (h2 = false, l2 && (clearInterval(l2), l2 = null), p2) {
-      let e4 = p2;
-      p2 = "", t2.onTranscript(e4, true);
+  function R2(t3, i2) {
+    if (h2 = false, l2 && (clearInterval(l2), l2 = null), f2) {
+      let t4 = f2;
+      f2 = "", e2.onTranscript(t4, true);
     }
-    d2?.("ws_close"), !u2 && e3 !== 1000 && e3 !== 1005 && t2.onError(`Connection closed: code ${e3}${i2 ? ` \u2014 ${i2}` : ""}`), t2.onClose(), m2.destroy();
+    d2?.("ws_close"), !u2 && t3 !== 1000 && t3 !== 1005 && e2.onError(`Connection closed: code ${t3}${i2 ? ` \u2014 ${i2}` : ""}`), e2.onClose(), m2.destroy();
   }
-  return i(T2, "processFrames"), i(E2, "handleMessage"), i(v2, "handleClose"), m2.on("data", (e3) => {
-    _2 = Buffer.concat([_2, e3]), T2();
+  return i(T2, "processFrames"), i(E2, "handleMessage"), i(R2, "handleClose"), m2.on("data", (t3) => {
+    _2 = Buffer.concat([_2, t3]), T2();
   }), m2.on("close", () => {
-    h2 && v2(1006, "connection lost");
-  }), m2.on("error", (e3) => {
-    u2 || t2.onError(`Socket error: ${e3.message}`);
-  }), y2(Dt), l2 = setInterval(() => {
-    h2 && y2(Dt);
-  }, 8000), { send(e3) {
-    !h2 || c2 || g2(Buffer.from(e3));
-  }, finalize: () => u2 || c2 ? Promise.resolve("already_closed") : (u2 = true, new Promise((e3) => {
+    h2 && R2(1006, "connection lost");
+  }), m2.on("error", (t3) => {
+    u2 || e2.onError(`Socket error: ${t3.message}`);
+  }), g2(He), l2 = setInterval(() => {
+    h2 && g2(He);
+  }, 8000), { send(t3) {
+    !h2 || c2 || y2(Buffer.from(t3));
+  }, finalize: () => u2 || c2 ? Promise.resolve("already_closed") : (u2 = true, new Promise((t3) => {
     let s3 = setTimeout(() => d2?.("safety_timeout"), 5000), r3 = setTimeout(() => d2?.("no_data_timeout"), 1500);
-    f2 = i(() => {
-      clearTimeout(r3), f2 = null;
+    p2 = i(() => {
+      clearTimeout(r3), p2 = null;
     }, "cancelNoDataTimer"), d2 = i((i2) => {
-      if (clearTimeout(s3), clearTimeout(r3), d2 = null, f2 = null, p2) {
-        let e4 = p2;
-        p2 = "", t2.onTranscript(e4, true);
+      if (clearTimeout(s3), clearTimeout(r3), d2 = null, p2 = null, f2) {
+        let t4 = f2;
+        f2 = "", e2.onTranscript(t4, true);
       }
-      e3(i2);
+      t3(i2);
     }, "resolveFinalize"), m2.destroyed ? d2("ws_already_closed") : setTimeout(() => {
-      c2 = true, h2 && y2('{"type":"CloseStream"}');
+      c2 = true, h2 && g2('{"type":"CloseStream"}');
     }, 0);
   })), close() {
     c2 = true, l2 && (clearInterval(l2), l2 = null), h2 = false, m2.destroyed || (w2(), m2.destroy());
   }, isConnected: () => h2 && !m2.destroyed };
 }
-async function xt(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await Ot(e2, { onTranscript: i((e3, t3) => {
-    t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
-  }, "onTranscript"), onError: i((e3) => {
-    n2 = e3;
+async function We(t2, e2, s2) {
+  let r2 = [], n2 = null, a2 = await Ke(t2, { onTranscript: i((t3, e3) => {
+    e3 ? r2.push(t3.trim()) : s2?.onInterim?.(t3);
+  }, "onTranscript"), onError: i((t3) => {
+    n2 = t3;
   }, "onError"), onClose: i(() => {}, "onClose") }, s2);
   try {
-    let e3 = await Ut(t2), i2 = e3;
-    e3.length > 44 && e3[0] === 82 && e3[1] === 73 && e3[2] === 70 && e3[3] === 70 && (i2 = e3.subarray(44));
+    let t3 = await Qe(e2), i2 = t3;
+    t3.length > 44 && t3[0] === 82 && t3[1] === 73 && t3[2] === 70 && t3[3] === 70 && (i2 = t3.subarray(44));
     let r3 = s2?.realtime !== false;
-    for (let e4 = 0;e4 < i2.length && a2.isConnected(); e4 += Ct) {
-      let t3 = i2.subarray(e4, Math.min(e4 + Ct, i2.length));
-      a2.send(t3), r3 && e4 + Ct < i2.length && await Pt(80);
+    for (let t4 = 0;t4 < i2.length && a2.isConnected(); t4 += Ue) {
+      let e3 = i2.subarray(t4, Math.min(t4 + Ue, i2.length));
+      a2.send(e3), r3 && t4 + Ue < i2.length && await Ge(80);
     }
     await a2.finalize();
   } finally {
@@ -40860,17 +46537,17 @@ async function xt(e2, t2, s2) {
     throw new Error(`Transcription error: ${n2}`);
   return r2.join(" ");
 }
-async function It(e2, t2, s2) {
-  let r2 = [], n2 = null, a2 = await Ot(e2, { onTranscript: i((e3, t3) => {
-    t3 ? r2.push(e3.trim()) : s2?.onInterim?.(e3);
-  }, "onTranscript"), onError: i((e3) => {
-    n2 = e3;
+async function Je(t2, e2, s2) {
+  let r2 = [], n2 = null, a2 = await Ke(t2, { onTranscript: i((t3, e3) => {
+    e3 ? r2.push(t3.trim()) : s2?.onInterim?.(t3);
+  }, "onTranscript"), onError: i((t3) => {
+    n2 = t3;
   }, "onError"), onClose: i(() => {}, "onClose") }, s2);
   try {
-    let e3 = Bt();
-    if (!e3)
+    let t3 = Ye();
+    if (!t3)
       throw new Error("No audio converter found. Install ffmpeg or sox.");
-    await Ht(a2, t2, e3, s2?.realtime !== false), await a2.finalize();
+    await Ve(a2, e2, t3, s2?.realtime !== false), await a2.finalize();
   } finally {
     a2.close();
   }
@@ -40878,91 +46555,91 @@ async function It(e2, t2, s2) {
     throw new Error(`Transcription error: ${n2}`);
   return r2.join(" ");
 }
-function Nt(e2, t2) {
-  if (Ft("rec")) {
-    let i2 = Rt("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(At), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
-    return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
+function je(t2, e2) {
+  if (ze("rec")) {
+    let i2 = xe("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(Be), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
+    return i2.stdout?.on("data", t2), i2.stderr?.on("data", () => {}), i2.on("close", e2), i2.on("error", e2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
-  if (Ft("arecord")) {
-    let i2 = Rt("arecord", ["-f", "S16_LE", "-r", String(At), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
-    return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
+  if (ze("arecord")) {
+    let i2 = xe("arecord", ["-f", "S16_LE", "-r", String(Be), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
+    return i2.stdout?.on("data", t2), i2.stderr?.on("data", () => {}), i2.on("close", e2), i2.on("error", e2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
   return null;
 }
-function Lt() {
-  return Ft("rec") ? { available: true, tool: "sox", installHint: null } : Ft("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
+function qe() {
+  return ze("rec") ? { available: true, tool: "sox", installHint: null } : ze("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
 }
-function Ft(e2) {
-  return St(e2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
+function ze(t2) {
+  return Ne(t2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
 }
-function Pt(e2) {
-  return new Promise((t2) => setTimeout(t2, e2));
+function Ge(t2) {
+  return new Promise((e2) => setTimeout(e2, t2));
 }
-async function Ut(e2) {
-  let { readFile: t2 } = await import("fs/promises");
-  return t2(e2);
+async function Qe(t2) {
+  let { readFile: e2 } = await import("fs/promises");
+  return e2(t2);
 }
-function Bt() {
-  return Ft("ffmpeg") ? "ffmpeg" : Ft("sox") ? "sox" : null;
+function Ye() {
+  return ze("ffmpeg") ? "ffmpeg" : ze("sox") ? "sox" : null;
 }
-async function Ht(e2, t2, i2, s2) {
-  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(At), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(At), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = Rt(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
-  return new Promise((t3, r3) => {
+async function Ve(t2, e2, i2, s2) {
+  let r2 = i2 === "ffmpeg" ? ["-i", e2, "-f", "s16le", "-ar", String(Be), "-ac", String(1), "pipe:1"] : [e2, "-t", "raw", "-r", String(Be), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = xe(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
+  return new Promise((e3, r3) => {
     let a2 = Date.now();
-    n2.stdout?.on("data", async (t4) => {
-      if (e2.isConnected()) {
-        if (e2.send(t4), s2) {
-          let e3 = t4.length / 32000 * 1000, i3 = Date.now() - a2, s3 = Math.max(0, 0.8 * e3 - i3);
-          s3 > 10 && (n2.stdout?.pause(), await Pt(s3), n2.stdout?.resume()), a2 = Date.now();
+    n2.stdout?.on("data", async (e4) => {
+      if (t2.isConnected()) {
+        if (t2.send(e4), s2) {
+          let t3 = e4.length / 32000 * 1000, i3 = Date.now() - a2, s3 = Math.max(0, 0.8 * t3 - i3);
+          s3 > 10 && (n2.stdout?.pause(), await Ge(s3), n2.stdout?.resume()), a2 = Date.now();
         }
       } else
         n2.kill("SIGTERM");
-    }), n2.stderr?.on("data", () => {}), n2.on("close", (e3) => {
-      e3 !== 0 && e3 !== null ? r3(new Error(`${i2} exited with code ${e3}`)) : t3();
+    }), n2.stderr?.on("data", () => {}), n2.on("close", (t3) => {
+      t3 !== 0 && t3 !== null ? r3(new Error(`${i2} exited with code ${t3}`)) : e3();
     }), n2.on("error", r3);
   });
 }
-i(Ot, "connectVoiceStream"), i(xt, "transcribeFile"), i(It, "transcribeAudioFile"), i(Nt, "startMicRecording"), i(Lt, "checkVoiceDeps"), i(Ft, "hasCommand"), i(Pt, "sleep"), i(Ut, "readFileAsBuffer"), i(Bt, "findConverter"), i(Ht, "streamConvertedAudio");
+i(Ke, "connectVoiceStream"), i(We, "transcribeFile"), i(Je, "transcribeAudioFile"), i(je, "startMicRecording"), i(qe, "checkVoiceDeps"), i(ze, "hasCommand"), i(Ge, "sleep"), i(Qe, "readFileAsBuffer"), i(Ye, "findConverter"), i(Ve, "streamConvertedAudio");
 
 // provider.ts
-import { appendFileSync } from "fs";
+import { appendFileSync as appendFileSync7 } from "fs";
 import { execSync } from "child_process";
-import { join } from "path";
-import { homedir } from "os";
+import { join as join11 } from "path";
+import { homedir as homedir11 } from "os";
 var __dirname = "/home/relishev/projects/vibe/claude-code-sdk/packages/opencode-claude";
 try {
   _traceWrite("/tmp/opencode-claude-trace.log", `PROVIDER.TS pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()}
 `);
 } catch {}
-var DEBUG = process.env.CLAUDE_MAX_DEBUG !== "0";
-var LOG_FILE = join(homedir(), ".claude", "claude-max-debug.log");
-var STATS_FILE = join(homedir(), ".claude", "claude-max-stats.log");
-var STATS_JSONL = join(homedir(), ".claude", "claude-max-stats.jsonl");
+var DEBUG3 = process.env.CLAUDE_MAX_DEBUG !== "0";
+var LOG_FILE5 = join11(homedir11(), ".claude", "claude-max-debug.log");
+var STATS_FILE = join11(homedir11(), ".claude", "claude-max-stats.log");
+var STATS_JSONL = join11(homedir11(), ".claude", "claude-max-stats.jsonl");
 var PID = process.pid;
 var SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? "?";
 var MAX_MEMORY_LINES = 500;
 var MAX_MEMORY_BYTES = 50000;
 function logStats(line, structured) {
   try {
-    appendFileSync(STATS_FILE, `${line} pid=${PID} ses=${SESSION}
+    appendFileSync7(STATS_FILE, `${line} pid=${PID} ses=${SESSION}
 `);
   } catch {}
   if (structured) {
     try {
-      appendFileSync(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + `
+      appendFileSync7(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + `
 `);
     } catch {}
   }
 }
-function dbg(...args) {
-  if (!DEBUG)
+function dbg4(...args) {
+  if (!DEBUG3)
     return;
   try {
-    appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
+    appendFileSync7(LOG_FILE5, `[${new Date().toISOString()}] ${args.map((a2) => typeof a2 === "string" ? a2 : JSON.stringify(a2)).join(" ")}
 `);
   } catch {}
 }
@@ -40971,6 +46648,10 @@ var IMAGE_TARGET_RAW_BYTES = 3.75 * 1024 * 1024;
 var IMAGE_ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 var IMAGE_MIN_DIMENSION = 8;
 var IMAGE_MIN_BASE64_BYTES = 32;
+var BODY_TARGET_BYTES = 14 * 1024 * 1024;
+var BODY_HARD_LIMIT_BYTES = 18 * 1024 * 1024;
+var IMAGE_AGGRESSIVE_MAX_LONG_EDGE = 800;
+var IMAGE_AGGRESSIVE_TARGET_BYTES = 200 * 1024;
 function sniffImageMime(raw) {
   if (raw.length < 12)
     return null;
@@ -41013,7 +46694,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
   }
   let mediaType = claimedMediaType;
   if (sniffedMime !== claimedMediaType && claimedMediaType !== "image/*") {
-    dbg(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} \u2014 using actual`);
+    dbg4(`image MIME mismatch: claimed=${claimedMediaType} actual=${sniffedMime} \u2014 using actual`);
     mediaType = sniffedMime;
   } else if (claimedMediaType === "image/*") {
     mediaType = sniffedMime;
@@ -41030,7 +46711,7 @@ async function validateAndNormalizeImage(base64Data, claimedMediaType) {
         return { ok: false, reason: `image too small ${img.width}\xD7${img.height} (min ${IMAGE_MIN_DIMENSION}\xD7${IMAGE_MIN_DIMENSION})` };
       }
       const outBuf = await img.getBuffer("image/png");
-      dbg(`image transcoded ${mediaType} \u2192 image/png (${img.width}\xD7${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
+      dbg4(`image transcoded ${mediaType} \u2192 image/png (${img.width}\xD7${img.height}, ${(outBuf.length / 1024).toFixed(0)}KB)`);
       return { ok: true, data: outBuf.toString("base64"), mediaType: "image/png", reason: `transcoded from ${mediaType}` };
     } catch (e2) {
       return { ok: false, reason: `failed to transcode ${mediaType}: ${e2.message}` };
@@ -41058,9 +46739,9 @@ function getJimp() {
   _jimpChecked = true;
   try {
     _jimp = require_commonjs30();
-    dbg("Image resizer: jimp loaded");
+    dbg4("Image resizer: jimp loaded");
   } catch {
-    dbg("Image resizer: jimp not available \u2014 images will not be resized");
+    dbg4("Image resizer: jimp not available \u2014 images will not be resized");
   }
   return _jimp;
 }
@@ -41070,7 +46751,7 @@ async function maybeResizeImage(base64Data, mediaType) {
   const jimpMod = getJimp();
   if (!jimpMod) {
     if (needsSizeReduction) {
-      dbg(`WARNING: image ${(rawBytes.length / 1024 / 1024).toFixed(1)}MB exceeds ${(IMAGE_TARGET_RAW_BYTES / 1024 / 1024).toFixed(1)}MB target but no resize lib available`);
+      dbg4(`WARNING: image ${(rawBytes.length / 1024 / 1024).toFixed(1)}MB exceeds ${(IMAGE_TARGET_RAW_BYTES / 1024 / 1024).toFixed(1)}MB target but no resize lib available`);
     }
     return { data: base64Data, mediaType, resized: false };
   }
@@ -41099,7 +46780,7 @@ async function maybeResizeImage(base64Data, mediaType) {
       outBuf = await img.getBuffer("image/png");
       outMediaType = "image/png";
       if (outBuf.length > IMAGE_TARGET_RAW_BYTES) {
-        dbg(`PNG still ${(outBuf.length / 1024).toFixed(0)}KB after resize, converting to JPEG`);
+        dbg4(`PNG still ${(outBuf.length / 1024).toFixed(0)}KB after resize, converting to JPEG`);
         outBuf = await img.getBuffer("image/jpeg");
         outMediaType = "image/jpeg";
       }
@@ -41108,12 +46789,93 @@ async function maybeResizeImage(base64Data, mediaType) {
       outMediaType = "image/jpeg";
     }
     const outBase64 = outBuf.toString("base64");
-    dbg(`Image resized: ${w2}\xD7${h2} \u2192 ${nw}\xD7${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB \u2192 ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
+    dbg4(`Image resized: ${w2}\xD7${h2} \u2192 ${nw}\xD7${nh}, ${(rawBytes.length / 1024).toFixed(0)}KB \u2192 ${(outBuf.length / 1024).toFixed(0)}KB ${outMediaType}`);
     return { data: outBase64, mediaType: outMediaType, resized: true };
   } catch (e2) {
-    dbg("Image resize failed, using original:", e2.message);
+    dbg4("Image resize failed, using original:", e2.message);
     return { data: base64Data, mediaType, resized: false };
   }
+}
+async function aggressiveResizeImage(base64Data, mediaType) {
+  const jimpMod = getJimp();
+  if (!jimpMod)
+    return { data: base64Data, mediaType, shrunk: false };
+  try {
+    const { Jimp } = jimpMod;
+    const rawBytes = Buffer.from(base64Data, "base64");
+    const img = await Jimp.fromBuffer(rawBytes);
+    const longEdge = Math.max(img.width, img.height);
+    const scale = Math.min(IMAGE_AGGRESSIVE_MAX_LONG_EDGE / longEdge, 1);
+    const nw = Math.max(1, Math.round(img.width * scale));
+    const nh = Math.max(1, Math.round(img.height * scale));
+    img.resize({ w: nw, h: nh });
+    const outBuf = await img.getBuffer("image/jpeg", { quality: 60 });
+    const outBase64 = outBuf.toString("base64");
+    const shrunk = outBuf.length < rawBytes.length;
+    return { data: outBase64, mediaType: "image/jpeg", shrunk };
+  } catch {
+    return { data: base64Data, mediaType, shrunk: false };
+  }
+}
+async function enforceTotalBodyBudget(messages, systemSize) {
+  const measure = () => systemSize + JSON.stringify(messages).length;
+  let bodySize = measure();
+  if (bodySize <= BODY_TARGET_BYTES)
+    return;
+  const t0 = Date.now();
+  dbg4(`IMAGE_BODY_GUARD start: bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB target=${(BODY_TARGET_BYTES / 1024 / 1024).toFixed(0)}MB`);
+  let shrunkCount = 0;
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content))
+      continue;
+    for (const block of msg.content) {
+      if (block?.type === "image" && block.source?.type === "base64" && typeof block.source.data === "string") {
+        const before = block.source.data.length;
+        const result = await aggressiveResizeImage(block.source.data, block.source.media_type ?? "image/png");
+        if (result.shrunk && result.data.length < before) {
+          block.source.data = result.data;
+          block.source.media_type = result.mediaType;
+          shrunkCount++;
+        }
+      }
+    }
+  }
+  bodySize = measure();
+  dbg4(`IMAGE_BODY_GUARD stage-A: aggressively shrunk ${shrunkCount} images, bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB`);
+  if (bodySize <= BODY_TARGET_BYTES) {
+    dbg4(`IMAGE_BODY_GUARD complete: stage-A sufficient in ${Date.now() - t0}ms`);
+    return;
+  }
+  let strippedCount = 0;
+  let strippedBytes = 0;
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content))
+      continue;
+    for (let i2 = 0;i2 < msg.content.length; i2++) {
+      const block = msg.content[i2];
+      if (block?.type === "image" && block.source?.type === "base64" && typeof block.source.data === "string") {
+        const sizeKb = Math.round(Buffer.from(block.source.data, "base64").length / 1024);
+        const mediaType = block.source.media_type ?? "image/?";
+        msg.content[i2] = {
+          type: "text",
+          text: `[image stripped to fit context budget: was ${sizeKb}KB ${mediaType}; resend if relevant]`
+        };
+        strippedCount++;
+        strippedBytes += block.source.data.length;
+        bodySize = measure();
+        if (bodySize <= BODY_HARD_LIMIT_BYTES)
+          break;
+      }
+    }
+    if (bodySize <= BODY_HARD_LIMIT_BYTES)
+      break;
+  }
+  dbg4(`IMAGE_BODY_GUARD stage-B: stripped ${strippedCount} images (~${(strippedBytes / 1024 / 1024).toFixed(1)}MB base64), bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB`);
+  if (bodySize <= BODY_HARD_LIMIT_BYTES) {
+    dbg4(`IMAGE_BODY_GUARD complete: stage-B sufficient in ${Date.now() - t0}ms`);
+    return;
+  }
+  dbg4(`IMAGE_BODY_GUARD stage-C: bodyLen=${(bodySize / 1024 / 1024).toFixed(1)}MB still over hard limit ${(BODY_HARD_LIMIT_BYTES / 1024 / 1024).toFixed(0)}MB \u2014 SDK Tier 2 will gate`);
 }
 function sanitizePathForProjects(name) {
   return name.replace(/[^a-zA-Z0-9]/g, "-");
@@ -41132,12 +46894,12 @@ function getGitRoot() {
 var _fileCache = new Map;
 function readCachedFile(filePath) {
   try {
-    const { statSync, readFileSync } = __require("fs");
-    const st2 = statSync(filePath);
+    const { statSync: statSync2, readFileSync: readFileSync6 } = __require_gv7hsff9("fs");
+    const st2 = statSync2(filePath);
     const cached = _fileCache.get(filePath);
     if (cached && cached.mtimeMs === st2.mtimeMs)
       return cached.content;
-    const content = readFileSync(filePath, "utf8");
+    const content = readFileSync6(filePath, "utf8");
     _fileCache.set(filePath, { content, mtimeMs: st2.mtimeMs });
     return content;
   } catch {
@@ -41176,19 +46938,19 @@ function buildContextInjectionParts() {
     return { stable: _stableInjectionFrozen, volatile: _volatileInjectionFrozen };
   }
   const tInject = Date.now();
-  const home = homedir();
+  const home = homedir11();
   const cwd = process.cwd();
   const gitRoot = getGitRoot();
   const projectBase = gitRoot || cwd;
   const sanitized = sanitizePathForProjects(projectBase);
-  const memoryPath = join(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
+  const memoryPath = join11(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
   const stableSources = [
-    { path: join(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
+    { path: join11(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
   ];
   if (cwd !== home) {
-    stableSources.push({ path: join(cwd, "CLAUDE.md"), tag: "claude-rules" });
-    const dotClaudePath = join(cwd, ".claude", "CLAUDE.md");
-    if (dotClaudePath !== join(home, ".claude", "CLAUDE.md")) {
+    stableSources.push({ path: join11(cwd, "CLAUDE.md"), tag: "claude-rules" });
+    const dotClaudePath = join11(cwd, ".claude", "CLAUDE.md");
+    if (dotClaudePath !== join11(home, ".claude", "CLAUDE.md")) {
       stableSources.push({ path: dotClaudePath, tag: "claude-rules" });
     }
   }
@@ -41220,7 +46982,7 @@ ${text}
   }
   const totalSources = stableParts.length + (volatile ? 1 : 0);
   const totalBytes = (stable?.length ?? 0) + (volatile?.length ?? 0);
-  dbg(`context_inject: ${totalSources} sources, ${totalBytes} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? " TRUNCATED" : ""}) built in ${Date.now() - tInject}ms [FROZEN for session, split: stable+volatile]`);
+  dbg4(`context_inject: ${totalSources} sources, ${totalBytes} bytes (claude_md=${claudeMdBytes}, memory=${memoryBytes}${memoryTruncated ? " TRUNCATED" : ""}) built in ${Date.now() - tInject}ms [FROZEN for session, split: stable+volatile]`);
   logStats(`[${new Date().toISOString()}] type=context_inject | sources=${totalSources} claude_md=${claudeMdBytes} memory=${memoryBytes} truncated=${memoryTruncated} buildMs=${Date.now() - tInject} split=true`, {
     type: "context_inject",
     sources: totalSources,
@@ -41250,7 +47012,7 @@ async function convertPrompt(prompt) {
     if (msg.role === "assistant" && Array.isArray(msg.content)) {
       for (const p2 of msg.content) {
         if (p2.type === "reasoning") {
-          dbg("PROMPT reasoning part:", {
+          dbg4("PROMPT reasoning part:", {
             textLen: p2.text?.length,
             hasProviderMetadata: !!p2.providerMetadata,
             providerMetadataKeys: p2.providerMetadata ? Object.keys(p2.providerMetadata) : [],
@@ -41309,52 +47071,52 @@ async function convertPrompt(prompt) {
         if (p2.type === "file" && typeof p2.mediaType === "string") {
           const isUrl = p2.data instanceof URL || typeof p2.data === "string" && (p2.data.startsWith("http://") || p2.data.startsWith("https://"));
           if (isUrl) {
-            const url = typeof p2.data === "string" ? p2.data : p2.data.toString();
+            const url2 = typeof p2.data === "string" ? p2.data : p2.data.toString();
             if (p2.mediaType.startsWith("image/")) {
-              content.push({ type: "image", source: { type: "url", url } });
-              dbg("Converted file part to image URL block:", p2.mediaType, url);
+              content.push({ type: "image", source: { type: "url", url: url2 } });
+              dbg4("Converted file part to image URL block:", p2.mediaType, url2);
             } else if (p2.mediaType === "application/pdf") {
-              content.push({ type: "document", source: { type: "url", url } });
-              dbg("Converted file part to document URL block:", url);
+              content.push({ type: "document", source: { type: "url", url: url2 } });
+              dbg4("Converted file part to document URL block:", url2);
             }
             continue;
           }
           let data = typeof p2.data === "string" ? p2.data : p2.data instanceof Uint8Array ? Buffer.from(p2.data).toString("base64") : p2.data instanceof ArrayBuffer ? Buffer.from(p2.data).toString("base64") : null;
           if (!data) {
-            dbg("Skipping file part: could not convert data to base64, type:", typeof p2.data);
+            dbg4("Skipping file part: could not convert data to base64, type:", typeof p2.data);
             continue;
           }
           if (typeof data === "string" && data.startsWith("data:")) {
             const commaIdx = data.indexOf(",");
             if (commaIdx !== -1) {
               data = data.slice(commaIdx + 1);
-              dbg("Stripped data URL prefix from file data");
+              dbg4("Stripped data URL prefix from file data");
             }
           }
           if (p2.mediaType.startsWith("image/")) {
             const validated = await validateAndNormalizeImage(data, p2.mediaType);
             if (!validated.ok) {
-              dbg(`image validation failed: ${validated.reason} \u2014 replacing with text placeholder`);
+              dbg4(`image validation failed: ${validated.reason} \u2014 replacing with text placeholder`);
               content.push({ type: "text", text: `[Image could not be processed: ${validated.reason}]` });
               continue;
             }
             if (validated.reason) {
-              dbg(`image normalized: ${validated.reason}`);
+              dbg4(`image normalized: ${validated.reason}`);
             }
             const resized = await maybeResizeImage(validated.data, validated.mediaType);
             const API_IMAGE_MAX_BASE64 = 5 * 1024 * 1024;
             if (resized.data.length > API_IMAGE_MAX_BASE64) {
-              dbg(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) \u2014 skipping`);
+              dbg4(`WARNING: image still too large after resize (${(resized.data.length / 1024 / 1024).toFixed(1)}MB base64, limit 5MB) \u2014 skipping`);
               content.push({ type: "text", text: `[Image too large: ${(resized.data.length / 1024 / 1024).toFixed(1)}MB after resize, API limit is 5MB. Please use a smaller image.]` });
               continue;
             }
             content.push({ type: "image", source: { type: "base64", media_type: resized.mediaType, data: resized.data } });
-            dbg("Converted file part to image block:", resized.mediaType, `${(resized.data.length / 1024).toFixed(0)}KB base64`, resized.resized ? "(resized)" : "(original)");
+            dbg4("Converted file part to image block:", resized.mediaType, `${(resized.data.length / 1024).toFixed(0)}KB base64`, resized.resized ? "(resized)" : "(original)");
           } else if (p2.mediaType === "application/pdf") {
             content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data } });
-            dbg("Converted file part to document block:", `${(data.length / 1024).toFixed(0)}KB base64`);
+            dbg4("Converted file part to document block:", `${(data.length / 1024).toFixed(0)}KB base64`);
           } else {
-            dbg("Skipping file part with unsupported mediaType:", p2.mediaType);
+            dbg4("Skipping file part with unsupported mediaType:", p2.mediaType);
           }
         }
       }
@@ -41467,23 +47229,25 @@ async function convertPrompt(prompt) {
       messages.splice(i2 + 1, 0, { role: "user", content: syntheticResults });
     }
     sanitizerHits += orphanIds.length;
-    dbg(`tool_use_sanitizer: healed ${orphanIds.length} orphan(s) at assistant msg[${i2}] ids=[${orphanIds.join(",")}]`);
+    dbg4(`tool_use_sanitizer: healed ${orphanIds.length} orphan(s) at assistant msg[${i2}] ids=[${orphanIds.join(",")}]`);
   }
   if (sanitizerHits > 0) {
-    dbg(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`);
+    dbg4(`tool_use_sanitizer: total ${sanitizerHits} synthetic tool_results injected (cache prefix rebuilt from first healed point)`);
   }
   const sysFingerprints = [];
   if (Array.isArray(system)) {
-    const { createHash } = __require("crypto");
+    const { createHash: createHash2 } = __require_gv7hsff9("crypto");
     for (const block of system) {
       const text = block?.text ?? "";
-      sysFingerprints.push(`${createHash("md5").update(String(text)).digest("hex").slice(0, 8)}@${String(text).length}`);
+      sysFingerprints.push(`${createHash2("md5").update(String(text)).digest("hex").slice(0, 8)}@${String(text).length}`);
     }
   } else if (typeof system === "string") {
-    const { createHash } = __require("crypto");
-    sysFingerprints.push(`${createHash("md5").update(system).digest("hex").slice(0, 8)}@${system.length}`);
+    const { createHash: createHash2 } = __require_gv7hsff9("crypto");
+    sysFingerprints.push(`${createHash2("md5").update(system).digest("hex").slice(0, 8)}@${system.length}`);
   }
-  dbg(`convertPrompt: ${messages.length} messages, system=${typeof system === "string" ? system.length : Array.isArray(system) ? system.length + " blocks" : "none"} fingerprints=[${sysFingerprints.join(",")}] in ${Date.now() - tConvert}ms`);
+  dbg4(`convertPrompt: ${messages.length} messages, system=${typeof system === "string" ? system.length : Array.isArray(system) ? system.length + " blocks" : "none"} fingerprints=[${sysFingerprints.join(",")}] in ${Date.now() - tConvert}ms`);
+  const systemSize = typeof system === "string" ? system.length : Array.isArray(system) ? JSON.stringify(system).length : 0;
+  await enforceTotalBodyBudget(messages, systemSize);
   return { system, messages };
 }
 var CWD_PATTERNS = [
@@ -41585,14 +47349,14 @@ function convertTools(tools) {
   const count = result.length;
   const namesNow = result.map((t2) => t2.name);
   const hash = namesNow.join(",");
-  const { createHash } = __require("crypto");
-  const toolsFingerprint = createHash("md5").update(result.map((t2) => `${t2.name}|${createHash("md5").update(JSON.stringify(t2)).digest("hex").slice(0, 8)}`).join(",")).digest("hex").slice(0, 12);
+  const { createHash: createHash2 } = __require_gv7hsff9("crypto");
+  const toolsFingerprint = createHash2("md5").update(result.map((t2) => `${t2.name}|${createHash2("md5").update(JSON.stringify(t2)).digest("hex").slice(0, 8)}`).join(",")).digest("hex").slice(0, 12);
   if (_lastToolCount > 0 && hash !== _lastToolHash) {
     const oldNames = new Set(_lastToolHash.split(","));
     const newNames = new Set(namesNow);
     const added = namesNow.filter((n2) => !oldNames.has(n2));
     const removed = [..._lastToolHash.split(",")].filter((n2) => !newNames.has(n2));
-    dbg(`\u26A0 TOOL_DRIFT: count ${_lastToolCount} \u2192 ${count} (builtin=${builtIn.length} mcp=${mcp.length}) added=[${added.join(",")}] removed=[${removed.join(",")}] toolsFp=${toolsFingerprint}`);
+    dbg4(`\u26A0 TOOL_DRIFT: count ${_lastToolCount} \u2192 ${count} (builtin=${builtIn.length} mcp=${mcp.length}) added=[${added.join(",")}] removed=[${removed.join(",")}] toolsFp=${toolsFingerprint}`);
     logStats(`[${new Date().toISOString()}] type=tool_drift | old=${_lastToolCount} new=${count} builtin=${builtIn.length} mcp=${mcp.length} added=${added.join(",")} removed=${removed.join(",")} toolsFp=${toolsFingerprint}`, {
       type: "tool_drift",
       oldCount: _lastToolCount,
@@ -41604,9 +47368,9 @@ function convertTools(tools) {
       toolsFingerprint
     });
   } else if (_lastToolCount === 0) {
-    dbg(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length}) toolsFp=${toolsFingerprint}`);
+    dbg4(`tools: ${count} registered (builtin=${builtIn.length} mcp=${mcp.length}) toolsFp=${toolsFingerprint}`);
   } else if (toolsFingerprint !== _lastToolFingerprint) {
-    dbg(`\u26A0 TOOL_SCHEMA_DRIFT: same ${count} tools but fingerprint changed ${_lastToolFingerprint} \u2192 ${toolsFingerprint}`);
+    dbg4(`\u26A0 TOOL_SCHEMA_DRIFT: same ${count} tools but fingerprint changed ${_lastToolFingerprint} \u2192 ${toolsFingerprint}`);
     logStats(`[${new Date().toISOString()}] type=tool_schema_drift | count=${count} oldFp=${_lastToolFingerprint} newFp=${toolsFingerprint}`, {
       type: "tool_schema_drift",
       count,
@@ -41667,7 +47431,7 @@ function createLanguageModel(sdk, modelId, providerId) {
     modelId,
     supportedUrls: {},
     async doGenerate(options) {
-      dbg("doGenerate", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
+      dbg4("doGenerate", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
       const { system, messages } = await convertPrompt(options.prompt);
       const tools = convertTools(options.tools);
       const toolChoice = convertToolChoice(options.toolChoice);
@@ -41710,9 +47474,9 @@ function createLanguageModel(sdk, modelId, providerId) {
             const r2 = repairTodowriteInput(inputStr);
             if (r2.didRepair) {
               inputStr = r2.repaired;
-              dbg(`tool_input_repair: todowrite (doGenerate) \u2014 wrapped bare array into {todos:[...]}`);
+              dbg4(`tool_input_repair: todowrite (doGenerate) \u2014 wrapped bare array into {todos:[...]}`);
             } else if (r2.reason) {
-              dbg(`tool_input_repair: todowrite (doGenerate) \u2014 no-op: ${r2.reason}`);
+              dbg4(`tool_input_repair: todowrite (doGenerate) \u2014 no-op: ${r2.reason}`);
             }
           }
           content.push({
@@ -41754,7 +47518,7 @@ function createLanguageModel(sdk, modelId, providerId) {
     },
     async doStream(options) {
       const t0 = Date.now();
-      dbg("doStream", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
+      dbg4("doStream", { modelId, promptLen: options.prompt?.length, hasTools: !!options.tools?.length });
       const { system, messages } = await convertPrompt(options.prompt);
       const tools = convertTools(options.tools);
       const toolChoice = convertToolChoice(options.toolChoice);
@@ -41776,12 +47540,12 @@ function createLanguageModel(sdk, modelId, providerId) {
         sdkOpts.stopSequences = options.stopSequences;
       const po = options.providerOptions?.["claude-max"] ?? options.providerOptions ?? {};
       const thinking = po.thinking ?? po;
-      const isAdaptive = te(modelId);
+      const isAdaptive = et(modelId);
       if (thinking?.type === "enabled" && thinking?.budgetTokens) {
         sdkOpts.thinking = { type: "enabled", budgetTokens: thinking.budgetTokens };
-        dbg("doStream thinking from variant:", sdkOpts.thinking);
+        dbg4("doStream thinking from variant:", sdkOpts.thinking);
       } else if (isAdaptive) {
-        dbg("doStream: adaptive model, SDK will handle thinking");
+        dbg4("doStream: adaptive model, SDK will handle thinking");
       }
       const sdkStream = sdk.stream(sdkOpts);
       let textId = "";
@@ -41799,7 +47563,7 @@ function createLanguageModel(sdk, modelId, providerId) {
           try {
             for await (const event of sdkStream) {
               if (firstEvent) {
-                dbg(`doStream first event after ${Date.now() - t0}ms`, { type: event.type, modelId });
+                dbg4(`doStream first event after ${Date.now() - t0}ms`, { type: event.type, modelId });
                 firstEvent = false;
               }
               switch (event.type) {
@@ -41863,9 +47627,9 @@ function createLanguageModel(sdk, modelId, providerId) {
                     const r2 = repairTodowriteInput(inputStr);
                     if (r2.didRepair) {
                       inputStr = r2.repaired;
-                      dbg(`tool_input_repair: todowrite \u2014 wrapped bare array into {todos:[...]} (model drift workaround)`);
+                      dbg4(`tool_input_repair: todowrite \u2014 wrapped bare array into {todos:[...]} (model drift workaround)`);
                     } else if (r2.reason) {
-                      dbg(`tool_input_repair: todowrite \u2014 ${r2.reason}`);
+                      dbg4(`tool_input_repair: todowrite \u2014 ${r2.reason}`);
                     }
                   }
                   controller.enqueue({
@@ -41891,7 +47655,7 @@ function createLanguageModel(sdk, modelId, providerId) {
                     usage: { in: u2?.inputTokens ?? 0, out: u2?.outputTokens ?? 0, cacheRead: u2?.cacheReadInputTokens ?? 0, cacheWrite: u2?.cacheCreationInputTokens ?? 0 },
                     rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined
                   });
-                  dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason });
+                  dbg4(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason });
                   if (textActive) {
                     controller.enqueue({ type: "text-end", id: textId });
                     textActive = false;
@@ -41942,7 +47706,7 @@ function createClaudeMax(options = {}) {
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? "1800", 10) || 1800) * 1000;
   let cacheConfigSnapshot = {};
   try {
-    const c2 = Me();
+    const c2 = Mt();
     cacheConfigSnapshot = {
       cacheTtlMs: c2.cacheTtlMs,
       cacheTtlMin: Math.round(c2.cacheTtlMs / 60000),
@@ -41958,8 +47722,8 @@ function createClaudeMax(options = {}) {
   let __pkgVersion = "unknown";
   let __sdkVersion = "unknown";
   try {
-    const path = __require("path");
-    const fs2 = __require("fs");
+    const path = __require_gv7hsff9("path");
+    const fs2 = __require_gv7hsff9("fs");
     const pkgPath = path.resolve(__dirname, "..", "package.json");
     const pkg = JSON.parse(fs2.readFileSync(pkgPath, "utf-8"));
     __pkgVersion = pkg.version ?? "unknown";
@@ -41968,7 +47732,7 @@ function createClaudeMax(options = {}) {
       __sdkVersion = sdkPkg.version ?? "unknown";
     } catch {}
   } catch {}
-  dbg(`STARTUP createClaudeMax pid=${PID} sdk=${__sdkVersion} plugin=${__pkgVersion} [cache-ssot]`, {
+  dbg4(`STARTUP createClaudeMax pid=${PID} sdk=${__sdkVersion} plugin=${__pkgVersion} [cache-ssot]`, {
     hasAccessToken: !!options.accessToken,
     credentialsPath: options.credentialsPath,
     keepaliveEnabled,
@@ -41978,15 +47742,42 @@ function createClaudeMax(options = {}) {
     rewriteBlockEnabled,
     cacheConfig: cacheConfigSnapshot
   });
-  const sdk = new Qe({
+  let _bridgeContextProvider = null;
+  let _bridgeImportAttempted = false;
+  const contextTokensProvider = () => {
+    if (_bridgeContextProvider) {
+      try {
+        return _bridgeContextProvider();
+      } catch {
+        return null;
+      }
+    }
+    if (!_bridgeImportAttempted) {
+      _bridgeImportAttempted = true;
+      (async () => {
+        try {
+          const swBridge = await Promise.resolve().then(() => (init_opencode_signal_wire(), exports_opencode_signal_wire));
+          if (typeof swBridge.createLazyContextTokensProvider === "function") {
+            _bridgeContextProvider = swBridge.createLazyContextTokensProvider();
+            dbg4(`STARTUP token-rotation: contextTokensProvider wired via lazy bridge`);
+          }
+        } catch (e2) {
+          dbg4(`STARTUP token-rotation: lazy contextTokensProvider unavailable (${e2?.message ?? "unknown"})`);
+        }
+      })();
+    }
+    return null;
+  };
+  const sdk = new ne({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
     expiresAt: options.expiresAt,
     credentialsPath: options.credentialsPath,
+    contextTokensProvider,
     onTokenStatus: (event) => {
       const emoji = event.level === "rotated" ? "\u2705" : event.level === "warning" ? "\u26A0\uFE0F" : event.level === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
       const line = `${emoji} TOKEN ${event.level.toUpperCase()}: ${event.message} (expires in ${Math.round(event.expiresInMs / 60000)}min, failures=${event.failedAttempts})`;
-      dbg(line);
+      dbg4(line);
       logStats(`[${new Date().toISOString()}] type=token_${event.level} | expiresIn=${Math.round(event.expiresInMs / 60000)}min failures=${event.failedAttempts} needsReLogin=${event.needsReLogin}`, {
         type: `token_${event.level}`,
         expiresInMin: Math.round(event.expiresInMs / 60000),
@@ -42007,7 +47798,7 @@ function createClaudeMax(options = {}) {
       rewriteBlockEnabled,
       rewriteBlockIdleMs,
       onTick: (tick) => {
-        dbg(`keepalive tick: pid=${process.pid} idle=${Math.round(tick.idleMs / 1000)}s nextFire=${Math.round(tick.nextFireMs / 1000)}s model=${tick.model}`);
+        dbg4(`keepalive tick: pid=${process.pid} idle=${Math.round(tick.idleMs / 1000)}s nextFire=${Math.round(tick.nextFireMs / 1000)}s model=${tick.model}`);
       },
       onHeartbeat: (stats) => {
         const rl = stats.rateLimit ? ` | quota=${stats.rateLimit.status ?? "?"} claim=${stats.rateLimit.claim ?? "?"}` : "";
@@ -42019,41 +47810,52 @@ function createClaudeMax(options = {}) {
           usage: { in: stats.usage.inputTokens, out: stats.usage.outputTokens, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0 },
           rateLimit: stats.rateLimit ?? undefined
         });
-        dbg("keepalive FIRED", { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit });
+        dbg4("keepalive FIRED", { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit });
       },
-      onDisarmed: (info) => {
-        logStats(`[${new Date().toISOString()}] type=keepalive_disarmed reason=${info.reason} | timer stays alive, will auto-resume on next real stream`, {
+      onDisarmed: (info2) => {
+        logStats(`[${new Date().toISOString()}] type=keepalive_disarmed reason=${info2.reason} | timer stays alive, will auto-resume on next real stream`, {
           type: "keepalive_disarmed",
-          reason: info.reason
+          reason: info2.reason
         });
-        dbg(`keepalive DISARMED reason=${info.reason} (timer alive, auto-resume on next real stream)`);
+        dbg4(`keepalive DISARMED reason=${info2.reason} (timer alive, auto-resume on next real stream)`);
       },
-      onRewriteWarning: (info) => {
-        const tag = info.blocked ? "cache_rewrite_blocked" : "cache_rewrite_warn";
-        logStats(`[${new Date().toISOString()}] type=${tag} model=${info.model} idle=${Math.round(info.idleMs / 1000)}s estimatedTokens=${info.estimatedTokens}${info.blocked ? " BLOCKED" : ""}`, {
+      onRewriteWarning: (info2) => {
+        const tag = info2.blocked ? "cache_rewrite_blocked" : "cache_rewrite_warn";
+        logStats(`[${new Date().toISOString()}] type=${tag} model=${info2.model} idle=${Math.round(info2.idleMs / 1000)}s estimatedTokens=${info2.estimatedTokens}${info2.blocked ? " BLOCKED" : ""}`, {
           type: tag,
-          model: info.model,
-          idleSec: Math.round(info.idleMs / 1000),
-          estimatedTokens: info.estimatedTokens,
-          blocked: info.blocked
+          model: info2.model,
+          idleSec: Math.round(info2.idleMs / 1000),
+          estimatedTokens: info2.estimatedTokens,
+          blocked: info2.blocked
         });
-        const banner = info.blocked ? `\uD83D\uDEAB [claude-max] CACHE REWRITE BLOCKED \u2014 idle=${Math.round(info.idleMs / 1000)}s, would cost ~${info.estimatedTokens} tokens. Unset CLAUDE_MAX_REWRITE_BLOCK to allow.` : `\u26A0\uFE0F  [claude-max] Cache likely dead \u2014 idle=${Math.round(info.idleMs / 1000)}s, next request will cost ~${info.estimatedTokens} cache_write tokens`;
+        const banner = info2.blocked ? `\uD83D\uDEAB [claude-max] CACHE REWRITE BLOCKED \u2014 idle=${Math.round(info2.idleMs / 1000)}s, would cost ~${info2.estimatedTokens} tokens. Unset CLAUDE_MAX_REWRITE_BLOCK to allow.` : `\u26A0\uFE0F  [claude-max] Cache likely dead \u2014 idle=${Math.round(info2.idleMs / 1000)}s, next request will cost ~${info2.estimatedTokens} cache_write tokens`;
         console.error(banner);
       },
-      onNetworkStateChange: (info) => {
-        logStats(`[${new Date().toISOString()}] type=network_${info.to} from=${info.from}`, {
-          type: `network_${info.to}`,
-          from: info.from,
-          to: info.to
+      onNetworkStateChange: (info2) => {
+        logStats(`[${new Date().toISOString()}] type=network_${info2.to} from=${info2.from}`, {
+          type: `network_${info2.to}`,
+          from: info2.from,
+          to: info2.to
         });
-        dbg(`network state: ${info.from} \u2192 ${info.to}`);
+        dbg4(`network state: ${info2.from} \u2192 ${info2.to}`);
       }
     }
   });
-  dbg(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`);
+  dbg4(`STARTUP createClaudeMax done in ${Date.now() - tCreate}ms`);
+  (async () => {
+    try {
+      const swBridge = await Promise.resolve().then(() => (init_opencode_signal_wire(), exports_opencode_signal_wire));
+      if (typeof swBridge.setBoundSdk === "function") {
+        swBridge.setBoundSdk(sdk);
+        dbg4(`STARTUP token-rotation: setBoundSdk OK (chat.message turn-boundary apply enabled)`);
+      }
+    } catch (e2) {
+      dbg4(`STARTUP token-rotation: bridge unavailable (${e2?.message ?? "unknown"}); continuing without turn-boundary hook`);
+    }
+  })();
   return {
     languageModel(modelId) {
-      dbg("languageModel requested:", modelId);
+      dbg4("languageModel requested:", modelId);
       return createLanguageModel(sdk, modelId, "claude-max");
     }
   };

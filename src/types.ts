@@ -162,6 +162,10 @@ export interface KeepaliveStats {
   durationMs: number
   idleMs: number
   model: string
+  /** Cache lineage this KA fire warmed. Lets a consumer attribute the
+   *  warm-up to the exact prefix family (e.g. the proxy's cache-miss
+   *  predictor, so it does not mistake a KA-kept-warm prefix for expired). */
+  lineageKey?: string
   rateLimit?: { status: string | null; claim: string | null; resetAt: number | null }
 }
 

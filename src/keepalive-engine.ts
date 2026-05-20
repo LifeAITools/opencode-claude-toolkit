@@ -1049,6 +1049,7 @@ export class KeepaliveEngine {
         durationMs,
         idleMs: idle,
         model: best.model,
+        lineageKey: best.lineageKey,
         rateLimit: {
           status: rl.status,
           claim: rl.claim,

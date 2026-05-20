@@ -10,11 +10,12 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { ProxyClient, type ProxyClientOptions } from '../src/proxy-client.js'
 import type { OrgIdResolver } from '../src/org-identity.js'
+import { lineageKey, prefixHashes } from '../src/lineage.js'
 
 // Minimal upstream mock — a tiny SSE body so handleRequest's tee()/parse path
 // works for requests that PASS the guard. Blocked requests never reach it.
@@ -186,6 +187,42 @@ describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
     const j = await r.json() as { error?: { type?: string } }
     expect(j.error?.type).toBe('cache_rewrite_guard')
     after.stop()
+    rmSync(path, { force: true })
+  })
+})
+
+describe('rewrite guard — KA-kept-warm lineage is not a false ttl-expiry', () => {
+  // Seed a prefix-history entry whose last REAL request is long past the TTL
+  // but whose last KA fire is recent. predictCacheMiss must measure idle from
+  // the KA fire (the cache IS warm) and not classify avoidable:ttl-expiry.
+  function seed(path: string, key: string, lastReqAt: number, lastKaAt: number) {
+    const body = JSON.parse(reqBody())
+    writeFileSync(path, JSON.stringify({
+      [key]: { hashes: prefixHashes(body), lastReqAt, orgId: 'org-default', lastKaAt },
+    }))
+  }
+
+  test('recent KA fire → idle measured from it → NOT blocked', async () => {
+    const path = join(TMP, 'ka-warm.json')
+    const now = Date.now()
+    const lk = lineageKey(JSON.parse(reqBody()))
+    seed(path, `rg-kawarm:${lk}`, now - 600_000, now - 200)  // real 10m ago, KA 0.2s ago
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-kawarm' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('control: KA fire ALSO stale → genuine ttl-expiry → blocked', async () => {
+    const path = join(TMP, 'ka-cold.json')
+    const now = Date.now()
+    const lk = lineageKey(JSON.parse(reqBody()))
+    seed(path, `rg-kacold:${lk}`, now - 600_000, now - 600_000)  // both stale
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-kacold' })
+    expect(r.status).toBe(400)
+    c.stop()
     rmSync(path, { force: true })
   })
 })

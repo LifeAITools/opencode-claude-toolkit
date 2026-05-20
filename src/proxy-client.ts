@@ -204,10 +204,18 @@ export interface ProxyClientOptions {
 /** One persisted cache-prefix fingerprint, keyed by `${sessionId}:${lineageKey}`. */
 interface PrefixHistoryEntry {
   hashes: PrefixHashes
+  /** Timestamp of the last REAL request for this lineage. */
   lastReqAt: number
   /** Org UUID under which this prefix was last cached — `null` when unknown.
    *  Absent in entries written before org-awareness; loaded as `null`. */
   orgId: string | null
+  /** Timestamp of the last KA fire that warmed this lineage's cache. A KA
+   *  fire refreshes the Anthropic-side prefix TTL just like a real request —
+   *  so the cache-miss predictor must treat it as a cache touch. Without
+   *  this, a user who idles past TTL while KA keeps the cache warm gets a
+   *  FALSE `avoidable:ttl-expiry` (the predictor saw only real-request idle)
+   *  and the rewrite guard blocks a request whose cache is actually hot. */
+  lastKaAt?: number
 }
 
 // ═══ Request context (per handleRequest call) ══════════════════════
@@ -666,6 +674,13 @@ export class ProxyClient {
         rewriteBlockIdleMs: cfg.kaRewriteBlockIdleSec > 0 ? cfg.kaRewriteBlockIdleSec * 1000 : Infinity,
         rewriteBlockEnabled: cfg.kaRewriteBlockEnabled,
         onHeartbeat: (stats) => {
+          // A successful KA fire just refreshed this lineage's Anthropic-side
+          // cache prefix — record the warm-up so predictCacheMiss does not
+          // later mistake KA-kept-warm idle for a TTL expiry and false-block.
+          if (stats.lineageKey) {
+            const e = this.prefixHistory.get(`${sessionId}:${stats.lineageKey}`)
+            if (e) e.lastKaAt = Date.now()
+          }
           // Record KA fire into metrics — they're the canonical hit-rate signal
           // since they replay the exact prompt prefix.
           this.metrics.recordRequest({
@@ -942,12 +957,20 @@ export class ProxyClient {
       const ph = prefixHashes(body)
       const prev = this.prefixHistory.get(key)
       const orgId = this.orgIdResolver.current()
-      this.prefixHistory.set(key, { hashes: ph, lastReqAt: now, orgId })
+      // Carry prev.lastKaAt forward — a real request resets lastReqAt, but the
+      // KA-fire timeline is independent and must survive this overwrite.
+      this.prefixHistory.set(key, { hashes: ph, lastReqAt: now, orgId, lastKaAt: prev?.lastKaAt })
 
       const isFirstRequest = !prev
       const systemChanged = !!prev && prev.hashes.system !== ph.system
       const toolsChanged = !!prev && prev.hashes.toolNames !== ph.toolNames
-      const idleMs = prev ? now - prev.lastReqAt : undefined
+      // Effective idle = time since the cache was last WARMED — by a real
+      // request OR a KA fire. KA fires replay the prefix and refresh its
+      // Anthropic-side TTL, so a lineage that KA kept warm must NOT read as
+      // idle-past-TTL (that false `avoidable:ttl-expiry` made the rewrite
+      // guard block requests whose cache was in fact hot).
+      const lastWarmAt = prev ? Math.max(prev.lastReqAt, prev.lastKaAt ?? 0) : undefined
+      const idleMs = lastWarmAt !== undefined ? now - lastWarmAt : undefined
       const ttlMs = this.config.kaCacheTtlSec * 1000
       // org-switch: this lineage's prefix was last cached under a different
       // org than the one billing the current request. Tripped ONLY when both
@@ -1087,6 +1110,7 @@ function loadPrefixHistory(path: string): Map<string, PrefixHistoryEntry> {
           hashes: v.hashes,
           lastReqAt: v.lastReqAt,
           orgId: typeof v.orgId === 'string' ? v.orgId : null,
+          lastKaAt: typeof v.lastKaAt === 'number' ? v.lastKaAt : undefined,
         })
       }
     }

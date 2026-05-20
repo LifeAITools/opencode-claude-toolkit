@@ -11,10 +11,27 @@ import { EventEmitter } from 'node:events'
 
 export type EventLevel = 'error' | 'info' | 'debug'
 
+/**
+ * Two strictness levels:
+ *
+ *   - EventKind (closed union):  for subscribers — `onKind('X', ...)` gets
+ *     autocomplete and typo-detection. Add a literal here when you add a
+ *     subscriber for that kind.
+ *
+ *   - EmitKind (open string):    for emitters — telemetry kinds get added
+ *     ad-hoc across the codebase (BODY_CAPTURE, STARTUP, ADMIN_DISARM, ...)
+ *     and closing the union would force every new line of telemetry to
+ *     touch this file. `string & {}` is the TanStack/Tailwind idiom that
+ *     keeps autocomplete for known literals while accepting any string.
+ *
+ * Subscribers are few; emitters are many. Different strictness needs.
+ */
+export type EmitKind = EventKind | (string & {})
+
 export interface BaseEvent {
   ts: string         // ISO timestamp
   level: EventLevel
-  kind: EventKind
+  kind: EmitKind
   msg?: string       // optional human message
 }
 
@@ -52,6 +69,12 @@ export type EventKind =
   | 'TOKEN_EXPIRED'
   | 'TOKEN_REFRESH_FAILED'
   | 'TOKEN_NEEDS_RELOGIN'
+  | 'TOKEN_FILE_CHANGED'        // emitted by quota-watcher fs.watch; consumed by upstream (invalidate) + KA engine (re-evaluate pause)
+
+  // Rate limit / quota
+  | 'UPSTREAM_RATE_LIMITED'     // emitted by upstream on 429; consumed by KA engine (pause/disarm decision)
+  | 'KA_PAUSED'                  // engine paused KA fires, waiting for quota reset
+  | 'KA_RESUMED_FROM_PAUSE'      // engine attempted post-reset fire; succeeded
 
   // Network
   | 'NETWORK_DEGRADED'
@@ -79,17 +102,33 @@ export interface SessionDeadEvent extends BaseEvent {
   reason: 'pid_gone' | 'idle_timeout' | 'explicit_close'
 }
 
+/**
+ * Usage subset on REAL_REQUEST_COMPLETE / KA_FIRE_COMPLETE events.
+ *
+ * Required totals are always emitted. Optional TTL-split + cache-deleted
+ * subfields are OMITTED from the event when the Anthropic response did NOT
+ * include `usage.cache_creation.*` / `usage.cache_deleted_input_tokens` —
+ * NOT written as 0 or null. This preserves the "field absent" semantic for
+ * downstream stats consumers (REQ-05, plan §527-528 backward-compat
+ * contract). When a writer serializes this event with JSON.stringify the
+ * omitted keys naturally disappear from the line.
+ */
+export interface UsageEventPayload {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+  cacheCreation5mInputTokens?: number
+  cacheCreation1hInputTokens?: number
+  cacheDeletedInputTokens?: number
+}
+
 export interface RealRequestCompleteEvent extends BaseEvent {
   kind: 'REAL_REQUEST_COMPLETE'
   sessionId: string
   model: string
   durationMs: number
-  usage: {
-    inputTokens: number
-    outputTokens: number
-    cacheReadInputTokens: number
-    cacheCreationInputTokens: number
-  }
+  usage: UsageEventPayload
   rateLimit: {
     util5h: number | null
     util7d: number | null
@@ -103,12 +142,7 @@ export interface KaFireCompleteEvent extends BaseEvent {
   model: string
   durationMs: number
   idleMs: number
-  usage: {
-    inputTokens: number
-    outputTokens: number
-    cacheReadInputTokens: number
-    cacheCreationInputTokens: number
-  }
+  usage: UsageEventPayload
   rateLimit: {
     util5h: number | null
     util7d: number | null
@@ -135,6 +169,37 @@ export interface HealthHeartbeatEvent extends BaseEvent {
   networkState: 'healthy' | 'degraded'
 }
 
+export interface TokenFileChangedEvent extends BaseEvent {
+  kind: 'TOKEN_FILE_CHANGED'
+  prevHint: string | null
+  newHint: string | null
+  expiresInSec: number | null
+  reason: string                  // 're-login (account/token swap)' | 'token refresh'
+}
+
+/**
+ * Upstream returned 429. Carries data needed by KA engine to decide pause vs disarm.
+ * `resetAt` is epoch-ms preferred; if upstream only gave retry-after seconds, sum'd to now.
+ * `requestKind` tells whether this was a user request ('real') or a KA fire ('ka').
+ */
+export interface UpstreamRateLimitedEvent extends BaseEvent {
+  kind: 'UPSTREAM_RATE_LIMITED'
+  sessionId: string | null
+  resetAt: number | null          // epoch ms when quota resets; null if upstream gave no hint
+  retryAfterSec: number | null    // raw retry-after header value if present
+  requestKind: 'real' | 'ka'
+  status: number                  // upstream HTTP status (always 429 here, but explicit for symmetry)
+}
+
+export interface KaPausedEvent extends BaseEvent {
+  kind: 'KA_PAUSED'
+  sessionId: string
+  resetAt: number | null
+  reason: string                  // 'cache_outlives_quota_wait'
+  cacheDiesAt: number | null      // epoch ms when current snapshot cache expires
+  snapshotSize: number            // input tokens in current snapshot
+}
+
 // Union of all events for strict typing on .on handlers
 export type ProxyEvent =
   | BaseEvent
@@ -144,6 +209,9 @@ export type ProxyEvent =
   | KaFireCompleteEvent
   | KaDisarmEvent
   | HealthHeartbeatEvent
+  | TokenFileChangedEvent
+  | UpstreamRateLimitedEvent
+  | KaPausedEvent
 
 // ═══ EventBus singleton ═══════════════════════════════════════════
 

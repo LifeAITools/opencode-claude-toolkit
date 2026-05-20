@@ -53,9 +53,10 @@ import { processAlive } from './session-tracker.js'
 import { ProxyConfigCredentialsAdapter } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
-import { ProxyClient } from '@life-ai-tools/claude-code-sdk'
+import { ProxyClient, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
+import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
 
-const PROXY_VERSION = '0.6.0'
+const PROXY_VERSION = '0.8.4'
 
 // ═══ Mode detection ═══════════════════════════════════════════════
 
@@ -159,6 +160,19 @@ emit({
   credentialsPath: cfg.credentialsPath,
 })
 
+// ═══ Body-capture boot — rolling 48h TTL of native CC + opencode bodies ══
+// Default ON; disable via CLAUDE_MAX_PROXY_CAPTURE_BODIES=0.
+// Files land in CAPTURE_INFO.dir (default ~/.claude-local/proxy-body-dumps/).
+// Sweep timer runs in background; safe to ignore the returned stop fn here.
+startCaptureCleanup()
+emit({
+  level: 'info',
+  kind: 'BODY_CAPTURE',
+  enabled: CAPTURE_INFO.enabled,
+  ttlHours: CAPTURE_INFO.ttlHours,
+  dir: CAPTURE_INFO.dir,
+})
+
 // ═══ ProxyClient (from SDK) — our core orchestrator ════════════════
 //
 // All cache-keepalive, session tracking, OAuth injection, SSE teeing,
@@ -169,9 +183,12 @@ emit({
 // Adapters are lightweight bridges from proxy-package infrastructure
 // (event bus, credentials reader) to SDK port interfaces.
 
+const credentialsAdapter = new ProxyConfigCredentialsAdapter(cfg)
+
 const proxyClient = new ProxyClient({
   config: {
     anthropicBaseUrl: cfg.anthropicBaseUrl,
+    kaCacheTtlSec: cfg.kaCacheTtlSec,
     kaIntervalSec: cfg.kaIntervalSec,
     kaIdleTimeoutSec: cfg.kaIdleTimeoutSec,
     kaMinTokens: cfg.kaMinTokens,
@@ -180,11 +197,40 @@ const proxyClient = new ProxyClient({
     kaRewriteBlockIdleSec: cfg.kaRewriteBlockIdleSec,
     kaRewriteBlockEnabled: cfg.kaRewriteBlockEnabled,
   },
-  credentialsProvider: new ProxyConfigCredentialsAdapter(cfg),
+  credentialsProvider: credentialsAdapter,
   eventEmitter: new BusEventEmitterAdapter(),
   // Use SDK defaults for sessionStore (InMemory with POSIX liveness) and
   // upstream (native fetch). Proxy-specific customizations would go here.
 })
+
+// ═══ Credentials watcher ═══════════════════════════════════════════
+//
+// Token cache in upstream.ts only invalidates on 401. But quota-exhaustion
+// returns 429 (NOT 401), so after `claude login` to a new org the proxy
+// would keep using the stale cached token for up to ~5min. fs.watch on
+// the credentials file makes the proxy react immediately to login/refresh.
+// 200ms debounce coalesces the read+write storm of credential file rotation.
+import { watch as fsWatch } from 'node:fs'
+let _credsDebounce: ReturnType<typeof setTimeout> | null = null
+try {
+  fsWatch(cfg.credentialsPath, { persistent: false }, () => {
+    if (_credsDebounce) clearTimeout(_credsDebounce)
+    _credsDebounce = setTimeout(() => {
+      credentialsAdapter.invalidate()
+      emit({
+        level: 'info',
+        kind: 'TOKEN_FILE_CHANGED',
+        msg: `Credentials file changed at ${cfg.credentialsPath} — token cache invalidated`,
+      })
+    }, 200)
+  })
+  emit({ level: 'info', kind: 'INFO', msg: `Credentials fs.watch armed on ${cfg.credentialsPath}` })
+} catch (e: any) {
+  // fs.watch can fail if the file doesn't exist yet (fresh install) —
+  // not fatal; first `claude login` will create it and next invalidation
+  // can only be triggered manually via /admin/disarm or by 401.
+  emit({ level: 'error', kind: 'ERROR', msg: `Credentials watch failed: ${e?.message}` })
+}
 
 // Backward-compatible alias — heartbeat.ts and admin routes used to reach
 // into `tracker`. They now query proxyClient instead.
@@ -227,6 +273,13 @@ async function handleMessages(
 
   // Delegate to SDK ProxyClient — it handles everything end-to-end.
   const rawBody = await req.arrayBuffer()
+
+  // Empirical wire-format research: capture rawBody for native CC vs opencode
+  // shape comparison. Fire-and-forget — must NEVER block or affect throughput.
+  // Default ON; disable via CLAUDE_MAX_PROXY_CAPTURE_BODIES=0.
+  // TTL: 48h rolling cleanup (CLAUDE_MAX_PROXY_CAPTURE_TTL_HOURS).
+  captureBody(rawBody, headers, { sessionId, sourcePid, srcPort })
+
   return proxyClient.handleRequest(rawBody, headers, {
     sessionId,
     sourcePid,
@@ -282,7 +335,9 @@ function statsJson() {
     cacheConfig: (() => {
       try {
         // Hot-read of ~/.claude/keepalive.json — useful to verify hot-reload took effect.
-        const c = (require('@life-ai-tools/claude-code-sdk') as typeof import('@life-ai-tools/claude-code-sdk')).loadKeepaliveConfig()
+        // loadKeepaliveConfig re-reads the file on each call (SDK is ESM-only;
+        // require() of it fails at runtime — use the static import binding).
+        const c = loadKeepaliveConfig()
         return {
           cacheTtlMs: c.cacheTtlMs,
           safetyMarginMs: c.safetyMarginMs,
@@ -343,6 +398,23 @@ const server = Bun.serve({
       emit({ level: 'info', kind: 'PROXY_SHUTDOWN', msg: 'Shutdown requested via /admin/shutdown' })
       setTimeout(() => shutdown(), 100)
       return Response.json({ ok: true, msg: 'Shutting down' })
+    }
+
+    if (req.method === 'POST' && url.pathname === '/admin/disarm') {
+      // Body: { sessionId?: string, reason?: string }
+      // Without sessionId → disarm ALL sessions (safe org-swap use case).
+      // Always invalidates token cache as a side effect (see proxyClient.disarmSessions).
+      let body: { sessionId?: string; reason?: string } = {}
+      try { body = await req.json() as any } catch { /* empty body = disarm all */ }
+      const reason = body.reason ?? 'admin_disarm'
+      const disarmed = proxyClient.disarmSessions(reason, body.sessionId)
+      return Response.json({
+        ok: true,
+        disarmedCount: disarmed.length,
+        sessionIds: disarmed,
+        reason,
+        tokenCacheInvalidated: true,
+      })
     }
 
     return new Response('Not Found', { status: 404 })

@@ -129,6 +129,55 @@ export function startHeartbeat(
       lastErrorMsg: _lastErrorMsg,
       lastErrorAgoSec,
     })
+
+    // Per-session KA ticks — emit one event per tracked session so failure
+    // modes are visible in real-time. Without this, if a single session's
+    // KA engine corrupts internally, it stays silent until "should have fired
+    // but didn't" — i.e. the failure is only detected when it's too late
+    // (cache TTL already expired). With per-session ticks, every heartbeat
+    // window shows the state of EVERY session, surfacing drift immediately.
+    for (const sess of tracker.list() as any[]) {
+      const eng: any = sess.engine ?? {}
+      const lastReqAt = sess.lastRequestAt ?? 0
+      const idleSec = lastReqAt ? Math.floor((now - lastReqAt) / 1000) : null
+      const timerRunning = (eng._timer ?? null) !== null
+      const registrySize = eng._registry?.size ?? null
+      const intervalSec = cfg.kaIntervalSec
+      // nextFireSec — best-effort estimate based on idle modulo interval.
+      // intervalSec is `number | undefined` by design (config.ts: "KA_INTERVAL_SEC
+      // unset → defer to SSOT"). When unset, the engine reads the actual cadence
+      // from ~/.claude/keepalive.json in-process and we can't reproduce it from
+      // proxy-side config alone — `null` is the honest answer for observers.
+      const nextFireSec = (idleSec !== null && timerRunning && intervalSec !== undefined)
+        ? Math.max(0, intervalSec - (idleSec % intervalSec))
+        : null
+      const cacheAgeSec = idleSec
+      const u: any = sess.lastUsage ?? {}
+      let kaState: 'armed' | 'firing' | 'disarmed' | 'idle' | 'cold'
+      if (eng._inFlight) kaState = 'firing'
+      else if (timerRunning && registrySize && registrySize > 0) kaState = 'armed'
+      else if (timerRunning) kaState = 'idle'
+      else if (lastReqAt) kaState = 'disarmed'
+      else kaState = 'cold'
+
+      emit({
+        level: 'info',
+        kind: 'PROXY_KA_TICK',
+        sessionId: String(sess.sessionId ?? 'unknown'),
+        pid: sess.pid ?? null,
+        model: String(sess.model ?? '?'),
+        state: kaState,
+        registrySize,
+        timerRunning,
+        idleSec,
+        intervalSec,
+        nextFireSec,
+        cacheAgeSec,
+        ttlSec: 3600,
+        cacheRead: u.cacheReadInputTokens ?? null,
+        cacheWrite: u.cacheCreationInputTokens ?? null,
+      })
+    }
   }, cfg.healthHeartbeatSec * 1000)
 
   if (typeof timer === 'object' && 'unref' in timer) {

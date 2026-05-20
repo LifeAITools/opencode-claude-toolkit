@@ -7,9 +7,64 @@
 
 import { appendFileSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
-import type { ProxyEvent } from './event-bus.js'
+import type { ProxyEvent, UsageEventPayload } from './event-bus.js'
 import { bus } from './event-bus.js'
 import type { ProxyConfig } from './config.js'
+
+// ═══ Stats-line compact usage shape ═══════════════════════════════════
+//
+// Producer-facing helper that converts a UsageEventPayload (verbose,
+// long-key form used inside the proxy event bus) into the short-key
+// compact shape consumed by `~/.claude-local/claude-max-stats.jsonl`
+// readers (quota-report.ts, cache-config.ts, opencode-claude/provider.ts,
+// signal-wire.ts).
+//
+// Existing required keys (`in`, `out`, `cacheRead`, `cacheWrite`) are
+// always present. The new optional TTL-split + cache-deleted keys
+// (`cacheWrite5m`, `cacheWrite1h`, `cacheDeleted`) are emitted ONLY when
+// the underlying Anthropic response included the corresponding subfield —
+// per plan §527-528 we MUST omit (not zero / null) when absent so legacy
+// readers continue to parse old + new entries without conditional logic
+// and so `cacheWrite5m + cacheWrite1h === cacheWrite` invariant is never
+// silently violated by zero-padding.
+//
+// REQ-05, CR-06 (separate fields), CN-09 (no bare catch — pure
+// transform, no I/O).
+
+export interface CompactStatsUsage {
+  in: number
+  out: number
+  cacheRead: number
+  cacheWrite: number
+  cacheWrite5m?: number
+  cacheWrite1h?: number
+  cacheDeleted?: number
+}
+
+/**
+ * Render the compact usage shape written to claude-max-stats.jsonl.
+ *
+ * @param u UsageEventPayload from REAL_REQUEST_COMPLETE / KA_FIRE_COMPLETE
+ * @returns object with omit-when-absent optional subfields
+ */
+export function toCompactStatsUsage(u: UsageEventPayload): CompactStatsUsage {
+  const out: CompactStatsUsage = {
+    in: u.inputTokens,
+    out: u.outputTokens,
+    cacheRead: u.cacheReadInputTokens,
+    cacheWrite: u.cacheCreationInputTokens,
+  }
+  if (typeof u.cacheCreation5mInputTokens === 'number') {
+    out.cacheWrite5m = u.cacheCreation5mInputTokens
+  }
+  if (typeof u.cacheCreation1hInputTokens === 'number') {
+    out.cacheWrite1h = u.cacheCreation1hInputTokens
+  }
+  if (typeof u.cacheDeletedInputTokens === 'number') {
+    out.cacheDeleted = u.cacheDeletedInputTokens
+  }
+  return out
+}
 
 const LEVEL_RANK: Record<string, number> = { error: 0, info: 1, debug: 2 }
 

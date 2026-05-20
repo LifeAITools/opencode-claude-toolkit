@@ -127,7 +127,18 @@ async function* parseSSE(
   const decoder = new TextDecoder()
   const reader = body.getReader()
   let buffer = ''
-  let usage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
+  // TokenUsage shape — split fields (cacheCreation5m/1h, cacheDeleted) start
+  // undefined and only get populated when the response actually contains
+  // `usage.cache_creation.*` / `usage.cache_deleted_input_tokens`. Per
+  // Anthropic public docs (REQ-05, OQ-02) these subfields are optional —
+  // absent in single-TTL responses. We forward `undefined` (not 0) so
+  // downstream consumers can distinguish "not reported" from "zero".
+  let usage: import('@life-ai-tools/claude-code-sdk').TokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+  }
   let stopReason: string | null = null
 
   try {
@@ -153,6 +164,26 @@ async function* parseSSE(
               outputTokens: u.output_tokens ?? 0,
               cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
               cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+            }
+            // Optional TTL-split subfields (REQ-05). Anthropic includes the
+            // `cache_creation` object in responses that touch a 1h-TTL
+            // breakpoint or mix 5m+1h TTLs. Single-TTL responses omit it
+            // entirely — we forward `undefined` so the omit-when-absent
+            // contract propagates to logger / stats writers.
+            const cc = u.cache_creation
+            if (cc && typeof cc === 'object') {
+              if (typeof cc.ephemeral_5m_input_tokens === 'number') {
+                usage.cacheCreation5mInputTokens = cc.ephemeral_5m_input_tokens
+              }
+              if (typeof cc.ephemeral_1h_input_tokens === 'number') {
+                usage.cacheCreation1hInputTokens = cc.ephemeral_1h_input_tokens
+              }
+            }
+            // Phase 6 telemetry (cache_edits / compact_20260112 deletion
+            // count). Publicly-readable response field; capturing now avoids
+            // retro-fitting historical data later.
+            if (typeof u.cache_deleted_input_tokens === 'number') {
+              usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
             }
           }
         } else if (parsed.type === 'message_delta') {

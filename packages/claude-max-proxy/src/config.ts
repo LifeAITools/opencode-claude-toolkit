@@ -6,6 +6,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { ANTHROPIC_API_BASE } from '@life-ai-tools/claude-code-sdk'
 
 export interface ProxyConfig {
   // Logging
@@ -18,6 +19,12 @@ export interface ProxyConfig {
   // its default from SSOT (~/.claude/keepalive.json) which auto-scales with
   // cacheTtlMs (legacy 5m → 150s, 1h → 1800s).
   kaIntervalSec: number | undefined
+  // Per-consumer cache TTL pin in seconds. DEFAULT 300 (5min) — matches native
+  // Claude Code wire-TTL (`cache_control:ephemeral` without `ttl`). Honoring
+  // SSOT's longer value here would burn tokens on KA fires against caches
+  // Anthropic already expired. See ProxyClientConfig.kaCacheTtlSec docs.
+  // Override via KA_CACHE_TTL_SEC env (rarely needed — wire autoscan adapts).
+  kaCacheTtlSec: number
   kaIdleTimeoutSec: number  // 0 = never stop
   kaMinTokens: number
 
@@ -107,6 +114,9 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     kaIntervalSec: process.env.KA_INTERVAL_SEC || fileEnv.KA_INTERVAL_SEC
       ? readInt('KA_INTERVAL_SEC', 0, fileEnv) || undefined
       : undefined,
+    // 5min default = native CC wire TTL. Wire-autoscan in KeepaliveEngine
+    // will further lock down per-session if it observes shorter markers.
+    kaCacheTtlSec: readInt('KA_CACHE_TTL_SEC', 300, fileEnv),
     kaIdleTimeoutSec: readInt('KA_IDLE_TIMEOUT_SEC', 0, fileEnv),
     kaMinTokens: readInt('KA_MIN_TOKENS', 2000, fileEnv),
 
@@ -122,7 +132,10 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
 
     credentialsPath: expandHome(read('CLAUDE_CREDENTIALS_PATH', '~/.claude/.credentials.json', fileEnv)),
 
-    anthropicBaseUrl: read('ANTHROPIC_UPSTREAM_URL', 'https://api.anthropic.com', fileEnv),
+    // Upstream URL — SSOT per REQ-12 / SSOT-01 (anthropic-endpoints.ts).
+    // ANTHROPIC_UPSTREAM_URL env override stays available for test/dev pointing
+    // at a local MITM proxy; default delegates to the SDK SSOT constant.
+    anthropicBaseUrl: read('ANTHROPIC_UPSTREAM_URL', ANTHROPIC_API_BASE, fileEnv),
   }
 
   return _cached

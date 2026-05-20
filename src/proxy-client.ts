@@ -211,6 +211,15 @@ export interface ProxyClientOptions {
    * `~/.claude-local/rewrite-guard-blocks/`. Injectable for test isolation.
    */
   rewriteBlockDumpDir?: string
+
+  /**
+   * Optional: wall-clock time (ms) this proxy process started. Default:
+   * `Date.now()` at construction. Used to recognise a TTL expiry that spans
+   * a proxy restart (the KA engine could not have kept the cache warm across
+   * a gap in which it did not exist) so the guard does not block it.
+   * Injectable for tests.
+   */
+  proxyStartedAt?: number
 }
 
 /** One persisted cache-prefix fingerprint, keyed by `${sessionId}:${lineageKey}`. */
@@ -283,6 +292,10 @@ export class ProxyClient {
   /** Directory for rewrite-guard block dumps. */
   private readonly rewriteBlockDumpDir: string
 
+  /** Wall-clock ms this proxy process started — a cache warm-up older than
+   *  this means the TTL gap spans a restart (KA could not have prevented it). */
+  private readonly proxyStartedAt: number
+
   /** Last cacheable prefix (system + tools) seen per `${sessionId}:${lineageKey}`.
    *  In-memory only (never persisted — bodies are large) — feeds the prefix
    *  diff written into a guard-block dump. Reaped with prefixHistory. */
@@ -301,6 +314,7 @@ export class ProxyClient {
     this.orgIdResolver = opts.orgIdResolver ?? new FileOrgIdResolver()
     this.prefixHistoryPath = opts.prefixHistoryPath ?? PREFIX_HISTORY_PATH
     this.rewriteBlockDumpDir = opts.rewriteBlockDumpDir ?? DEFAULT_REWRITE_DUMP_DIR
+    this.proxyStartedAt = opts.proxyStartedAt ?? Date.now()
     this.prefixHistory = loadPrefixHistory(this.prefixHistoryPath)
 
     // Cache metrics collector — emits CACHE_METRICS_SUMMARY every 60s and
@@ -1028,6 +1042,10 @@ export class ProxyClient {
       const lastWarmAt = prev ? Math.max(prev.lastReqAt, prev.lastKaAt ?? 0) : undefined
       const idleMs = lastWarmAt !== undefined ? now - lastWarmAt : undefined
       const ttlMs = this.config.kaCacheTtlSec * 1000
+      // The cache's last warm-up predates this proxy process → the TTL gap
+      // spans a restart. KA could not have kept it warm (its engine did not
+      // exist), so an expiry here is NOT avoidable — see classifyRewrite.
+      const spansProxyRestart = lastWarmAt !== undefined && lastWarmAt < this.proxyStartedAt
       // org-switch: this lineage's prefix was last cached under a different
       // org than the one billing the current request. Tripped ONLY when both
       // org-ids are known and differ — an unknown org (`null`) never trips it.
@@ -1044,7 +1062,7 @@ export class ProxyClient {
         return null
       }
 
-      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged })
+      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart })
       // When the cacheable prefix diverges or expires, ~the whole context
       // re-caches. bodyBytes/4 is a rough token estimate — adequate for a
       // threshold check (the guard) and a human-readable log figure.
@@ -1066,6 +1084,7 @@ export class ProxyClient {
           + (systemChanged ? ' [system changed]' : '')
           + (toolsChanged ? ' [tools changed]' : '')
           + (orgChanged ? ' [org switched]' : '')
+          + (spansProxyRestart ? ' [spans proxy restart]' : '')
           + (idleMs !== undefined && idleMs > ttlMs
               ? ` [idle ${Math.round(idleMs / 1000)}s > ttl ${Math.round(ttlMs / 1000)}s]` : ''),
       })

@@ -111,7 +111,7 @@ export declare const DEFAULT_ROLE_WEIGHTS: RoleWeights;
  * candidate (cost asymmetry: under-KA is expensive, over-KA is cheap).
  */
 export declare function classifyRole(body: unknown, headers: unknown, hints?: RoleHints, weights?: RoleWeights): RoleClassification;
-export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
+export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'expected:proxy-restart' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
 export interface RewriteContext {
     /** This is the first request observed for the lineage. */
     isFirstRequest?: boolean;
@@ -123,6 +123,12 @@ export interface RewriteContext {
     ttlMs?: number;
     /** This rewrite was observed on a KA fire (not a real request). */
     isKaFire?: boolean;
+    /** The lineage's last cache warm-up (real request OR KA fire) happened
+     *  before the current proxy process started — i.e. the cache TTL gap spans
+     *  a proxy restart. The keepalive engine could not have kept the cache warm
+     *  across a gap in which it did not exist, so such an expiry is NOT
+     *  `avoidable` — it is an expected consequence of the restart. */
+    spansProxyRestart?: boolean;
     /** The current org-id differs from the org-id under which this lineage's
      *  prefix was last cached. Replaying the prefix would cold-write the full
      *  context against — and bill — the NEW org. The predictor sets this only

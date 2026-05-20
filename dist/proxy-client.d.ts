@@ -135,6 +135,14 @@ export interface ProxyClientOptions {
      * `~/.claude-local/rewrite-guard-blocks/`. Injectable for test isolation.
      */
     rewriteBlockDumpDir?: string;
+    /**
+     * Optional: wall-clock time (ms) this proxy process started. Default:
+     * `Date.now()` at construction. Used to recognise a TTL expiry that spans
+     * a proxy restart (the KA engine could not have kept the cache warm across
+     * a gap in which it did not exist) so the guard does not block it.
+     * Injectable for tests.
+     */
+    proxyStartedAt?: number;
 }
 export interface HandleRequestContext {
     /** Unique identifier for the logical session. */
@@ -171,6 +179,9 @@ export declare class ProxyClient {
     private readonly prefixHistoryPath;
     /** Directory for rewrite-guard block dumps. */
     private readonly rewriteBlockDumpDir;
+    /** Wall-clock ms this proxy process started — a cache warm-up older than
+     *  this means the TTL gap spans a restart (KA could not have prevented it). */
+    private readonly proxyStartedAt;
     /** Last cacheable prefix (system + tools) seen per `${sessionId}:${lineageKey}`.
      *  In-memory only (never persisted — bodies are large) — feeds the prefix
      *  diff written into a guard-block dump. Reaped with prefixHistory. */

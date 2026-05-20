@@ -47,6 +47,13 @@ function mkClient(extra: Partial<ProxyClientOptions> = {}) {
     // value (no host ~/.claude.json read) so non-org tests are hermetic.
     prefixHistoryPath: join(TMP, `ph-${phSeq++}.json`),
     orgIdResolver: { current: () => 'org-default' },
+    // Keep block dumps inside the suite temp dir — never the real
+    // ~/.claude-local/rewrite-guard-blocks/.
+    rewriteBlockDumpDir: join(TMP, 'dumps-default'),
+    // proxyStartedAt=0 (epoch) → no real timestamp predates it, so the
+    // proxy-restart exemption never trips by accident; tests that exercise
+    // it pass an explicit recent value.
+    proxyStartedAt: 0,
     ...extra,
   })
 }
@@ -244,5 +251,30 @@ describe('rewrite guard — block dump artifact', () => {
     expect(art.prefixDiff.summary).toContain('IDENTICAL')      // ttl-expiry: prefix unchanged
     c.stop()
     rmSync(dumpDir, { recursive: true, force: true })
+  })
+})
+
+describe('rewrite guard — a TTL expiry spanning a proxy restart is NOT blocked', () => {
+  test('last warm-up predates proxyStartedAt → expected:proxy-restart → passes', async () => {
+    // The cache genuinely expired, but the gap spans a proxy restart: the KA
+    // engine did not exist to keep it warm, so this is not the user's fault
+    // and must not be blocked (it would just demand a pointless marker).
+    const path = join(TMP, 'proxy-restart.json')
+    const now = Date.now()
+    const lk = lineageKey(JSON.parse(reqBody()))
+    writeFileSync(path, JSON.stringify({
+      [`rg-restart:${lk}`]: {
+        hashes: prefixHashes(JSON.parse(reqBody())),
+        lastReqAt: now - 600_000,    // 10 min ago — idle far past the 1s TTL
+        orgId: 'org-default',
+        lastKaAt: now - 600_000,
+      },
+    }))
+    // proxyStartedAt AFTER the seeded warm-up → the gap spans this restart.
+    const c = mkClient({ prefixHistoryPath: path, proxyStartedAt: now - 1_000 })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-restart' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
   })
 })

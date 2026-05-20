@@ -170,6 +170,13 @@ describe('classifyRewrite', () => {
     expect(v.expected).toBe(false)
   })
 
+  test('idle past TTL but spanning a proxy restart → expected:proxy-restart (not avoidable)', () => {
+    // KA could not have prevented this — its engine did not exist for the gap.
+    const v = classifyRewrite({ idleMs: 400_000, ttlMs: 300_000, spansProxyRestart: true })
+    expect(v.class).toBe('expected:proxy-restart')
+    expect(v.expected).toBe(true)
+  })
+
   test('rewrite on a KA fire → anomalous:stale-ka-snapshot (a problem)', () => {
     const v = classifyRewrite({ isKaFire: true })
     expect(v.class).toBe('anomalous:stale-ka-snapshot')

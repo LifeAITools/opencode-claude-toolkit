@@ -56,6 +56,7 @@
  */
 import { KeepaliveEngine } from './keepalive-engine.js';
 import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, Session } from './proxy-ports.js';
+import { type OrgIdResolver } from './org-identity.js';
 export interface ProxyClientConfig {
     /** Anthropic API base URL. Default: https://api.anthropic.com */
     anthropicBaseUrl?: string;
@@ -115,6 +116,19 @@ export interface ProxyClientOptions {
     upstreamFetcher?: IUpstreamFetcher;
     /** Optional: how to check PID liveness. Default: POSIX kill -0 */
     livenessChecker?: ILivenessChecker;
+    /**
+     * Optional: how to resolve the current Anthropic org UUID — used by the
+     * rewrite guard to detect a cross-org cache replay (`anomalous:org-switch`).
+     * Default: FileOrgIdResolver reading `~/.claude.json`.
+     */
+    orgIdResolver?: OrgIdResolver;
+    /**
+     * Optional: where to persist the cache-prefix history (so the miss
+     * predictor + rewrite guard survive a proxy restart). Default:
+     * `~/.claude-local/proxy-prefix-history.json`. Injectable for test
+     * isolation — production never sets it.
+     */
+    prefixHistoryPath?: string;
 }
 export interface HandleRequestContext {
     /** Unique identifier for the logical session. */
@@ -147,6 +161,10 @@ export declare class ProxyClient {
      *  guard survive a proxy restart — otherwise the first request of every
      *  session post-restart looks like a cold-start and the guard is blind. */
     private readonly prefixHistory;
+    /** Where prefixHistory is persisted — configurable for test isolation. */
+    private readonly prefixHistoryPath;
+    /** Resolves the current Anthropic org UUID — drives org-switch detection. */
+    private readonly orgIdResolver;
     constructor(opts: ProxyClientOptions);
     /** Current rate-limit snapshot from last upstream response. */
     get rateLimitSnapshot(): Readonly<RateLimitSnapshot>;

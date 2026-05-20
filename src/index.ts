@@ -111,6 +111,15 @@ export type {
   HandleRequestContext,
   RateLimitSnapshot,
 } from './proxy-client.js'
+
+// Org-identity — resolves the current Anthropic org UUID for the rewrite
+// guard's cross-org cache-replay detection (`anomalous:org-switch`).
+export {
+  FileOrgIdResolver,
+  readOrgIdFromConfig,
+  DEFAULT_ACCOUNT_CONFIG_PATH,
+} from './org-identity.js'
+export type { OrgIdResolver } from './org-identity.js'
 export type {
   KeepaliveConfig,
   KeepaliveStats,

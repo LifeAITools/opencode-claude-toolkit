@@ -75,6 +75,7 @@ import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { prefixHashes, classifyRewrite, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
+import { FileOrgIdResolver, type OrgIdResolver } from './org-identity.js'
 import { readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -183,6 +184,30 @@ export interface ProxyClientOptions {
 
   /** Optional: how to check PID liveness. Default: POSIX kill -0 */
   livenessChecker?: ILivenessChecker
+
+  /**
+   * Optional: how to resolve the current Anthropic org UUID — used by the
+   * rewrite guard to detect a cross-org cache replay (`anomalous:org-switch`).
+   * Default: FileOrgIdResolver reading `~/.claude.json`.
+   */
+  orgIdResolver?: OrgIdResolver
+
+  /**
+   * Optional: where to persist the cache-prefix history (so the miss
+   * predictor + rewrite guard survive a proxy restart). Default:
+   * `~/.claude-local/proxy-prefix-history.json`. Injectable for test
+   * isolation — production never sets it.
+   */
+  prefixHistoryPath?: string
+}
+
+/** One persisted cache-prefix fingerprint, keyed by `${sessionId}:${lineageKey}`. */
+interface PrefixHistoryEntry {
+  hashes: PrefixHashes
+  lastReqAt: number
+  /** Org UUID under which this prefix was last cached — `null` when unknown.
+   *  Absent in entries written before org-awareness; loaded as `null`. */
+  orgId: string | null
 }
 
 // ═══ Request context (per handleRequest call) ══════════════════════
@@ -230,7 +255,13 @@ export class ProxyClient {
    *  Persisted to disk (loadPrefixHistory) so the cache-miss predictor + rewrite
    *  guard survive a proxy restart — otherwise the first request of every
    *  session post-restart looks like a cold-start and the guard is blind. */
-  private readonly prefixHistory: Map<string, { hashes: PrefixHashes; lastReqAt: number }> = loadPrefixHistory()
+  private readonly prefixHistory: Map<string, PrefixHistoryEntry>
+
+  /** Where prefixHistory is persisted — configurable for test isolation. */
+  private readonly prefixHistoryPath: string
+
+  /** Resolves the current Anthropic org UUID — drives org-switch detection. */
+  private readonly orgIdResolver: OrgIdResolver
 
   constructor(opts: ProxyClientOptions) {
     this.config = { ...DEFAULT_CONFIG, ...opts.config }
@@ -239,6 +270,9 @@ export class ProxyClient {
     this.liveness = opts.livenessChecker ?? new DefaultLivenessChecker()
     this.store = opts.sessionStore ?? new InMemorySessionStore<KeepaliveEngine>(this.liveness)
     this.upstream = opts.upstreamFetcher ?? new NativeFetchUpstream()
+    this.orgIdResolver = opts.orgIdResolver ?? new FileOrgIdResolver()
+    this.prefixHistoryPath = opts.prefixHistoryPath ?? PREFIX_HISTORY_PATH
+    this.prefixHistory = loadPrefixHistory(this.prefixHistoryPath)
 
     // Cache metrics collector — emits CACHE_METRICS_SUMMARY every 60s and
     // CACHE_REGRESSION_DETECTED if hit_rate drops below threshold.
@@ -269,7 +303,7 @@ export class ProxyClient {
         }
       }
       // Persist prefix history each reaper tick so it survives a proxy restart.
-      savePrefixHistory(this.prefixHistory)
+      savePrefixHistory(this.prefixHistory, this.prefixHistoryPath)
     }, 10_000)
     if (this.reaperTimer && typeof this.reaperTimer === 'object' && 'unref' in this.reaperTimer) {
       (this.reaperTimer as any).unref()
@@ -298,7 +332,7 @@ export class ProxyClient {
   /** Clean shutdown — stops reaper, metrics collector, and all KA engines in store. */
   stop(): void {
     clearInterval(this.reaperTimer)
-    savePrefixHistory(this.prefixHistory)
+    savePrefixHistory(this.prefixHistory, this.prefixHistoryPath)
     this.metrics.stop()
     this.store.stopAll()
   }
@@ -907,21 +941,31 @@ export class ProxyClient {
       const now = Date.now()
       const ph = prefixHashes(body)
       const prev = this.prefixHistory.get(key)
-      this.prefixHistory.set(key, { hashes: ph, lastReqAt: now })
+      const orgId = this.orgIdResolver.current()
+      this.prefixHistory.set(key, { hashes: ph, lastReqAt: now, orgId })
 
       const isFirstRequest = !prev
       const systemChanged = !!prev && prev.hashes.system !== ph.system
       const toolsChanged = !!prev && prev.hashes.toolNames !== ph.toolNames
       const idleMs = prev ? now - prev.lastReqAt : undefined
       const ttlMs = this.config.kaCacheTtlSec * 1000
+      // org-switch: this lineage's prefix was last cached under a different
+      // org than the one billing the current request. Tripped ONLY when both
+      // org-ids are known and differ — an unknown org (`null`) never trips it.
+      // This is deliberate: a routine ~8h same-org token refresh leaves
+      // `oauthAccount.organizationUuid` untouched, so it never false-blocks;
+      // and a transient read failure (null) degrades to "can't prove a
+      // switch" rather than to a false 400.
+      const prevOrgId = prev?.orgId ?? null
+      const orgChanged = !!prev && orgId !== null && prevOrgId !== null && orgId !== prevOrgId
 
-      // Prefix unchanged + within TTL → a cache HIT is expected; stay quiet.
-      if (!isFirstRequest && !systemChanged && !toolsChanged
+      // Prefix unchanged + within TTL + same org → a cache HIT is expected; stay quiet.
+      if (!isFirstRequest && !systemChanged && !toolsChanged && !orgChanged
           && (idleMs === undefined || idleMs <= ttlMs)) {
         return null
       }
 
-      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs })
+      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged })
       // When the cacheable prefix diverges or expires, ~the whole context
       // re-caches. bodyBytes/4 is a rough token estimate — adequate for a
       // threshold check (the guard) and a human-readable log figure.
@@ -935,12 +979,14 @@ export class ProxyClient {
         expected: verdict.expected,
         systemChanged,
         toolsChanged,
+        orgChanged,
         predictedTokens,
         idleMs: idleMs ?? null,
         ttlMs,
         msg: `predicted cache rewrite — ${verdict.class} (~${predictedTokens} tok)`
           + (systemChanged ? ' [system changed]' : '')
           + (toolsChanged ? ' [tools changed]' : '')
+          + (orgChanged ? ' [org switched]' : '')
           + (idleMs !== undefined && idleMs > ttlMs
               ? ` [idle ${Math.round(idleMs / 1000)}s > ttl ${Math.round(ttlMs / 1000)}s]` : ''),
       })
@@ -1028,21 +1074,29 @@ function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
 const PREFIX_HISTORY_PATH = join(homedir(), '.claude-local', 'proxy-prefix-history.json')
 const PREFIX_HISTORY_MAX_AGE_MS = 60 * 60 * 1000   // prune entries older than 1h on load
 
-function loadPrefixHistory(): Map<string, { hashes: PrefixHashes; lastReqAt: number }> {
-  const m = new Map<string, { hashes: PrefixHashes; lastReqAt: number }>()
+function loadPrefixHistory(path: string): Map<string, PrefixHistoryEntry> {
+  const m = new Map<string, PrefixHistoryEntry>()
   try {
-    const raw = JSON.parse(readFileSync(PREFIX_HISTORY_PATH, 'utf8')) as Record<string, { hashes: PrefixHashes; lastReqAt: number }>
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, Partial<PrefixHistoryEntry>>
     const cutoff = Date.now() - PREFIX_HISTORY_MAX_AGE_MS
     for (const [k, v] of Object.entries(raw)) {
-      if (v && typeof v.lastReqAt === 'number' && v.lastReqAt >= cutoff && v.hashes) m.set(k, v)
+      if (v && typeof v.lastReqAt === 'number' && v.lastReqAt >= cutoff && v.hashes) {
+        // `orgId` is absent in entries written before org-awareness — normalize
+        // to `null` so a pre-upgrade prefix never reads as a (false) org-switch.
+        m.set(k, {
+          hashes: v.hashes,
+          lastReqAt: v.lastReqAt,
+          orgId: typeof v.orgId === 'string' ? v.orgId : null,
+        })
+      }
     }
   } catch { /* missing or corrupt → start empty */ }
   return m
 }
 
-function savePrefixHistory(m: Map<string, { hashes: PrefixHashes; lastReqAt: number }>): void {
+function savePrefixHistory(m: Map<string, PrefixHistoryEntry>, path: string): void {
   try {
-    writeFileSync(PREFIX_HISTORY_PATH, JSON.stringify(Object.fromEntries(m)))
+    writeFileSync(path, JSON.stringify(Object.fromEntries(m)))
   } catch { /* best-effort — never break the request path */ }
 }
 

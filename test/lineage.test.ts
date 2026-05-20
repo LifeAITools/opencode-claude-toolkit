@@ -181,6 +181,26 @@ describe('classifyRewrite', () => {
       .toBe('anomalous:stale-ka-snapshot')
   })
 
+  test('org changed → anomalous:org-switch (a problem)', () => {
+    const v = classifyRewrite({ orgChanged: true })
+    expect(v.class).toBe('anomalous:org-switch')
+    expect(v.expected).toBe(false)
+  })
+
+  test('org-switch outranks expected:* signals (cross-org spend is the hazard)', () => {
+    // A request can both change tools AND cross orgs — the org switch is the
+    // dangerous classification, so it must win.
+    expect(classifyRewrite({ orgChanged: true, toolsChanged: true }).class)
+      .toBe('anomalous:org-switch')
+    expect(classifyRewrite({ orgChanged: true, idleMs: 400_000, ttlMs: 300_000 }).class)
+      .toBe('anomalous:org-switch')
+  })
+
+  test('isKaFire still outranks org-switch', () => {
+    expect(classifyRewrite({ isKaFire: true, orgChanged: true }).class)
+      .toBe('anomalous:stale-ka-snapshot')
+  })
+
   test('never throws', () => {
     expect(() => classifyRewrite({})).not.toThrow()
     expect(() => classifyRewrite(null as any)).not.toThrow()

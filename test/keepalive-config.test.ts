@@ -154,7 +154,7 @@ describe('keepalive-config: rewriteGuard', () => {
     const c = _resolve(null)
     expect(c.rewriteGuard.enabled).toBe(false)
     expect(c.rewriteGuard.minRewriteTokens).toBe(50_000)
-    expect(c.rewriteGuard.overrideMarker).toBe('[cache-rewrite-ok]')
+    expect(c.rewriteGuard.overrideMarker).toBe('[%cache-rewrite-ok%]')
   })
 
   test('parses rewriteGuard from file', () => {
@@ -166,8 +166,8 @@ describe('keepalive-config: rewriteGuard', () => {
 
   test('invalid rewriteGuard fields fall back to defaults', () => {
     const c = _resolve({ rewriteGuard: { minRewriteTokens: 'nope', overrideMarker: '' } })
-    expect(c.rewriteGuard.minRewriteTokens).toBe(50_000)              // non-numeric → default
-    expect(c.rewriteGuard.overrideMarker).toBe('[cache-rewrite-ok]')  // empty → default
+    expect(c.rewriteGuard.minRewriteTokens).toBe(50_000)                // non-numeric → default
+    expect(c.rewriteGuard.overrideMarker).toBe('[%cache-rewrite-ok%]')  // empty → default
     expect(c.rewriteGuard.enabled).toBe(false)
   })
 })

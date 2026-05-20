@@ -10,7 +10,11 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { ProxyClient } from '../src/proxy-client.js'
+import { mkdtempSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { ProxyClient, type ProxyClientOptions } from '../src/proxy-client.js'
+import type { OrgIdResolver } from '../src/org-identity.js'
 
 // Minimal upstream mock — a tiny SSE body so handleRequest's tee()/parse path
 // works for requests that PASS the guard. Blocked requests never reach it.
@@ -21,13 +25,28 @@ function sseResponse(): Response {
   )
 }
 
-function mkClient() {
+// Suite-private temp dir for prefix-history files — keeps tests off the real
+// ~/.claude-local/proxy-prefix-history.json the live daemon uses.
+const TMP = mkdtempSync(join(tmpdir(), 'rewrite-guard-'))
+let phSeq = 0
+
+/** Mutable org resolver — flip `.org` between requests to simulate `claude login`. */
+function mutableResolver(initial: string | null): OrgIdResolver & { org: string | null } {
+  return { org: initial, current() { return this.org } }
+}
+
+function mkClient(extra: Partial<ProxyClientOptions> = {}) {
   return new ProxyClient({
     // kaCacheTtlSec=1 → predictCacheMiss treats a >1s idle as ttl-expiry,
     // so the avoidable-rewrite path is reachable inside a fast test.
     config: { kaCacheTtlSec: 1 },
     credentialsProvider: { getAccessToken: async () => 'fake-token', invalidate() {} },
     upstreamFetcher: { fetch: async () => sseResponse() },
+    // Each client gets a fresh isolated history file; org defaults to a fixed
+    // value (no host ~/.claude.json read) so non-org tests are hermetic.
+    prefixHistoryPath: join(TMP, `ph-${phSeq++}.json`),
+    orgIdResolver: { current: () => 'org-default' },
+    ...extra,
   })
 }
 
@@ -99,5 +118,74 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     const r = await c.handleRequest(continuation, {}, { sessionId: 'rg-sess-5' })
     expect(r.status).not.toBe(400)
     c.stop()
+  })
+})
+
+describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
+  test('org switch (prefix cached under a different org) WITHOUT marker → 400', async () => {
+    // req1 caches the prefix under org-A; the user then `claude login`s to
+    // org-B; req2 (same prefix, same session, no idle gap) would cold-write
+    // the full context against org-B's quota → guard blocks it.
+    const resolver = mutableResolver('org-A')
+    const c = mkClient({ orgIdResolver: resolver })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-1' })
+    resolver.org = 'org-B'
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-1' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { type?: string } }
+    expect(j.error?.type).toBe('cache_rewrite_guard')
+    c.stop()
+  })
+
+  test('org switch WITH the override marker → passes the guard', async () => {
+    const resolver = mutableResolver('org-A')
+    const c = mkClient({ orgIdResolver: resolver })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-2' })
+    resolver.org = 'org-B'
+    const r = await c.handleRequest(reqBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-org-2' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+
+  test('same org across requests → NOT blocked (a routine token refresh must not false-trip)', async () => {
+    // organizationUuid is refresh-stable — a same-org ~8h token refresh leaves
+    // it untouched, so two requests under one org must never trip the guard.
+    const c = mkClient({ orgIdResolver: mutableResolver('org-A') })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-3' })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-3' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+
+  test('unknown org (resolver returns null) → org-switch never trips', async () => {
+    // A transient ~/.claude.json read failure degrades to "can't prove a
+    // switch" — the request passes rather than getting a false 400.
+    const resolver = mutableResolver(null)
+    const c = mkClient({ orgIdResolver: resolver })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-4' })
+    resolver.org = 'org-B'   // null → known is still not a provable switch
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-4' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+
+  test('prefix history survives a proxy restart — org-switch caught post-restart', async () => {
+    // Persistence (REQ-1) + org-awareness (REQ-2) together: without the
+    // on-disk history a post-restart request looks like a cold-start and the
+    // guard is blind. With it, the loaded prefix still carries org-A, so a
+    // switch to org-B is caught by the fresh ProxyClient instance.
+    const path = join(TMP, 'persist-restart.json')
+
+    const before = mkClient({ orgIdResolver: mutableResolver('org-A'), prefixHistoryPath: path })
+    await before.handleRequest(reqBody(), {}, { sessionId: 'rg-persist-1' })
+    before.stop()   // persists prefixHistory to `path`
+
+    const after = mkClient({ orgIdResolver: mutableResolver('org-B'), prefixHistoryPath: path })
+    const r = await after.handleRequest(reqBody(), {}, { sessionId: 'rg-persist-1' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { type?: string } }
+    expect(j.error?.type).toBe('cache_rewrite_guard')
+    after.stop()
+    rmSync(path, { force: true })
   })
 })

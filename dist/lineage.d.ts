@@ -111,7 +111,7 @@ export declare const DEFAULT_ROLE_WEIGHTS: RoleWeights;
  * candidate (cost asymmetry: under-KA is expensive, over-KA is cheap).
  */
 export declare function classifyRole(body: unknown, headers: unknown, hints?: RoleHints, weights?: RoleWeights): RoleClassification;
-export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'unknown';
+export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
 export interface RewriteContext {
     /** This is the first request observed for the lineage. */
     isFirstRequest?: boolean;
@@ -123,6 +123,11 @@ export interface RewriteContext {
     ttlMs?: number;
     /** This rewrite was observed on a KA fire (not a real request). */
     isKaFire?: boolean;
+    /** The current org-id differs from the org-id under which this lineage's
+     *  prefix was last cached. Replaying the prefix would cold-write the full
+     *  context against — and bill — the NEW org. The predictor sets this only
+     *  when BOTH org-ids are known and differ (an unknown org never trips it). */
+    orgChanged?: boolean;
 }
 export interface RewriteVerdict {
     class: RewriteClass;

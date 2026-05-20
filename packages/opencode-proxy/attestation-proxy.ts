@@ -24,12 +24,19 @@ import { spawn } from 'child_process'
 import { readFileSync, appendFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import {
+  ANTHROPIC_API_BASE,
+  HEADER_CONTENT_TYPE,
+  CONTENT_TYPE_JSON,
+} from '@life-ai-tools/claude-code-sdk'
 
 // ─── Config ────────────────────────────────────────────────
+// API_BASE sourced from SSOT (@life-ai-tools/claude-code-sdk:
+// anthropic-endpoints.ts) per REQ-12 / SSOT-01.
 const args = process.argv.slice(2)
 const PORT = parseInt(args[args.indexOf('--port') + 1] || '8319')
 const MODE: 'direct' | 'cc' = (args[args.indexOf('--mode') + 1] as any) || 'direct'
-const API_BASE = 'https://api.anthropic.com'
+const API_BASE = ANTHROPIC_API_BASE
 const CC_BIN = process.env.CC_BIN || 'claude'
 const LOG_FILE = join(homedir(), '.claude', 'attestation-proxy.log')
 
@@ -149,7 +156,7 @@ async function handleCC(req: Request): Promise<Response> {
           error: { type: 'api_error', message: `CC process exited ${code}: ${stderr.slice(0, 200)}` }
         }), { 
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON }
         }))
         return
       }
@@ -169,7 +176,7 @@ async function handleCC(req: Request): Promise<Response> {
       
       // Copy rate limit headers from CC's response if available in logs
       const headers = new Headers({
-        'Content-Type': 'application/json',
+        [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON,
         'anthropic-ratelimit-unified-status': 'allowed',
         'anthropic-ratelimit-unified-representative-claim': 'five_hour',
       })
@@ -199,13 +206,13 @@ const server = Bun.serve({
         port: PORT,
         cc_bin: CC_BIN,
         timestamp: new Date().toISOString(),
-      }), { headers: { 'Content-Type': 'application/json' } })
+      }), { headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON } })
     }
     
     // Mode check / switch
     if (url.pathname === '/mode') {
       return new Response(JSON.stringify({ mode: MODE }), {
-        headers: { 'Content-Type': 'application/json' }
+        headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON }
       })
     }
     

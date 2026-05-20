@@ -103,6 +103,10 @@ export interface ResolvedKeepaliveConfig {
      *  hot-reloaded — tune `~/.claude/keepalive.json` → `roleDetector` without
      *  a rebuild. See RoleWeights (lineage.ts) for field semantics. */
     readonly roleDetector: RoleWeights;
+    /** Rewrite-guard policy — opt-in block-until-confirmed for uncontrolled
+     *  rewrites. SSOT-tunable + hot-reloaded via `~/.claude/keepalive.json`
+     *  → `rewriteGuard`. See RewriteGuardConfig. */
+    readonly rewriteGuard: RewriteGuardConfig;
     /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
     readonly tokenRotationContextThreshold: number;
     /** Fallback mtime poll interval if fs.watch misses an event (REQ-02). Default 30000. */
@@ -115,6 +119,31 @@ export interface ResolvedKeepaliveConfig {
     readonly tokenRotationLogRetentionDays: number;
     /** Source of truth — where we read this config from (for diagnostics). */
     readonly _source: 'defaults' | 'file' | 'mixed';
+}
+/**
+ * Rewrite-guard policy — opt-in protection against spontaneous, uncontrolled
+ * cache rewrites. When `enabled`, a request predicted to incur an
+ * avoidable/anomalous cache_creation above `minRewriteTokens` — and NOT the
+ * first request of the session — is rejected with HTTP 400 until the user's
+ * latest message contains `overrideMarker`.
+ *
+ * IMPORTANT — what this does and does NOT do:
+ *   - It does NOT save the rewrite cost. The user still needs an answer, so
+ *     they re-send (with the marker) and the SAME re-cache happens.
+ *   - It DOES turn a silent quota spend into an explicit, consented one — a
+ *     "confirm large spend" checkpoint. Cost: one rejected round-trip per block.
+ *   - `expected:*` rewrites (cold-start / compact / tools-changed) are NEVER
+ *     blocked — only `avoidable:ttl-expiry` / `anomalous:*`.
+ * Default: disabled (opt-in).
+ */
+export interface RewriteGuardConfig {
+    /** Master switch. Default false — must be explicitly opted into. */
+    readonly enabled: boolean;
+    /** Only block when predicted cache_creation exceeds this many tokens. Default 50000. */
+    readonly minRewriteTokens: number;
+    /** Substring in the LATEST user message that overrides the block (fresh-consent:
+     *  only the current turn's message is scanned, not history). Default below. */
+    readonly overrideMarker: string;
 }
 /**
  * Recommended values when 1h cache is active.

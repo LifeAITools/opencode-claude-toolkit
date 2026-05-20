@@ -74,6 +74,7 @@ import {
 import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { prefixHashes, classifyRewrite, type PrefixHashes } from './lineage.js'
+import { loadKeepaliveConfig } from './keepalive-config.js'
 import {
   HEADER_AUTHORIZATION,
   HEADER_ANTHROPIC_BETA,
@@ -463,9 +464,42 @@ export class ProxyClient {
     // many requests in flight at once, and a shared slot would clobber.
     const reqLineageKey = session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
 
-    // Observability: predict whether this request incurs a cache rewrite +
-    // classify the cause. Never blocks — the request always proceeds.
-    this.predictCacheMiss(sessionId, reqLineageKey, parsedBody)
+    // Predict whether this request incurs a cache rewrite + classify the cause.
+    const rewriteAssessment = this.predictCacheMiss(sessionId, reqLineageKey, parsedBody, bodyBytes)
+
+    // Rewrite guard — opt-in, default OFF. When enabled, an avoidable/anomalous
+    // rewrite above the configured token threshold that the user has NOT
+    // confirmed (via the override marker in their latest message) is rejected
+    // with 400 instead of silently spending quota. `expected:*` rewrites
+    // (cold-start / compact / tools-changed) are never blocked. This does NOT
+    // save the cost — the re-sent request re-caches the same — it converts a
+    // silent quota spend into an explicit, consented one.
+    {
+      const guard = loadKeepaliveConfig().rewriteGuard
+      if (guard.enabled && rewriteAssessment && !rewriteAssessment.expected
+          && rewriteAssessment.predictedTokens >= guard.minRewriteTokens
+          && !lastUserMessageHasMarker(parsedBody, guard.overrideMarker)) {
+        this.events.emit({
+          level: 'error',
+          kind: 'CACHE_REWRITE_BLOCKED',
+          sessionId,
+          lineageKey: reqLineageKey,
+          rewriteClass: rewriteAssessment.rewriteClass,
+          predictedTokens: rewriteAssessment.predictedTokens,
+          msg: `rewrite guard blocked ${rewriteAssessment.rewriteClass} `
+            + `(~${rewriteAssessment.predictedTokens} tok) — awaiting user override marker`,
+        })
+        return jsonResponse(400, {
+          error: {
+            type: 'cache_rewrite_guard',
+            message: `Cache-rewrite guard: this turn would re-cache ~${rewriteAssessment.predictedTokens} `
+              + `tokens (${rewriteAssessment.rewriteClass}) — an unconfirmed quota spend. To proceed, `
+              + `re-send your message with ${guard.overrideMarker} in it. `
+              + `(Disable: keepalive.json → rewriteGuard.enabled=false.)`,
+          },
+        })
+      }
+    }
 
     // Pre-request rewrite-burst guard
     try {
@@ -856,7 +890,8 @@ export class ProxyClient {
     sessionId: string,
     lineageKey: string,
     body: Record<string, unknown>,
-  ): void {
+    bodyBytes: number,
+  ): { rewriteClass: string; expected: boolean; predictedTokens: number } | null {
     try {
       const key = `${sessionId}:${lineageKey}`
       const now = Date.now()
@@ -873,10 +908,14 @@ export class ProxyClient {
       // Prefix unchanged + within TTL → a cache HIT is expected; stay quiet.
       if (!isFirstRequest && !systemChanged && !toolsChanged
           && (idleMs === undefined || idleMs <= ttlMs)) {
-        return
+        return null
       }
 
       const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs })
+      // When the cacheable prefix diverges or expires, ~the whole context
+      // re-caches. bodyBytes/4 is a rough token estimate — adequate for a
+      // threshold check (the guard) and a human-readable log figure.
+      const predictedTokens = Math.round(bodyBytes / 4)
       this.events.emit({
         level: verdict.expected ? 'info' : 'error',
         kind: 'PREDICTED_CACHE_MISS',
@@ -886,16 +925,19 @@ export class ProxyClient {
         expected: verdict.expected,
         systemChanged,
         toolsChanged,
+        predictedTokens,
         idleMs: idleMs ?? null,
         ttlMs,
-        msg: `predicted cache rewrite — ${verdict.class}`
+        msg: `predicted cache rewrite — ${verdict.class} (~${predictedTokens} tok)`
           + (systemChanged ? ' [system changed]' : '')
           + (toolsChanged ? ' [tools changed]' : '')
           + (idleMs !== undefined && idleMs > ttlMs
               ? ` [idle ${Math.round(idleMs / 1000)}s > ttl ${Math.round(ttlMs / 1000)}s]` : ''),
       })
+      return { rewriteClass: verdict.class, expected: verdict.expected, predictedTokens }
     } catch {
       // Predictor is observability-only — never affect the request path.
+      return null
     }
   }
 
@@ -973,6 +1015,39 @@ function jsonResponse(status: number, body: unknown): Response {
     status,
     headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
   })
+}
+
+/**
+ * True if the LATEST user message in the request body contains `marker`.
+ * Only the most recent user message is scanned — an old marker left in
+ * conversation history does NOT count (fresh-consent: the marker must be in
+ * the turn the user is sending now). Never throws.
+ */
+function lastUserMessageHasMarker(body: unknown, marker: string): boolean {
+  try {
+    if (!marker) return false
+    const msgs = (body as { messages?: unknown })?.messages
+    if (!Array.isArray(msgs)) return false
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (!m || typeof m !== 'object' || (m as { role?: unknown }).role !== 'user') continue
+      const content = (m as { content?: unknown }).content
+      let text = ''
+      if (typeof content === 'string') {
+        text = content
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block && typeof block === 'object' && typeof (block as { text?: unknown }).text === 'string') {
+            text += (block as { text: string }).text + '\n'
+          }
+        }
+      }
+      return text.includes(marker)   // first user message from the end == current turn
+    }
+    return false
+  } catch {
+    return false
+  }
 }
 
 /**

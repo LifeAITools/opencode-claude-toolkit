@@ -129,6 +129,11 @@ export interface ResolvedKeepaliveConfig {
    *  a rebuild. See RoleWeights (lineage.ts) for field semantics. */
   readonly roleDetector: RoleWeights
 
+  /** Rewrite-guard policy — opt-in block-until-confirmed for uncontrolled
+   *  rewrites. SSOT-tunable + hot-reloaded via `~/.claude/keepalive.json`
+   *  → `rewriteGuard`. See RewriteGuardConfig. */
+  readonly rewriteGuard: RewriteGuardConfig
+
   /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
   readonly tokenRotationContextThreshold: number
 
@@ -172,6 +177,38 @@ const DEFAULT_DUMP: DumpConfig = {
   metadataRetentionMs:   7 * 24 * 60 * 60 * 1000,
 }
 
+/**
+ * Rewrite-guard policy — opt-in protection against spontaneous, uncontrolled
+ * cache rewrites. When `enabled`, a request predicted to incur an
+ * avoidable/anomalous cache_creation above `minRewriteTokens` — and NOT the
+ * first request of the session — is rejected with HTTP 400 until the user's
+ * latest message contains `overrideMarker`.
+ *
+ * IMPORTANT — what this does and does NOT do:
+ *   - It does NOT save the rewrite cost. The user still needs an answer, so
+ *     they re-send (with the marker) and the SAME re-cache happens.
+ *   - It DOES turn a silent quota spend into an explicit, consented one — a
+ *     "confirm large spend" checkpoint. Cost: one rejected round-trip per block.
+ *   - `expected:*` rewrites (cold-start / compact / tools-changed) are NEVER
+ *     blocked — only `avoidable:ttl-expiry` / `anomalous:*`.
+ * Default: disabled (opt-in).
+ */
+export interface RewriteGuardConfig {
+  /** Master switch. Default false — must be explicitly opted into. */
+  readonly enabled: boolean
+  /** Only block when predicted cache_creation exceeds this many tokens. Default 50000. */
+  readonly minRewriteTokens: number
+  /** Substring in the LATEST user message that overrides the block (fresh-consent:
+   *  only the current turn's message is scanned, not history). Default below. */
+  readonly overrideMarker: string
+}
+
+const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
+  enabled: false,
+  minRewriteTokens: 50_000,
+  overrideMarker: '[cache-rewrite-ok]',
+}
+
 const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampMax'> = {
   cacheTtlMs:                5 * 60 * 1000,        // 5 min — legacy Anthropic behavior
   safetyMarginMs:            15 * 1000,            // 15 s — legacy
@@ -188,6 +225,7 @@ const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampM
   rewriteBlockEnabled:       false,
   dump:                      DEFAULT_DUMP,
   roleDetector:              DEFAULT_ROLE_WEIGHTS,
+  rewriteGuard:              DEFAULT_REWRITE_GUARD,
   // Token-rotation defaults (REQ-13). Hot-reloadable via ~/.claude/keepalive.json.
   tokenRotationContextThreshold: 150_000,
   tokenRotationPollIntervalMs:   30_000,
@@ -400,6 +438,18 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
         : D.spawnToolPatterns,
   }
 
+  // Rewrite-guard policy — validated, hot-reloadable. Default off (opt-in).
+  const rg = (raw?.rewriteGuard && typeof raw.rewriteGuard === 'object')
+    ? raw.rewriteGuard as Record<string, unknown> : {}
+  const rewriteGuard: RewriteGuardConfig = {
+    enabled: bool(rg.enabled, DEFAULT_REWRITE_GUARD.enabled),
+    minRewriteTokens: num(rg.minRewriteTokens, 'rewriteGuard.minRewriteTokens',
+      DEFAULT_REWRITE_GUARD.minRewriteTokens, 1_000, 10_000_000),
+    overrideMarker: (typeof rg.overrideMarker === 'string' && rg.overrideMarker.length > 0)
+      ? rg.overrideMarker
+      : DEFAULT_REWRITE_GUARD.overrideMarker,
+  }
+
   const config: ResolvedKeepaliveConfig = {
     cacheTtlMs,
     safetyMarginMs,
@@ -443,6 +493,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     // accompanies this scaffolding (see DumpConfig interface above).
     dump: DEFAULT_DUMP,
     roleDetector,
+    rewriteGuard,
     // Token-rotation knobs (REQ-13, CR-08). Hot-reloaded via mtime cache.
     tokenRotationContextThreshold: num(
       raw?.tokenRotationContextThreshold,

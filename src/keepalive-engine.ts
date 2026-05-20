@@ -120,7 +120,15 @@ interface PendingSnapshot {
 /** Observed per-lineage history — feeds the main-agent detector. */
 interface LineageStat {
   firstSeenAt: number
+  /** Last REAL request for this lineage. Drives the role detector's
+   *  `resumedAfterIdle` signal — must NOT be touched by KA fires. */
   lastSeenAt: number
+  /** Last time this lineage's cache was WARMED — by a real request OR a KA
+   *  fire. This is the PER-LINEAGE idle clock the tick uses to decide when to
+   *  fire: it lets the engine see that the main agent's lineage is idle even
+   *  while sub-agent lineages are busy (the global `lastActivityAt` could
+   *  not — sub-agent traffic masked it). */
+  lastWarmedAt: number
   maxToolCount: number
   /** Set once a lineage has gone idle past TTL and then resumed — the
    *  definitionally-correct "this is the main agent" behavioural signal. */
@@ -416,6 +424,9 @@ export class KeepaliveEngine {
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private abortController: AbortController | null = null
   private inFlight = false
+  /** Lineage of the KA fire currently in flight — so a real request of a
+   *  DIFFERENT lineage does not abort it (master-warm-while-sub-agents-run). */
+  private inFlightLineageKey: string | null = null
   // -1 = uninitialized (will be seeded on first fire-eligible tick).
   // 0 = explicit "no jitter" (honored — used by tests to make timing deterministic).
   // >0 = current jitter offset added to fire threshold to spread multi-session bursts.
@@ -524,7 +535,7 @@ export class KeepaliveEngine {
     const stat = this.lineageStats.get(key)
     if (!stat) {
       this.lineageStats.set(key, {
-        firstSeenAt: now, lastSeenAt: now,
+        firstSeenAt: now, lastSeenAt: now, lastWarmedAt: now,
         maxToolCount: toolCount, resumedAfterIdle: false,
       })
     } else {
@@ -533,6 +544,7 @@ export class KeepaliveEngine {
       // (sub-agents never resume; they burst once and vanish).
       if (now - stat.lastSeenAt > this.cacheTtlMs) stat.resumedAfterIdle = true
       stat.lastSeenAt = now
+      stat.lastWarmedAt = now            // a real request warms this lineage
       if (toolCount > stat.maxToolCount) stat.maxToolCount = toolCount
     }
 
@@ -622,9 +634,16 @@ export class KeepaliveEngine {
       } catch { /* scan failure → keep current TTL, defensive default */ }
     }
 
-    // Abort any in-flight keepalive before real request
-    this.abortController?.abort()
-    this.inFlight = false
+    // Abort the in-flight KA fire ONLY if it is for THIS SAME lineage — a
+    // real request of the same lineage makes its KA redundant. A real request
+    // for a DIFFERENT lineage (e.g. a sub-agent firing while the main agent's
+    // KA is in flight) must NOT interrupt it: that is the whole point of
+    // keeping the delegating master agent warm independently of sub-agents.
+    if (this.inFlight && this.inFlightLineageKey === key) {
+      this.abortController?.abort()
+      this.inFlight = false
+      this.inFlightLineageKey = null
+    }
 
     // Return the lineageKey so the consumer can hand it back to
     // notifyRealRequestComplete — the concurrency-safe completion path.
@@ -998,7 +1017,13 @@ export class KeepaliveEngine {
       return
     }
 
-    const idle = Date.now() - this.lastActivityAt
+    // PER-LINEAGE idle: time since the lineage we are about to keep alive
+    // (`best`) was last warmed — NOT the global `lastActivityAt`. The global
+    // clock is reset by EVERY real request of EVERY lineage, so busy
+    // sub-agent traffic masked the main agent's idleness and the fire below
+    // never triggered. The per-lineage clock sees the main agent go idle.
+    const bestStat = this.lineageStats.get(best.lineageKey)
+    const idle = Date.now() - (bestStat ? bestStat.lastWarmedAt : this.lastActivityAt)
 
     // Jitter: prevents multi-session burst. Sentinel -1 = uninitialized; seed
     // a random offset on first eligible tick. Explicit 0 means "no jitter" and
@@ -1022,6 +1047,7 @@ export class KeepaliveEngine {
 
     // Fire keepalive for heaviest model
     this.inFlight = true
+    this.inFlightLineageKey = best.lineageKey
 
     try {
       const token = await this.getToken()
@@ -1046,6 +1072,10 @@ export class KeepaliveEngine {
       // Update fire timer (for spacing keepalives) but NOT realActivityAt
       this.lastActivityAt = Date.now()
       this.cacheWrittenAt = Date.now()
+      // A successful KA fire warmed THIS lineage — advance its per-lineage
+      // idle clock so the next fire is spaced one interval out from here.
+      const firedStat = this.lineageStats.get(best.lineageKey)
+      if (firedStat) firedStat.lastWarmedAt = Date.now()
 
       const rl = this.getRateLimitInfo()
       this.config.onHeartbeat?.({
@@ -1133,6 +1163,7 @@ export class KeepaliveEngine {
     } finally {
       this.inFlight = false
       this.abortController = null
+      this.inFlightLineageKey = null
     }
   }
 
@@ -1687,6 +1718,11 @@ export class KeepaliveEngine {
   /** @internal — for test inspection */
   get _registry(): ReadonlyMap<string, RegistryEntry> {
     return this.registry
+  }
+
+  /** @internal — per-lineage idle clocks (for tests). */
+  get _lineageStats(): ReadonlyMap<string, { lastSeenAt: number; lastWarmedAt: number }> {
+    return this.lineageStats
   }
 
   /** @internal — for test inspection */

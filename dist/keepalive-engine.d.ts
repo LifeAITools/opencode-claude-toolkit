@@ -131,6 +131,9 @@ export declare class KeepaliveEngine {
     private retryTimer;
     private abortController;
     private inFlight;
+    /** Lineage of the KA fire currently in flight — so a real request of a
+     *  DIFFERENT lineage does not abort it (master-warm-while-sub-agents-run). */
+    private inFlightLineageKey;
     private jitterMs;
     private quotaPauseTimer;
     private quotaPauseUntil;
@@ -282,6 +285,11 @@ export declare class KeepaliveEngine {
     private writeSnapshotDebug;
     /** @internal — for test inspection */
     get _registry(): ReadonlyMap<string, RegistryEntry>;
+    /** @internal — per-lineage idle clocks (for tests). */
+    get _lineageStats(): ReadonlyMap<string, {
+        lastSeenAt: number;
+        lastWarmedAt: number;
+    }>;
     /** @internal — for test inspection */
     get _timer(): ReturnType<typeof setInterval> | null;
     /** @internal — for test inspection */

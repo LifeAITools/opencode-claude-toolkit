@@ -375,7 +375,7 @@ describe('KeepaliveEngine Layer 5: post-fire eviction detection', () => {
       }),
     })
     // Register a snapshot with cache_control so engine will fire it
-    e.notifyRealRequestStart('m', {
+    const lk = e.notifyRealRequestStart('m', {
       system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }] }],
     }, {})
@@ -383,6 +383,8 @@ describe('KeepaliveEngine Layer 5: post-fire eviction detection', () => {
     // Age cache slightly so tick() will fire
     e._setCacheWrittenAt(Date.now() - 70_000)
     ;(e as any).lastActivityAt = Date.now() - 70_000
+    // tick() now reads the PER-LINEAGE warm clock — age it too.
+    { const st = e._lineageStats.get(lk); if (st) (st as any).lastWarmedAt = Date.now() - 70_000 }
     ;(e as any).jitterMs = 0
     // Trigger fire
     await (e as any).tick()
@@ -740,12 +742,14 @@ describe('KeepaliveEngine Layer 4: error classification (regression: 2026-04-26 
           content: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }],
         }],
       }
-      e.notifyRealRequestStart('m', bodyWithCC, {})
+      const lk = e.notifyRealRequestStart('m', bodyWithCC, {})
       e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
       // Fresh cache: write was just now. Age it slightly so tick fires.
       e._setCacheWrittenAt(Date.now() - 1_000)
       // Force lastActivityAt back so tick() doesn't skip on jitter
       ;(e as any).lastActivityAt = Date.now() - 200_000
+      // tick() now reads the PER-LINEAGE warm clock — age it too.
+      { const st = e._lineageStats.get(lk); if (st) (st as any).lastWarmedAt = Date.now() - 200_000 }
       ;(e as any).jitterMs = 0
       // Invoke tick directly
       void (e as any).tick().then(() => {
@@ -1036,6 +1040,33 @@ describe('KeepaliveEngine: agent-aware per-lineage KA + reload', () => {
     e.notifyRealRequestStart('m', mainBody('seq'), {})
     e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })  // no key arg
     expect(e._registry.size).toBe(1)
+    e.stop()
+  })
+})
+
+// ─── Per-lineage idle clock — master stays warm while sub-agents run ──────
+describe('KeepaliveEngine: per-lineage idle clock isolates the main agent', () => {
+  const richTools = [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }]
+  const body = (text: string) => ({ system: [{ type: 'text', text }], tools: richTools })
+
+  test("a sub-agent lineage's traffic does NOT touch the main lineage's warm clock", () => {
+    const e = mkEngine()
+    // Main agent: one request → registers + records its per-lineage clock.
+    const mainKey = e.notifyRealRequestStart('m', body('MAIN-AGENT'), {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 }, mainKey)
+    const mainWarmedAt = e._lineageStats.get(mainKey)!.lastWarmedAt
+
+    // Burst of sub-agent traffic — each a DISTINCT lineage (distinct system).
+    for (let i = 0; i < 8; i++) {
+      const subKey = e.notifyRealRequestStart('m', body('SUB-' + i), {})
+      e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 }, subKey)
+      expect(subKey).not.toBe(mainKey)
+    }
+
+    // The main lineage's per-lineage warm clock is UNCHANGED — sub-agent
+    // traffic cannot mask the master's idleness (the global lastActivityAt
+    // could, which is what starved the master's KA).
+    expect(e._lineageStats.get(mainKey)!.lastWarmedAt).toBe(mainWarmedAt)
     e.stop()
   })
 })

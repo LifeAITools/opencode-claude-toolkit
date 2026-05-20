@@ -53,6 +53,17 @@ export interface KeepaliveEngineOptions {
      */
     isOwnerAlive?: () => boolean;
 }
+import { type AgentRole } from './lineage.js';
+/** One KA registry entry — keyed by cache lineage, not by model. */
+interface RegistryEntry {
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    model: string;
+    lineageKey: string;
+    role: AgentRole;
+    inputTokens: number;
+    hasCacheControl: boolean;
+}
 /**
  * Scan an Anthropic request body for ALL cache_control markers and return
  * shape info needed for KA decisions:
@@ -109,9 +120,9 @@ export declare class KeepaliveEngine {
     private healthProbeTimer;
     private healthProbeAttempt;
     private registry;
-    private _pendingSnapshotModel;
-    private _pendingSnapshotBody;
-    private _pendingSnapshotHeaders;
+    private pendingSnapshots;
+    private lineageStats;
+    private _legacyPendingLineage;
     private lastActivityAt;
     private lastRealActivityAt;
     private cacheWrittenAt;
@@ -128,12 +139,19 @@ export declare class KeepaliveEngine {
      * Call at the top of every real request. Primes the pending snapshot slot
      * with the body/headers about to be sent, and aborts any in-flight KA.
      */
-    notifyRealRequestStart(model: string, body: Record<string, unknown>, headers: Record<string, string>): void;
+    notifyRealRequestStart(model: string, body: Record<string, unknown>, headers: Record<string, string>): string;
     /**
      * Call after a real request completes successfully. Registers the pending
-     * snapshot (heaviest-wins), updates activity timestamps, starts KA timer.
+     * snapshot for KA — but ONLY for the main agent's lineage. Sub-agent and aux
+     * lineages are never registered (sub-agents self-warm via their own traffic;
+     * aux calls carry no reusable context).
+     *
+     * `lineageKey` should be the value returned by the matching
+     * notifyRealRequestStart — required for concurrency-safety under sub-agent
+     * fan-out. When omitted, falls back to the most recently primed lineage
+     * (safe only for sequential callers: SDK direct use, tests).
      */
-    notifyRealRequestComplete(usage: TokenUsage): void;
+    notifyRealRequestComplete(usage: TokenUsage, lineageKeyArg?: string): void;
     /**
      * Layer 3 — Cache rewrite burst protection.
      * Call at the top of every real request BEFORE sending.
@@ -168,6 +186,24 @@ export declare class KeepaliveEngine {
      * `onDisarmed` so observers (TUI, logs) record the cause.
      */
     disarm(reason: string): void;
+    /**
+     * Non-destructive reload — the org-swap / credential-refresh path.
+     *
+     * Unlike disarm()/stop(), this does NOT kill the tick timer. It drops the
+     * stale snapshot (an old org's cached prefix is useless against a new org —
+     * replaying it would cold-write the new org's quota) and aborts any in-flight
+     * KA fire, but leaves the timer running so the engine **auto-resumes** the
+     * moment the next real request re-registers a snapshot.
+     *
+     * This fixes the failure where one `claude-max disarm` killed KA for the rest
+     * of the session: disarm()→stop() nulled the timer, and re-arming then
+     * depended on a fragile path that sub-agent request concurrency could starve.
+     *
+     * Token freshness is the caller's concern: ProxyClient.reloadSessions()
+     * invalidates the credential cache; each KA fire rebuilds Authorization from
+     * a fresh getToken(). disarm() (full stop) is reserved for shutdown.
+     */
+    reload(reason: string): void;
     private startTimer;
     private tick;
     /**
@@ -244,13 +280,7 @@ export declare class KeepaliveEngine {
     private stopHealthProbe;
     private writeSnapshotDebug;
     /** @internal — for test inspection */
-    get _registry(): ReadonlyMap<string, {
-        body: Record<string, unknown>;
-        headers: Record<string, string>;
-        model: string;
-        inputTokens: number;
-        hasCacheControl: boolean;
-    }>;
+    get _registry(): ReadonlyMap<string, RegistryEntry>;
     /** @internal — for test inspection */
     get _timer(): ReturnType<typeof setInterval> | null;
     /** @internal — for test inspection */
@@ -304,4 +334,5 @@ export declare class KeepaliveEngine {
         retryAfterSec?: number | null;
     }): void;
 }
+export {};
 //# sourceMappingURL=keepalive-engine.d.ts.map

@@ -91,6 +91,40 @@ export interface KeepaliveEngineOptions {
 // Re-exported from types.ts — engine throws this on guard block
 import { CacheRewriteBlockedError } from './types.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
+import { lineageKey, classifyRole, type AgentRole, type RoleHints } from './lineage.js'
+
+// ============================================================
+// Per-lineage KA state shapes
+// ============================================================
+
+/** One KA registry entry — keyed by cache lineage, not by model. */
+interface RegistryEntry {
+  body: Record<string, unknown>
+  headers: Record<string, string>
+  model: string
+  lineageKey: string
+  role: AgentRole
+  inputTokens: number
+  hasCacheControl: boolean
+}
+
+/** A snapshot primed by notifyRealRequestStart, awaiting its completion. */
+interface PendingSnapshot {
+  model: string
+  body: Record<string, unknown>
+  headers: Record<string, string>
+  role: AgentRole
+}
+
+/** Observed per-lineage history — feeds the main-agent detector. */
+interface LineageStat {
+  firstSeenAt: number
+  lastSeenAt: number
+  maxToolCount: number
+  /** Set once a lineage has gone idle past TTL and then resumed — the
+   *  definitionally-correct "this is the main agent" behavioural signal. */
+  resumedAfterIdle: boolean
+}
 
 /**
  * Classify an error thrown during doFetch into actionable categories.
@@ -347,15 +381,28 @@ export class KeepaliveEngine {
   private healthProbeTimer: ReturnType<typeof setTimeout> | null = null
   private healthProbeAttempt = 0
 
-  // KA registry — one entry per model, heaviest-wins.
-  // hasCacheControl: Layer 3 safety net — when false, fire is pointless because
-  // there are no Anthropic-side cached blocks to refresh. Skip the network call.
-  private registry = new Map<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; hasCacheControl: boolean }>()
+  // KA registry — one entry per cache LINEAGE (hash of system⊕tools), not per
+  // model. main agent + sub-agents share a model (claude-opus-4-7) but have
+  // distinct lineages; keying by lineage stops a heavy sub-agent from clobbering
+  // the main agent's slot (the model-keyed `heaviest-wins` failure). Only
+  // main/unknown-role lineages are registered — sub-agents self-warm via their
+  // own continuous traffic and an idle sub-agent is finished, not parked.
+  // hasCacheControl: Layer 3 — when false, a fire refreshes nothing; skip it.
+  private registry = new Map<string, RegistryEntry>()
 
-  // Pending snapshot slot — primed by notifyRealRequestStart, committed by notifyRealRequestComplete
-  private _pendingSnapshotModel = ''
-  private _pendingSnapshotBody: Record<string, unknown> | null = null
-  private _pendingSnapshotHeaders: Record<string, string> | null = null
+  // Pending snapshots — keyed by lineageKey so concurrent requests of DIFFERENT
+  // lineages (main + sub-agent in flight together) cannot clobber each other.
+  // The single-slot version silently dropped registrations under sub-agent
+  // fan-out, which left the KA unable to re-arm after a disarm.
+  private pendingSnapshots = new Map<string, PendingSnapshot>()
+
+  // Per-lineage observed history — feeds classifyRole's hints.
+  private lineageStats = new Map<string, LineageStat>()
+
+  // Legacy fallback: notifyRealRequestComplete(usage) called WITHOUT a
+  // lineageKey (SDK direct use / tests — all sequential) commits the most
+  // recently primed lineage. Concurrency-safe callers pass the key explicitly.
+  private _legacyPendingLineage = ''
 
   // Timestamps
   private lastActivityAt = 0
@@ -458,16 +505,59 @@ export class KeepaliveEngine {
    * Call at the top of every real request. Primes the pending snapshot slot
    * with the body/headers about to be sent, and aborts any in-flight KA.
    */
-  notifyRealRequestStart(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
+  notifyRealRequestStart(model: string, body: Record<string, unknown>, headers: Record<string, string>): string {
     // If engine is paused on 429, a real user request implies upstream is
     // reachable from the consumer's perspective — wake immediately. If their
     // request also gets 429'd we'll re-enter pause on the next KA attempt.
     this.wakeFromQuotaPause()
 
-    // Snapshot for keepalive registry (deep clone to avoid mutation)
-    this._pendingSnapshotModel = model
-    this._pendingSnapshotBody = JSON.parse(JSON.stringify(body))
-    this._pendingSnapshotHeaders = { ...headers }
+    // ── Lineage identity + per-lineage history ──────────────────────
+    // Pure, never-throws. The lineageKey identifies a distinct cache prefix
+    // regardless of whether the consumer runs sub-agents as threads (Claude
+    // Code) or processes (opencode).
+    const key = lineageKey(body)
+    const now = Date.now()
+    const toolCount = Array.isArray(body.tools) ? body.tools.length : 0
+    const stat = this.lineageStats.get(key)
+    if (!stat) {
+      this.lineageStats.set(key, {
+        firstSeenAt: now, lastSeenAt: now,
+        maxToolCount: toolCount, resumedAfterIdle: false,
+      })
+    } else {
+      // Resumed-after-idle: this lineage went quiet past the cache TTL and is
+      // back — the definitionally-correct proof that it is the MAIN agent
+      // (sub-agents never resume; they burst once and vanish).
+      if (now - stat.lastSeenAt > this.cacheTtlMs) stat.resumedAfterIdle = true
+      stat.lastSeenAt = now
+      if (toolCount > stat.maxToolCount) stat.maxToolCount = toolCount
+    }
+
+    // ── Role classification (layered, advisory, never throws) ───────
+    const maxToolsSeen = Math.max(
+      0, ...Array.from(this.lineageStats.values()).map((s) => s.maxToolCount),
+    )
+    const oldestSeen = Math.min(
+      now, ...Array.from(this.lineageStats.values()).map((s) => s.firstSeenAt),
+    )
+    const hints: RoleHints = {
+      resumedAfterIdle: this.lineageStats.get(key)?.resumedAfterIdle,
+      oldestInGroup: (this.lineageStats.get(key)?.firstSeenAt ?? now) <= oldestSeen,
+      richestToolsInGroup: toolCount >= maxToolsSeen && toolCount > 0,
+    }
+    // roleDetector weights/thresholds come from the SSOT (keepalive.json),
+    // mtime-cached + hot-reloaded — tunable on the fly, never hardcoded.
+    const role = classifyRole(body, headers, hints, loadKeepaliveConfig().roleDetector).role
+
+    // Snapshot for keepalive registry — keyed by lineage so a concurrent
+    // sub-agent request cannot clobber the main agent's pending slot.
+    this.pendingSnapshots.set(key, {
+      model,
+      body: JSON.parse(JSON.stringify(body)),
+      headers: { ...headers },
+      role,
+    })
+    this._legacyPendingLineage = key
 
     // ── Observability: scan EVERY real request for wire cache_control TTL ──
     // Runs unconditionally (even when TTL is pinned via constructor override),
@@ -532,13 +622,24 @@ export class KeepaliveEngine {
     // Abort any in-flight keepalive before real request
     this.abortController?.abort()
     this.inFlight = false
+
+    // Return the lineageKey so the consumer can hand it back to
+    // notifyRealRequestComplete — the concurrency-safe completion path.
+    return key
   }
 
   /**
    * Call after a real request completes successfully. Registers the pending
-   * snapshot (heaviest-wins), updates activity timestamps, starts KA timer.
+   * snapshot for KA — but ONLY for the main agent's lineage. Sub-agent and aux
+   * lineages are never registered (sub-agents self-warm via their own traffic;
+   * aux calls carry no reusable context).
+   *
+   * `lineageKey` should be the value returned by the matching
+   * notifyRealRequestStart — required for concurrency-safety under sub-agent
+   * fan-out. When omitted, falls back to the most recently primed lineage
+   * (safe only for sequential callers: SDK direct use, tests).
    */
-  notifyRealRequestComplete(usage: TokenUsage): void {
+  notifyRealRequestComplete(usage: TokenUsage, lineageKeyArg?: string): void {
     const now = Date.now()
     this.lastActivityAt = now
     this.lastRealActivityAt = now  // only REAL requests set this
@@ -556,31 +657,42 @@ export class KeepaliveEngine {
 
     if (!this.config.enabled) return
 
-    // Register snapshot for this model — ONLY if it's the heaviest context seen.
-    const model = this._pendingSnapshotModel
-    const body = this._pendingSnapshotBody
-    const headers = this._pendingSnapshotHeaders
-    if (model && body && headers) {
+    // Commit the pending snapshot for this lineage. Keyed by lineageKey so a
+    // concurrent sub-agent completion cannot consume the main agent's slot.
+    const key = lineageKeyArg ?? this._legacyPendingLineage
+    const pending = key ? this.pendingSnapshots.get(key) : undefined
+    if (pending) {
+      const { model, body, headers, role } = pending
       const totalTokens = (usage.inputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0)
-      const existing = this.registry.get(model)
-      // Layer 3 input: record whether this snapshot has any cache_control
-      // markers. If none, KA fire is pointless (nothing to refresh on Anthropic
-      // side) and would only burn input tokens. Skipped in tickFire().
+      // Layer 3 input: does the snapshot carry any cache_control markers? If
+      // not, a KA fire refreshes nothing on Anthropic's side — skipped in tick().
       const { hasAnyCacheControl } = detectCacheTtlFromBody(body)
-      if (totalTokens >= this.config.minTokens && (!existing || totalTokens >= existing.inputTokens)) {
-        this.registry.set(model, { body, headers, model, inputTokens: totalTokens, hasCacheControl: hasAnyCacheControl })
-      }
-      // Track largest observed cache size per model for rewrite cost estimation.
-      const prevMax = this.lastKnownCacheTokensByModel.get(model) ?? 0
-      if (totalTokens > prevMax) {
-        this.lastKnownCacheTokensByModel.set(model, totalTokens)
+
+      // Register for KA — UNLESS this is a sub-agent lineage. An active
+      // sub-agent self-warms via its own ~10s traffic; an idle one is finished,
+      // not parked. Only main/unknown lineages get parked-and-resumed and thus
+      // need KA. (`unknown` registers as the over-KA-safe default — under-KA is
+      // expensive, over-KA is cheap.) Registry is keyed by lineage, so a heavy
+      // sub-agent can no longer clobber the main agent's slot.
+      const existing = this.registry.get(key)
+      if (role !== 'sub'
+          && totalTokens >= this.config.minTokens
+          && (!existing || totalTokens >= existing.inputTokens)) {
+        this.registry.set(key, {
+          body, headers, model, lineageKey: key, role,
+          inputTokens: totalTokens, hasCacheControl: hasAnyCacheControl,
+        })
       }
 
-      // Write snapshot metadata for debugging (rotate: keep last 24h)
+      // Track largest observed cache size per model — feeds the rewrite-guard
+      // cost estimate (model-scoped); updated for every role.
+      const prevMax = this.lastKnownCacheTokensByModel.get(model) ?? 0
+      if (totalTokens > prevMax) this.lastKnownCacheTokensByModel.set(model, totalTokens)
+
+      // Snapshot metadata for debugging (rotate: keep last 24h).
       this.writeSnapshotDebug(model, body, usage)
 
-      this._pendingSnapshotBody = null
-      this._pendingSnapshotHeaders = null
+      this.pendingSnapshots.delete(key)
     }
 
     if (this.registry.size > 0) this.startTimer()
@@ -662,6 +774,39 @@ export class KeepaliveEngine {
     this.registry.clear()
     try { this.config.onDisarmed?.({ reason, at: Date.now() }) } catch {}
     this.stop()
+  }
+
+  /**
+   * Non-destructive reload — the org-swap / credential-refresh path.
+   *
+   * Unlike disarm()/stop(), this does NOT kill the tick timer. It drops the
+   * stale snapshot (an old org's cached prefix is useless against a new org —
+   * replaying it would cold-write the new org's quota) and aborts any in-flight
+   * KA fire, but leaves the timer running so the engine **auto-resumes** the
+   * moment the next real request re-registers a snapshot.
+   *
+   * This fixes the failure where one `claude-max disarm` killed KA for the rest
+   * of the session: disarm()→stop() nulled the timer, and re-arming then
+   * depended on a fragile path that sub-agent request concurrency could starve.
+   *
+   * Token freshness is the caller's concern: ProxyClient.reloadSessions()
+   * invalidates the credential cache; each KA fire rebuilds Authorization from
+   * a fresh getToken(). disarm() (full stop) is reserved for shutdown.
+   */
+  reload(reason: string): void {
+    this.logClearDiag('external_reload', { reason })
+    this.abortController?.abort()
+    this.abortController = null
+    this.inFlight = false
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+    // Drop committed (stale-org) snapshots. Pending in-flight snapshots are
+    // kept — their real request goes to the NEW org, so their completion is a
+    // valid fresh registration.
+    this.registry.clear()
+    // Timer intentionally left running — a cheap no-op against the empty
+    // registry, auto-resumes on the next notifyRealRequestComplete. Same
+    // rationale as onDisarmed() ("timer remains... auto-resumes").
+    try { this.config.onDisarmed?.({ reason, at: Date.now() }) } catch {}
   }
 
   // ────────────────────────────────────────────────────────────
@@ -825,11 +970,17 @@ export class KeepaliveEngine {
     // that have at least one cache_control marker. Entries without markers
     // would burn input tokens on a fire that refreshes nothing on Anthropic's
     // side (no cached blocks exist).
-    let best: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; hasCacheControl: boolean } | null = null
+    let best: RegistryEntry | null = null
     let skippedNoCacheControl = 0
     for (const entry of this.registry.values()) {
       if (!entry.hasCacheControl) { skippedNoCacheControl++; continue }
-      if (!best || entry.inputTokens > best.inputTokens) best = entry
+      if (!best) { best = entry; continue }
+      // Prefer a confirmed `main` lineage over an `unknown` candidate; within
+      // the same role tier, the heaviest context wins.
+      const entryMain = entry.role === 'main'
+      const bestMain = best.role === 'main'
+      if (entryMain && !bestMain) { best = entry; continue }
+      if (entryMain === bestMain && entry.inputTokens > best.inputTokens) best = entry
     }
     if (!best) {
       if (skippedNoCacheControl > 0) {
@@ -1529,7 +1680,7 @@ export class KeepaliveEngine {
   // ────────────────────────────────────────────────────────────
 
   /** @internal — for test inspection */
-  get _registry(): ReadonlyMap<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; hasCacheControl: boolean }> {
+  get _registry(): ReadonlyMap<string, RegistryEntry> {
     return this.registry
   }
 
@@ -1552,9 +1703,9 @@ export class KeepaliveEngine {
   _setCacheWrittenAt(v: number): void { this.cacheWrittenAt = v }
   get _cacheWrittenAt(): number { return this.cacheWrittenAt }
   _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
-    this._pendingSnapshotModel = model
-    this._pendingSnapshotBody = body
-    this._pendingSnapshotHeaders = headers
+    const key = lineageKey(body)
+    this.pendingSnapshots.set(key, { model, body, headers, role: 'main' })
+    this._legacyPendingLineage = key
   }
 
   /** @internal — for test inspection (smart-pause state) */

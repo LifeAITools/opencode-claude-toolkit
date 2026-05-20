@@ -25,6 +25,7 @@
  *   Activate 1h by writing { "cacheTtlSec": 3600, ... } to keepalive.json.
  *   Hot-reload picks it up on the next mtime-check (next request or KA tick).
  */
+import { type RoleWeights } from './lineage.js';
 export interface DumpConfig {
     /** Master switch — disable all body dumps. Default: true. */
     readonly enabled: boolean;
@@ -98,6 +99,10 @@ export interface ResolvedKeepaliveConfig {
     readonly rewriteBlockEnabled: boolean;
     /** Body-dump policy with rotation. See DumpConfig docs. */
     readonly dump: DumpConfig;
+    /** Agent-role detector weights + thresholds. Fully SSOT-tunable and
+     *  hot-reloaded — tune `~/.claude/keepalive.json` → `roleDetector` without
+     *  a rebuild. See RoleWeights (lineage.ts) for field semantics. */
+    readonly roleDetector: RoleWeights;
     /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
     readonly tokenRotationContextThreshold: number;
     /** Fallback mtime poll interval if fs.watch misses an event (REQ-02). Default 30000. */

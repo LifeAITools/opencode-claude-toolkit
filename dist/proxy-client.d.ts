@@ -142,6 +142,9 @@ export declare class ProxyClient {
     private readonly liveness;
     private readonly reaperTimer;
     private lastRateLimit;
+    /** Previous request's cacheable-prefix fingerprint per `${sessionId}:${lineageKey}`
+     *  — feeds the cache-miss predictor. Pruned when a session is reaped. */
+    private readonly prefixHistory;
     constructor(opts: ProxyClientOptions);
     /** Current rate-limit snapshot from last upstream response. */
     get rateLimitSnapshot(): Readonly<RateLimitSnapshot>;
@@ -171,6 +174,22 @@ export declare class ProxyClient {
      */
     disarmSessions(reason: string, sessionId?: string): string[];
     /**
+     * Reload one or all KA engines: drop stale snapshots + invalidate the
+     * credential cache, but — unlike disarmSessions — leave each engine's tick
+     * timer running so it auto-resumes the moment the next real request
+     * re-registers a snapshot.
+     *
+     * This is the correct primitive for org-swap (`claude login` to a new org):
+     * the old org's cached prefix is useless against the new org, so it must be
+     * dropped — but the KA must NOT die. The user keeps working, and the parked
+     * main agent's cache must be re-warmed as soon as traffic resumes. The old
+     * disarmSessions() killed the timer, so a single org-swap silently disabled
+     * KA for the rest of the session.
+     *
+     * Pass sessionId to target one session, omit to reload all.
+     */
+    reloadSessions(reason: string, sessionId?: string): string[];
+    /**
      * Handle one /v1/messages request end-to-end. Returns a Response whose
      * body streams SSE bytes from Anthropic directly to the caller.
      *
@@ -181,6 +200,7 @@ export declare class ProxyClient {
     private createEngine;
     private engineDoFetch;
     private parseSSEAndNotify;
+    private predictCacheMiss;
     private handleNetworkError;
 }
 //# sourceMappingURL=proxy-client.d.ts.map

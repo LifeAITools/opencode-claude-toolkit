@@ -417,6 +417,26 @@ const server = Bun.serve({
       })
     }
 
+    if (req.method === 'POST' && url.pathname === '/admin/reload') {
+      // Body: { sessionId?: string, reason?: string }
+      // Like /admin/disarm (drops stale snapshots + invalidates token cache)
+      // but leaves each engine's KA timer running so it auto-resumes on the
+      // next real request. This is the correct org-swap primitive — disarm
+      // killed KA for the rest of the session.
+      let body: { sessionId?: string; reason?: string } = {}
+      try { body = await req.json() as any } catch { /* empty body = reload all */ }
+      const reason = body.reason ?? 'admin_reload'
+      const reloaded = proxyClient.reloadSessions(reason, body.sessionId)
+      return Response.json({
+        ok: true,
+        reloadedCount: reloaded.length,
+        sessionIds: reloaded,
+        reason,
+        tokenCacheInvalidated: true,
+        kaTimerKept: true,
+      })
+    }
+
     return new Response('Not Found', { status: 404 })
   },
 })

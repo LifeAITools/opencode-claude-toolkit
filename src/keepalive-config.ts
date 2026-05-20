@@ -29,6 +29,7 @@
 import { statSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { DEFAULT_ROLE_WEIGHTS, type RoleWeights } from './lineage.js'
 
 // ──────────────────────────────────────────────────────────────
 // Public types
@@ -123,6 +124,11 @@ export interface ResolvedKeepaliveConfig {
   /** Body-dump policy with rotation. See DumpConfig docs. */
   readonly dump: DumpConfig
 
+  /** Agent-role detector weights + thresholds. Fully SSOT-tunable and
+   *  hot-reloaded — tune `~/.claude/keepalive.json` → `roleDetector` without
+   *  a rebuild. See RoleWeights (lineage.ts) for field semantics. */
+  readonly roleDetector: RoleWeights
+
   /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
   readonly tokenRotationContextThreshold: number
 
@@ -181,6 +187,7 @@ const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampM
   minTokens:                 2000,
   rewriteBlockEnabled:       false,
   dump:                      DEFAULT_DUMP,
+  roleDetector:              DEFAULT_ROLE_WEIGHTS,
   // Token-rotation defaults (REQ-13). Hot-reloadable via ~/.claude/keepalive.json.
   tokenRotationContextThreshold: 150_000,
   tokenRotationPollIntervalMs:   30_000,
@@ -373,6 +380,26 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     LEGACY_DEFAULTS.retryDelaysMs as number[],
   )
 
+  // Role-detector weights/thresholds — every field validated, hot-reloadable.
+  const rd = (raw?.roleDetector && typeof raw.roleDetector === 'object')
+    ? raw.roleDetector as Record<string, unknown> : {}
+  const D = DEFAULT_ROLE_WEIGHTS
+  const roleDetector: RoleWeights = {
+    mainThreshold:    num(rd.mainThreshold,    'roleDetector.mainThreshold',    D.mainThreshold,    0, 100),
+    baseline:         num(rd.baseline,         'roleDetector.baseline',         D.baseline,         0, 100),
+    spawnTool:        num(rd.spawnTool,        'roleDetector.spawnTool',        D.spawnTool,        0, 100),
+    resumedAfterIdle: num(rd.resumedAfterIdle, 'roleDetector.resumedAfterIdle', D.resumedAfterIdle, 0, 100),
+    oldest:           num(rd.oldest,           'roleDetector.oldest',           D.oldest,           0, 100),
+    richest:          num(rd.richest,          'roleDetector.richest',          D.richest,          0, 100),
+    auxToolCountMax:  num(rd.auxToolCountMax,  'roleDetector.auxToolCountMax',  D.auxToolCountMax,  0, 10_000),
+    spawnToolPatterns:
+      Array.isArray(rd.spawnToolPatterns)
+        && rd.spawnToolPatterns.length > 0
+        && rd.spawnToolPatterns.every((p) => typeof p === 'string')
+        ? rd.spawnToolPatterns as string[]
+        : D.spawnToolPatterns,
+  }
+
   const config: ResolvedKeepaliveConfig = {
     cacheTtlMs,
     safetyMarginMs,
@@ -415,6 +442,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     // for now we emit DEFAULT_DUMP. Full parsing is the in-flight work that
     // accompanies this scaffolding (see DumpConfig interface above).
     dump: DEFAULT_DUMP,
+    roleDetector,
     // Token-rotation knobs (REQ-13, CR-08). Hot-reloaded via mtime cache.
     tokenRotationContextThreshold: num(
       raw?.tokenRotationContextThreshold,

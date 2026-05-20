@@ -173,7 +173,10 @@ export function startHeartbeat(
         intervalSec,
         nextFireSec,
         cacheAgeSec,
-        ttlSec: 3600,
+        // Real engine TTL (5min for the native-CC pin, 1h for opencode) — was
+        // hardcoded 3600, which misreported every native-CC session as 1h and
+        // misled cache-drop diagnosis.
+        ttlSec: Math.round(((eng._cacheTtlMs as number) ?? 3_600_000) / 1000),
         cacheRead: u.cacheReadInputTokens ?? null,
         cacheWrite: u.cacheCreationInputTokens ?? null,
       })

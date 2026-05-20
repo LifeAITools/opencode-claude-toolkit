@@ -461,7 +461,8 @@ describe('KeepaliveEngine Layer 3: no cache_control → no KA fire', () => {
     const e = mkEngine({ minTokens: 100 })
     e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'plain' }] }, {})
     e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
-    const entry = e._registry.get('m')
+    // Registry is keyed by cache lineage, not model — fetch the sole entry.
+    const entry = Array.from(e._registry.values())[0]
     expect(entry).toBeDefined()
     expect(entry!.hasCacheControl).toBe(false)
   })
@@ -472,7 +473,7 @@ describe('KeepaliveEngine Layer 3: no cache_control → no KA fire', () => {
       system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
     }, {})
     e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
-    const entry = e._registry.get('m')
+    const entry = Array.from(e._registry.values())[0]
     expect(entry).toBeDefined()
     expect(entry!.hasCacheControl).toBe(true)
   })
@@ -489,7 +490,7 @@ describe('KeepaliveEngine Layer 2: heaviest-wins snapshot registry', () => {
     e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 50 })
 
     expect(e._registry.size).toBe(1)
-    expect(e._registry.get('claude-opus-4-7')?.inputTokens).toBe(5000)
+    expect(Array.from(e._registry.values())[0]?.inputTokens).toBe(5000)
     e.stop()
   })
 
@@ -502,22 +503,34 @@ describe('KeepaliveEngine Layer 2: heaviest-wins snapshot registry', () => {
     e.notifyRealRequestStart('claude-opus-4-7', { messages: [{ role: 'user', content: 'large' }] }, {})
     e.notifyRealRequestComplete({ inputTokens: 10000, outputTokens: 10 })
 
-    expect(e._registry.get('claude-opus-4-7')?.inputTokens).toBe(10000)
+    expect(Array.from(e._registry.values())[0]?.inputTokens).toBe(10000)
     e.stop()
   })
 
-  test('smaller snapshot does NOT overwrite larger (subagent protection)', () => {
+  test('sub-agent request (agent-id header) does NOT register — cannot touch main slot', () => {
+    // Subagent protection is now by ROLE, not by size: a sub-agent lineage is
+    // never registered for KA at all (it self-warms via its own traffic), so
+    // it physically cannot clobber the main agent's slot regardless of weight.
     const e = mkEngine({ minTokens: 100 })
+    const mainTools = [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }]
 
-    // Heavy main conversation: 50k input + 40k cacheRead = 90k total
-    e.notifyRealRequestStart('claude-opus-4-7', { messages: [{ role: 'user', content: 'main' }] }, {})
+    // Main agent — rich tool set incl. spawn-tool, no agent-id → role=main.
+    e.notifyRealRequestStart('claude-opus-4-7',
+      { system: [{ type: 'text', text: 'main' }], tools: mainTools }, {})
     e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 100, cacheReadInputTokens: 40000 })
+    expect(e._registry.size).toBe(1)
+    expect(Array.from(e._registry.values())[0]!.role).toBe('main')
 
-    // Tiny subagent call: 200 tokens — MUST NOT overwrite
-    e.notifyRealRequestStart('claude-opus-4-7', { messages: [{ role: 'user', content: 'sub' }] }, {})
+    // Sub-agent — distinct lineage, agent-id header present → role=sub →
+    // NOT registered. Main entry untouched.
+    e.notifyRealRequestStart('claude-opus-4-7',
+      { system: [{ type: 'text', text: 'sub' }], tools: mainTools.slice(0, 10) },
+      { 'x-claude-code-agent-id': 'sub-1' })
     e.notifyRealRequestComplete({ inputTokens: 200, outputTokens: 10 })
 
-    expect(e._registry.get('claude-opus-4-7')?.inputTokens).toBe(90000)
+    expect(e._registry.size).toBe(1)  // still only the main lineage
+    expect(Array.from(e._registry.values())[0]!.inputTokens).toBe(90000)
+    expect(Array.from(e._registry.values())[0]!.role).toBe('main')
     e.stop()
   })
 
@@ -940,5 +953,89 @@ describe('KeepaliveEngine public API', () => {
       onRewriteWarning: () => {},
       onNetworkStateChange: () => {},
     })).not.toThrow()
+  })
+})
+
+// ─── Agent-aware per-lineage KA + reload ─────────────────────────
+
+describe('KeepaliveEngine: agent-aware per-lineage KA + reload', () => {
+  const richTools = [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }]
+  const mainBody = (text: string) => ({ system: [{ type: 'text', text }], tools: richTools })
+
+  test('notifyRealRequestStart returns the lineageKey', () => {
+    const e = mkEngine()
+    const key = e.notifyRealRequestStart('m', mainBody('s'), {})
+    expect(key).toBeString()
+    expect(key.length).toBeGreaterThan(0)
+    e.stop()
+  })
+
+  test('main and sub-agent are distinct lineages — only main is registered', () => {
+    const e = mkEngine({ minTokens: 100 })
+    const kMain = e.notifyRealRequestStart('m', mainBody('main'), {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 }, kMain)
+    const kSub = e.notifyRealRequestStart('m', mainBody('sub'), { 'x-claude-code-agent-id': 's1' })
+    e.notifyRealRequestComplete({ inputTokens: 30000, outputTokens: 1 }, kSub)
+
+    expect(kMain).not.toBe(kSub)        // distinct cache lineages
+    expect(e._registry.size).toBe(1)    // sub-agent NOT registered
+    expect(Array.from(e._registry.values())[0]!.role).toBe('main')
+    e.stop()
+  })
+
+  test('concurrent interleaved requests of two lineages both commit (no slot clobber)', () => {
+    // The single-pending-slot bug: start A, start B, complete A, complete B —
+    // B's start clobbered the slot, so A's completion registered B and B's
+    // registered nothing. Per-lineage slots + explicit keys → BOTH commit.
+    const e = mkEngine({ minTokens: 100 })
+    const kA = e.notifyRealRequestStart('m', mainBody('A'), {})
+    const kB = e.notifyRealRequestStart('m', mainBody('B'), {})
+    expect(kA).not.toBe(kB)
+    e.notifyRealRequestComplete({ inputTokens: 40000, outputTokens: 1 }, kA)
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 }, kB)
+    expect(e._registry.size).toBe(2)    // neither clobbered the other
+    e.stop()
+  })
+
+  test('reload() clears registry but KEEPS the timer alive (unlike disarm)', () => {
+    const e = mkEngine({ minTokens: 100 })
+    const k = e.notifyRealRequestStart('m', mainBody('m'), {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 }, k)
+    expect(e._registry.size).toBe(1)
+    expect(e._timer).not.toBeNull()
+
+    e.reload('org_swap')
+
+    expect(e._registry.size).toBe(0)    // stale snapshot dropped
+    expect(e._timer).not.toBeNull()     // ← timer SURVIVES (disarm would null it)
+    e.stop()
+  })
+
+  test('reload() then a fresh request re-arms cleanly', () => {
+    const e = mkEngine({ minTokens: 100 })
+    const k1 = e.notifyRealRequestStart('m', mainBody('m'), {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 }, k1)
+    e.reload('org_swap')
+    expect(e._registry.size).toBe(0)
+
+    const k2 = e.notifyRealRequestStart('m', mainBody('m'), {})
+    e.notifyRealRequestComplete({ inputTokens: 55000, outputTokens: 1 }, k2)
+    expect(e._registry.size).toBe(1)    // re-armed
+    expect(e._timer).not.toBeNull()
+    e.stop()
+  })
+
+  test('reload() is safe on an idle engine', () => {
+    const e = mkEngine()
+    expect(() => e.reload('idle_reload')).not.toThrow()
+    expect(e._registry.size).toBe(0)
+  })
+
+  test('legacy notifyRealRequestComplete(usage) without key still works (sequential)', () => {
+    const e = mkEngine({ minTokens: 100 })
+    e.notifyRealRequestStart('m', mainBody('seq'), {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })  // no key arg
+    expect(e._registry.size).toBe(1)
+    e.stop()
   })
 })

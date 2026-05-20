@@ -73,6 +73,7 @@ import {
 } from './proxy-adapters.js'
 import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
+import { prefixHashes, classifyRewrite, type PrefixHashes } from './lineage.js'
 import {
   HEADER_AUTHORIZATION,
   HEADER_ANTHROPIC_BETA,
@@ -221,6 +222,10 @@ export class ProxyClient {
     utilization5h: null, utilization7d: null,
   }
 
+  /** Previous request's cacheable-prefix fingerprint per `${sessionId}:${lineageKey}`
+   *  — feeds the cache-miss predictor. Pruned when a session is reaped. */
+  private readonly prefixHistory = new Map<string, { hashes: PrefixHashes; lastReqAt: number }>()
+
   constructor(opts: ProxyClientOptions) {
     this.config = { ...DEFAULT_CONFIG, ...opts.config }
     this.credentials = opts.credentialsProvider
@@ -252,6 +257,10 @@ export class ProxyClient {
       const reaped = this.store.reapDead()
       for (const sid of reaped) {
         this.events.emit({ level: 'info', kind: 'SESSION_DEAD', sessionId: sid, reason: 'pid_gone' })
+        // Drop this session's prefix-history (keys are `${sid}:${lineageKey}`).
+        for (const k of this.prefixHistory.keys()) {
+          if (k.startsWith(sid + ':')) this.prefixHistory.delete(k)
+        }
       }
     }, 10_000)
     if (this.reaperTimer && typeof this.reaperTimer === 'object' && 'unref' in this.reaperTimer) {
@@ -323,6 +332,43 @@ export class ProxyClient {
       sessionIds: disarmed,
     })
     return disarmed
+  }
+
+  /**
+   * Reload one or all KA engines: drop stale snapshots + invalidate the
+   * credential cache, but — unlike disarmSessions — leave each engine's tick
+   * timer running so it auto-resumes the moment the next real request
+   * re-registers a snapshot.
+   *
+   * This is the correct primitive for org-swap (`claude login` to a new org):
+   * the old org's cached prefix is useless against the new org, so it must be
+   * dropped — but the KA must NOT die. The user keeps working, and the parked
+   * main agent's cache must be re-warmed as soon as traffic resumes. The old
+   * disarmSessions() killed the timer, so a single org-swap silently disabled
+   * KA for the rest of the session.
+   *
+   * Pass sessionId to target one session, omit to reload all.
+   */
+  reloadSessions(reason: string, sessionId?: string): string[] {
+    const reloaded: string[] = []
+    if (sessionId) {
+      const s = this.store.list().find(x => x.sessionId === sessionId)
+      if (s) { s.engine.reload(reason); reloaded.push(s.sessionId) }
+    } else {
+      for (const s of this.store.list()) { s.engine.reload(reason); reloaded.push(s.sessionId) }
+    }
+    // Same credential-cache invalidation as disarmSessions — the canonical
+    // caller just rotated credentials (org swap).
+    this.credentials.invalidate()
+    this.events.emit({
+      level: 'info',
+      kind: 'ADMIN_RELOAD',
+      reason,
+      sessionIdRequested: sessionId ?? null,
+      reloadedCount: reloaded.length,
+      sessionIds: reloaded,
+    })
+    return reloaded
   }
 
   // ─── Main entry point ──────────────────────────────────────────
@@ -411,8 +457,15 @@ export class ProxyClient {
       bodyBytes,
     })
 
-    // Prime engine — aborts any in-flight KA, records pending snapshot
-    session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
+    // Prime engine — aborts any in-flight KA, records pending snapshot.
+    // Capture the returned lineageKey so the (async, background) completion can
+    // be matched to THIS request concurrency-safely — sub-agent fan-out keeps
+    // many requests in flight at once, and a shared slot would clobber.
+    const reqLineageKey = session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
+
+    // Observability: predict whether this request incurs a cache rewrite +
+    // classify the cause. Never blocks — the request always proceeds.
+    this.predictCacheMiss(sessionId, reqLineageKey, parsedBody)
 
     // Pre-request rewrite-burst guard
     try {
@@ -496,7 +549,7 @@ export class ProxyClient {
     }
 
     // Parse in background — extract usage + notify engine. Never crashes.
-    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0).catch((e) => {
+    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0, reqLineageKey).catch((e) => {
       this.events.emit({
         level: 'error',
         kind: 'REAL_REQUEST_ERROR',
@@ -678,6 +731,7 @@ export class ProxyClient {
     sessionId: string,
     model: string,
     t0: number,
+    lineageKey: string,
   ): Promise<void> {
     try {
       let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
@@ -744,7 +798,7 @@ export class ProxyClient {
       const isFirstCall = session.lastUsage === null
       session.lastUsage = usage
       try {
-        session.engine.notifyRealRequestComplete(usage)
+        session.engine.notifyRealRequestComplete(usage, lineageKey)
       } catch (e: any) {
         this.events.emit({
           level: 'error',
@@ -784,6 +838,64 @@ export class ProxyClient {
         sessionId,
         msg: `SSE parse error: ${err?.message ?? err}`,
       })
+    }
+  }
+
+  // ─── Internal: predicted cache-miss observability ──────────────
+  //
+  // Before forwarding, compare this request's cacheable-prefix fingerprint to
+  // the previous request of the same (session, lineage). A divergence at the
+  // system/tools block — or an idle gap past the cache TTL — predicts a
+  // cache_creation rewrite. We NEVER block (the request is the user's work);
+  // we classify + emit PREDICTED_CACHE_MISS so every rewrite is visible with
+  // its cause: expected:* (cold-start / compact / tools-change — incl. the
+  // user's "первичный запуск = норм") logs at info; avoidable:* / anomalous:*
+  // log at error. Never throws — observability must not affect throughput.
+
+  private predictCacheMiss(
+    sessionId: string,
+    lineageKey: string,
+    body: Record<string, unknown>,
+  ): void {
+    try {
+      const key = `${sessionId}:${lineageKey}`
+      const now = Date.now()
+      const ph = prefixHashes(body)
+      const prev = this.prefixHistory.get(key)
+      this.prefixHistory.set(key, { hashes: ph, lastReqAt: now })
+
+      const isFirstRequest = !prev
+      const systemChanged = !!prev && prev.hashes.system !== ph.system
+      const toolsChanged = !!prev && prev.hashes.toolNames !== ph.toolNames
+      const idleMs = prev ? now - prev.lastReqAt : undefined
+      const ttlMs = this.config.kaCacheTtlSec * 1000
+
+      // Prefix unchanged + within TTL → a cache HIT is expected; stay quiet.
+      if (!isFirstRequest && !systemChanged && !toolsChanged
+          && (idleMs === undefined || idleMs <= ttlMs)) {
+        return
+      }
+
+      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs })
+      this.events.emit({
+        level: verdict.expected ? 'info' : 'error',
+        kind: 'PREDICTED_CACHE_MISS',
+        sessionId,
+        lineageKey,
+        rewriteClass: verdict.class,
+        expected: verdict.expected,
+        systemChanged,
+        toolsChanged,
+        idleMs: idleMs ?? null,
+        ttlMs,
+        msg: `predicted cache rewrite — ${verdict.class}`
+          + (systemChanged ? ' [system changed]' : '')
+          + (toolsChanged ? ' [tools changed]' : '')
+          + (idleMs !== undefined && idleMs > ttlMs
+              ? ` [idle ${Math.round(idleMs / 1000)}s > ttl ${Math.round(ttlMs / 1000)}s]` : ''),
+      })
+    } catch {
+      // Predictor is observability-only — never affect the request path.
     }
   }
 

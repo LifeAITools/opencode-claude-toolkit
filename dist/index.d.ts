@@ -19,6 +19,8 @@ export { FileOrgIdResolver, readOrgIdFromConfig, DEFAULT_ACCOUNT_CONFIG_PATH, } 
 export type { OrgIdResolver } from './org-identity.js';
 export { writeRewriteBlockDump, diffPrefix, DEFAULT_REWRITE_DUMP_DIR, } from './rewrite-dump.js';
 export type { CachePrefix, PrefixDiff, RewriteBlockDumpInput, } from './rewrite-dump.js';
+export { loadKaSnapshots, saveKaSnapshots, assessRevival, DEFAULT_KA_SNAPSHOT_PATH, KA_SNAPSHOT_MAX_AGE_MS, } from './ka-snapshot-store.js';
+export type { PersistedRegistryEntry, PersistedEngineState, PersistedSession, KaSnapshotFile, RevivalVerdict, } from './ka-snapshot-store.js';
 export type { KeepaliveConfig, KeepaliveStats, KeepaliveTick, } from './types.js';
 export { oauthLogin } from './auth.js';
 export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js';

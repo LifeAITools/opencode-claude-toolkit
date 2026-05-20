@@ -54,6 +54,7 @@ export interface KeepaliveEngineOptions {
     isOwnerAlive?: () => boolean;
 }
 import { type AgentRole } from './lineage.js';
+import type { PersistedEngineState } from './ka-snapshot-store.js';
 /** One KA registry entry — keyed by cache lineage, not by model. */
 interface RegistryEntry {
     body: Record<string, unknown>;
@@ -308,6 +309,7 @@ export declare class KeepaliveEngine {
             hasAnyCacheControl: boolean;
             at: number;
         }) => void;
+        onRegistryChange?: () => void;
     };
     /** @internal — for test inspection (per-consumer override audit) */
     get _cacheTtlMs(): number;
@@ -333,6 +335,30 @@ export declare class KeepaliveEngine {
         resetAt?: number | null;
         retryAfterSec?: number | null;
     }): void;
+    /** Notify the consumer (best-effort) that the KA registry was mutated —
+     *  used to trigger cross-restart persistence. Never throws. */
+    private notifyRegistryChanged;
+    /** Clear the registry + notify — the disarm/reload/evict mutation path. */
+    private clearRegistry;
+    /**
+     * Reconstruct armed state from a persisted snapshot (ka-snapshot-store.ts).
+     * Called ONCE on a fresh engine, before any real request: repopulates the
+     * registry + timing scalars and starts the tick, leaving the engine
+     * indistinguishable from one armed by a real request. From the first tick
+     * onward every existing layer (owner-alive gate, wake-from-sleep TTL
+     * recheck, network/429 handling) runs unmodified. Never throws.
+     *
+     * The caller (ProxyClient) is responsible for having decided, via
+     * `assessRevival`, that this snapshot's cache is still warm enough — revive()
+     * trusts that decision and does not re-check liveness here.
+     */
+    revive(state: PersistedEngineState): void;
+    /**
+     * Serialise the armed state for cross-restart persistence (see
+     * ka-snapshot-store.ts). Returns `null` when the engine holds no snapshot
+     * worth persisting (registry empty — disarmed or never armed). Never throws.
+     */
+    serializeState(): PersistedEngineState | null;
 }
 export {};
 //# sourceMappingURL=keepalive-engine.d.ts.map

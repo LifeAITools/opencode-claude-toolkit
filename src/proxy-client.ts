@@ -81,6 +81,14 @@ import {
   DEFAULT_REWRITE_DUMP_DIR,
   type CachePrefix,
 } from './rewrite-dump.js'
+import {
+  loadKaSnapshots,
+  saveKaSnapshots,
+  assessRevival,
+  DEFAULT_KA_SNAPSHOT_PATH,
+  KA_SNAPSHOT_MAX_AGE_MS,
+  type PersistedSession,
+} from './ka-snapshot-store.js'
 import { readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -220,6 +228,13 @@ export interface ProxyClientOptions {
    * Injectable for tests.
    */
   proxyStartedAt?: number
+
+  /**
+   * Optional: where to persist the KA snapshot registry so KA survives a
+   * proxy restart (idle sessions keep their cache warm across a deploy).
+   * Default: `~/.claude-local/proxy-ka-snapshots.json`. Injectable for tests.
+   */
+  kaSnapshotPath?: string
 }
 
 /** One persisted cache-prefix fingerprint, keyed by `${sessionId}:${lineageKey}`. */
@@ -296,6 +311,19 @@ export class ProxyClient {
    *  this means the TTL gap spans a restart (KA could not have prevented it). */
   private readonly proxyStartedAt: number
 
+  /** Where the KA snapshot registry is persisted (configurable for tests). */
+  private readonly kaSnapshotPath: string
+
+  /** Set when a KA registry mutated since the last persist — bounds writes
+   *  to "only when something changed" (bodies are large; no blind 10s saves). */
+  private kaSnapshotDirty = false
+
+  /** Lineage keys (`${sessionId}:${lineageKey}`) whose persisted KA snapshot
+   *  was DROPPED at startup (cache already dead). The next real request for
+   *  such a lineage is a genuine rewrite the guard should surface — see
+   *  predictCacheMiss / classifyRewrite's `kaRevivalDropped`. */
+  private readonly kaReviveDropped: Set<string> = new Set()
+
   /** Last cacheable prefix (system + tools) seen per `${sessionId}:${lineageKey}`.
    *  In-memory only (never persisted — bodies are large) — feeds the prefix
    *  diff written into a guard-block dump. Reaped with prefixHistory. */
@@ -315,6 +343,7 @@ export class ProxyClient {
     this.prefixHistoryPath = opts.prefixHistoryPath ?? PREFIX_HISTORY_PATH
     this.rewriteBlockDumpDir = opts.rewriteBlockDumpDir ?? DEFAULT_REWRITE_DUMP_DIR
     this.proxyStartedAt = opts.proxyStartedAt ?? Date.now()
+    this.kaSnapshotPath = opts.kaSnapshotPath ?? DEFAULT_KA_SNAPSHOT_PATH
     this.prefixHistory = loadPrefixHistory(this.prefixHistoryPath)
 
     // Cache metrics collector — emits CACHE_METRICS_SUMMARY every 60s and
@@ -347,13 +376,27 @@ export class ProxyClient {
         for (const k of this.lineagePrefix.keys()) {
           if (k.startsWith(sid + ':')) this.lineagePrefix.delete(k)
         }
+        for (const k of this.kaReviveDropped) {
+          if (k.startsWith(sid + ':')) this.kaReviveDropped.delete(k)
+        }
+        this.kaSnapshotDirty = true   // a reaped session must leave the KA file
       }
       // Persist prefix history each reaper tick so it survives a proxy restart.
       savePrefixHistory(this.prefixHistory, this.prefixHistoryPath)
+      // Persist the KA snapshot registry, but only when something changed —
+      // snapshot bodies are large, so no unconditional 10s writes.
+      if (this.kaSnapshotDirty) {
+        this.persistKaSnapshots()
+        this.kaSnapshotDirty = false
+      }
     }, 10_000)
     if (this.reaperTimer && typeof this.reaperTimer === 'object' && 'unref' in this.reaperTimer) {
       (this.reaperTimer as any).unref()
     }
+
+    // Revive KA engines for sessions whose cache is provably still warm —
+    // last step of construction so every dependency above is ready.
+    this.reviveKaSnapshots()
   }
 
   // ─── Public getters ─────────────────────────────────────────────
@@ -379,6 +422,9 @@ export class ProxyClient {
   stop(): void {
     clearInterval(this.reaperTimer)
     savePrefixHistory(this.prefixHistory, this.prefixHistoryPath)
+    // Final KA-snapshot persist — must run BEFORE store.stopAll() empties the
+    // engines, so a clean shutdown leaves a current registry to revive from.
+    this.persistKaSnapshots()
     this.metrics.stop()
     this.store.stopAll()
   }
@@ -809,11 +855,113 @@ export class ProxyClient {
           hasAnyCacheControl: info.hasAnyCacheControl,
           msg: `cache_control TTL ${info.previousTtlMs === null ? 'first-seen' : 'changed'} for session ${sessionId.slice(0, 8)} — ${info.previousTtlMs === null ? '?' : Math.round(info.previousTtlMs / 60000) + 'm'} → ${info.minTtlMs === null ? 'none' : Math.round(info.minTtlMs / 60000) + 'm'}`,
         }),
+        // Registry mutated → mark the KA snapshot file dirty so the reaper
+        // persists the fresh state on its next tick.
+        onRegistryChange: () => { this.kaSnapshotDirty = true },
       },
       getToken: () => this.credentials.getAccessToken(),
       doFetch: (body, headers, signal) => this.engineDoFetch(body, headers, signal),
       getRateLimitInfo: () => this.lastRateLimit,
       isOwnerAlive: () => this.store.isOwnerAlive(sessionId),
+    })
+  }
+
+  // ─── Internal: KA snapshot persistence (survives a proxy restart) ──────
+
+  /** Serialise every armed engine's KA registry into a persistable map. */
+  private collectKaSnapshots(): Record<string, PersistedSession> {
+    const out: Record<string, PersistedSession> = {}
+    for (const s of this.store.list()) {
+      const state = s.engine.serializeState()
+      if (!state) continue                       // disarmed / never-armed — skip
+      out[s.sessionId] = {
+        ...state,
+        sessionId: s.sessionId,
+        ownerPid: s.pid ?? null,
+        model: s.model ?? null,
+      }
+    }
+    return out
+  }
+
+  /** Persist the KA snapshot registry. Best-effort — never throws. */
+  private persistKaSnapshots(): void {
+    saveKaSnapshots(this.collectKaSnapshots(), this.kaSnapshotPath)
+  }
+
+  /**
+   * Startup: revive KA engines for sessions whose cache is provably still
+   * warm. A snapshot too stale to revive is DROPPED — never re-armed (firing
+   * KA on a dead cache is itself a cold write = quota burn). Each dropped
+   * lineage is recorded in `kaReviveDropped` so the next real request for it
+   * is surfaced as a genuine rewrite, not silently passed as proxy-restart.
+   */
+  private reviveKaSnapshots(): void {
+    let sessions: Record<string, PersistedSession>
+    try {
+      sessions = loadKaSnapshots(this.kaSnapshotPath).sessions
+    } catch {
+      return
+    }
+    const ssot = loadKeepaliveConfig()
+    const intervalMs = this.config.kaIntervalSec !== undefined
+      ? this.config.kaIntervalSec * 1000
+      : ssot.intervalMs
+    const opts = {
+      safetyMarginMs: ssot.safetyMarginMs,
+      intervalMs,
+      maxAgeMs: KA_SNAPSHOT_MAX_AGE_MS,
+      fireBudgetMs: ssot.healthProbeTimeoutMs,
+    }
+    const now = Date.now()
+    for (const [sid, ps] of Object.entries(sessions)) {
+      // Owner-PID gate first — never revive a session whose consumer exited
+      // (pid 1 = reparented to init = parent dead).
+      if (ps.ownerPid != null && (ps.ownerPid === 1 || !this.liveness.isAlive(ps.ownerPid))) {
+        this.recordReviveDrop(sid, ps, 'owner-dead')
+        continue
+      }
+      const verdict = assessRevival(ps, now, opts)
+      if (!verdict.revive) {
+        this.recordReviveDrop(sid, ps, verdict.reason)
+        continue
+      }
+      try {
+        const session = this.store.getOrCreate(sid, ps.ownerPid, () => this.createEngine(sid))
+        session.model = ps.model
+        session.engine.revive(ps)
+        this.kaSnapshotDirty = true
+        this.events.emit({
+          level: 'info',
+          kind: 'KA_REVIVED',
+          sessionId: sid,
+          lineageCount: ps.registry.length,
+          model: ps.model,
+          cacheAgeMs: now - ps.cacheWrittenAt,
+          msg: `KA revived for session ${sid.slice(0, 8)} — ${ps.registry.length} lineage(s), `
+            + `cache ${Math.round((now - ps.cacheWrittenAt) / 1000)}s old`,
+        })
+      } catch {
+        this.recordReviveDrop(sid, ps, 'revive-error')
+      }
+    }
+  }
+
+  /** Record a dropped KA snapshot: tag its lineages (so the guard surfaces the
+   *  next real request as a real rewrite) and emit KA_REVIVE_DROP. */
+  private recordReviveDrop(sessionId: string, ps: PersistedSession, reason: string): void {
+    for (const e of ps.registry ?? []) {
+      if (e && typeof e.lineageKey === 'string') {
+        this.kaReviveDropped.add(`${sessionId}:${e.lineageKey}`)
+      }
+    }
+    this.events.emit({
+      level: 'info',
+      kind: 'KA_REVIVE_DROP',
+      sessionId,
+      reason,
+      lineageCount: ps.registry?.length ?? 0,
+      msg: `KA snapshot not revived for session ${sessionId.slice(0, 8)} — ${reason}`,
     })
   }
 
@@ -1046,6 +1194,11 @@ export class ProxyClient {
       // spans a restart. KA could not have kept it warm (its engine did not
       // exist), so an expiry here is NOT avoidable — see classifyRewrite.
       const spansProxyRestart = lastWarmAt !== undefined && lastWarmAt < this.proxyStartedAt
+      // ...UNLESS KA-persistence had a snapshot for this lineage and dropped it
+      // as already-dead at startup — then the rewrite IS blockable. One-shot:
+      // consume the flag so only the first post-restart request is surfaced.
+      const kaRevivalDropped = this.kaReviveDropped.has(key)
+      if (kaRevivalDropped) this.kaReviveDropped.delete(key)
       // org-switch: this lineage's prefix was last cached under a different
       // org than the one billing the current request. Tripped ONLY when both
       // org-ids are known and differ — an unknown org (`null`) never trips it.
@@ -1062,7 +1215,7 @@ export class ProxyClient {
         return null
       }
 
-      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart })
+      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart, kaRevivalDropped })
       // When the cacheable prefix diverges or expires, ~the whole context
       // re-caches. bodyBytes/4 is a rough token estimate — adequate for a
       // threshold check (the guard) and a human-readable log figure.
@@ -1085,6 +1238,7 @@ export class ProxyClient {
           + (toolsChanged ? ' [tools changed]' : '')
           + (orgChanged ? ' [org switched]' : '')
           + (spansProxyRestart ? ' [spans proxy restart]' : '')
+          + (kaRevivalDropped ? ' [ka snapshot dropped — unrevivable]' : '')
           + (idleMs !== undefined && idleMs > ttlMs
               ? ` [idle ${Math.round(idleMs / 1000)}s > ttl ${Math.round(ttlMs / 1000)}s]` : ''),
       })

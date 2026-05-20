@@ -1039,3 +1039,67 @@ describe('KeepaliveEngine: agent-aware per-lineage KA + reload', () => {
     e.stop()
   })
 })
+
+// ─── Cross-restart persistence: serializeState() + revive() ──────
+describe('KeepaliveEngine: serialize / revive for cross-restart persistence', () => {
+  const richTools = [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }]
+  const mainBody = (text: string) => ({ system: [{ type: 'text', text }], tools: richTools })
+
+  test('serializeState() returns null on a fresh (un-armed) engine', () => {
+    const e = mkEngine()
+    expect(e.serializeState()).toBeNull()
+    e.stop()
+  })
+
+  test('serializeState() captures the registry + cacheWrittenAt once armed', () => {
+    const e = mkEngine()
+    e.notifyRealRequestStart('m', mainBody('persist'), {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })
+    const state = e.serializeState()
+    expect(state).not.toBeNull()
+    expect(state!.registry.length).toBe(1)
+    expect(state!.cacheWrittenAt).toBeGreaterThan(0)
+    expect(typeof state!.cacheTtlMs).toBe('number')
+    e.stop()
+  })
+
+  test('revive() arms a fresh engine — registry populated, tick timer running', () => {
+    const src = mkEngine()
+    src.notifyRealRequestStart('m', mainBody('revive'), {})
+    src.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })
+    const state = src.serializeState()!
+    src.stop()
+
+    const revived = mkEngine()
+    expect(revived._registry.size).toBe(0)
+    revived.revive(state)
+    expect(revived._registry.size).toBe(1)
+    expect(revived._timer).not.toBeNull()                 // armed without a real request
+    expect(revived._cacheWrittenAt).toBe(state.cacheWrittenAt)
+    revived.stop()
+  })
+
+  test('revive() is idempotent — refuses to revive over an already-armed engine', () => {
+    const src = mkEngine()
+    src.notifyRealRequestStart('m', mainBody('a'), {})
+    src.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })
+    const state = src.serializeState()!
+    src.stop()
+
+    const e = mkEngine()
+    e.notifyRealRequestStart('m', mainBody('b'), {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })
+    const before = e._registry.size
+    e.revive(state)                                       // engine already armed
+    expect(e._registry.size).toBe(before)                 // unchanged — no-op
+    e.stop()
+  })
+
+  test('revive() never throws on malformed state', () => {
+    const e = mkEngine()
+    expect(() => e.revive(null as any)).not.toThrow()
+    expect(() => e.revive({ registry: [] } as any)).not.toThrow()
+    expect(e._registry.size).toBe(0)
+    e.stop()
+  })
+})

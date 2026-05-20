@@ -133,6 +133,23 @@ export type {
   PrefixDiff,
   RewriteBlockDumpInput,
 } from './rewrite-dump.js'
+
+// KA snapshot persistence — revive the keepalive registry across a proxy
+// restart so idle sessions keep their prompt cache warm.
+export {
+  loadKaSnapshots,
+  saveKaSnapshots,
+  assessRevival,
+  DEFAULT_KA_SNAPSHOT_PATH,
+  KA_SNAPSHOT_MAX_AGE_MS,
+} from './ka-snapshot-store.js'
+export type {
+  PersistedRegistryEntry,
+  PersistedEngineState,
+  PersistedSession,
+  KaSnapshotFile,
+  RevivalVerdict,
+} from './ka-snapshot-store.js'
 export type {
   KeepaliveConfig,
   KeepaliveStats,

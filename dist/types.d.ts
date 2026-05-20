@@ -159,6 +159,12 @@ export interface KeepaliveConfig {
         hasAnyCacheControl: boolean;
         at: number;
     }) => void;
+    /**
+     * Fired whenever the KA snapshot registry is mutated (a snapshot registered,
+     * or the registry cleared on disarm/reload/evict). Lets a consumer persist
+     * the registry across a proxy restart without polling. Best-effort.
+     */
+    onRegistryChange?: () => void;
 }
 export interface KeepaliveTick {
     idleMs: number;

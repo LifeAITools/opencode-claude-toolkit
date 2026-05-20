@@ -143,6 +143,12 @@ export interface ProxyClientOptions {
      * Injectable for tests.
      */
     proxyStartedAt?: number;
+    /**
+     * Optional: where to persist the KA snapshot registry so KA survives a
+     * proxy restart (idle sessions keep their cache warm across a deploy).
+     * Default: `~/.claude-local/proxy-ka-snapshots.json`. Injectable for tests.
+     */
+    kaSnapshotPath?: string;
 }
 export interface HandleRequestContext {
     /** Unique identifier for the logical session. */
@@ -182,6 +188,16 @@ export declare class ProxyClient {
     /** Wall-clock ms this proxy process started — a cache warm-up older than
      *  this means the TTL gap spans a restart (KA could not have prevented it). */
     private readonly proxyStartedAt;
+    /** Where the KA snapshot registry is persisted (configurable for tests). */
+    private readonly kaSnapshotPath;
+    /** Set when a KA registry mutated since the last persist — bounds writes
+     *  to "only when something changed" (bodies are large; no blind 10s saves). */
+    private kaSnapshotDirty;
+    /** Lineage keys (`${sessionId}:${lineageKey}`) whose persisted KA snapshot
+     *  was DROPPED at startup (cache already dead). The next real request for
+     *  such a lineage is a genuine rewrite the guard should surface — see
+     *  predictCacheMiss / classifyRewrite's `kaRevivalDropped`. */
+    private readonly kaReviveDropped;
     /** Last cacheable prefix (system + tools) seen per `${sessionId}:${lineageKey}`.
      *  In-memory only (never persisted — bodies are large) — feeds the prefix
      *  diff written into a guard-block dump. Reaped with prefixHistory. */
@@ -241,6 +257,21 @@ export declare class ProxyClient {
      */
     handleRequest(rawBody: ArrayBuffer | Uint8Array | string, headers: Record<string, string>, ctx: HandleRequestContext): Promise<Response>;
     private createEngine;
+    /** Serialise every armed engine's KA registry into a persistable map. */
+    private collectKaSnapshots;
+    /** Persist the KA snapshot registry. Best-effort — never throws. */
+    private persistKaSnapshots;
+    /**
+     * Startup: revive KA engines for sessions whose cache is provably still
+     * warm. A snapshot too stale to revive is DROPPED — never re-armed (firing
+     * KA on a dead cache is itself a cold write = quota burn). Each dropped
+     * lineage is recorded in `kaReviveDropped` so the next real request for it
+     * is surfaced as a genuine rewrite, not silently passed as proxy-restart.
+     */
+    private reviveKaSnapshots;
+    /** Record a dropped KA snapshot: tag its lineages (so the guard surfaces the
+     *  next real request as a real rewrite) and emit KA_REVIVE_DROP. */
+    private recordReviveDrop;
     private engineDoFetch;
     private parseSSEAndNotify;
     private predictCacheMiss;

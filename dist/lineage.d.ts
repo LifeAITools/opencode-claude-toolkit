@@ -129,6 +129,13 @@ export interface RewriteContext {
      *  across a gap in which it did not exist, so such an expiry is NOT
      *  `avoidable` — it is an expected consequence of the restart. */
     spansProxyRestart?: boolean;
+    /** This lineage HAD a persisted KA snapshot at the restart, but it was
+     *  dropped (cache already too stale to revive). Unlike a restart with no
+     *  persisted snapshot at all, the proxy genuinely tried and could not save
+     *  the cache — so the rewrite is a real, blockable one the user should
+     *  consent to, NOT a free `expected:proxy-restart`. Overrides
+     *  `spansProxyRestart`. */
+    kaRevivalDropped?: boolean;
     /** The current org-id differs from the org-id under which this lineage's
      *  prefix was last cached. Replaying the prefix would cold-write the full
      *  context against — and bill — the NEW org. The predictor sets this only

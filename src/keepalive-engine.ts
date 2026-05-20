@@ -92,6 +92,7 @@ export interface KeepaliveEngineOptions {
 import { CacheRewriteBlockedError } from './types.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { lineageKey, classifyRole, type AgentRole, type RoleHints } from './lineage.js'
+import type { PersistedEngineState } from './ka-snapshot-store.js'
 
 // ============================================================
 // Per-lineage KA state shapes
@@ -359,6 +360,7 @@ export class KeepaliveEngine {
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
     onNetworkStateChange?: (info: { from: string; to: string; at: number }) => void
     onTtlScan?: (info: { minTtlMs: number | null; previousTtlMs: number | null; hasAnyCacheControl: boolean; at: number }) => void
+    onRegistryChange?: () => void
   }
 
   /** Last observed wire cache_control min-TTL (ms). null = none seen yet / no markers. */
@@ -494,6 +496,7 @@ export class KeepaliveEngine {
       onRewriteWarning: ka.onRewriteWarning,
       onNetworkStateChange: ka.onNetworkStateChange,
       onTtlScan: ka.onTtlScan,
+      onRegistryChange: ka.onRegistryChange,
     }
   }
 
@@ -682,6 +685,7 @@ export class KeepaliveEngine {
           body, headers, model, lineageKey: key, role,
           inputTokens: totalTokens, hasCacheControl: hasAnyCacheControl,
         })
+        this.notifyRegistryChanged()
       }
 
       // Track largest observed cache size per model — feeds the rewrite-guard
@@ -753,7 +757,7 @@ export class KeepaliveEngine {
     }
     this.quotaPauseUntil = null
     this.abortController?.abort()
-    this.registry.clear()
+    this.clearRegistry()
     this.inFlight = false
     this.stopHealthProbe()
   }
@@ -771,7 +775,7 @@ export class KeepaliveEngine {
    */
   disarm(reason: string): void {
     this.logClearDiag('external_disarm', { reason })
-    this.registry.clear()
+    this.clearRegistry()
     try { this.config.onDisarmed?.({ reason, at: Date.now() }) } catch {}
     this.stop()
   }
@@ -802,7 +806,7 @@ export class KeepaliveEngine {
     // Drop committed (stale-org) snapshots. Pending in-flight snapshots are
     // kept — their real request goes to the NEW org, so their completion is a
     // valid fresh registration.
-    this.registry.clear()
+    this.clearRegistry()
     // Timer intentionally left running — a cheap no-op against the empty
     // registry, auto-resumes on the next notifyRealRequestComplete. Same
     // rationale as onDisarmed() ("timer remains... auto-resumes").
@@ -845,7 +849,7 @@ export class KeepaliveEngine {
     try {
       if (!this.isOwnerAlive()) {
         this.logClearDiag('owner_dead', { ownerCheck: 'tick' })
-        this.registry.clear()
+        this.clearRegistry()
         this.stop()
         this.onDisarmed('owner_dead')
         return
@@ -873,7 +877,7 @@ export class KeepaliveEngine {
             `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((cacheAge - this.cacheTtlMs) / 1000)}\n`)
         } catch { /* logging best-effort */ }
         this.logClearDiag('cache_expired_during_sleep', { overSec: Math.round((cacheAge - this.cacheTtlMs) / 1000) })
-        this.registry.clear()
+        this.clearRegistry()
         this.onDisarmed('cache_expired_during_sleep')
         return
       }
@@ -885,7 +889,7 @@ export class KeepaliveEngine {
     const liveConfig = loadKeepaliveConfig()
     if (!liveConfig.enabled) {
       this.logClearDiag('config_disabled', { liveConfigEnabled: liveConfig.enabled })
-      this.registry.clear()
+      this.clearRegistry()
       this.stop()
       return
     }
@@ -961,7 +965,7 @@ export class KeepaliveEngine {
     const realIdle = Date.now() - this.lastRealActivityAt
     if (this.config.idleTimeoutMs !== Infinity && realIdle > this.config.idleTimeoutMs) {
       this.logClearDiag('idle_timeout', { realIdleMs: realIdle, idleTimeoutMs: this.config.idleTimeoutMs })
-      this.registry.clear()
+      this.clearRegistry()
       this.stop()
       return
     }
@@ -1081,7 +1085,7 @@ export class KeepaliveEngine {
             `[${new Date().toISOString()}] KA_FIRE_EVICTION_DETECTED pid=${process.pid} cw=${cw} cr=${cr} ratio=${(cr/cw).toFixed(3)} — disarming to prevent cascade\n`)
         } catch { /* logging best-effort */ }
         // Clear registry so we won't re-fire stale snapshot.
-        this.registry.clear()
+        this.clearRegistry()
         this.stop()
         // Notify consumer so they can log/alert
         try { this.config.onDisarmed?.({ reason: 'cache_evicted_post_fire', at: Date.now() }) } catch {}
@@ -1118,12 +1122,12 @@ export class KeepaliveEngine {
         // (they should refresh via credentialStore on 401). Engine will resume
         // on next real request with fresh creds.
         this.logClearDiag('auth_error', { category, errStatus: (err as any)?.status })
-        this.registry.clear()
+        this.clearRegistry()
         this.onDisarmed('auth_error')
       } else {
         // Permanent (400, malformed request, etc). Don't retry.
         this.logClearDiag('permanent_error', { category, errStatus: (err as any)?.status, errMessage: (err as any)?.message?.slice(0, 200) })
-        this.registry.clear()
+        this.clearRegistry()
         this.onDisarmed('permanent_error')
       }
     } finally {
@@ -1233,7 +1237,7 @@ export class KeepaliveEngine {
         gapMs: resetAtMs - cacheDiesAt,
         cacheTtlMs: this.cacheTtlMs,
       })
-      this.registry.clear()
+      this.clearRegistry()
       this.onDisarmed('quota_outlives_cache')
       return
     }
@@ -1306,7 +1310,7 @@ export class KeepaliveEngine {
   ): void {
     if (attemptIndex >= this.retryDelaysMs.length) {
       this.logClearDiag('retry_exhausted', { attemptIndex, retryDelaysMsLen: this.retryDelaysMs.length })
-      this.registry.clear()
+      this.clearRegistry()
       this.onDisarmed('retry_exhausted')
       return
     }
@@ -1349,7 +1353,7 @@ export class KeepaliveEngine {
         attemptIndex,
         retryDelaysMsRaw: JSON.stringify(this.retryDelaysMs),
       })
-      this.registry.clear()
+      this.clearRegistry()
       this.onDisarmed(reason)
       return
     }
@@ -1362,7 +1366,7 @@ export class KeepaliveEngine {
       try {
         if (!this.isOwnerAlive()) {
           this.logClearDiag('owner_dead', { ownerCheck: 'retry' })
-          this.registry.clear()
+          this.clearRegistry()
           this.stop()
           this.onDisarmed('owner_dead')
           return
@@ -1377,7 +1381,7 @@ export class KeepaliveEngine {
       const ageNow = Date.now() - this.cacheWrittenAt
       if (ageNow > this.cacheTtlMs - this.safetyMarginMs) {
         this.logClearDiag('cache_ttl_expired_mid_retry', { ageNowMs: ageNow })
-        this.registry.clear()
+        this.clearRegistry()
         this.onDisarmed('cache_ttl_expired_mid_retry')
         return
       }
@@ -1433,7 +1437,7 @@ export class KeepaliveEngine {
             errStatus: (err as any)?.status,
             errMessage: (err as any)?.message?.slice(0, 200),
           })
-          this.registry.clear()
+          this.clearRegistry()
           this.onDisarmed('permanent_error_mid_retry')
         }
       } finally {
@@ -1719,5 +1723,104 @@ export class KeepaliveEngine {
     err: { resetAt?: number | null; retryAfterSec?: number | null },
   ): void {
     this.handleQuotaRateLimit(entry, err)
+  }
+
+  /** Notify the consumer (best-effort) that the KA registry was mutated —
+   *  used to trigger cross-restart persistence. Never throws. */
+  private notifyRegistryChanged(): void {
+    try { this.config.onRegistryChange?.() } catch { /* never break a fire/request */ }
+  }
+
+  /** Clear the registry + notify — the disarm/reload/evict mutation path. */
+  private clearRegistry(): void {
+    this.registry.clear()
+    this.notifyRegistryChanged()
+  }
+
+  /**
+   * Reconstruct armed state from a persisted snapshot (ka-snapshot-store.ts).
+   * Called ONCE on a fresh engine, before any real request: repopulates the
+   * registry + timing scalars and starts the tick, leaving the engine
+   * indistinguishable from one armed by a real request. From the first tick
+   * onward every existing layer (owner-alive gate, wake-from-sleep TTL
+   * recheck, network/429 handling) runs unmodified. Never throws.
+   *
+   * The caller (ProxyClient) is responsible for having decided, via
+   * `assessRevival`, that this snapshot's cache is still warm enough — revive()
+   * trusts that decision and does not re-check liveness here.
+   */
+  revive(state: PersistedEngineState): void {
+    try {
+      // Fresh-engine guard — never revive over a live/armed engine.
+      if (this.registry.size > 0 || this.timer) return
+      if (!state || !Array.isArray(state.registry) || state.registry.length === 0) return
+
+      this.cacheWrittenAt = state.cacheWrittenAt
+      // Seed BOTH activity clocks to the warm-up time: a revived engine whose
+      // cache is already aging then fires its first KA promptly (idle is
+      // measured from cacheWrittenAt) instead of waiting a full interval.
+      this.lastActivityAt = state.cacheWrittenAt
+      this.lastRealActivityAt = state.cacheWrittenAt
+      this.lastObservedTtlMs = state.lastObservedTtlMs ?? null
+      this.ttlEverObserved = !!state.ttlEverObserved
+      // Keep the (already wire-downlocked) TTL — never let SSOT raise a TTL the
+      // wire proved shorter. Take the stricter of the two; over-fire is safe.
+      if (Number.isFinite(state.cacheTtlMs) && state.cacheTtlMs > 0) {
+        this.cacheTtlMs = Math.min(this.cacheTtlMs, state.cacheTtlMs)
+      }
+      if (state.cacheTtlObservedLocked) this.cacheTtlObservedLocked = true
+      this.lastKnownCacheTokensByModel = new Map(
+        Object.entries(state.lastKnownCacheTokensByModel ?? {}),
+      )
+      for (const e of state.registry) {
+        if (!e || typeof e.lineageKey !== 'string') continue
+        this.registry.set(e.lineageKey, {
+          body: JSON.parse(JSON.stringify(e.body)),
+          headers: { ...e.headers },
+          model: e.model,
+          lineageKey: e.lineageKey,
+          role: e.role as AgentRole,
+          inputTokens: e.inputTokens,
+          hasCacheControl: e.hasCacheControl,
+        })
+      }
+      if (this.registry.size > 0) {
+        this.notifyRegistryChanged()
+        this.startTimer()
+      }
+    } catch {
+      /* revive is best-effort — a failure just means no KA until a real request */
+    }
+  }
+
+  /**
+   * Serialise the armed state for cross-restart persistence (see
+   * ka-snapshot-store.ts). Returns `null` when the engine holds no snapshot
+   * worth persisting (registry empty — disarmed or never armed). Never throws.
+   */
+  serializeState(): PersistedEngineState | null {
+    try {
+      if (this.registry.size === 0) return null
+      return {
+        cacheWrittenAt: this.cacheWrittenAt,
+        cacheTtlMs: this.cacheTtlMs,
+        cacheTtlOverridden: this.cacheTtlOverridden,
+        cacheTtlObservedLocked: this.cacheTtlObservedLocked,
+        lastObservedTtlMs: this.lastObservedTtlMs,
+        ttlEverObserved: this.ttlEverObserved,
+        lastKnownCacheTokensByModel: Object.fromEntries(this.lastKnownCacheTokensByModel),
+        registry: Array.from(this.registry.values()).map((e) => ({
+          body: e.body,
+          headers: e.headers,
+          model: e.model,
+          lineageKey: e.lineageKey,
+          role: e.role,
+          inputTokens: e.inputTokens,
+          hasCacheControl: e.hasCacheControl,
+        })),
+      }
+    } catch {
+      return null
+    }
   }
 }

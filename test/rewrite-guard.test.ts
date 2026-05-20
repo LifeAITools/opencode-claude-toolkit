@@ -13,7 +13,7 @@ import { describe, test, expect } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { ProxyClient, type ProxyClientOptions } from '../src/proxy-client.js'
+import { ProxyClient, extractSessionIdFromBody, type ProxyClientOptions } from '../src/proxy-client.js'
 import type { OrgIdResolver } from '../src/org-identity.js'
 import { lineageKey, prefixHashes } from '../src/lineage.js'
 
@@ -251,6 +251,27 @@ describe('rewrite guard — block dump artifact', () => {
     expect(art.prefixDiff.summary).toContain('IDENTICAL')      // ttl-expiry: prefix unchanged
     c.stop()
     rmSync(dumpDir, { recursive: true, force: true })
+  })
+})
+
+describe('extractSessionIdFromBody', () => {
+  const UUID = 'ae5106e7-9b6d-5e2f-8a1b-2c3d4e5f6071'
+  test('SDK-agent metadata.user_id (..._session_<uuid>)', () => {
+    const body = JSON.stringify({ model: 'm', messages: [],
+      metadata: { user_id: `user_devhash_account__session_${UUID}` } })
+    expect(extractSessionIdFromBody(body)).toBe(UUID)
+  })
+  test('interactive-CC metadata.user_id (JSON with session_id)', () => {
+    const body = JSON.stringify({ model: 'm', messages: [],
+      metadata: { user_id: JSON.stringify({ device_id: 'd', session_id: UUID }) } })
+    expect(extractSessionIdFromBody(body)).toBe(UUID)
+  })
+  test('no metadata → null', () => {
+    expect(extractSessionIdFromBody(JSON.stringify({ model: 'm', messages: [] }))).toBeNull()
+  })
+  test('malformed body → null, never throws', () => {
+    expect(() => extractSessionIdFromBody('{bad')).not.toThrow()
+    expect(extractSessionIdFromBody('{bad')).toBeNull()
   })
 })
 

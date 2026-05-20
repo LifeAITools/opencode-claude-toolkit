@@ -280,4 +280,18 @@ export declare class ProxyClient {
     private predictCacheMiss;
     private handleNetworkError;
 }
+/**
+ * Extract the Claude Code session id from a request body's `metadata.user_id`.
+ *
+ * Claude Code embeds the session UUID in `metadata.user_id` even when the
+ * `x-claude-code-session-id` HTTP header is absent — interactive CC writes it
+ * as a JSON `{"...","session_id":"<uuid>"}`, an Agent-SDK-spawned agent writes
+ * it as `user_<device>_account_<acct>_session_<uuid>`. The proxy front-end can
+ * therefore key a HEADER-LESS agent (every SDK-spawned cognitive worker) to
+ * its real, stable session id instead of a throwaway `anon-*` — which is what
+ * makes per-session KA + cross-restart cache persistence work for them.
+ *
+ * Never throws — a parse failure / absent field yields `null`.
+ */
+export declare function extractSessionIdFromBody(rawBody: ArrayBuffer | Uint8Array | string): string | null;
 //# sourceMappingURL=proxy-client.d.ts.map

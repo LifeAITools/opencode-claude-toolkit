@@ -104,7 +104,7 @@ export type {
 // ProxyClient — the core orchestrator. Consumers construct this with
 // adapters (credentials + event emitter + session store) and use
 // handleRequest() to process /v1/messages requests end-to-end.
-export { ProxyClient } from './proxy-client.js'
+export { ProxyClient, extractSessionIdFromBody } from './proxy-client.js'
 export type {
   ProxyClientConfig,
   ProxyClientOptions,

@@ -13,7 +13,7 @@ export type { RecordedRequest, MetricsSummary, RegressionInfo, CacheMetricsOptio
 export type { ICredentialsProvider, IEventEmitter, ISessionStore, IUpstreamFetcher, ILivenessChecker, ProxyEvent, Session, ProxyClientAdapters, } from './proxy-ports.js';
 export { FileCredentialsProvider, ConsoleEventEmitter, NullEventEmitter, InMemorySessionStore, DefaultLivenessChecker, NativeFetchUpstream, } from './proxy-adapters.js';
 export type { FileCredentialsProviderOptions, ConsoleEventEmitterOptions, } from './proxy-adapters.js';
-export { ProxyClient } from './proxy-client.js';
+export { ProxyClient, extractSessionIdFromBody } from './proxy-client.js';
 export type { ProxyClientConfig, ProxyClientOptions, HandleRequestContext, RateLimitSnapshot, } from './proxy-client.js';
 export { FileOrgIdResolver, readOrgIdFromConfig, DEFAULT_ACCOUNT_CONFIG_PATH, } from './org-identity.js';
 export type { OrgIdResolver } from './org-identity.js';

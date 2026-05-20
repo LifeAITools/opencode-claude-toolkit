@@ -1418,6 +1418,41 @@ function extractCcVersion(body: unknown): string | null {
 }
 
 /**
+ * Extract the Claude Code session id from a request body's `metadata.user_id`.
+ *
+ * Claude Code embeds the session UUID in `metadata.user_id` even when the
+ * `x-claude-code-session-id` HTTP header is absent — interactive CC writes it
+ * as a JSON `{"...","session_id":"<uuid>"}`, an Agent-SDK-spawned agent writes
+ * it as `user_<device>_account_<acct>_session_<uuid>`. The proxy front-end can
+ * therefore key a HEADER-LESS agent (every SDK-spawned cognitive worker) to
+ * its real, stable session id instead of a throwaway `anon-*` — which is what
+ * makes per-session KA + cross-restart cache persistence work for them.
+ *
+ * Never throws — a parse failure / absent field yields `null`.
+ */
+export function extractSessionIdFromBody(
+  rawBody: ArrayBuffer | Uint8Array | string,
+): string | null {
+  try {
+    const s = typeof rawBody === 'string'
+      ? rawBody
+      : new TextDecoder().decode(rawBody as ArrayBuffer)
+    if (!s.includes('session')) return null              // cheap bail-out
+    const body = JSON.parse(s) as { metadata?: { user_id?: unknown } }
+    const uid = body?.metadata?.user_id
+    if (typeof uid !== 'string') return null
+    // Matches both `"session_id":"<uuid>"` and `..._session_<uuid>` — the
+    // optional `_id` covers the JSON `session_id` key.
+    const m = uid.match(
+      /session(?:_?id)?["'_:\s]*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/,
+    )
+    return m ? m[1].toLowerCase() : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Inspect the LATEST user message for rewrite-guard purposes. Never throws.
  *
  *   isContinuation — the message carries a `tool_result` block → it is an

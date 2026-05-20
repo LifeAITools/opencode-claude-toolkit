@@ -142,8 +142,10 @@ export declare class ProxyClient {
     private readonly liveness;
     private readonly reaperTimer;
     private lastRateLimit;
-    /** Previous request's cacheable-prefix fingerprint per `${sessionId}:${lineageKey}`
-     *  — feeds the cache-miss predictor. Pruned when a session is reaped. */
+    /** Previous request's cacheable-prefix fingerprint per `${sessionId}:${lineageKey}`.
+     *  Persisted to disk (loadPrefixHistory) so the cache-miss predictor + rewrite
+     *  guard survive a proxy restart — otherwise the first request of every
+     *  session post-restart looks like a cold-start and the guard is blind. */
     private readonly prefixHistory;
     constructor(opts: ProxyClientOptions);
     /** Current rate-limit snapshot from last upstream response. */

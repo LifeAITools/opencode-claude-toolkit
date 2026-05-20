@@ -75,6 +75,9 @@ import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { prefixHashes, classifyRewrite, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
+import { readFileSync, writeFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import {
   HEADER_AUTHORIZATION,
   HEADER_ANTHROPIC_BETA,
@@ -223,9 +226,11 @@ export class ProxyClient {
     utilization5h: null, utilization7d: null,
   }
 
-  /** Previous request's cacheable-prefix fingerprint per `${sessionId}:${lineageKey}`
-   *  — feeds the cache-miss predictor. Pruned when a session is reaped. */
-  private readonly prefixHistory = new Map<string, { hashes: PrefixHashes; lastReqAt: number }>()
+  /** Previous request's cacheable-prefix fingerprint per `${sessionId}:${lineageKey}`.
+   *  Persisted to disk (loadPrefixHistory) so the cache-miss predictor + rewrite
+   *  guard survive a proxy restart — otherwise the first request of every
+   *  session post-restart looks like a cold-start and the guard is blind. */
+  private readonly prefixHistory: Map<string, { hashes: PrefixHashes; lastReqAt: number }> = loadPrefixHistory()
 
   constructor(opts: ProxyClientOptions) {
     this.config = { ...DEFAULT_CONFIG, ...opts.config }
@@ -263,6 +268,8 @@ export class ProxyClient {
           if (k.startsWith(sid + ':')) this.prefixHistory.delete(k)
         }
       }
+      // Persist prefix history each reaper tick so it survives a proxy restart.
+      savePrefixHistory(this.prefixHistory)
     }, 10_000)
     if (this.reaperTimer && typeof this.reaperTimer === 'object' && 'unref' in this.reaperTimer) {
       (this.reaperTimer as any).unref()
@@ -291,6 +298,7 @@ export class ProxyClient {
   /** Clean shutdown — stops reaper, metrics collector, and all KA engines in store. */
   stop(): void {
     clearInterval(this.reaperTimer)
+    savePrefixHistory(this.prefixHistory)
     this.metrics.stop()
     this.store.stopAll()
   }
@@ -1010,6 +1018,32 @@ function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
     utilization7d: headers.get('anthropic-ratelimit-unified-7d-utilization')
       ? parseFloat(headers.get('anthropic-ratelimit-unified-7d-utilization')!) : null,
   }
+}
+
+// ─── Prefix-history persistence (survives a proxy restart) ─────────
+// In-memory prefix fingerprints were wiped on restart → first request of every
+// session post-restart classified cold-start → rewrite guard blind. Persisting
+// bridges restarts.
+
+const PREFIX_HISTORY_PATH = join(homedir(), '.claude-local', 'proxy-prefix-history.json')
+const PREFIX_HISTORY_MAX_AGE_MS = 60 * 60 * 1000   // prune entries older than 1h on load
+
+function loadPrefixHistory(): Map<string, { hashes: PrefixHashes; lastReqAt: number }> {
+  const m = new Map<string, { hashes: PrefixHashes; lastReqAt: number }>()
+  try {
+    const raw = JSON.parse(readFileSync(PREFIX_HISTORY_PATH, 'utf8')) as Record<string, { hashes: PrefixHashes; lastReqAt: number }>
+    const cutoff = Date.now() - PREFIX_HISTORY_MAX_AGE_MS
+    for (const [k, v] of Object.entries(raw)) {
+      if (v && typeof v.lastReqAt === 'number' && v.lastReqAt >= cutoff && v.hashes) m.set(k, v)
+    }
+  } catch { /* missing or corrupt → start empty */ }
+  return m
+}
+
+function savePrefixHistory(m: Map<string, { hashes: PrefixHashes; lastReqAt: number }>): void {
+  try {
+    writeFileSync(PREFIX_HISTORY_PATH, JSON.stringify(Object.fromEntries(m)))
+  } catch { /* best-effort — never break the request path */ }
 }
 
 function jsonResponse(status: number, body: unknown): Response {

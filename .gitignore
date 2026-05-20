@@ -1,41 +1,32 @@
+# Dependencies & env
 node_modules/
-*.bak
-*.log
 .env
-src/
-scripts/
-PRPs/
-# test/ — see selective allow-list below; directory-level ignore commented
-# out so explicit !test/<file> rules can re-include contract tests.
-test/*
+bun.lock
+
+# Logs & editor/agent scratch
+*.log
 .claude/
 packages/opencode-claude/.claude/
-*.map
+README.md.toc
+
+# Backups (timestamped + plain)
+*.bak
 *.backup
 *.backup2
-
-# Tracked regression tests inside the otherwise-ignored test/ tree.
-# Pattern `test/*` (above) ignores all files in test/ but NOT the directory
-# itself, allowing these `!`-prefixed re-includes to work. Listed explicitly
-# so contract tests don't drift out of git on accident.
-!test/keepalive-engine.test.ts
-!test/keepalive-regression.test.ts
-!test/todowrite-repair.test.ts
-!test/orphan-tool-use-sanitizer.test.ts
-
-# One-off test/POC scripts
-packages/claude-max-provider/test-*.ts
-
-# Dev artifacts
+*.backup-*
 packages/opencode-proxy/server.ts.bak
-packages/opencode-plugin/
+
+# Planning docs — local working notes, not shipped code
+PRPs/
+
+# One-off POC / dev artifacts (not part of any published package)
+packages/claude-max-provider/test-*.ts
 packages/opencode-proxy/*.sh
-bun.lock
-README.md.toc
-~/.claude/snapshots/
 
 # Session-local opencode state (local dev env, not code)
 .opencode/
 
-# Timestamped backup files (provider.ts.backup-before-core-switch-YYYYMMDD-HHMMSS)
-*.backup-*
+# NOTE: src/, scripts/, test/, packages/*/src/, and dist sourcemaps (*.map)
+# are INTENTIONALLY tracked. They were previously ignored (with a fragile
+# `!test/<file>` allow-list), which left ~40 core source files invisible to
+# git and let drift accumulate silently. Source belongs in version control.

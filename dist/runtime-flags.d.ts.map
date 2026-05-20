@@ -1,0 +1,1 @@
+{"version":3,"file":"runtime-flags.d.ts","sourceRoot":"","sources":["../src/runtime-flags.ts"],"names":[],"mappings":"AAeA,MAAM,WAAW,YAAY;IAC3B,cAAc,EAAE,OAAO,CAAC;IACxB,gBAAgB,EAAE,OAAO,CAAC;CAC3B;AAoBD,wBAAgB,SAAS,IAAI,YAAY,CA2BxC;AAED,4BAA4B;AAC5B,wBAAgB,QAAQ,IAAI,OAAO,CAElC;AAED,wBAAgB,iBAAiB,IAAI,OAAO,CAE3C"}

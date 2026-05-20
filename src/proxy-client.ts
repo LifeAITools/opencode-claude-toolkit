@@ -1,0 +1,928 @@
+/**
+ * ProxyClient — the CORE orchestrator for subscription-based Anthropic proxying.
+ *
+ * ──────────────────────────────────────────────────────────────
+ *  RESPONSIBILITIES
+ * ──────────────────────────────────────────────────────────────
+ *
+ *  Given a consumer's HTTP request to /v1/messages (body + headers + session
+ *  context), ProxyClient:
+ *    1. Tracks per-session state (via ISessionStore port)
+ *    2. Obtains fresh OAuth token (via ICredentialsProvider port)
+ *    3. Rewrites headers (strip consumer auth, inject OAuth bearer, oauth beta)
+ *    4. Notifies KeepaliveEngine so it knows there's a real request
+ *    5. Forwards to api.anthropic.com (via IUpstreamFetcher port)
+ *    6. Tees the SSE stream: one copy back to consumer, one parsed for usage
+ *    7. Feeds usage back to engine which schedules keepalive fires
+ *    8. Handles network-level errors with standards-compliant 503 response
+ *
+ *  What it does NOT do:
+ *    - Listen on any port (that's the HTTP server's job — consumers wrap us)
+ *    - Write logs directly (goes through IEventEmitter port)
+ *    - Persist session state (goes through ISessionStore port)
+ *    - Refresh OAuth tokens (ICredentialsProvider owns that)
+ *
+ *  ──────────────────────────────────────────────────────────────
+ *  USAGE
+ *  ──────────────────────────────────────────────────────────────
+ *
+ *  Zero-config (defaults):
+ *    const client = new ProxyClient({
+ *      config: { kaIntervalSec: 120, credentialsPath: '~/.claude/.credentials.json' },
+ *      credentialsProvider: new FileCredentialsProvider(),
+ *    })
+ *
+ *  HTTP proxy:
+ *    Bun.serve({
+ *      async fetch(req) {
+ *        return client.handleRequest(
+ *          await req.arrayBuffer(),
+ *          headersToObject(req.headers),
+ *          { sessionId: req.headers.get('x-claude-code-session-id') ?? randomId() }
+ *        )
+ *      }
+ *    })
+ *
+ *  In-process (opencode-plugin):
+ *    return {
+ *      auth: {
+ *        loader: () => ({
+ *          fetch: (req, init) => client.handleRequest(init.body, headersFromInit(init), {
+ *            sessionId: crypto.randomUUID(),
+ *          }),
+ *        }),
+ *      },
+ *    }
+ */
+
+import { KeepaliveEngine } from './keepalive-engine.js'
+import { CacheMetricsCollector } from './cache-metrics.js'
+import type {
+  ICredentialsProvider,
+  IEventEmitter,
+  ILivenessChecker,
+  ISessionStore,
+  IUpstreamFetcher,
+  Session,
+} from './proxy-ports.js'
+import {
+  ConsoleEventEmitter,
+  DefaultLivenessChecker,
+  InMemorySessionStore,
+  NativeFetchUpstream,
+} from './proxy-adapters.js'
+import type { StreamEvent, TokenUsage } from './types.js'
+import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
+import {
+  HEADER_AUTHORIZATION,
+  HEADER_ANTHROPIC_BETA,
+  HEADER_CONTENT_TYPE,
+  CONTENT_TYPE_JSON,
+} from './anthropic-headers.js'
+
+// ═══ Config ═══════════════════════════════════════════════════════
+
+export interface ProxyClientConfig {
+  /** Anthropic API base URL. Default: https://api.anthropic.com */
+  anthropicBaseUrl?: string
+
+  /**
+   * Per-consumer cache TTL override in SECONDS. When set, this proxy's engine
+   * uses THIS value as its cache lifetime (and never live-reloads it from SSOT).
+   *
+   * Default: 300 (5 min) — matches native Claude Code's `cache_control:ephemeral`
+   * wire behavior. The shared ~/.claude/keepalive.json may declare a longer TTL
+   * (e.g. 3600s for opencode's 1h cache contract), but that value reflects
+   * opencode's traffic — NOT the native CC traffic this proxy intercepts.
+   *
+   * Honoring SSOT's longer TTL here is the architectural bug that caused the
+   * 2026-05-17 SDK-0.15 incident (906K cache_creation tokens wasted on KA fires
+   * against caches Anthropic had already expired at 5 min).
+   *
+   * Set to `null` (or omit and patch the type) only when you knowingly want SSOT
+   * behavior — e.g. when the proxy will exclusively serve opencode-style traffic
+   * with explicit `ttl: '1h'` cache_control markers.
+   */
+  kaCacheTtlSec?: number
+
+  /**
+   * Keepalive interval in seconds. Engine clamps to [intervalClampMin, intervalClampMax]
+   * derived from the active cacheTtlMs (read from ~/.claude/keepalive.json SSOT,
+   * or from kaCacheTtlSec when overridden).
+   *
+   * If undefined, engine uses SSOT.intervalMs (auto-scales: ~5m TTL → 150s, ~1h TTL → 1800s).
+   * Explicit value overrides SSOT.
+   */
+  kaIntervalSec?: number
+
+  /**
+   * Idle timeout in seconds — how long without real requests before engine
+   * disarms. 0 = never. Default: 0 (never, kept warm until PID dies).
+   */
+  kaIdleTimeoutSec?: number
+
+  /** Minimum tokens for a snapshot to be eligible for KA. Default: 2000 */
+  kaMinTokens?: number
+
+  /** Rewrite-burst guard warn threshold (idle sec). Default: 300 */
+  kaRewriteWarnIdleSec?: number
+
+  /** Rewrite-burst guard warn token threshold. Default: 50000 */
+  kaRewriteWarnTokens?: number
+
+  /** Rewrite-burst guard block threshold (idle sec). 0 = never. Default: 0 */
+  kaRewriteBlockIdleSec?: number
+
+  /** Enable rewrite-burst hard block. Default: false (warn only) */
+  kaRewriteBlockEnabled?: boolean
+}
+
+// Note: kaIntervalSec intentionally NOT defaulted here.
+// When undefined, KeepaliveEngine reads its default from
+// ~/.claude/keepalive.json (SSOT) which auto-scales with cacheTtlMs.
+//
+// kaCacheTtlSec DEFAULTS to 300 (5min) because this proxy intercepts native
+// Claude Code traffic, whose cache_control:ephemeral writes live 5 min on
+// Anthropic's side. The SSOT (~/.claude/keepalive.json) is shared with
+// opencode and may declare 3600s — honoring that value here is a wire-TTL
+// mismatch that wastes tokens (2026-05-17 incident). See ProxyClientConfig.
+const DEFAULT_CONFIG: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
+  kaIntervalSec: number | undefined
+} = {
+  anthropicBaseUrl: ANTHROPIC_API_BASE,
+  kaCacheTtlSec: 300,
+  kaIntervalSec: undefined,
+  kaIdleTimeoutSec: 0,
+  kaMinTokens: 2000,
+  kaRewriteWarnIdleSec: 300,
+  kaRewriteWarnTokens: 50000,
+  kaRewriteBlockIdleSec: 0,
+  kaRewriteBlockEnabled: false,
+}
+
+export interface ProxyClientOptions {
+  /** Config tuning — all fields optional (sensible defaults) */
+  config?: ProxyClientConfig
+
+  /** REQUIRED: how to get OAuth tokens */
+  credentialsProvider: ICredentialsProvider
+
+  /** Optional: where to emit events. Default: ConsoleEventEmitter (stderr) */
+  eventEmitter?: IEventEmitter
+
+  /** Optional: where to store sessions. Default: InMemorySessionStore */
+  sessionStore?: ISessionStore<KeepaliveEngine>
+
+  /** Optional: how to talk to upstream. Default: native fetch */
+  upstreamFetcher?: IUpstreamFetcher
+
+  /** Optional: how to check PID liveness. Default: POSIX kill -0 */
+  livenessChecker?: ILivenessChecker
+}
+
+// ═══ Request context (per handleRequest call) ══════════════════════
+
+export interface HandleRequestContext {
+  /** Unique identifier for the logical session. */
+  sessionId: string
+
+  /** OS PID of the consumer process (for JIT liveness check). */
+  sourcePid?: number | null
+
+  /** Abort signal for the upstream fetch. */
+  signal?: AbortSignal
+}
+
+// ═══ Rate limit snapshot (exposed for introspection) ═══════════════
+
+export interface RateLimitSnapshot {
+  status: string | null
+  resetAt: number | null
+  claim: string | null
+  retryAfter: number | null
+  utilization5h: number | null
+  utilization7d: number | null
+}
+
+// ═══ ProxyClient ═══════════════════════════════════════════════════
+
+export class ProxyClient {
+  private readonly config: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & { kaIntervalSec: number | undefined }
+  private readonly metrics: CacheMetricsCollector
+  private readonly credentials: ICredentialsProvider
+  private readonly events: IEventEmitter
+  private readonly store: ISessionStore<KeepaliveEngine>
+  private readonly upstream: IUpstreamFetcher
+  private readonly liveness: ILivenessChecker
+
+  private readonly reaperTimer: ReturnType<typeof setInterval>
+  private lastRateLimit: RateLimitSnapshot = {
+    status: null, resetAt: null, claim: null, retryAfter: null,
+    utilization5h: null, utilization7d: null,
+  }
+
+  constructor(opts: ProxyClientOptions) {
+    this.config = { ...DEFAULT_CONFIG, ...opts.config }
+    this.credentials = opts.credentialsProvider
+    this.events = opts.eventEmitter ?? new ConsoleEventEmitter()
+    this.liveness = opts.livenessChecker ?? new DefaultLivenessChecker()
+    this.store = opts.sessionStore ?? new InMemorySessionStore<KeepaliveEngine>(this.liveness)
+    this.upstream = opts.upstreamFetcher ?? new NativeFetchUpstream()
+
+    // Cache metrics collector — emits CACHE_METRICS_SUMMARY every 60s and
+    // CACHE_REGRESSION_DETECTED if hit_rate drops below threshold.
+    this.metrics = new CacheMetricsCollector({
+      windowMs: 60_000,
+      reportIntervalMs: 60_000,
+      onSummary: (summary) => this.events.emit({
+        level: 'info',
+        kind: 'CACHE_METRICS_SUMMARY',
+        ...summary,
+      }),
+      onRegression: (info) => this.events.emit({
+        level: 'error',
+        kind: 'CACHE_REGRESSION_DETECTED',
+        ...info,
+      }),
+    })
+
+    // Periodic reaper — every 10s, remove sessions whose owner PID is dead.
+    // Keeps state clean + stops KA engines for dead consumers.
+    this.reaperTimer = setInterval(() => {
+      const reaped = this.store.reapDead()
+      for (const sid of reaped) {
+        this.events.emit({ level: 'info', kind: 'SESSION_DEAD', sessionId: sid, reason: 'pid_gone' })
+      }
+    }, 10_000)
+    if (this.reaperTimer && typeof this.reaperTimer === 'object' && 'unref' in this.reaperTimer) {
+      (this.reaperTimer as any).unref()
+    }
+  }
+
+  // ─── Public getters ─────────────────────────────────────────────
+
+  /** Current rate-limit snapshot from last upstream response. */
+  get rateLimitSnapshot(): Readonly<RateLimitSnapshot> { return this.lastRateLimit }
+
+  /** List all tracked sessions (for stats endpoints). */
+  listSessions(): Session<KeepaliveEngine>[] { return this.store.list() }
+
+  /** Total session count. */
+  sessionCount(): number { return this.store.size() }
+
+  /** Config used by this client (read-only). */
+  get configSnapshot(): Readonly<Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & { kaIntervalSec: number | undefined }> { return this.config }
+
+  /** Snapshot of current rolling cache-metrics window. */
+  get cacheMetricsSnapshot() { return this.metrics.summary() }
+
+  // ─── Lifecycle ─────────────────────────────────────────────────
+
+  /** Clean shutdown — stops reaper, metrics collector, and all KA engines in store. */
+  stop(): void {
+    clearInterval(this.reaperTimer)
+    this.metrics.stop()
+    this.store.stopAll()
+  }
+
+  /**
+   * Disarm one or all KA engines and invalidate cached credentials.
+   *
+   * Use case: user swapped Anthropic org via `claude login` and wants the
+   * proxy to drop all stale snapshots before next request. Without this,
+   * the next KA fire would replay the previous session's accumulated
+   * snapshot against the NEW org — paying full cold-cache-write cost
+   * (~80K-500K tokens, see body-dump analysis) on the wrong account.
+   *
+   * Pass sessionId to target a single session, omit to disarm all.
+   * Returns the list of sessionIds that were disarmed.
+   */
+  disarmSessions(reason: string, sessionId?: string): string[] {
+    const disarmed: string[] = []
+    if (sessionId) {
+      const s = this.store.list().find(x => x.sessionId === sessionId)
+      if (s) {
+        s.engine.disarm(reason)
+        disarmed.push(s.sessionId)
+      }
+    } else {
+      for (const s of this.store.list()) {
+        s.engine.disarm(reason)
+        disarmed.push(s.sessionId)
+      }
+    }
+    // Always invalidate token cache too — caller may have just rotated
+    // credentials (org swap is the canonical case for this method).
+    this.credentials.invalidate()
+    this.events.emit({
+      level: 'info',
+      kind: 'ADMIN_DISARM',
+      reason,
+      sessionIdRequested: sessionId ?? null,
+      disarmedCount: disarmed.length,
+      sessionIds: disarmed,
+    })
+    return disarmed
+  }
+
+  // ─── Main entry point ──────────────────────────────────────────
+
+  /**
+   * Handle one /v1/messages request end-to-end. Returns a Response whose
+   * body streams SSE bytes from Anthropic directly to the caller.
+   *
+   * Network errors produce 503 with Retry-After: 2. Upstream 401 invalidates
+   * cached OAuth. Upstream 4xx/5xx pass through unchanged.
+   */
+  async handleRequest(
+    rawBody: ArrayBuffer | Uint8Array | string,
+    headers: Record<string, string>,
+    ctx: HandleRequestContext,
+  ): Promise<Response> {
+    const sessionId = ctx.sessionId
+    const sourcePid = ctx.sourcePid ?? null
+
+    // Get or create session with KA engine
+    const session = this.store.getOrCreate(
+      sessionId,
+      sourcePid,
+      () => this.createEngine(sessionId),
+    )
+    session.lastRequestAt = Date.now()
+
+    // Normalize body
+    const rawBodyStr = typeof rawBody === 'string'
+      ? rawBody
+      : new TextDecoder().decode(rawBody as ArrayBuffer)
+    const bodyBytes = typeof rawBody === 'string'
+      ? new TextEncoder().encode(rawBody).byteLength
+      : (rawBody as ArrayBuffer | Uint8Array).byteLength
+
+    // Parse body minimally (for model extraction + KA snapshot)
+    let parsedBody: any
+    try {
+      parsedBody = JSON.parse(rawBodyStr)
+    } catch {
+      this.events.emit({ level: 'error', kind: 'REAL_REQUEST_ERROR', sessionId, msg: 'Invalid JSON body' })
+      return jsonResponse(400, { error: 'Invalid JSON' })
+    }
+
+    const model = parsedBody.model ?? 'unknown'
+    session.model = model
+
+    // Build upstream headers: strip hop-by-hop + consumer auth, force identity encoding
+    const upstreamHeaders: Record<string, string> = {}
+    for (const [k, v] of Object.entries(headers)) {
+      const lk = k.toLowerCase()
+      if (HOP_BY_HOP_OR_AUTH.includes(lk)) continue
+      upstreamHeaders[k] = v
+    }
+    upstreamHeaders['accept-encoding'] = 'identity'
+
+    // Inject OAuth bearer
+    try {
+      const token = await this.credentials.getAccessToken()
+      upstreamHeaders[HEADER_AUTHORIZATION] = `Bearer ${token}`
+    } catch (credErr: any) {
+      this.events.emit({
+        level: 'error',
+        kind: 'TOKEN_NEEDS_RELOGIN',
+        sessionId,
+        msg: credErr?.message ?? 'No OAuth credentials',
+      })
+      return jsonResponse(401, {
+        error: { type: 'authentication_error', message: credErr?.message ?? 'No OAuth credentials' },
+      })
+    }
+
+    // Ensure oauth beta flag present
+    const existingBeta = upstreamHeaders[HEADER_ANTHROPIC_BETA] ?? upstreamHeaders['Anthropic-Beta'] ?? ''
+    if (!existingBeta.includes('oauth-2025-04-20')) {
+      const prefix = existingBeta ? existingBeta + ',' : ''
+      upstreamHeaders[HEADER_ANTHROPIC_BETA] = prefix + 'oauth-2025-04-20'
+      delete upstreamHeaders['Anthropic-Beta']
+    }
+
+    this.events.emit({
+      level: 'info',
+      kind: 'REAL_REQUEST_START',
+      sessionId,
+      model,
+      bodyBytes,
+    })
+
+    // Prime engine — aborts any in-flight KA, records pending snapshot
+    session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
+
+    // Pre-request rewrite-burst guard
+    try {
+      session.engine.checkRewriteGuard(model)
+    } catch (err: any) {
+      if (err?.code === 'CACHE_REWRITE_BLOCKED') {
+        return jsonResponse(429, {
+          error: { type: 'cache_rewrite_blocked', message: err.message },
+        })
+      }
+      throw err
+    }
+
+    const t0 = Date.now()
+
+    // Forward upstream
+    let upstream: Response
+    try {
+      upstream = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: rawBodyStr,
+        signal: ctx.signal,
+      })
+    } catch (fetchErr: any) {
+      return this.handleNetworkError(sessionId, fetchErr)
+    }
+
+    // Parse rate-limit headers into snapshot
+    this.lastRateLimit = parseRateLimitHeaders(upstream.headers)
+
+    if (!upstream.ok) {
+      const errText = await upstream.text().catch(() => '')
+      if (upstream.status === 401) this.credentials.invalidate()
+
+      this.events.emit({
+        level: 'error',
+        kind: 'REAL_REQUEST_ERROR',
+        sessionId,
+        status: upstream.status,
+        msg: errText.slice(0, 200),
+      })
+
+      if (upstream.status === 429) {
+        this.events.emit({
+          level: 'error',
+          kind: 'UPSTREAM_RATE_LIMITED',
+          sessionId,
+          resetAt: this.lastRateLimit.resetAt,
+          retryAfterSec: this.lastRateLimit.retryAfter,
+          requestKind: 'real',
+          status: 429,
+        })
+      }
+
+      return new Response(errText, {
+        status: upstream.status,
+        headers: upstream.headers,
+      })
+    }
+
+    if (!upstream.body) {
+      return new Response('No upstream body', { status: 502 })
+    }
+
+    // Tee SSE stream: one to caller, one for usage parsing
+    let toClient: ReadableStream<Uint8Array>
+    let toParse: ReadableStream<Uint8Array>
+    try {
+      const teed = upstream.body.tee()
+      toClient = teed[0]
+      toParse = teed[1]
+    } catch (teeErr: any) {
+      this.events.emit({
+        level: 'error',
+        kind: 'REAL_REQUEST_ERROR',
+        sessionId,
+        msg: `tee() failed: ${teeErr?.message}`,
+      })
+      return new Response(upstream.body, { status: upstream.status, headers: upstream.headers })
+    }
+
+    // Parse in background — extract usage + notify engine. Never crashes.
+    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0).catch((e) => {
+      this.events.emit({
+        level: 'error',
+        kind: 'REAL_REQUEST_ERROR',
+        sessionId,
+        msg: `parse promise rejected: ${e?.message}`,
+      })
+    })
+
+    // Return byte-for-byte stream to caller
+    const responseHeaders = new Headers(upstream.headers)
+    responseHeaders.delete('content-encoding')
+    responseHeaders.delete('content-length')
+    return new Response(toClient, {
+      status: upstream.status,
+      headers: responseHeaders,
+    })
+  }
+
+  // ─── Internal: engine factory per session ──────────────────────
+
+  private createEngine(sessionId: string): KeepaliveEngine {
+    const cfg = this.config
+    return new KeepaliveEngine({
+      config: {
+        // Per-consumer TTL pin — see ProxyClientConfig.kaCacheTtlSec docs.
+        // Default 300s matches native CC wire TTL; without this the engine
+        // honored SSOT's 3600s and fired KAs against dead caches (the
+        // 2026-05-17 SDK-0.15 incident root cause).
+        cacheTtlMs: cfg.kaCacheTtlSec * 1000,
+        // undefined → engine reads from SSOT (~/.claude/keepalive.json)
+        intervalMs: cfg.kaIntervalSec !== undefined ? cfg.kaIntervalSec * 1000 : undefined,
+        idleTimeoutMs: cfg.kaIdleTimeoutSec > 0 ? cfg.kaIdleTimeoutSec * 1000 : Infinity,
+        minTokens: cfg.kaMinTokens,
+        rewriteWarnIdleMs: cfg.kaRewriteWarnIdleSec * 1000,
+        rewriteWarnTokens: cfg.kaRewriteWarnTokens,
+        rewriteBlockIdleMs: cfg.kaRewriteBlockIdleSec > 0 ? cfg.kaRewriteBlockIdleSec * 1000 : Infinity,
+        rewriteBlockEnabled: cfg.kaRewriteBlockEnabled,
+        onHeartbeat: (stats) => {
+          // Record KA fire into metrics — they're the canonical hit-rate signal
+          // since they replay the exact prompt prefix.
+          this.metrics.recordRequest({
+            kind: 'ka',
+            cacheRead: stats.usage.cacheReadInputTokens ?? 0,
+            cacheWrite: stats.usage.cacheCreationInputTokens ?? 0,
+            input: stats.usage.inputTokens ?? 0,
+            model: stats.model,
+          })
+          this.events.emit({
+            level: 'info',
+            kind: 'KA_FIRE_COMPLETE',
+            sessionId,
+            model: stats.model,
+            durationMs: stats.durationMs,
+            idleMs: stats.idleMs,
+            usage: {
+              inputTokens: stats.usage.inputTokens,
+              outputTokens: stats.usage.outputTokens,
+              cacheReadInputTokens: stats.usage.cacheReadInputTokens ?? 0,
+              cacheCreationInputTokens: stats.usage.cacheCreationInputTokens ?? 0,
+            },
+            rateLimit: stats.rateLimit,
+          })
+        },
+        onTick: (tick) => {
+          // Use the engine's resolved intervalMs for "idle" threshold.
+          // If kaIntervalSec was unset, fall back to a reasonable estimate (90% of resolved interval).
+          const resolvedIntervalMs = (cfg.kaIntervalSec ?? 120) * 1000
+          if (tick.idleMs > resolvedIntervalMs * 0.9) {
+            this.events.emit({
+              level: 'debug',
+              kind: 'KA_TICK_IDLE',
+              sessionId,
+              idleMs: tick.idleMs,
+              nextFireMs: tick.nextFireMs,
+              model: tick.model,
+              tokens: tick.tokens,
+            })
+          }
+        },
+        onDisarmed: (info) => this.events.emit({
+          level: 'error',
+          kind: 'KA_DISARM',
+          sessionId,
+          reason: info.reason,
+          msg: `KA disarmed for session ${sessionId.slice(0, 8)} — reason=${info.reason}`,
+        }),
+        onRewriteWarning: (info) => this.events.emit({
+          level: info.blocked ? 'error' : 'info',
+          kind: info.blocked ? 'REWRITE_BLOCK' : 'REWRITE_WARN',
+          sessionId,
+          idleMs: info.idleMs,
+          estimatedTokens: info.estimatedTokens,
+          blocked: info.blocked,
+          model: info.model,
+        }),
+        onNetworkStateChange: (info) => this.events.emit({
+          level: info.to === 'degraded' ? 'error' : 'info',
+          kind: info.to === 'degraded' ? 'NETWORK_DEGRADED' : 'NETWORK_HEALTHY',
+          sessionId,
+          from: info.from,
+          to: info.to,
+        }),
+        onTtlScan: (info) => this.events.emit({
+          level: 'info',
+          kind: 'CACHE_TTL_CHANGED',
+          sessionId,
+          minTtlMs: info.minTtlMs,
+          previousTtlMs: info.previousTtlMs,
+          hasAnyCacheControl: info.hasAnyCacheControl,
+          msg: `cache_control TTL ${info.previousTtlMs === null ? 'first-seen' : 'changed'} for session ${sessionId.slice(0, 8)} — ${info.previousTtlMs === null ? '?' : Math.round(info.previousTtlMs / 60000) + 'm'} → ${info.minTtlMs === null ? 'none' : Math.round(info.minTtlMs / 60000) + 'm'}`,
+        }),
+      },
+      getToken: () => this.credentials.getAccessToken(),
+      doFetch: (body, headers, signal) => this.engineDoFetch(body, headers, signal),
+      getRateLimitInfo: () => this.lastRateLimit,
+      isOwnerAlive: () => this.store.isOwnerAlive(sessionId),
+    })
+  }
+
+  // ─── Internal: SSE-generator wrapper used by engine ────────────
+  //
+  // KeepaliveEngine expects doFetch to yield StreamEvent objects. We wrap
+  // the IUpstreamFetcher (which returns a Response) into an async generator
+  // that parses SSE and yields typed events.
+
+  private async *engineDoFetch(
+    body: Record<string, unknown>,
+    headers: Record<string, string>,
+    signal?: AbortSignal,
+  ): AsyncGenerator<StreamEvent> {
+    const bodyStr = JSON.stringify(body)
+    const response = await this.upstream.fetch(
+      `${this.config.anthropicBaseUrl}/v1/messages?beta=true`,
+      { method: 'POST', headers, body: bodyStr, signal },
+    )
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      const err: Error & {
+        status?: number
+        resetAt?: number | null     // epoch SECONDS (Anthropic convention) — engine multiplies by 1000
+        retryAfterSec?: number | null
+      } = new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`)
+      err.status = response.status
+      if (response.status === 401) this.credentials.invalidate()
+      if (response.status === 429) {
+        // Parse rate-limit headers (engine path bypasses the real-request
+        // header parser; do it inline so the emitted event carries resetAt).
+        const rl = parseRateLimitHeaders(response.headers)
+        this.lastRateLimit = rl
+        // Attach to the thrown error so the KA engine can apply smart-pause
+        // policy (cache_dies_at vs resetAt) instead of plain retry-chain.
+        err.resetAt = rl.resetAt
+        err.retryAfterSec = rl.retryAfter
+        this.events.emit({
+          level: 'error',
+          kind: 'UPSTREAM_RATE_LIMITED',
+          sessionId: null,
+          resetAt: rl.resetAt,
+          retryAfterSec: rl.retryAfter,
+          requestKind: 'ka',
+          status: 429,
+        })
+      }
+      throw err
+    }
+
+    if (!response.body) throw new Error('No response body')
+
+    // Parse SSE and yield StreamEvents (only what engine cares about)
+    yield* parseSSEToEvents(response.body, signal)
+  }
+
+  // ─── Internal: parse consumer-facing stream for usage ──────────
+
+  private async parseSSEAndNotify(
+    stream: ReadableStream<Uint8Array>,
+    session: Session<KeepaliveEngine>,
+    sessionId: string,
+    model: string,
+    t0: number,
+  ): Promise<void> {
+    try {
+      let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
+      const decoder = new TextDecoder()
+      const reader = stream.getReader()
+      let buffer = ''
+      while (true) {
+        let done: boolean, value: Uint8Array | undefined
+        try {
+          const r = await reader.read()
+          done = r.done
+          value = r.value
+        } catch (readErr: any) {
+          this.events.emit({
+            level: 'debug',
+            kind: 'REAL_REQUEST_ERROR',
+            sessionId,
+            msg: `stream read aborted: ${readErr?.message}`,
+          })
+          return
+        }
+        if (done) break
+        if (!value) continue
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6)
+          if (raw === '[DONE]') continue
+          try {
+            const p = JSON.parse(raw)
+            if (p.type === 'message_start' && p.message?.usage) {
+              const u = p.message.usage
+              usage = {
+                inputTokens: u.input_tokens ?? 0,
+                outputTokens: u.output_tokens ?? 0,
+                cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+                cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+              }
+              // Phase 3.B (REQ-05, OQ-02): TTL-split + deletion subfields.
+              // Present only on responses that used 1h cache_control or
+              // experienced compact_20260112 / cache_edits.clear_at. Forward
+              // `undefined` when absent (not 0) — omit-when-absent contract.
+              const cc = u.cache_creation
+              if (cc && typeof cc === 'object') {
+                if (typeof cc.ephemeral_5m_input_tokens === 'number') {
+                  usage.cacheCreation5mInputTokens = cc.ephemeral_5m_input_tokens
+                }
+                if (typeof cc.ephemeral_1h_input_tokens === 'number') {
+                  usage.cacheCreation1hInputTokens = cc.ephemeral_1h_input_tokens
+                }
+              }
+              if (typeof u.cache_deleted_input_tokens === 'number') {
+                usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
+              }
+            } else if (p.type === 'message_delta' && p.usage?.output_tokens) {
+              usage.outputTokens = p.usage.output_tokens
+            }
+          } catch { /* malformed line, skip */ }
+        }
+      }
+
+      const isFirstCall = session.lastUsage === null
+      session.lastUsage = usage
+      try {
+        session.engine.notifyRealRequestComplete(usage)
+      } catch (e: any) {
+        this.events.emit({
+          level: 'error',
+          kind: 'REAL_REQUEST_ERROR',
+          sessionId,
+          msg: `engine.notifyRealRequestComplete: ${e?.message}`,
+        })
+      }
+
+      // Record into rolling metrics for hit-rate / regression tracking.
+      this.metrics.recordRequest({
+        kind: 'real',
+        cacheRead: usage.cacheReadInputTokens ?? 0,
+        cacheWrite: usage.cacheCreationInputTokens ?? 0,
+        input: usage.inputTokens ?? 0,
+        model,
+        firstCall: isFirstCall,
+      })
+
+      this.events.emit({
+        level: 'info',
+        kind: 'REAL_REQUEST_COMPLETE',
+        sessionId,
+        model,
+        durationMs: Date.now() - t0,
+        usage,
+        rateLimit: {
+          util5h: this.lastRateLimit.utilization5h,
+          util7d: this.lastRateLimit.utilization7d,
+          status: this.lastRateLimit.status,
+        },
+      })
+    } catch (err: any) {
+      this.events.emit({
+        level: 'error',
+        kind: 'REAL_REQUEST_ERROR',
+        sessionId,
+        msg: `SSE parse error: ${err?.message ?? err}`,
+      })
+    }
+  }
+
+  // ─── Internal: network error handler ───────────────────────────
+
+  private handleNetworkError(sessionId: string, fetchErr: any): Response {
+    const code = fetchErr?.code ?? fetchErr?.cause?.code ?? ''
+    const msg = String(fetchErr?.message ?? '').toLowerCase()
+    const isNetworkErr =
+      NETWORK_ERROR_CODES.has(code) ||
+      msg.includes('unable to connect') || msg.includes('failed to open socket') ||
+      msg.includes('connection refused') || msg.includes('network')
+
+    this.events.emit({
+      level: 'error',
+      kind: 'REAL_REQUEST_ERROR',
+      sessionId,
+      status: isNetworkErr ? 503 : 502,
+      msg: `upstream fetch threw: ${code || ''} ${msg}`.trim().slice(0, 200),
+    })
+
+    if (isNetworkErr) {
+      return new Response(JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'overloaded_error',
+          message: 'Upstream network error — proxy cannot reach Anthropic. Retrying will help once network is restored.',
+        },
+      }), {
+        status: 503,
+        headers: {
+          [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON,
+          'retry-after': '2',
+        },
+      })
+    }
+
+    return new Response(JSON.stringify({
+      type: 'error',
+      error: { type: 'api_error', message: `Upstream request failed: ${msg || code || 'unknown'}` },
+    }), { status: 502, headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON } })
+  }
+}
+
+// ═══ Module-level helpers ═══════════════════════════════════════════
+
+const HOP_BY_HOP_OR_AUTH = [
+  'host', 'content-length', 'connection', 'authorization',
+  'accept-encoding',  // force uncompressed SSE
+]
+
+const NETWORK_ERROR_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT',
+  'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
+])
+
+function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
+  return {
+    status: headers.get('anthropic-ratelimit-unified-status'),
+    resetAt: headers.get('anthropic-ratelimit-unified-reset')
+      ? Number(headers.get('anthropic-ratelimit-unified-reset')) : null,
+    claim: headers.get('anthropic-ratelimit-unified-representative-claim'),
+    retryAfter: headers.get('retry-after')
+      ? parseFloat(headers.get('retry-after')!) : null,
+    utilization5h: headers.get('anthropic-ratelimit-unified-5h-utilization')
+      ? parseFloat(headers.get('anthropic-ratelimit-unified-5h-utilization')!) : null,
+    utilization7d: headers.get('anthropic-ratelimit-unified-7d-utilization')
+      ? parseFloat(headers.get('anthropic-ratelimit-unified-7d-utilization')!) : null,
+  }
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
+  })
+}
+
+/**
+ * Parse Anthropic SSE stream into StreamEvent objects.
+ * Only yields message_start / message_delta / message_stop — engine only
+ * cares about usage. Other events (content_block_delta etc) are drained but
+ * not yielded.
+ */
+async function* parseSSEToEvents(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncGenerator<StreamEvent> {
+  const decoder = new TextDecoder()
+  const reader = body.getReader()
+  let buffer = ''
+  let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
+
+  try {
+    while (true) {
+      if (signal?.aborted) { reader.cancel(); return }
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6)
+        if (raw === '[DONE]') continue
+        let p: any
+        try { p = JSON.parse(raw) } catch { continue }
+
+        if (p.type === 'message_start' && p.message?.usage) {
+          const u = p.message.usage
+          usage = {
+            inputTokens: u.input_tokens ?? 0,
+            outputTokens: u.output_tokens ?? 0,
+            cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+            cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+          }
+          // Phase 3.B (REQ-05): same TTL-split + deletion capture as
+          // upstream.ts. Optional subfields forwarded `undefined` on absent.
+          const cc = u.cache_creation
+          if (cc && typeof cc === 'object') {
+            if (typeof cc.ephemeral_5m_input_tokens === 'number') {
+              usage.cacheCreation5mInputTokens = cc.ephemeral_5m_input_tokens
+            }
+            if (typeof cc.ephemeral_1h_input_tokens === 'number') {
+              usage.cacheCreation1hInputTokens = cc.ephemeral_1h_input_tokens
+            }
+          }
+          if (typeof u.cache_deleted_input_tokens === 'number') {
+            usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
+          }
+        } else if (p.type === 'message_delta' && p.usage?.output_tokens) {
+          usage.outputTokens = p.usage.output_tokens
+        } else if (p.type === 'message_stop') {
+          yield { type: 'message_stop', usage, stopReason: null }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}

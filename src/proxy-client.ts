@@ -476,9 +476,11 @@ export class ProxyClient {
     // silent quota spend into an explicit, consented one.
     {
       const guard = loadKeepaliveConfig().rewriteGuard
+      const lastMsg = inspectLastUserMessage(parsedBody, guard.overrideMarker)
       if (guard.enabled && rewriteAssessment && !rewriteAssessment.expected
           && rewriteAssessment.predictedTokens >= guard.minRewriteTokens
-          && !lastUserMessageHasMarker(parsedBody, guard.overrideMarker)) {
+          && !lastMsg.isContinuation        // never block an agent tool-loop continuation
+          && !lastMsg.hasMarker) {
         this.events.emit({
           level: 'error',
           kind: 'CACHE_REWRITE_BLOCKED',
@@ -1018,35 +1020,48 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 /**
- * True if the LATEST user message in the request body contains `marker`.
- * Only the most recent user message is scanned — an old marker left in
- * conversation history does NOT count (fresh-consent: the marker must be in
- * the turn the user is sending now). Never throws.
+ * Inspect the LATEST user message for rewrite-guard purposes. Never throws.
+ *
+ *   isContinuation — the message carries a `tool_result` block → it is an
+ *     agent tool-loop continuation, NOT a fresh user turn. The guard must NOT
+ *     apply: the user has no message to add a marker to, so blocking would
+ *     strand the loop forever. Such a request is always let through (the
+ *     PREDICTED_CACHE_MISS log still records it).
+ *   hasMarker — the override marker is present in this message's text. Only
+ *     the latest user message is scanned, so a marker left in conversation
+ *     history does NOT count — fresh-consent: the marker must be in the turn
+ *     being sent now. This is why no marker-counting is needed: an old marker
+ *     is structurally excluded by "latest message only".
  */
-function lastUserMessageHasMarker(body: unknown, marker: string): boolean {
+function inspectLastUserMessage(
+  body: unknown,
+  marker: string,
+): { isContinuation: boolean; hasMarker: boolean } {
+  const NONE = { isContinuation: false, hasMarker: false }
   try {
-    if (!marker) return false
     const msgs = (body as { messages?: unknown })?.messages
-    if (!Array.isArray(msgs)) return false
+    if (!Array.isArray(msgs)) return NONE
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
       if (!m || typeof m !== 'object' || (m as { role?: unknown }).role !== 'user') continue
       const content = (m as { content?: unknown }).content
+      let isContinuation = false
       let text = ''
       if (typeof content === 'string') {
         text = content
       } else if (Array.isArray(content)) {
         for (const block of content) {
-          if (block && typeof block === 'object' && typeof (block as { text?: unknown }).text === 'string') {
-            text += (block as { text: string }).text + '\n'
-          }
+          if (!block || typeof block !== 'object') continue
+          const b = block as { type?: unknown; text?: unknown }
+          if (b.type === 'tool_result') isContinuation = true
+          if (typeof b.text === 'string') text += b.text + '\n'
         }
       }
-      return text.includes(marker)   // first user message from the end == current turn
+      return { isContinuation, hasMarker: !!marker && text.includes(marker) }
     }
-    return false
+    return NONE
   } catch {
-    return false
+    return NONE
   }
 }
 

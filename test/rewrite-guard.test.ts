@@ -78,4 +78,26 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     expect(r.status).not.toBe(400)
     c.stop()
   })
+
+  test('tool-loop continuation (last user msg is a tool_result) is NOT blocked', async () => {
+    // idle>TTL, but the latest user message is a tool_result — an agent
+    // continuation, not a fresh user turn. The user has no message to mark,
+    // so the guard must let it through rather than strand the loop forever.
+    const c = mkClient()
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-5' })
+    await Bun.sleep(1200)
+    const continuation = JSON.stringify({
+      model: 'claude-opus-4-7',
+      system: [{ type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral' } }],
+      tools: [],
+      messages: [
+        { role: 'user', content: 'do the work ' + FILLER },
+        { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'result' }] },
+      ],
+    })
+    const r = await c.handleRequest(continuation, {}, { sessionId: 'rg-sess-5' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
 })

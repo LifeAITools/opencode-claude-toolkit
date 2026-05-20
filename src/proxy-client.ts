@@ -734,6 +734,7 @@ export class ProxyClient {
             level: 'info',
             kind: 'KA_FIRE_COMPLETE',
             sessionId,
+            lineageKey: stats.lineageKey,
             model: stats.model,
             durationMs: stats.durationMs,
             idleMs: stats.idleMs,
@@ -955,6 +956,10 @@ export class ProxyClient {
         level: 'info',
         kind: 'REAL_REQUEST_COMPLETE',
         sessionId,
+        // lineageKey lets offline analysis attribute a cache hit/rewrite to a
+        // specific agent (main vs each sub-agent) — needed to verify the main
+        // agent's cache survives a sub-agent (Task-tool) excursion.
+        lineageKey,
         model,
         durationMs: Date.now() - t0,
         usage,

@@ -206,7 +206,7 @@ export interface RewriteGuardConfig {
 const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
   enabled: false,
   minRewriteTokens: 50_000,
-  overrideMarker: '[cache-rewrite-ok]',
+  overrideMarker: '[%cache-rewrite-ok%]',
 }
 
 const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampMax'> = {

@@ -254,6 +254,38 @@ describe('rewrite guard — block dump artifact', () => {
   })
 })
 
+describe('proxy — CC_VERSION_CHANGED detection', () => {
+  // Body carrying the Claude Code billing header (cc_version=X.Y.Z.<fingerprint>).
+  const bodyV = (ver: string) => JSON.stringify({
+    model: 'claude-opus-4-7',
+    system: [
+      { type: 'text', text: `x-anthropic-billing-header: cc_version=${ver}; cc_entrypoint=cli; cch=abc;` },
+      { type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral' } },
+    ],
+    tools: [],
+    messages: [{ role: 'user', content: 'hi ' + FILLER }],
+  })
+
+  test('emits CC_VERSION_CHANGED on a real version bump, ignores the per-request fingerprint', async () => {
+    const events: any[] = []
+    const c = mkClient({ eventEmitter: { emit: (e: any) => events.push(e) } })
+    // first observation — no "change" event (nothing to compare to)
+    await c.handleRequest(bodyV('2.1.143.111'), {}, { sessionId: 'ccv-1' })
+    expect(events.some((e) => e.kind === 'CC_VERSION_CHANGED')).toBe(false)
+    // real version bump → event
+    await c.handleRequest(bodyV('2.1.144.222'), {}, { sessionId: 'ccv-1' })
+    const ev = events.find((e) => e.kind === 'CC_VERSION_CHANGED')
+    expect(ev).toBeDefined()
+    expect(ev.previousVersion).toBe('2.1.143')
+    expect(ev.version).toBe('2.1.144')
+    // same version, different fingerprint suffix → NO new event
+    const before = events.filter((e) => e.kind === 'CC_VERSION_CHANGED').length
+    await c.handleRequest(bodyV('2.1.144.999'), {}, { sessionId: 'ccv-1' })
+    expect(events.filter((e) => e.kind === 'CC_VERSION_CHANGED').length).toBe(before)
+    c.stop()
+  })
+})
+
 describe('rewrite guard — a TTL expiry spanning a proxy restart is NOT blocked', () => {
   test('last warm-up predates proxyStartedAt → expected:proxy-restart → passes', async () => {
     // The cache genuinely expired, but the gap spans a proxy restart: the KA

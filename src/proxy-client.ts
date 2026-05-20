@@ -311,6 +311,10 @@ export class ProxyClient {
    *  this means the TTL gap spans a restart (KA could not have prevented it). */
   private readonly proxyStartedAt: number
 
+  /** Last Claude Code version seen in a request's billing header — a change
+   *  churns the cacheable prefix; tracked to emit CC_VERSION_CHANGED. */
+  private lastCcVersion: string | null = null
+
   /** Where the KA snapshot registry is persisted (configurable for tests). */
   private readonly kaSnapshotPath: string
 
@@ -550,6 +554,30 @@ export class ProxyClient {
 
     const model = parsedBody.model ?? 'unknown'
     session.model = model
+
+    // Detect a Claude Code version change. A CC version bump rewrites the
+    // cached system text + tool definitions → a new lineage → one cold cache
+    // rewrite per active session. It is otherwise invisible (it happens in
+    // the background); surfacing it as an explicit event makes the rewrite
+    // spike attributable instead of a silent mystery.
+    {
+      const ccVersion = extractCcVersion(parsedBody)
+      if (ccVersion && ccVersion !== this.lastCcVersion) {
+        const prev = this.lastCcVersion
+        this.lastCcVersion = ccVersion
+        if (prev !== null) {
+          this.events.emit({
+            level: 'info',
+            kind: 'CC_VERSION_CHANGED',
+            sessionId,
+            previousVersion: prev,
+            version: ccVersion,
+            msg: `Claude Code version ${prev} -> ${ccVersion} — the cacheable `
+              + `prefix changed; expect one cold cache rewrite per active session`,
+          })
+        }
+      }
+    }
 
     // Build upstream headers: strip hop-by-hop + consumer auth, force identity encoding
     const upstreamHeaders: Record<string, string> = {}
@@ -1364,6 +1392,29 @@ function jsonResponse(status: number, body: unknown): Response {
     status,
     headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
   })
+}
+
+/**
+ * Extract the Claude Code version from a request body's billing header.
+ * Claude Code prepends a `x-anthropic-billing-header: cc_version=X.Y.Z.<fp>`
+ * text block to `system`; the trailing `.<fp>` is a per-request fingerprint
+ * (volatile) — we return only the stable `X.Y.Z`. Never throws.
+ */
+function extractCcVersion(body: unknown): string | null {
+  try {
+    const system = (body as { system?: unknown })?.system
+    if (!Array.isArray(system)) return null
+    for (const b of system) {
+      const t = b && typeof b === 'object' ? (b as { text?: unknown }).text : undefined
+      if (typeof t === 'string' && t.includes('x-anthropic-billing-header')) {
+        const m = t.match(/cc_version=(\d+\.\d+\.\d+)/)
+        if (m) return m[1]
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 /**

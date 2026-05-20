@@ -188,6 +188,9 @@ export declare class ProxyClient {
     /** Wall-clock ms this proxy process started — a cache warm-up older than
      *  this means the TTL gap spans a restart (KA could not have prevented it). */
     private readonly proxyStartedAt;
+    /** Last Claude Code version seen in a request's billing header — a change
+     *  churns the cacheable prefix; tracked to emit CC_VERSION_CHANGED. */
+    private lastCcVersion;
     /** Where the KA snapshot registry is persisted (configurable for tests). */
     private readonly kaSnapshotPath;
     /** Set when a KA registry mutated since the last persist — bounds writes

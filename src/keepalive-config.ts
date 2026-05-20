@@ -201,12 +201,16 @@ export interface RewriteGuardConfig {
   /** Substring in the LATEST user message that overrides the block (fresh-consent:
    *  only the current turn's message is scanned, not history). Default below. */
   readonly overrideMarker: string
+  /** On a block, write the rejected request + prefix diff to a JSON artifact
+   *  (rewrite-guard-blocks/) so it can be analysed offline. Default true. */
+  readonly dumpBlocked: boolean
 }
 
 const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
   enabled: false,
   minRewriteTokens: 50_000,
   overrideMarker: '[%cache-rewrite-ok%]',
+  dumpBlocked: true,
 }
 
 const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampMax'> = {
@@ -448,6 +452,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     overrideMarker: (typeof rg.overrideMarker === 'string' && rg.overrideMarker.length > 0)
       ? rg.overrideMarker
       : DEFAULT_REWRITE_GUARD.overrideMarker,
+    dumpBlocked: bool(rg.dumpBlocked, DEFAULT_REWRITE_GUARD.dumpBlocked),
   }
 
   const config: ResolvedKeepaliveConfig = {

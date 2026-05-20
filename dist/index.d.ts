@@ -17,6 +17,8 @@ export { ProxyClient } from './proxy-client.js';
 export type { ProxyClientConfig, ProxyClientOptions, HandleRequestContext, RateLimitSnapshot, } from './proxy-client.js';
 export { FileOrgIdResolver, readOrgIdFromConfig, DEFAULT_ACCOUNT_CONFIG_PATH, } from './org-identity.js';
 export type { OrgIdResolver } from './org-identity.js';
+export { writeRewriteBlockDump, diffPrefix, DEFAULT_REWRITE_DUMP_DIR, } from './rewrite-dump.js';
+export type { CachePrefix, PrefixDiff, RewriteBlockDumpInput, } from './rewrite-dump.js';
 export type { KeepaliveConfig, KeepaliveStats, KeepaliveTick, } from './types.js';
 export { oauthLogin } from './auth.js';
 export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js';

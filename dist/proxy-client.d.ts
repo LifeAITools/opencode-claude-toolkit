@@ -129,6 +129,12 @@ export interface ProxyClientOptions {
      * isolation — production never sets it.
      */
     prefixHistoryPath?: string;
+    /**
+     * Optional: directory for rewrite-guard block dumps (the rejected request
+     * + prefix diff, written on every block for offline analysis). Default:
+     * `~/.claude-local/rewrite-guard-blocks/`. Injectable for test isolation.
+     */
+    rewriteBlockDumpDir?: string;
 }
 export interface HandleRequestContext {
     /** Unique identifier for the logical session. */
@@ -163,6 +169,12 @@ export declare class ProxyClient {
     private readonly prefixHistory;
     /** Where prefixHistory is persisted — configurable for test isolation. */
     private readonly prefixHistoryPath;
+    /** Directory for rewrite-guard block dumps. */
+    private readonly rewriteBlockDumpDir;
+    /** Last cacheable prefix (system + tools) seen per `${sessionId}:${lineageKey}`.
+     *  In-memory only (never persisted — bodies are large) — feeds the prefix
+     *  diff written into a guard-block dump. Reaped with prefixHistory. */
+    private readonly lineagePrefix;
     /** Resolves the current Anthropic org UUID — drives org-switch detection. */
     private readonly orgIdResolver;
     constructor(opts: ProxyClientOptions);

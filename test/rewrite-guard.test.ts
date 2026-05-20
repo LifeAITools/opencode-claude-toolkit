@@ -10,7 +10,7 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { ProxyClient, type ProxyClientOptions } from '../src/proxy-client.js'
@@ -224,5 +224,25 @@ describe('rewrite guard — KA-kept-warm lineage is not a false ttl-expiry', () 
     expect(r.status).toBe(400)
     c.stop()
     rmSync(path, { force: true })
+  })
+})
+
+describe('rewrite guard — block dump artifact', () => {
+  test('a block writes a dump with the rejected request + prefix diff', async () => {
+    const dumpDir = join(TMP, 'dump-out')
+    const c = mkClient({ rewriteBlockDumpDir: dumpDir })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-dump-1' })   // cold-start, passes
+    await Bun.sleep(1200)                                              // idle 1.2s > 1s TTL
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-dump-1' })
+    expect(r.status).toBe(400)
+
+    const files = readdirSync(dumpDir)
+    expect(files.length).toBe(1)
+    const art = JSON.parse(readFileSync(join(dumpDir, files[0]), 'utf8'))
+    expect(art.verdict.rewriteClass).toBe('avoidable:ttl-expiry')
+    expect(art.blockedRequest.model).toBe('claude-opus-4-7')   // full request captured
+    expect(art.prefixDiff.summary).toContain('IDENTICAL')      // ttl-expiry: prefix unchanged
+    c.stop()
+    rmSync(dumpDir, { recursive: true, force: true })
   })
 })

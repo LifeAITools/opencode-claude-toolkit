@@ -120,6 +120,19 @@ export {
   DEFAULT_ACCOUNT_CONFIG_PATH,
 } from './org-identity.js'
 export type { OrgIdResolver } from './org-identity.js'
+
+// Rewrite-guard block dumps — the rejected request + prefix diff, persisted
+// on every guard block for offline analysis.
+export {
+  writeRewriteBlockDump,
+  diffPrefix,
+  DEFAULT_REWRITE_DUMP_DIR,
+} from './rewrite-dump.js'
+export type {
+  CachePrefix,
+  PrefixDiff,
+  RewriteBlockDumpInput,
+} from './rewrite-dump.js'
 export type {
   KeepaliveConfig,
   KeepaliveStats,

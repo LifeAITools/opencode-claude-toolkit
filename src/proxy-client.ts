@@ -76,6 +76,11 @@ import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { prefixHashes, classifyRewrite, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { FileOrgIdResolver, type OrgIdResolver } from './org-identity.js'
+import {
+  writeRewriteBlockDump,
+  DEFAULT_REWRITE_DUMP_DIR,
+  type CachePrefix,
+} from './rewrite-dump.js'
 import { readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -199,6 +204,13 @@ export interface ProxyClientOptions {
    * isolation — production never sets it.
    */
   prefixHistoryPath?: string
+
+  /**
+   * Optional: directory for rewrite-guard block dumps (the rejected request
+   * + prefix diff, written on every block for offline analysis). Default:
+   * `~/.claude-local/rewrite-guard-blocks/`. Injectable for test isolation.
+   */
+  rewriteBlockDumpDir?: string
 }
 
 /** One persisted cache-prefix fingerprint, keyed by `${sessionId}:${lineageKey}`. */
@@ -268,6 +280,14 @@ export class ProxyClient {
   /** Where prefixHistory is persisted — configurable for test isolation. */
   private readonly prefixHistoryPath: string
 
+  /** Directory for rewrite-guard block dumps. */
+  private readonly rewriteBlockDumpDir: string
+
+  /** Last cacheable prefix (system + tools) seen per `${sessionId}:${lineageKey}`.
+   *  In-memory only (never persisted — bodies are large) — feeds the prefix
+   *  diff written into a guard-block dump. Reaped with prefixHistory. */
+  private readonly lineagePrefix: Map<string, CachePrefix> = new Map()
+
   /** Resolves the current Anthropic org UUID — drives org-switch detection. */
   private readonly orgIdResolver: OrgIdResolver
 
@@ -280,6 +300,7 @@ export class ProxyClient {
     this.upstream = opts.upstreamFetcher ?? new NativeFetchUpstream()
     this.orgIdResolver = opts.orgIdResolver ?? new FileOrgIdResolver()
     this.prefixHistoryPath = opts.prefixHistoryPath ?? PREFIX_HISTORY_PATH
+    this.rewriteBlockDumpDir = opts.rewriteBlockDumpDir ?? DEFAULT_REWRITE_DUMP_DIR
     this.prefixHistory = loadPrefixHistory(this.prefixHistoryPath)
 
     // Cache metrics collector — emits CACHE_METRICS_SUMMARY every 60s and
@@ -308,6 +329,9 @@ export class ProxyClient {
         // Drop this session's prefix-history (keys are `${sid}:${lineageKey}`).
         for (const k of this.prefixHistory.keys()) {
           if (k.startsWith(sid + ':')) this.prefixHistory.delete(k)
+        }
+        for (const k of this.lineagePrefix.keys()) {
+          if (k.startsWith(sid + ':')) this.lineagePrefix.delete(k)
         }
       }
       // Persist prefix history each reaper tick so it survives a proxy restart.
@@ -531,6 +555,20 @@ export class ProxyClient {
           && rewriteAssessment.predictedTokens >= guard.minRewriteTokens
           && !lastMsg.isContinuation        // never block an agent tool-loop continuation
           && !lastMsg.hasMarker) {
+        // Dump the rejected request + prefix diff so it can be analysed
+        // offline — once we return 400 the request is otherwise gone.
+        let dumpPath: string | null = null
+        if (guard.dumpBlocked) {
+          dumpPath = writeRewriteBlockDump(this.rewriteBlockDumpDir, {
+            sessionId,
+            lineageKey: reqLineageKey,
+            rewriteClass: rewriteAssessment.rewriteClass,
+            predictedTokens: rewriteAssessment.predictedTokens,
+            signals: rewriteAssessment.signals,
+            blockedRequest: parsedBody,
+            previousPrefix: rewriteAssessment.prevPrefix,
+          })
+        }
         this.events.emit({
           level: 'error',
           kind: 'CACHE_REWRITE_BLOCKED',
@@ -538,8 +576,10 @@ export class ProxyClient {
           lineageKey: reqLineageKey,
           rewriteClass: rewriteAssessment.rewriteClass,
           predictedTokens: rewriteAssessment.predictedTokens,
+          dumpPath,
           msg: `rewrite guard blocked ${rewriteAssessment.rewriteClass} `
-            + `(~${rewriteAssessment.predictedTokens} tok) — awaiting user override marker`,
+            + `(~${rewriteAssessment.predictedTokens} tok) — awaiting user override marker`
+            + (dumpPath ? ` — dump: ${dumpPath}` : ''),
         })
         return jsonResponse(400, {
           error: {
@@ -950,13 +990,24 @@ export class ProxyClient {
     lineageKey: string,
     body: Record<string, unknown>,
     bodyBytes: number,
-  ): { rewriteClass: string; expected: boolean; predictedTokens: number } | null {
+  ): {
+    rewriteClass: string
+    expected: boolean
+    predictedTokens: number
+    signals: { systemChanged: boolean; toolsChanged: boolean; orgChanged: boolean; idleMs: number | null; ttlMs: number }
+    /** Previous cacheable prefix of this lineage (for a guard-block dump). */
+    prevPrefix: CachePrefix | null
+  } | null {
     try {
       const key = `${sessionId}:${lineageKey}`
       const now = Date.now()
       const ph = prefixHashes(body)
       const prev = this.prefixHistory.get(key)
       const orgId = this.orgIdResolver.current()
+      // Capture the previous cacheable prefix BEFORE overwriting it, so a
+      // guard-block dump can diff old vs new system/tools.
+      const prevPrefix = this.lineagePrefix.get(key) ?? null
+      this.lineagePrefix.set(key, { system: body.system, tools: body.tools })
       // Carry prev.lastKaAt forward — a real request resets lastReqAt, but the
       // KA-fire timeline is independent and must survive this overwrite.
       this.prefixHistory.set(key, { hashes: ph, lastReqAt: now, orgId, lastKaAt: prev?.lastKaAt })
@@ -1013,7 +1064,13 @@ export class ProxyClient {
           + (idleMs !== undefined && idleMs > ttlMs
               ? ` [idle ${Math.round(idleMs / 1000)}s > ttl ${Math.round(ttlMs / 1000)}s]` : ''),
       })
-      return { rewriteClass: verdict.class, expected: verdict.expected, predictedTokens }
+      return {
+        rewriteClass: verdict.class,
+        expected: verdict.expected,
+        predictedTokens,
+        signals: { systemChanged, toolsChanged, orgChanged, idleMs: idleMs ?? null, ttlMs },
+        prevPrefix,
+      }
     } catch {
       // Predictor is observability-only — never affect the request path.
       return null

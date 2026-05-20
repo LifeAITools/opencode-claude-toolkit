@@ -5,7 +5,7 @@
  * accepts authenticated wake events from the Event Router (L2), queues them
  * if the agent is busy, and injects them via promptAsync to trigger the LLM.
  *
- * Discovery: writes a JSON file to ~/.opencode/wake/ so the router can find us.
+ * Discovery: writes a JSON file to WAKE_DISCOVERY_DIR (see domain-constants) so the router can find us.
  * Auth: per-session random token validated on every request (CR-07).
  * Injection: promptAsync with noReply:false for full LLM loop (CR-02, DB-05).
  *
@@ -26,6 +26,7 @@ import type {
   DiscoveryFile,
 } from './wake-types'
 import { DISCOVERY_DIR, discoveryDir, WAKE_EVENT_TYPES, WARM_CHANNEL_TTL_MS } from './wake-types'
+import { FNV_32_PRIME } from './domain-constants'
 
 // ─── Constants ────────────────────────────────────────────
 
@@ -455,7 +456,7 @@ function hasSeenWakeEvent(event: WakeEvent): boolean {
 }
 
 function stableHash(input: string): string {
-  let hash = 2166136261
+  let hash = FNV_32_PRIME
   for (let i = 0; i < input.length; i++) {
     hash ^= input.charCodeAt(i)
     hash = Math.imul(hash, 16777619)

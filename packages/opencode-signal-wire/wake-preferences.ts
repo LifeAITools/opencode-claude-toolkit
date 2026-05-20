@@ -7,14 +7,17 @@
  * - api.kv = session-ephemeral rule toggles (separate concern)
  *
  * Paths:
- * - Global: ~/.opencode/wake-preferences.json
- * - Per-project: .opencode/wake-preferences.json (overrides global)
+ * - Global: $HOME-relative wake-preferences.json (see GLOBAL_PREFS_PATH below)
+ * - Per-project: cwd-relative wake-preferences.json (overrides global)
  */
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { WAKE_EVENT_TYPES } from './wake-types'
+// Note: GLOBAL_PREFS_PATH lives at $HOME/<dotdir>/wake-preferences.json — outside
+// the WAKE_ROOT (wake/) subtree, so it is intentionally NOT centralized in
+// domain-constants. Per-project prefs live at cwd-relative <dotdir>/.
 
 // ─── Presets (DB-04: client-side, not server-defined) ─────────────
 

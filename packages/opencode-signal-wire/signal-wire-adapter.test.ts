@@ -21,7 +21,7 @@ describe('signal-wire-translate', () => {
       match: { prompt_keywords: ['hi'] },
       action: { hint: 'hello there' },
     }]
-    const canonical = translateLegacyRules(legacy, 'opencode')
+    const canonical = translateLegacyRules(legacy)
     expect(canonical.length).toBe(1)
     expect(canonical[0].events).toEqual(['chat.message'])
     expect(canonical[0].actions).toEqual([{ type: 'hint', text: 'hello there' }])
@@ -33,7 +33,7 @@ describe('signal-wire-translate', () => {
       events: ['PostToolUse'],
       action: { hint: 'x' },
     }]
-    const canonical = translateLegacyRules(legacy, 'opencode')
+    const canonical = translateLegacyRules(legacy)
     expect(canonical[0].events).toEqual(['tool.after'])
   })
 
@@ -46,18 +46,22 @@ describe('signal-wire-translate', () => {
         { type: 'audit' },
       ],
     }]
-    const canonical = translateLegacyRules(legacy, 'opencode')
+    const canonical = translateLegacyRules(legacy)
     expect(canonical[0].actions.length).toBe(2)
   })
 
-  test('translateLegacyRules filters by platform', () => {
+  test('platforms field is deprecated — rules are NOT filtered by platform', () => {
+    // signal-wire-core deliberately removed platform filtering: the `platforms`
+    // field is deprecated (a TRANSLATE_DROPPED warn is logged), and
+    // platform-specificity is now expressed via match.* predicates instead.
+    // All well-formed rules translate regardless of any legacy `platforms` field.
     const legacy = [
       { id: 'a', platforms: ['opencode'], events: ['UserPromptSubmit'], action: { hint: 'x' } },
       { id: 'b', platforms: ['claude-code'], events: ['UserPromptSubmit'], action: { hint: 'x' } },
-      { id: 'c', events: ['UserPromptSubmit'], action: { hint: 'x' } },  // no platforms = all
+      { id: 'c', events: ['UserPromptSubmit'], action: { hint: 'x' } },  // no platforms
     ]
-    const canonical = translateLegacyRules(legacy, 'opencode')
-    expect(canonical.map(r => r.id).sort()).toEqual(['a', 'c'])
+    const canonical = translateLegacyRules(legacy)
+    expect(canonical.map(r => r.id).sort()).toEqual(['a', 'b', 'c'])
   })
 
   test('translateLegacyRules converts cooldown_minutes → cooldown_seconds', () => {
@@ -68,7 +72,7 @@ describe('signal-wire-translate', () => {
       action: { hint: 'x' },
       cooldown_minutes: 5,
     }]
-    const canonical = translateLegacyRules(legacy, 'opencode')
+    const canonical = translateLegacyRules(legacy)
     expect(canonical[0].cooldown_seconds).toBe(300)
   })
 })

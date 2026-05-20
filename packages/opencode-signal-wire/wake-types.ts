@@ -18,7 +18,7 @@ import { join } from 'path'
  * Resolution order:
  *   1. WAKE_DISCOVERY_DIR env var (deployment override; same value must be
  *      set in wake-router so reads/writes converge).
- *   2. $HOME/.opencode/wake (default for normal local installs).
+ *   2. WAKE_ROOT from domain-constants (default for normal local installs).
  *
  * Resolved lazily so a launcher that sets WAKE_DISCOVERY_DIR after this
  * module is imported (e.g. via dynamic isolation in agent-runner) still
@@ -157,6 +157,18 @@ export interface DiscoveryFile {
   subscribePreset?: string
   /** Member type: 'human' (OAuth), 'agent' (X-Agent-Id), 'unknown' */
   memberType?: 'human' | 'agent' | 'unknown'
+  /**
+   * Phase 5.3: Heartbeat-driven liveness signal. Plugin updates this every
+   * 30s. Registry consumers use it instead of file mtime — push beats poll.
+   * Threshold: lastSeen > 90s ago → unhealthy → /health probe fallback.
+   * ISO 8601 timestamp. Absent on initial write; populated by heartbeat-writer.
+   */
+  lastSeen?: string
+  /**
+   * Phase 5.5.3: Multi-signal-detected mode. Used by wake-router fail-mode
+   * and operator dashboards. Set once at plugin boot by detectRunMode().
+   */
+  runMode?: 'human' | 'agent' | 'unknown'
 }
 
 // ─── SignalWire Engine (duck-typed to avoid circular imports) ────────

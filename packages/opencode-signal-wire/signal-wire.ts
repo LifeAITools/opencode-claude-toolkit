@@ -31,6 +31,45 @@ import {
 
 import type { WakeEvent } from './wake-types'
 
+/**
+ * Model context window SSOT (mirrors @life-ai-tools/claude-code-sdk/src/models.ts).
+ *
+ * Inlined here (not imported) because @kiberos signal-wire adapter has no
+ * runtime dep on claude-code-sdk — adding one would create a circular
+ * dependency (claude-code-sdk → opencode-claude → opencode-signal-wire).
+ *
+ * KEEP IN SYNC with claude-code-sdk/src/models.ts when models change. Drift
+ * here causes contextPercent miscalculation → premature session wrap-up
+ * (bug 2026-05-13: every Claude model was assumed 200K → 1M-window models
+ * computed 5× inflated contextPercent → agents winding up at ~15% real use).
+ */
+const MODEL_CONTEXT_WINDOW: Record<string, number> = {
+  // Opus 4.x — 1M context (beta)
+  'claude-opus-4-7': 1_000_000,
+  'claude-opus-4-6': 1_000_000,
+  // Sonnet 4.6 — 1M context
+  'claude-sonnet-4-6': 1_000_000,
+  // Haiku 4.5 — 200K context
+  'claude-haiku-4-5-20251001': 200_000,
+}
+
+/** Resolve the context window for a model id. Returns undefined if unknown. */
+function resolveContextWindow(modelId: string): number | undefined {
+  if (MODEL_CONTEXT_WINDOW[modelId]) return MODEL_CONTEXT_WINDOW[modelId]
+  const lower = modelId.toLowerCase()
+  // Substring match — handles dated suffixes like "claude-opus-4-7-20251115"
+  for (const [id, window] of Object.entries(MODEL_CONTEXT_WINDOW)) {
+    if (lower.includes(id) || id.includes(lower)) return window
+  }
+  // Family-level fallback for models not in table — be optimistic about
+  // window size (1M for Opus/Sonnet families) to avoid false-positive
+  // premature-wrap-up. Only Haiku gets the smaller window.
+  if (/haiku/i.test(modelId)) return 200_000
+  if (/(opus-4|sonnet-4|opus-5|sonnet-5)/i.test(modelId)) return 1_000_000
+  if (/(opus|sonnet)/i.test(modelId)) return 200_000 // older opus/sonnet (3.x)
+  return undefined
+}
+
 // ─── Adapter identity SSOT ────────────────────────────────
 // Bumped when this file's behavior changes, independent of Core version.
 const ADAPTER_VERSION = '1.0.0' as const
@@ -49,7 +88,18 @@ let adapterBannerEmitted = false
 function emitAdapterBanner(rulesLoaded: number, rulesPath: string | undefined): void {
   if (adapterBannerEmitted) return
   adapterBannerEmitted = true
-  swLog(`ADAPTER_BANNER pid=${process.pid} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? '(unset)'}`)
+  // Include process-identification info so multiple opencode instances can be
+  // distinguished in the shared log file:
+  //   pid                  — OS process
+  //   ppid                 — parent (helps spot Task-tool sub-agents)
+  //   argv0                — what binary is running
+  //   cwd                  — working dir (often differentiates instances)
+  //   OPENCODE_*           — opencode-supplied env (instance id, session id)
+  // Grep recipe: `grep ADAPTER_BANNER ~/.claude/signal-wire-debug.log`
+  const env = process.env
+  const sessionEnv = env.OPENCODE_SESSION_ID || env.OPENCODE_SESSION_SLUG || '?'
+  const instanceEnv = env.OPENCODE_AGENT_INSTANCE_ID || '?'
+  swLog(`ADAPTER_BANNER pid=${process.pid} ppid=${process.ppid ?? '?'} cwd=${process.cwd()} session_env=${sessionEnv} instance_env=${instanceEnv} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? '(unset)'}`)
 }
 
 // ─── Hot-reload rules store ────────────────────────────────
@@ -344,6 +394,20 @@ export class SignalWire {
   private lastQuotaUtil7d: number | undefined
   private lastContextWindow: number | undefined
 
+  // ─── Diagnostic logging state (added 2026-05-13) ─────────
+  // Track last-logged context snapshot to rate-limit CTX_SNAPSHOT lines:
+  // only log when something CHANGES (model, window, or contextPercent diff > 1%).
+  // Without this, logs would flood — every chat.message event triggers an emit.
+  // With it, you get one log line per real state transition + a periodic
+  // heartbeat every 60s so silent processes still show up.
+  private lastLoggedSnapshot: {
+    model?: string
+    window?: number
+    contextTokens?: number
+    contextPercent?: number
+    tsMs?: number
+  } = {}
+
   constructor(config: SignalWireConfig) {
     this.sessionId = config.sessionId
     this.platform = config.platform ?? 'opencode'
@@ -398,6 +462,36 @@ export class SignalWire {
 
   setSdkClient(_client: unknown): void { /* no-op in Core-adapter */ }
 
+  /**
+   * Update the bound sessionId after construction.
+   *
+   * Why this exists: at `server` boot, opencode often delivers
+   * `input.sessionID === undefined`, which we floor to `'unknown'` in
+   * plugin.ts. That stale value gets baked into the adapter and then
+   * leaks into runtimeMeta.sessionId → into hint templates like
+   * `<ctx session="{sessionId}" />`, producing `session="unknown"` even
+   * after the real session has been bound.
+   *
+   * Call sites:
+   *   - plugin.ts `bindSession()` once the real session id is discovered
+   *     (from `session.created`, `findNewSessionByDirectory`, or any
+   *     subsequent hook that surfaces `input.sessionID`).
+   *   - plugin.ts `chat.message` hook on every fire — chat hooks ALWAYS
+   *     carry the authoritative session id, so each turn refreshes any
+   *     stale state.
+   *
+   * Idempotent: no-op when the candidate is empty / `'unknown'` /
+   * unchanged. Logs the transition for audit.
+   */
+  setSessionId(candidate: string | null | undefined): void {
+    if (!candidate) return
+    if (candidate === 'unknown') return
+    if (this.sessionId === candidate) return
+    const prev = this.sessionId
+    this.sessionId = candidate
+    swLog(`SET_SESSION_ID pid=${process.pid} prev=${prev || '?'} new=${candidate}`)
+  }
+
   trackTokens(u: { inputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }): void {
     const promptSize = (u.inputTokens ?? 0) + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0)
     const prev = this.contextPosition
@@ -424,12 +518,24 @@ export class SignalWire {
    */
   trackModel(modelId: string): void {
     if (typeof modelId !== 'string' || modelId.length === 0) return
+    const prevModel = this.lastModel
+    const prevWindow = this.lastContextWindow
     this.lastModel = modelId
-    // Heuristic: Claude family models. Adapter-specific knowledge belongs
-    // here, not in core (which is model-agnostic).
-    if (/haiku/i.test(modelId)) this.lastContextWindow = 200_000
-    else if (/(opus|sonnet|claude)/i.test(modelId)) this.lastContextWindow = 200_000
-    // else: leave undefined (unknown model → don't fake the window)
+    // Use MODEL_CONTEXT_WINDOW (mirror of claude-code-sdk MAX_MODELS) for
+    // accurate per-model window size. The old code hardcoded 200K for every
+    // model — for 1M-window models (Opus 4.x, Sonnet 4.6) this meant
+    // contextPercent was 5× inflated. At 142K real tokens, agents saw "71%
+    // full" instead of "14% full", causing premature session wrap-up.
+    // Bug fix 2026-05-13.
+    const window = resolveContextWindow(modelId)
+    if (window) this.lastContextWindow = window
+    // else: leave previous value — don't overwrite with stale data
+
+    // Log model→window resolution on EVERY model change so we can audit
+    // mismatches between processes. One line per pid per unique model.
+    if (prevModel !== modelId || prevWindow !== this.lastContextWindow) {
+      swLog(`TRACK_MODEL pid=${process.pid} session=${this.sessionId || '?'} model=${modelId} window=${this.lastContextWindow ?? 'unknown'} resolved_from=${window ? 'table' : 'fallback'}`)
+    }
   }
 
   /**
@@ -449,9 +555,14 @@ export class SignalWire {
    * events without aliasing concerns.
    */
   private getRuntimeMeta(): Record<string, unknown> {
+    // Treat the boot-time placeholder 'unknown' as missing — otherwise it
+    // leaks into hint templates as `session="unknown"` and confuses
+    // downstream consumers (operators, log analysis). Real sessions are
+    // opencode UUIDs (`ses_…`) — never literal "unknown".
+    const sid = this.sessionId && this.sessionId !== 'unknown' ? this.sessionId : undefined
     const meta: Record<string, unknown> = {
       pid: process.pid,
-      sessionId: this.sessionId || undefined,
+      sessionId: sid,
       contextTokens: this.contextPosition || undefined,
     }
     if (this.lastContextWindow != null) {
@@ -464,6 +575,28 @@ export class SignalWire {
     if (this.lastModel) meta.model = this.lastModel
     if (this.lastQuotaUtil5h != null) meta.quotaUtil5h = this.lastQuotaUtil5h
     if (this.lastQuotaUtil7d != null) meta.quotaUtil7d = this.lastQuotaUtil7d
+
+    // ─── Diagnostic CTX_SNAPSHOT (added 2026-05-13) ──────────
+    // Log a snapshot when state CHANGED meaningfully OR every 60s heartbeat.
+    // This file is THE audit trail: grep CTX_SNAPSHOT to see what each pid
+    // believed about its own context size — catches future regressions where
+    // a process computes the wrong contextPercent without you noticing.
+    const now = Date.now()
+    const prev = this.lastLoggedSnapshot
+    const curTokens = (typeof meta.contextTokens === 'number' ? meta.contextTokens : undefined)
+    const curPct = (typeof meta.contextPercent === 'number' ? meta.contextPercent : undefined)
+    const pctChanged = (curPct ?? -1) !== (prev.contextPercent ?? -1) && Math.abs((curPct ?? 0) - (prev.contextPercent ?? 0)) >= 1
+    const modelChanged = this.lastModel !== prev.model
+    const windowChanged = this.lastContextWindow !== prev.window
+    const heartbeatDue = !prev.tsMs || (now - prev.tsMs) >= 60_000
+    if (pctChanged || modelChanged || windowChanged || heartbeatDue) {
+      const reason = modelChanged ? 'model_change'
+        : windowChanged ? 'window_change'
+        : pctChanged ? 'pct_change'
+        : 'heartbeat'
+      swLog(`CTX_SNAPSHOT pid=${process.pid} session=${this.sessionId || '?'} model=${this.lastModel ?? '?'} tokens=${curTokens ?? 'null'} window=${this.lastContextWindow ?? 'null'} pct=${curPct ?? 'null'}% remaining=${typeof meta.contextRemaining === 'number' ? meta.contextRemaining : 'null'} util5h=${this.lastQuotaUtil5h ?? 'null'} util7d=${this.lastQuotaUtil7d ?? 'null'} reason=${reason}`)
+      this.lastLoggedSnapshot = { model: this.lastModel, window: this.lastContextWindow, contextTokens: curTokens, contextPercent: curPct, tsMs: now }
+    }
     return meta
   }
 
@@ -545,6 +678,14 @@ export class SignalWire {
               util7d: typeof rec.rateLimit.util7d === 'number' ? rec.rateLimit.util7d : null,
             })
           }
+          // Log STATS_REFRESH only when the consumed record changes (by line
+          // identity heuristic = totalIn + model). Most refresh() calls see
+          // the same most-recent record and shouldn't spam logs.
+          const lineKey = `${rec.model ?? '?'}:${totalIn}`
+          if (lineKey !== this.lastStatsRefreshKey) {
+            swLog(`STATS_REFRESH pid=${process.pid} session=${this.sessionId || '?'} matched_pid=${rec.pid} rec_type=${rec.type} rec_model=${rec.model ?? '?'} in=${u.in ?? 0} cacheRead=${u.cacheRead ?? 0} cacheWrite=${u.cacheWrite ?? 0} totalIn=${totalIn} util5h=${rec.rateLimit?.util5h ?? 'null'} util7d=${rec.rateLimit?.util7d ?? 'null'}`)
+            this.lastStatsRefreshKey = lineKey
+          }
           return true
         } catch {
           // Malformed line — keep walking.
@@ -552,10 +693,18 @@ export class SignalWire {
         }
       }
       return false
-    } catch {
+    } catch (e) {
+      // Log read failures so silent-no-context-data isn't invisible.
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg !== this.lastStatsRefreshError) {
+        swLog(`STATS_REFRESH_FAIL pid=${process.pid} session=${this.sessionId || '?'} error="${msg}"`)
+        this.lastStatsRefreshError = msg
+      }
       return false
     }
   }
+  private lastStatsRefreshKey: string | undefined
+  private lastStatsRefreshError: string | undefined
 
   /**
    * Toggle a rule on/off. Persists to the rules JSON file (atomic rewrite),

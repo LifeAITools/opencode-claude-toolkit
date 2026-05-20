@@ -11,10 +11,12 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { SignalWire } from './signal-wire'
 import {
-  checkSpawnAllowed,
-  getAgentIdentity,
-  getSpawnActive,
-  getSpawnTotal,
+  // Note: legacy local spawn-check helpers (checkSpawnAllowed, getAgentIdentity,
+  // getSpawnActive, getSpawnTotal) intentionally NOT imported here — all spawn
+  // decisions go through wake-router decision-engine (Phase 4.2 routeTaskThroughEngine).
+  // The local helpers remain exported from wake-listener.ts only for any
+  // external consumers and for the helperStarted/active counter (in-process
+  // metric, not a policy decision).
   helperStarted,
   resolveCurrentDepth,
   bindWakeListenerSession,
@@ -23,6 +25,7 @@ import {
 } from './wake-listener'
 import type { WakeListenerHandle } from './wake-listener'
 import { computeSubscribe, loadPreferences } from './wake-preferences'
+import { bootstrapIdentity, applyIdentityToEnv, type ResolvedIdentity } from './identity-bootstrap'
 import {
   normalizeChatMessage,
   normalizeToolBefore,
@@ -34,6 +37,7 @@ import {
 } from './hook-listener'
 import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
+import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -138,61 +142,246 @@ async function findNewSessionByDirectory(client: any, directory: string, notBefo
   return { id: candidates[0].id, directory: candidates[0].directory, count: 1 }
 }
 
+// ─── Subagent type → role mapping (loaded once on first call) ────
+
+let _subagentRoleMap: Record<string, string> | null = null
+function loadSubagentRoleMap(): Record<string, string> {
+  if (_subagentRoleMap) return _subagentRoleMap
+  const mapPath = join(WAKE_ROOT, 'subagent-role-map.json')
+  try {
+    const raw = readFileSync(mapPath, 'utf-8')
+    const parsed = JSON.parse(raw)
+    // Strip _comment / _doc fields (they're documentation, not mappings)
+    const map: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (k.startsWith('_')) continue
+      if (typeof v === 'string') map[k] = v
+    }
+    _subagentRoleMap = map
+    return map
+  } catch {
+    return { default: 'staff-helper' }
+  }
+}
+
+function inferTargetRole(subagentType?: string): string {
+  if (!subagentType) {
+    return loadSubagentRoleMap().default ?? 'staff-helper'
+  }
+  const map = loadSubagentRoleMap()
+  // Direct match first
+  if (map[subagentType]) return map[subagentType]
+  // Prefix wildcard match: e.g. "lat-dev-kit-prompt-booster-*" → all prompt-booster-X
+  for (const [pattern, role] of Object.entries(map)) {
+    if (pattern.endsWith('*') && subagentType.startsWith(pattern.slice(0, -1))) {
+      return role
+    }
+  }
+  return map.default ?? 'staff-helper'
+}
+
+/**
+ * Phase 4.2: routeTaskThroughEngine — central task tool intercept.
+ *
+ * Replaces the old local handlePreToolUseSpawnCheck. ALL task spawn decisions
+ * MUST go through wake-router's decision-engine (CN-01: no bypass).
+ *
+ * Failure modes are HARD BLOCKS with explicit recovery instructions — no
+ * silent fallback. If the central system is down, the operator must fix it
+ * (start router / install stack / set explicit override). This is intentional:
+ * silent fallbacks let the new system "kind of work" without anyone noticing
+ * the central layer was never actually engaged, defeating the whole purpose.
+ *
+ * The ONLY escape valve is the explicit env var:
+ *     SW_ALLOW_TASK_WITHOUT_ROUTER=1
+ * which is loudly logged on every fire. Intended exclusively for operators
+ * debugging the router itself; NOT to be set in any persistent .env.
+ *
+ * Flow:
+ *   1. Not a spawn tool → undefined (no-op)
+ *   2. Description quality gate (cheap early reject)
+ *   3. Check identity provisioned + router reachable
+ *      - missing identity → BLOCK with `wake-status install` hint
+ *      - router down → BLOCK with `systemctl start synqtask-stack` hint
+ *      - both can be overridden by SW_ALLOW_TASK_WITHOUT_ROUTER=1 (loud warning)
+ *   4. POST /agent-action/request with intent='inline_helper'
+ *   5. On decision:
+ *      - inline_ok → inject _sw* args; opencode spawns subprocess
+ *      - denied → BLOCK with router's reason + alternative
+ *      - any error → BLOCK with the error message
+ */
+async function routeTaskThroughEngine(
+  toolName: string,
+  sessionId: string,
+  input?: Record<string, any>,
+  output?: { args?: Record<string, any> },
+): Promise<{ decision: 'block'; message: string } | undefined> {
+  const spawnTools = ['task', 'Task', 'task_tool', 'call_omo_agent']
+  if (!spawnTools.includes(toolName)) return undefined
+
+  const description = String(input?.description ?? input?.prompt ?? input?.message ?? '')
+  // Cheap early gate (router would deny too, but this saves a network call)
+  if (description.length > 0 && description.length < 200) {
+    return {
+      decision: 'block',
+      message: `Delegation blocked: description too short (${description.length} chars, need 200+). ` +
+               `Include concrete task, constraints, files, and expected output.`,
+    }
+  }
+
+  // Operator override — explicit, loud, NEVER persisted in .env.
+  // Used for debugging the router itself when you can't otherwise unblock task tool.
+  const override = process.env.SW_ALLOW_TASK_WITHOUT_ROUTER === '1'
+
+  // Lazy-load to avoid plugin boot dependency on these modules if unused
+  const [{ requestAgentAction, RouterUnreachableError, RouterRejectedError, isRouterReachable }, { detectRunMode }] = await Promise.all([
+    import('./agent-action-client'),
+    import('./run-mode'),
+  ])
+
+  const memberId = process.env.SYNQTASK_MEMBER_ID
+  const memberSecret = process.env.SYNQTASK_MEMBER_SECRET
+
+  // ─── Gate: identity provisioned? ──
+  if (!memberId || !memberSecret) {
+    if (override) {
+      console.error(
+        `[SW] ⚠️⚠️⚠️ SW_ALLOW_TASK_WITHOUT_ROUTER=1: task tool firing without provisioned identity. ` +
+        `This bypasses RBAC and audit. ONLY for debugging.`,
+      )
+      // Override = allow with no further checks. Operator's responsibility.
+      helperStarted()
+      return undefined
+    }
+    return {
+      decision: 'block',
+      message:
+        `Task tool blocked: plugin has no SynqTask identity.\n` +
+        `\n` +
+        `Run \`wake-status install\` (or check that ${WAKE_ROOT}/router.json exists\n` +
+        `and ${AGENT_IDENTITY_DIR}/ contains your cached identity).\n` +
+        `\n` +
+        `Debug override (NOT for normal use): SW_ALLOW_TASK_WITHOUT_ROUTER=1`,
+    }
+  }
+
+  // ─── Gate: router reachable? ──
+  const reachable = await isRouterReachable(800)
+  if (!reachable) {
+    if (override) {
+      console.error(
+        `[SW] ⚠️⚠️⚠️ SW_ALLOW_TASK_WITHOUT_ROUTER=1: router unreachable but task tool firing anyway. ` +
+        `RBAC bypassed. ONLY for debugging.`,
+      )
+      helperStarted()
+      return undefined
+    }
+    return {
+      decision: 'block',
+      message:
+        `Task tool blocked: wake-router is unreachable.\n` +
+        `\n` +
+        `Run \`systemctl --user start synqtask-stack\` to start the router.\n` +
+        `Check status: \`wake-status\` or \`curl http://127.0.0.1:9800/health\`.\n` +
+        `\n` +
+        `Debug override (NOT for normal use): SW_ALLOW_TASK_WITHOUT_ROUTER=1`,
+    }
+  }
+
+  const runMode = detectRunMode().mode
+  const subagentType = input?.subagent_type ?? input?.subagentType
+  const targetRole = inferTargetRole(subagentType)
+  const depth = await resolveCurrentDepth(sessionId)
+
+  // ─── Main path: ask the router ──
+  try {
+    const result = await requestAgentAction({
+      caller: {
+        memberId,
+        memberSecret,
+        sessionId,
+        spawnDepth: depth,
+        pid: process.pid,
+        runMode,
+      },
+      intent: 'inline_helper',
+      target: { role: targetRole },
+      task: {
+        title: input?.description?.slice(0, 80) ?? 'subagent task',
+        description: description || '(no description provided)',
+      },
+    }, { timeoutMs: 6000 })
+
+    if (result.decision === 'inline_ok' && result.inline) {
+      // Phase 4.3 — in-process brief registration.
+      //
+      // Important: opencode's `task` tool does NOT spawn a subprocess. It
+      // creates a sub-session within the SAME opencode runtime, handled by
+      // the SAME plugin instance. So we don't inject env vars; we register
+      // the brief in our in-process registry, keyed by spawnBriefRef. On
+      // the first chat.message for the new sub-session, we claim the brief,
+      // associate it with the session ID, and apply:
+      //   - composed system prompt (via experimental.chat.system.transform)
+      //   - tool restrictions (via tool.definition + tool.execute.before)
+      //   - per-call reminder injected into chat parts
+      const { registerBrief } = await import('./spawn-brief-applier')
+      registerBrief({
+        briefRef: result.inline.spawnBriefRef,
+        decisionLogId: result.decisionLogId,
+        parentMemberId: memberId,
+      })
+
+      helperStarted()
+      dbg(`task routed via engine: decision=inline_ok role=${targetRole} ` +
+          `decisionLogId=${result.decisionLogId.slice(0, 8)} promptHash=${result.audit.promptHash?.slice(0, 8)} ` +
+          `briefRef=${result.inline.spawnBriefRef}`)
+      return undefined  // ALLOW (opencode spawns sub-session, our chat.message hook will pick up brief)
+    }
+    return {
+      decision: 'block',
+      message: `Unexpected engine decision: ${result.decision} (${result.reason})`,
+    }
+  } catch (e: any) {
+    if (e instanceof RouterRejectedError) {
+      const resp = e.response
+      const alt = resp.denial?.alternative ? `\n\nAlternative: ${resp.denial.alternative}` : ''
+      return {
+        decision: 'block',
+        message: `Task blocked by router: ${resp.reason}${alt}\n\n(decisionLogId: ${resp.decisionLogId})`,
+      }
+    }
+    if (e instanceof RouterUnreachableError) {
+      // Router was reachable a moment ago (we just probed /health), so this
+      // is a real network/protocol error. Surface explicitly.
+      return {
+        decision: 'block',
+        message:
+          `Task blocked: router became unreachable during request (${e.reason}).\n` +
+          `Check \`wake-status\` or \`journalctl --user -u synqtask-stack -n 50\`.`,
+      }
+    }
+    // Unknown error — fail-closed for safety.
+    dbg(`task routing error: ${e?.message ?? String(e)}`)
+    return {
+      decision: 'block',
+      message:
+        `Task routing error: ${e?.message ?? 'unknown'}.\n` +
+        `Run \`wake-status\` to diagnose.`,
+    }
+  }
+}
+
+/**
+ * Backward-compat shim — kept only because existing in-tree callers reference
+ * the old name. New code uses routeTaskThroughEngine directly. Both paths
+ * lead to the SAME implementation; no legacy bypass anywhere.
+ */
 async function handlePreToolUseSpawnCheck(
   toolName: string,
   sessionId: string,
   input?: Record<string, any>,
 ): Promise<{ decision: 'block'; message: string } | undefined> {
-  const spawnTools = ['task', 'Task', 'task_tool', 'call_omo_agent']
-  if (!spawnTools.includes(toolName)) return undefined
-
-  try {
-    const identity = getAgentIdentity()
-    const depth = await resolveCurrentDepth(sessionId)
-
-    if (!identity || !identity.roleName) {
-      const maxDepth = parseInt(process.env.__MAX_HELPER_DEPTH ?? '1', 10)
-      if (depth >= maxDepth) {
-        return {
-          decision: 'block',
-          message: [
-            `Helper blocked: depth ${depth}/${maxDepth}.`,
-            `Do the work yourself and return the result; do not spawn another task agent at this level.`,
-          ].join('\n'),
-        }
-      }
-      helperStarted()
-      dbg(`helper spawn OK depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()}`)
-      return undefined
-    }
-
-    const check = checkSpawnAllowed(identity, depth, getSpawnActive())
-    if (!check.allowed) {
-      const roleName = identity.roleName ?? 'unknown'
-      const reason = check.depth >= check.maxDepth
-        ? `Depth ${check.depth}/${check.maxDepth} for role '${roleName}'.`
-        : `Active helpers ${check.active}/${check.maxConcurrent} for role '${roleName}'.`
-      return {
-        decision: 'block',
-        message: [`Spawn blocked: ${reason}`, `Do the work yourself or coordinate through SynqTask instead of spawning.`].join('\n'),
-      }
-    }
-
-    const description = String(input?.description ?? input?.prompt ?? input?.message ?? '')
-    if (description.length < 200) {
-      return {
-        decision: 'block',
-        message: `Delegation blocked: description too short (${description.length} chars, need 200+). Include concrete task, constraints, files, and expected output.`,
-      }
-    }
-
-    helperStarted()
-    dbg(`agent spawn OK role=${identity.roleName} depth=${depth} active=${getSpawnActive()} total=${getSpawnTotal()}`)
-  } catch (e: any) {
-    dbg(`pre_tool_use spawn check failed-open: ${e?.message}`)
-  }
-
-  return undefined
+  return routeTaskThroughEngine(toolName, sessionId, input, undefined)
 }
 
 export default {
@@ -205,6 +394,57 @@ export default {
     const serverUrl = getServerUrl(input)
     const sessionId = input.sessionID ?? 'unknown'
     let agentInstanceId = process.env.OPENCODE_AGENT_INSTANCE_ID ?? `opencode:${sessionId}:${process.pid}`
+    // Phase 2.4: Identity bootstrap (read router.json + provision or cache hit).
+    //
+    // Sets SYNQTASK_MEMBER_ID/SECRET in process.env when provisioning succeeds.
+    // When it fails (router down, no router.json, provision rejected):
+    //   - We do NOT silently fall back to whatever happened to be in env before.
+    //   - Plugin continues to boot (signal-wire engine, wake-listener, etc. still load
+    //     because they're decoupled from identity), but downstream identity-dependent
+    //     operations (task tool through router, SynqTask MCP calls as agent) will
+    //     hit explicit failure paths with actionable recovery instructions.
+    //   - Operator must fix the root cause (start stack, run install).
+    let provisionedIdentity: ResolvedIdentity | null = null
+    try {
+      provisionedIdentity = await bootstrapIdentity({ cwd })
+      if (provisionedIdentity) {
+        applyIdentityToEnv(provisionedIdentity)
+        logStep('IDENTITY_PROVISIONED', {
+          memberId: provisionedIdentity.memberId,
+          role: provisionedIdentity.role,
+          deterministicKey: provisionedIdentity.deterministicKey,
+          isNew: provisionedIdentity.isNewlyProvisioned,
+          orgRoleSlug: provisionedIdentity.orgRole?.slug ?? 'unknown',
+        })
+      } else {
+        // No router.json AND no cache → plugin runs without provisioned identity.
+        // This is degraded mode; identity-dependent operations will explicitly fail
+        // (not silently use whatever env had).
+        logStep('IDENTITY_NOT_PROVISIONED', {
+          reason: 'no_router_json_and_no_cache',
+          impact: 'task_tool_will_block_until_router_reachable',
+          recovery: 'run `wake-status install` then restart opencode',
+        })
+        // Clear any inherited stale identity env so downstream sees the truth:
+        // we don't have an identity. Tells task tool "block with clear message"
+        // rather than "use stale memberId that backend will reject anyway".
+        if (process.env.SYNQTASK_MEMBER_ID && !process.env.OPENCODE_AGENT_INSTANCE_ID) {
+          // Only clear when the env doesn't look like opencode.json-driven config.
+          // OPENCODE_AGENT_INSTANCE_ID presence means an external launcher pre-set
+          // identity intentionally — respect that path.
+          delete (process.env as any).SYNQTASK_MEMBER_ID
+          delete (process.env as any).SYNQTASK_MEMBER_SECRET
+        }
+      }
+    } catch (e: any) {
+      // Bootstrap threw (network, parse error, etc.). Surface explicitly.
+      logStep('IDENTITY_BOOTSTRAP_ERROR', {
+        error: e?.message ?? String(e),
+        impact: 'task_tool_will_block_until_router_reachable',
+        recovery: 'check journalctl --user -u synqtask-stack and wake-status',
+      })
+    }
+
     const { memberId, memberType, agentRegistration, projectConfigFound, agentIdSource } = resolveMemberHints(cwd)
 
     logStep('PLUGIN_BANNER', {
@@ -315,6 +555,14 @@ export default {
       }
       const bound = bindWakeListenerSession(wakeHandle, candidateSessionId, { agentInstanceId, reason })
       if (bound) boundSessionId = candidateSessionId
+      // Propagate the resolved sessionId to the SignalWire adapter so its
+      // runtimeMeta.sessionId stops emitting the boot-time placeholder
+      // `'unknown'`. Without this, hint templates like
+      // `<ctx session="{sessionId}" />` show `session="unknown"` for the
+      // whole process lifetime even after the real session is bound.
+      if (bound && signalWire) {
+        try { signalWire.setSessionId(candidateSessionId) } catch { /* best-effort */ }
+      }
       logStep(bound ? 'SESSION_BOUND' : 'SESSION_BIND_SKIPPED', {
         reason,
         sessionId: candidateSessionId,
@@ -448,6 +696,21 @@ export default {
         return await handlePreToolUseSpawnCheck(toolName, boundSessionId ?? sessionId, input)
       },
 
+      // ─── Phase 4.5: System prompt + tool definition hooks ──────────────
+      // Inject role-specific context (from OrgRole template OR ephemeral
+      // brief for sub-sessions) into opencode's system prompt and tool
+      // definitions sent to the LLM.
+
+      'experimental.chat.system.transform': async (input: any, output: any) => {
+        const { systemTransformHook } = await import('./system-prompt-hook')
+        await systemTransformHook(input, output)
+      },
+
+      'tool.definition': async (input: any, output: any) => {
+        const { toolDefinitionHook } = await import('./tool-definition-hook')
+        await toolDefinitionHook(input, output)
+      },
+
       // ─── In-process rule-engine hooks (signal-wire-architecture-v3 Stage 2) ─
       // Closes the "НЕ мигрировал opencode-claude" item from
       // PRPs/signal-wire-architecture-v3/AUDIT-FULL.md. The hook normalizers,
@@ -487,6 +750,14 @@ export default {
           // delivers the hook before session.created bookkeeping settles.
           if (!event.sessionId && boundSessionId) {
             ;(event as any).sessionId = boundSessionId
+          }
+          // chat.message always carries the authoritative session id — use
+          // it to refresh the SignalWire adapter so runtimeMeta.sessionId
+          // is correct for THIS turn's hint interpolation, even if
+          // bindSession never fired (e.g. server started before opencode
+          // surfaced the session, then user typed before retries landed).
+          if (event.sessionId && signalWire) {
+            try { signalWire.setSessionId(event.sessionId) } catch { /* */ }
           }
           // Track model from input.model — opencode supplies provider+modelID.
           // Updates runtimeMeta lastModel for subsequent runtimeMeta predicates
@@ -547,6 +818,65 @@ export default {
       },
 
       'tool.execute.before': async (input: any, output: any) => {
+        // ═══════════════════════════════════════════════════════════════
+        // Phase 4.5.3 — role-based + ephemeral-brief tool blocking
+        // (runs BEFORE signal-wire rule engine so rules can layer on top)
+        // ═══════════════════════════════════════════════════════════════
+        try {
+          const toolName = input?.tool ?? ''
+          const sessionID = input?.sessionID ?? boundSessionId ?? ''
+
+          // 1) Sub-session blocked tools (from ephemeral brief)
+          const { getBriefForSession } = await import('./spawn-brief-applier')
+          const brief = sessionID ? getBriefForSession(sessionID) : null
+          if (brief?.blockedTools?.includes(toolName)) {
+            if (output?.args) {
+              output.args = {
+                _swBlocked: true,
+                _swReason: `Tool '${toolName}' is blocked for this sub-session's role (ephemeral brief). Use one of: ${brief.allowedTools.join(', ')}`,
+                _swDecisionLogId: brief.decisionLogId,
+              }
+            }
+            logStep('TOOL_BLOCKED_BY_BRIEF', {
+              tool: toolName,
+              sessionId: sessionID,
+              decisionLogId: brief.decisionLogId,
+              allowedTools: brief.allowedTools,
+            })
+            return  // hard stop; signal-wire engine doesn't run
+          }
+
+          // 2) Parent identity blocked tools (from OrgRole.metadata.tools_blocked)
+          const memberId = process.env.SYNQTASK_MEMBER_ID
+          if (memberId && !brief) {
+            // Only check parent identity blocks for non-sub-session calls
+            // (sub-session blocks are handled by step 1)
+            const { _getBlockedForSession } = await import('./tool-definition-hook')
+            const blocked = _getBlockedForSession(sessionID)
+            if (blocked.includes(toolName)) {
+              const role = process.env.SYNQTASK_AGENT_ROLE ?? 'unknown'
+              if (output?.args) {
+                output.args = {
+                  _swBlocked: true,
+                  _swReason: `Tool '${toolName}' is blocked for your role '${role}'. ` +
+                             `Allowed tools are listed in your AGENT.md role section. ` +
+                             `To use this tool, delegate to a higher-privilege role via 'task' tool or SynqTask.`,
+                  _swRole: role,
+                }
+              }
+              logStep('TOOL_BLOCKED_BY_ROLE', { tool: toolName, sessionId: sessionID, role })
+              return  // hard stop
+            }
+          }
+        } catch (e: any) {
+          // Role/brief check failure must NOT block tool execution
+          // (would deny legitimate calls). Log and fall through to signal-wire engine.
+          logStep('TOOL_BLOCK_CHECK_FAILED_OPEN', { error: e?.message ?? String(e) })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // Existing signal-wire rule engine path (Phase 4.5.3 layers on top)
+        // ═══════════════════════════════════════════════════════════════
         if (!signalWireEngine) return
         try {
           const event = normalizeToolBefore(input ?? { tool: 'unknown', sessionID: '', callID: '' }, output ?? { args: {} })

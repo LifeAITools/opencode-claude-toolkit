@@ -41,6 +41,22 @@ describe('lineageKey', () => {
     expect(lineageKey({ system: 'plain string sys', tools: [] })).toBeString()
   })
 
+  test('volatile non-cache_control block (billing header) does NOT change the key', () => {
+    // Claude Code prepends `x-anthropic-billing-header` with a per-request
+    // `cch=` token and no cache_control — the lineage key must ignore it,
+    // otherwise per-lineage tracking churns on every request.
+    const cached = [{ type: 'text', text: 'You are Claude Code', cache_control: { type: 'ephemeral' } }]
+    const req1 = { system: [{ type: 'text', text: 'x-anthropic-billing-header: cch=aaaaa' }, ...cached], tools: [{ name: 'Bash' }] }
+    const req2 = { system: [{ type: 'text', text: 'x-anthropic-billing-header: cch=zzzzz' }, ...cached], tools: [{ name: 'Bash' }] }
+    expect(lineageKey(req1)).toBe(lineageKey(req2))
+  })
+
+  test('a change inside a cache_control block DOES change the key', () => {
+    const a = { system: [{ type: 'text', text: 'agent A', cache_control: { type: 'ephemeral' } }], tools: [{ name: 'Bash' }] }
+    const b = { system: [{ type: 'text', text: 'agent B', cache_control: { type: 'ephemeral' } }], tools: [{ name: 'Bash' }] }
+    expect(lineageKey(a)).not.toBe(lineageKey(b))
+  })
+
   test('malformed bodies never throw', () => {
     expect(() => lineageKey(null)).not.toThrow()
     expect(() => lineageKey(undefined)).not.toThrow()

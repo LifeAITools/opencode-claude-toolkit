@@ -154,7 +154,7 @@ export function startHeartbeat(
       const cacheAgeSec = idleSec
       const u: any = sess.lastUsage ?? {}
       let kaState: 'armed' | 'firing' | 'disarmed' | 'idle' | 'cold'
-      if (eng._inFlight) kaState = 'firing'
+      if (eng.inFlight) kaState = 'firing'   // engine field is `inFlight` (no underscore)
       else if (timerRunning && registrySize && registrySize > 0) kaState = 'armed'
       else if (timerRunning) kaState = 'idle'
       else if (lastReqAt) kaState = 'disarmed'

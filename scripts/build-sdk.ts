@@ -63,10 +63,14 @@ async function main() {
       // Preserve exported names and class names
       keep_classnames: true,
       keep_fnames: false,
-      properties: {
-        // Only mangle private-looking properties (_prefixed)
-        regex: /^_[a-z]/,
-      },
+      // Property mangling intentionally DISABLED. The `_`-prefixed
+      // introspection getters (_cacheTtlMs, _registry, _timer, _inFlight,
+      // _cacheTtlOverridden, ...) are the SDK's contract with external
+      // consumers — claude-max-proxy's heartbeat + /stats read them by name.
+      // Mangling them (was: properties.regex /^_[a-z]/) silently broke that
+      // contract: the proxy read `undefined` and fell back to wrong defaults
+      // (e.g. heartbeat ttlSec hardcoded to 3600 regardless of real TTL).
+      // Local-variable mangling (toplevel) still gives the size win.
     },
     format: {
       comments: false,        // strip all comments

@@ -206,7 +206,13 @@ export function assessRevival(
     if (now >= cacheDiesAt) {
       return { revive: false, reason: 'cache-already-dead' }
     }
-    const remainingWait = Math.max(0, 0.9 * opts.intervalMs - age)
+    // The revived engine clamps its KA interval exactly as KeepaliveEngine
+    // does — to [60s, cacheTtl - safetyMargin - 60s]. Use that EFFECTIVE
+    // interval, NOT the raw SSOT value: a 30-min SSOT interval would make
+    // 0.9*interval ≈ 27 min and falsely fail every still-warm snapshot.
+    const clampMax = Math.max(60_000, s.cacheTtlMs - opts.safetyMarginMs - 60_000)
+    const effIntervalMs = Math.min(Math.max(opts.intervalMs, 60_000), clampMax)
+    const remainingWait = Math.max(0, 0.9 * effIntervalMs - age)
     if (now + remainingWait + opts.fireBudgetMs >= cacheDiesAt) {
       return { revive: false, reason: 'cache-dies-before-ka' }
     }

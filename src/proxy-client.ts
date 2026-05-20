@@ -643,8 +643,8 @@ export class ProxyClient {
           && rewriteAssessment.predictedTokens >= guard.minRewriteTokens
           && !lastMsg.isContinuation        // never block an agent tool-loop continuation
           && !lastMsg.hasMarker) {
-        // Dump the rejected request + prefix diff so it can be analysed
-        // offline — once we return 400 the request is otherwise gone.
+        // Dump the request + prefix diff for offline analysis — both the
+        // blocked and the let-through (automated) path.
         let dumpPath: string | null = null
         if (guard.dumpBlocked) {
           dumpPath = writeRewriteBlockDump(this.rewriteBlockDumpDir, {
@@ -657,27 +657,48 @@ export class ProxyClient {
             previousPrefix: rewriteAssessment.prevPrefix,
           })
         }
-        this.events.emit({
-          level: 'error',
-          kind: 'CACHE_REWRITE_BLOCKED',
-          sessionId,
-          lineageKey: reqLineageKey,
-          rewriteClass: rewriteAssessment.rewriteClass,
-          predictedTokens: rewriteAssessment.predictedTokens,
-          dumpPath,
-          msg: `rewrite guard blocked ${rewriteAssessment.rewriteClass} `
-            + `(~${rewriteAssessment.predictedTokens} tok) — awaiting user override marker`
-            + (dumpPath ? ` — dump: ${dumpPath}` : ''),
-        })
-        return jsonResponse(400, {
-          error: {
-            type: 'cache_rewrite_guard',
-            message: `Cache-rewrite guard: this turn would re-cache ~${rewriteAssessment.predictedTokens} `
-              + `tokens (${rewriteAssessment.rewriteClass}) — an unconfirmed quota spend. To proceed, `
-              + `re-send your message with ${guard.overrideMarker} in it. `
-              + `(Disable: keepalive.json → rewriteGuard.enabled=false.)`,
-          },
-        })
+        // The guard is an INTERACTIVE consent checkpoint: a human sees the 400
+        // and re-sends with the override marker. An automated agent — an
+        // Agent-SDK-spawned cognitive worker, or a Claude Code sub-agent —
+        // cannot consent; a hard 400 just strands its work. For those, log +
+        // dump for visibility but LET THE REQUEST THROUGH.
+        if (isAutomatedAgent(parsedBody, headers)) {
+          this.events.emit({
+            level: 'info',
+            kind: 'CACHE_REWRITE_UNGUARDED',
+            sessionId,
+            lineageKey: reqLineageKey,
+            rewriteClass: rewriteAssessment.rewriteClass,
+            predictedTokens: rewriteAssessment.predictedTokens,
+            dumpPath,
+            msg: `rewrite guard would block ${rewriteAssessment.rewriteClass} `
+              + `(~${rewriteAssessment.predictedTokens} tok) — consumer is an automated `
+              + `agent (cannot consent); passed through`
+              + (dumpPath ? ` — dump: ${dumpPath}` : ''),
+          })
+        } else {
+          this.events.emit({
+            level: 'error',
+            kind: 'CACHE_REWRITE_BLOCKED',
+            sessionId,
+            lineageKey: reqLineageKey,
+            rewriteClass: rewriteAssessment.rewriteClass,
+            predictedTokens: rewriteAssessment.predictedTokens,
+            dumpPath,
+            msg: `rewrite guard blocked ${rewriteAssessment.rewriteClass} `
+              + `(~${rewriteAssessment.predictedTokens} tok) — awaiting user override marker`
+              + (dumpPath ? ` — dump: ${dumpPath}` : ''),
+          })
+          return jsonResponse(400, {
+            error: {
+              type: 'cache_rewrite_guard',
+              message: `Cache-rewrite guard: this turn would re-cache ~${rewriteAssessment.predictedTokens} `
+                + `tokens (${rewriteAssessment.rewriteClass}) — an unconfirmed quota spend. To proceed, `
+                + `re-send your message with ${guard.overrideMarker} in it. `
+                + `(Disable: keepalive.json → rewriteGuard.enabled=false.)`,
+            },
+          })
+        }
       }
     }
 
@@ -1449,6 +1470,33 @@ export function extractSessionIdFromBody(
     return m ? m[1].toLowerCase() : null
   } catch {
     return null
+  }
+}
+
+/**
+ * Is this request from an AUTOMATED agent (vs an interactive human)?
+ *
+ * The rewrite guard is an interactive consent checkpoint — a 400 the human
+ * answers by re-sending with the override marker. An automated agent cannot
+ * do that, so the guard must not hard-block it. Two automated cases:
+ *   - a Claude Code sub-agent — carries the `x-claude-code-agent-id` header;
+ *   - an Agent-SDK-spawned agent (every CWE/CWA cognitive worker) — its
+ *     `metadata.user_id` is the underscore form `user_..._session_<uuid>`,
+ *     whereas interactive Claude Code writes `user_id` as a JSON object.
+ * Never throws.
+ */
+function isAutomatedAgent(body: unknown, headers: Record<string, string>): boolean {
+  try {
+    for (const [k, v] of Object.entries(headers)) {
+      if (k.toLowerCase() === 'x-claude-code-agent-id' && typeof v === 'string' && v) return true
+    }
+    const uid = (body as { metadata?: { user_id?: unknown } })?.metadata?.user_id
+    if (typeof uid === 'string' && !uid.trimStart().startsWith('{') && uid.includes('_session_')) {
+      return true
+    }
+    return false
+  } catch {
+    return false
   }
 }
 

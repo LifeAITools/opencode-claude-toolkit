@@ -275,6 +275,39 @@ describe('extractSessionIdFromBody', () => {
   })
 })
 
+describe('rewrite guard — automated agents are not hard-blocked', () => {
+  // SDK-agent body: metadata.user_id is the underscore form (not JSON).
+  const agentBody = () => JSON.stringify({
+    model: 'claude-opus-4-7',
+    system: [{ type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral' } }],
+    tools: [],
+    messages: [{ role: 'user', content: 'do the work ' + FILLER }],
+    metadata: { user_id: 'user_devhash_account__session_a1b2c3d4-0000-5111-8222-333344445555' },
+  })
+
+  test('SDK-agent ttl-expiry → passes through (CACHE_REWRITE_UNGUARDED), no 400', async () => {
+    const events: any[] = []
+    const c = mkClient({ eventEmitter: { emit: (e: any) => events.push(e) } })
+    await c.handleRequest(agentBody(), {}, { sessionId: 'rg-auto-1' })   // cold-start
+    await Bun.sleep(1200)                                                // idle > 1s TTL
+    const r = await c.handleRequest(agentBody(), {}, { sessionId: 'rg-auto-1' })
+    expect(r.status).not.toBe(400)
+    expect(events.some((e) => e.kind === 'CACHE_REWRITE_UNGUARDED')).toBe(true)
+    expect(events.some((e) => e.kind === 'CACHE_REWRITE_BLOCKED')).toBe(false)
+    c.stop()
+  })
+
+  test('Claude Code sub-agent (x-claude-code-agent-id header) ttl-expiry → passes, no 400', async () => {
+    const c = mkClient()
+    const hdr = { 'x-claude-code-agent-id': 'sub-7' }
+    await c.handleRequest(reqBody(), hdr, { sessionId: 'rg-auto-2' })
+    await Bun.sleep(1200)
+    const r = await c.handleRequest(reqBody(), hdr, { sessionId: 'rg-auto-2' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+})
+
 describe('proxy — CC_VERSION_CHANGED detection', () => {
   // Body carrying the Claude Code billing header (cc_version=X.Y.Z.<fingerprint>).
   const bodyV = (ver: string) => JSON.stringify({

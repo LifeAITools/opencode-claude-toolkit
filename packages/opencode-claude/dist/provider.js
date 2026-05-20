@@ -2586,38 +2586,38 @@ var require_bitmapimage = __commonJS((exports, module) => {
       const sourceByteWidth = this.bitmap.width * 4;
       const targetByteWidth = toImage.bitmap.width * 4;
       const copyByteWidth = fromWidth * 4;
-      let si = fromY * sourceByteWidth + fromX * 4;
-      let ti = toY * targetByteWidth + toX * 4;
+      let si2 = fromY * sourceByteWidth + fromX * 4;
+      let ti2 = toY * targetByteWidth + toX * 4;
       while (--fromHeight >= 0) {
-        sourceBuf.copy(targetBuf, ti, si, si + copyByteWidth);
-        si += sourceByteWidth;
-        ti += targetByteWidth;
+        sourceBuf.copy(targetBuf, ti2, si2, si2 + copyByteWidth);
+        si2 += sourceByteWidth;
+        ti2 += targetByteWidth;
       }
       return this;
     }
     fillRGBA(rgba) {
       const buf = this.bitmap.data;
       const bufByteWidth = this.bitmap.height * 4;
-      let bi = 0;
-      while (bi < bufByteWidth) {
-        buf.writeUInt32BE(rgba, bi);
-        bi += 4;
+      let bi2 = 0;
+      while (bi2 < bufByteWidth) {
+        buf.writeUInt32BE(rgba, bi2);
+        bi2 += 4;
       }
-      while (bi < buf.length) {
-        buf.copy(buf, bi, 0, bufByteWidth);
-        bi += bufByteWidth;
+      while (bi2 < buf.length) {
+        buf.copy(buf, bi2, 0, bufByteWidth);
+        bi2 += bufByteWidth;
       }
       return this;
     }
     getRGBA(x2, y2) {
-      const bi = (y2 * this.bitmap.width + x2) * 4;
-      return this.bitmap.data.readUInt32BE(bi);
+      const bi2 = (y2 * this.bitmap.width + x2) * 4;
+      return this.bitmap.data.readUInt32BE(bi2);
     }
     getRGBASet() {
       const rgbaSet = new Set;
       const buf = this.bitmap.data;
-      for (let bi = 0;bi < buf.length; bi += 4) {
-        rgbaSet.add(buf.readUInt32BE(bi, true));
+      for (let bi2 = 0;bi2 < buf.length; bi2 += 4) {
+        rgbaSet.add(buf.readUInt32BE(bi2, true));
       }
       return rgbaSet;
     }
@@ -2694,8 +2694,8 @@ var require_bitmapimage = __commonJS((exports, module) => {
       const bufferLength = this.bitmap.data.length;
       let x2 = 0;
       let y2 = 0;
-      for (let bi = 0;bi < bufferLength; bi += 4) {
-        scanHandler(x2, y2, bi);
+      for (let bi2 = 0;bi2 < bufferLength; bi2 += 4) {
+        scanHandler(x2, y2, bi2);
         if (++x2 === width) {
           x2 = 0;
           ++y2;
@@ -2704,8 +2704,8 @@ var require_bitmapimage = __commonJS((exports, module) => {
     }
     scanAllIndexes(scanHandler) {
       const bufferLength = this.bitmap.data.length;
-      for (let bi = 0;bi < bufferLength; bi += 4) {
-        scanHandler(bi);
+      for (let bi2 = 0;bi2 < bufferLength; bi2 += 4) {
+        scanHandler(bi2);
       }
     }
   }
@@ -3747,15 +3747,15 @@ var require_image_q = __commonJS((exports, module) => {
       let lo = i2 - rad;
       if (lo < -1)
         lo = -1;
-      let hi = i2 + rad;
-      if (hi > this._networkSize)
-        hi = this._networkSize;
+      let hi2 = i2 + rad;
+      if (hi2 > this._networkSize)
+        hi2 = this._networkSize;
       let j2 = i2 + 1;
       let k2 = i2 - 1;
       let m2 = 1;
-      while (j2 < hi || k2 > lo) {
+      while (j2 < hi2 || k2 > lo) {
         const a2 = this._radPower[m2++] / _NeuQuant._alphaRadBias;
-        if (j2 < hi) {
+        if (j2 < hi2) {
           const p2 = this._network[j2++];
           p2.subtract(a2 * (p2.r - r2), a2 * (p2.g - g2), a2 * (p2.b - b2), a2 * (p2.a - al));
         }
@@ -3951,15 +3951,15 @@ var require_image_q = __commonJS((exports, module) => {
       let lo = i2 - rad;
       if (lo < -1)
         lo = -1;
-      let hi = i2 + rad;
-      if (hi > this._networkSize)
-        hi = this._networkSize;
+      let hi2 = i2 + rad;
+      if (hi2 > this._networkSize)
+        hi2 = this._networkSize;
       let j2 = i2 + 1;
       let k2 = i2 - 1;
       let m2 = 1;
-      while (j2 < hi || k2 > lo) {
+      while (j2 < hi2 || k2 > lo) {
         const a2 = this._radPower[m2++] / _NeuQuantFloat._alphaRadBias;
-        if (j2 < hi) {
+        if (j2 < hi2) {
           const p2 = this._network[j2++];
           p2.subtract(a2 * (p2.r - r2), a2 * (p2.g - g2), a2 * (p2.b - b2), a2 * (p2.a - al));
         }
@@ -5405,7 +5405,7 @@ var require_gifframe = __commonJS((exports) => {
 
 // node_modules/gifwrap/src/gifutil.js
 var require_gifutil = __commonJS((exports) => {
-  var fs = __require_gv7hsff9("fs");
+  var fs2 = __require_gv7hsff9("fs");
   var ImageQ = require_image_q();
   var BitmapImage = require_bitmapimage();
   var { GifFrame } = require_gifframe();
@@ -5516,14 +5516,14 @@ var require_gifutil = __commonJS((exports) => {
     jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
     return jimpImage;
   };
-  exports.write = function(path, frames, spec, encoder) {
+  exports.write = function(path2, frames, spec, encoder) {
     encoder = encoder || defaultCodec;
-    const matches = path.match(/\.[a-zA-Z]+$/);
+    const matches = path2.match(/\.[a-zA-Z]+$/);
     if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-      throw new Error(`GIF '${path}' has an unexpected suffix`);
+      throw new Error(`GIF '${path2}' has an unexpected suffix`);
     }
     return encoder.encodeGif(frames, spec).then((gif) => {
-      return _writeBinary(path, gif.buffer).then(() => {
+      return _writeBinary(path2, gif.buffer).then(() => {
         return gif;
       });
     });
@@ -5568,8 +5568,8 @@ var require_gifutil = __commonJS((exports) => {
       const imageBuf = image2.bitmap.data;
       const inputBuf = new ArrayBuffer(imageBuf.length);
       const inputArray = new Uint32Array(inputBuf);
-      for (let bi = 0, ai = 0;bi < imageBuf.length; bi += 4, ++ai) {
-        inputArray[ai] = imageBuf.readUInt32LE(bi, true);
+      for (let bi2 = 0, ai2 = 0;bi2 < imageBuf.length; bi2 += 4, ++ai2) {
+        inputArray[ai2] = imageBuf.readUInt32LE(bi2, true);
       }
       const inputContainer = ImageQ.utils.PointContainer.fromUint32Array(inputArray, image2.bitmap.width, image2.bitmap.height);
       quantizer.sample(inputContainer);
@@ -5580,14 +5580,14 @@ var require_gifutil = __commonJS((exports) => {
       const imageBuf = images[i2].bitmap.data;
       const outputContainer = imageMaker.quantizeSync(inputContainers[i2], limitedPalette);
       const outputArray = outputContainer.toUint32Array();
-      for (let bi = 0, ai = 0;bi < imageBuf.length; bi += 4, ++ai) {
-        imageBuf.writeUInt32LE(outputArray[ai], bi);
+      for (let bi2 = 0, ai2 = 0;bi2 < imageBuf.length; bi2 += 4, ++ai2) {
+        imageBuf.writeUInt32LE(outputArray[ai2], bi2);
       }
     }
   }
-  function _readBinary(path) {
+  function _readBinary(path2) {
     return new Promise((resolve, reject) => {
-      fs.readFile(path, (err, buffer) => {
+      fs2.readFile(path2, (err, buffer) => {
         if (err) {
           return reject(err);
         }
@@ -5595,9 +5595,9 @@ var require_gifutil = __commonJS((exports) => {
       });
     });
   }
-  function _writeBinary(path, buffer) {
+  function _writeBinary(path2, buffer) {
     return new Promise((resolve, reject) => {
-      fs.writeFile(path, buffer, (err) => {
+      fs2.writeFile(path2, buffer, (err) => {
         if (err) {
           return reject(err);
         }
@@ -5687,8 +5687,8 @@ var require_gifcodec = __commonJS((exports) => {
             buffer = buffer.slice(info.y * reader.width * 4);
           }
           if (reader.width > info.width) {
-            for (let ii = 0;ii < info.height; ++ii) {
-              buffer.copy(buffer, ii * info.width * 4, (info.x + ii * reader.width) * 4, (info.x + ii * reader.width) * 4 + info.width * 4);
+            for (let ii2 = 0;ii2 < info.height; ++ii2) {
+              buffer.copy(buffer, ii2 * info.width * 4, (info.x + ii2 * reader.width) * 4, (info.x + ii2 * reader.width) * 4 + info.width * 4);
             }
           }
           buffer = buffer.slice(0, info.width * info.height * 4);
@@ -5775,11 +5775,11 @@ var require_gifcodec = __commonJS((exports) => {
     return index === -1 ? null : index;
   }
   function _colorLookupBinary(colors, color) {
-    var lo = 0, hi = colors.length - 1, mid;
-    while (lo <= hi) {
-      mid = Math.floor((lo + hi) / 2);
+    var lo = 0, hi2 = colors.length - 1, mid;
+    while (lo <= hi2) {
+      mid = Math.floor((lo + hi2) / 2);
       if (colors[mid] > color)
-        hi = mid - 1;
+        hi2 = mid - 1;
       else if (colors[mid] < color)
         lo = mid + 1;
       else
@@ -7554,9 +7554,9 @@ var require_decoder2 = __commonJS((exports, module) => {
       return a2 < 0 ? 0 : a2 > 255 ? 255 : a2;
     }
     constructor.prototype = {
-      load: function load(path) {
+      load: function load(path2) {
         var xhr = new XMLHttpRequest;
-        xhr.open("GET", path, true);
+        xhr.open("GET", path2, true);
         xhr.responseType = "arraybuffer";
         xhr.onload = function() {
           var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -14146,7 +14146,7 @@ var require_UTIF = __commonJS((exports, module) => {
           W3.constructor = W3;
           return W3;
         }(), ak = function ag() {
-          var p2 = new Uint8Array([0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]), t2 = 4017, ac = 799, ah = 3406, ao = 2276, ar = 1567, ai = 3784, s2 = 5793, ad = 2896;
+          var p2 = new Uint8Array([0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]), t2 = 4017, ac = 799, ah = 3406, ao = 2276, ar = 1567, ai2 = 3784, s2 = 5793, ad = 2896;
           function ak2(Q2) {
             if (Q2 == null)
               Q2 = {};
@@ -14477,8 +14477,8 @@ var require_UTIF = __commonJS((exports, module) => {
               U2 = j2 << 4;
               E2 = E2 + a3 + 1 >> 1;
               a3 = E2 - a3;
-              b2 = C2 * ai + F2 * ar + 128 >> 8;
-              C2 = C2 * ar - F2 * ai + 128 >> 8;
+              b2 = C2 * ai2 + F2 * ar + 128 >> 8;
+              C2 = C2 * ar - F2 * ai2 + 128 >> 8;
               F2 = b2;
               d2 = d2 + U2 + 1 >> 1;
               U2 = d2 - U2;
@@ -14541,8 +14541,8 @@ var require_UTIF = __commonJS((exports, module) => {
               U2 = j2;
               E2 = (E2 + a3 + 1 >> 1) + 4112;
               a3 = E2 - a3;
-              b2 = C2 * ai + F2 * ar + 2048 >> 12;
-              C2 = C2 * ar - F2 * ai + 2048 >> 12;
+              b2 = C2 * ai2 + F2 * ar + 2048 >> 12;
+              C2 = C2 * ar - F2 * ai2 + 2048 >> 12;
               F2 = b2;
               d2 = d2 + U2 + 1 >> 1;
               U2 = d2 - U2;
@@ -15469,7 +15469,7 @@ var require_UTIF = __commonJS((exports, module) => {
         }
         function av(t2, E2, h2, L2, g2, n2) {
           L2 = new Uint16Array(L2.buffer);
-          var W2 = Date.now(), j2 = UTIF2._binBE, $2 = E2 + h2, r2, u2, X2, I2, ax, a3, R2, ai, aa, ap, ah, ae2, aD, al, i2, aE, T2, B2;
+          var W2 = Date.now(), j2 = UTIF2._binBE, $2 = E2 + h2, r2, u2, X2, I2, ax, a3, R2, ai2, aa, ap, ah, ae2, aD, al, i2, aE, T2, B2;
           E2 += 4;
           var a5 = n2[0] == 1;
           while (E2 < $2) {
@@ -15490,7 +15490,7 @@ var require_UTIF = __commonJS((exports, module) => {
             else if (S2 == 62)
               R2 = s2;
             else if (S2 == 101)
-              ai = s2;
+              ai2 = s2;
             else if (S2 == 109)
               aa = s2;
             else if (S2 == 84)
@@ -16050,13 +16050,13 @@ var require_UTIF = __commonJS((exports, module) => {
         var huff = [];
         for (max = 16;max != 0 && !source[max]; max--)
           ;
-        var si = 17;
+        var si2 = 17;
         huff[0] = max;
         for (h2 = len = 1;len <= max; len++)
-          for (i2 = 0;i2 < source[len]; i2++, ++si)
+          for (i2 = 0;i2 < source[len]; i2++, ++si2)
             for (j2 = 0;j2 < 1 << max - len; j2++)
               if (h2 <= 1 << max)
-                huff[h2++] = len << 8 | source[si];
+                huff[h2++] = len << 8 | source[si2];
         return huff;
       };
       UTIF2.decode._decodeNewJPEG = function(img, data, off, len, tgt, toff) {
@@ -16729,9 +16729,9 @@ var require_UTIF = __commonJS((exports, module) => {
               arr.push(bin.readUint(data, (num < 2 ? offset - 4 : voff) + 4 * j2));
           }
           if (type == 5 || type == 10) {
-            var ri = type == 5 ? bin.readUint : bin.readInt;
+            var ri2 = type == 5 ? bin.readUint : bin.readInt;
             for (var j2 = 0;j2 < num; j2++)
-              arr.push([ri(data, voff + j2 * 8), ri(data, voff + j2 * 8 + 4)]);
+              arr.push([ri2(data, voff + j2 * 8), ri2(data, voff + j2 * 8 + 4)]);
           }
           if (type == 8) {
             for (var j2 = 0;j2 < num; j2++)
@@ -16815,8 +16815,8 @@ var require_UTIF = __commonJS((exports, module) => {
         bin.writeUshort(data, offset, knum);
         offset += 2;
         var eoff = offset + knum * 12 + 4;
-        for (var ki = 0;ki < keys.length; ki++) {
-          var key = keys[ki];
+        for (var ki2 = 0;ki2 < keys.length; ki2++) {
+          var key = keys[ki2];
           if (key == "t34665" || key == "t34853")
             continue;
           if (key == "exifIFD")
@@ -16979,35 +16979,35 @@ var require_UTIF = __commonJS((exports, module) => {
               }
             if (smpls == 3)
               for (var i2 = 0;i2 < area; i2++) {
-                var qi = i2 << 2, ti = i2 * 3;
-                img[qi] = data[ti];
-                img[qi + 1] = data[ti + 1];
-                img[qi + 2] = data[ti + 2];
+                var qi = i2 << 2, ti2 = i2 * 3;
+                img[qi] = data[ti2];
+                img[qi + 1] = data[ti2 + 1];
+                img[qi + 2] = data[ti2 + 2];
                 img[qi + 3] = 255;
               }
             if (smpls >= 4)
               for (var i2 = 0;i2 < area; i2++) {
-                var qi = i2 << 2, ti = i2 * smpls;
-                img[qi] = data[ti];
-                img[qi + 1] = data[ti + 1];
-                img[qi + 2] = data[ti + 2];
-                img[qi + 3] = data[ti + 3];
+                var qi = i2 << 2, ti2 = i2 * smpls;
+                img[qi] = data[ti2];
+                img[qi + 1] = data[ti2 + 1];
+                img[qi + 2] = data[ti2 + 2];
+                img[qi + 3] = data[ti2 + 3];
               }
           } else if (bps == 16) {
             if (smpls == 4)
               for (var i2 = 0;i2 < area; i2++) {
-                var qi = i2 << 2, ti = i2 * 8 + 1;
-                img[qi] = data[ti];
-                img[qi + 1] = data[ti + 2];
-                img[qi + 2] = data[ti + 4];
-                img[qi + 3] = data[ti + 6];
+                var qi = i2 << 2, ti2 = i2 * 8 + 1;
+                img[qi] = data[ti2];
+                img[qi + 1] = data[ti2 + 2];
+                img[qi + 2] = data[ti2 + 4];
+                img[qi + 3] = data[ti2 + 6];
               }
             if (smpls == 3)
               for (var i2 = 0;i2 < area; i2++) {
-                var qi = i2 << 2, ti = i2 * 6 + 1;
-                img[qi] = data[ti];
-                img[qi + 1] = data[ti + 2];
-                img[qi + 2] = data[ti + 4];
+                var qi = i2 << 2, ti2 = i2 * 6 + 1;
+                img[qi] = data[ti2];
+                img[qi + 1] = data[ti2 + 2];
+                img[qi + 2] = data[ti2 + 4];
                 img[qi + 3] = 255;
               }
           } else if (bps == 32) {
@@ -17033,19 +17033,19 @@ var require_UTIF = __commonJS((exports, module) => {
             }
             if (smpls == 3)
               for (var i2 = 0;i2 < area; i2++) {
-                var qi = i2 << 2, ti = i2 * 3;
-                img[qi] = ~~(0.5 + ndt[ti] * 255);
-                img[qi + 1] = ~~(0.5 + ndt[ti + 1] * 255);
-                img[qi + 2] = ~~(0.5 + ndt[ti + 2] * 255);
+                var qi = i2 << 2, ti2 = i2 * 3;
+                img[qi] = ~~(0.5 + ndt[ti2] * 255);
+                img[qi + 1] = ~~(0.5 + ndt[ti2 + 1] * 255);
+                img[qi + 2] = ~~(0.5 + ndt[ti2 + 2] * 255);
                 img[qi + 3] = 255;
               }
             else if (smpls == 4)
               for (var i2 = 0;i2 < area; i2++) {
-                var qi = i2 << 2, ti = i2 * 4;
-                img[qi] = ~~(0.5 + ndt[ti] * 255);
-                img[qi + 1] = ~~(0.5 + ndt[ti + 1] * 255);
-                img[qi + 2] = ~~(0.5 + ndt[ti + 2] * 255);
-                img[qi + 3] = ~~(0.5 + ndt[ti + 3] * 255);
+                var qi = i2 << 2, ti2 = i2 * 4;
+                img[qi] = ~~(0.5 + ndt[ti2] * 255);
+                img[qi + 1] = ~~(0.5 + ndt[ti2 + 1] * 255);
+                img[qi + 2] = ~~(0.5 + ndt[ti2 + 2] * 255);
+                img[qi + 3] = ~~(0.5 + ndt[ti2 + 3] * 255);
               }
             else
               throw smpls;
@@ -17058,48 +17058,48 @@ var require_UTIF = __commonJS((exports, module) => {
           for (var y2 = 0;y2 < h2; y2++)
             for (var x2 = 0;x2 < w2; x2++) {
               var i2 = y2 * w2 + x2;
-              var qi = i2 << 2, mi = 0;
+              var qi = i2 << 2, mi2 = 0;
               var dof = y2 * bpl;
               if (false) {} else if (bps == 1)
-                mi = data[dof + (x2 >>> 3)] >>> 7 - (x2 & 7) & 1;
+                mi2 = data[dof + (x2 >>> 3)] >>> 7 - (x2 & 7) & 1;
               else if (bps == 2)
-                mi = data[dof + (x2 >>> 2)] >>> 6 - 2 * (x2 & 3) & 3;
+                mi2 = data[dof + (x2 >>> 2)] >>> 6 - 2 * (x2 & 3) & 3;
               else if (bps == 4)
-                mi = data[dof + (x2 >>> 1)] >>> 4 - 4 * (x2 & 1) & 15;
+                mi2 = data[dof + (x2 >>> 1)] >>> 4 - 4 * (x2 & 1) & 15;
               else if (bps == 8)
-                mi = data[dof + x2 * smpls];
+                mi2 = data[dof + x2 * smpls];
               else
                 throw bps;
-              img[qi] = map[mi] >> 8;
-              img[qi + 1] = map[cn + mi] >> 8;
-              img[qi + 2] = map[cn + cn + mi] >> 8;
+              img[qi] = map[mi2] >> 8;
+              img[qi + 1] = map[cn + mi2] >> 8;
+              img[qi + 2] = map[cn + cn + mi2] >> 8;
               img[qi + 3] = nexta ? data[dof + x2 * smpls + 1] : 255;
             }
         } else if (intp == 5) {
           var gotAlpha = smpls > 4 ? 1 : 0;
           for (var i2 = 0;i2 < area; i2++) {
-            var qi = i2 << 2, si = i2 * smpls;
+            var qi = i2 << 2, si2 = i2 * smpls;
             if (window.UDOC) {
-              var C2 = data[si], M2 = data[si + 1], Y2 = data[si + 2], K2 = data[si + 3];
+              var C2 = data[si2], M2 = data[si2 + 1], Y2 = data[si2 + 2], K2 = data[si2 + 3];
               var c2 = UDOC.C.cmykToRgb([C2 * (1 / 255), M2 * (1 / 255), Y2 * (1 / 255), K2 * (1 / 255)]);
               img[qi] = ~~(0.5 + 255 * c2[0]);
               img[qi + 1] = ~~(0.5 + 255 * c2[1]);
               img[qi + 2] = ~~(0.5 + 255 * c2[2]);
             } else {
-              var C2 = 255 - data[si], M2 = 255 - data[si + 1], Y2 = 255 - data[si + 2], K2 = (255 - data[si + 3]) * (1 / 255);
+              var C2 = 255 - data[si2], M2 = 255 - data[si2 + 1], Y2 = 255 - data[si2 + 2], K2 = (255 - data[si2 + 3]) * (1 / 255);
               img[qi] = ~~(C2 * K2 + 0.5);
               img[qi + 1] = ~~(M2 * K2 + 0.5);
               img[qi + 2] = ~~(Y2 * K2 + 0.5);
             }
-            img[qi + 3] = 255 * (1 - gotAlpha) + data[si + 4] * gotAlpha;
+            img[qi + 3] = 255 * (1 - gotAlpha) + data[si2 + 4] * gotAlpha;
           }
         } else if (intp == 6 && out["t278"]) {
           var rps = out["t278"][0];
           for (var y2 = 0;y2 < h2; y2 += rps) {
             var i2 = y2 * w2, len = rps * w2;
             for (var j2 = 0;j2 < len; j2++) {
-              var qi = 4 * (i2 + j2), si = 3 * i2 + 4 * (j2 >>> 1);
-              var Y2 = data[si + (j2 & 1)], Cb = data[si + 2] - 128, Cr = data[si + 3] - 128;
+              var qi = 4 * (i2 + j2), si2 = 3 * i2 + 4 * (j2 >>> 1);
+              var Y2 = data[si2 + (j2 & 1)], Cb = data[si2 + 2] - 128, Cr = data[si2 + 3] - 128;
               var r2 = Y2 + ((Cr >> 2) + (Cr >> 3) + (Cr >> 5));
               var g2 = Y2 - ((Cb >> 2) + (Cb >> 4) + (Cb >> 5)) - ((Cr >> 1) + (Cr >> 3) + (Cr >> 4) + (Cr >> 5));
               var b2 = Y2 + (Cb + (Cb >> 1) + (Cb >> 2) + (Cb >> 6));
@@ -17112,11 +17112,11 @@ var require_UTIF = __commonJS((exports, module) => {
         } else if (intp == 32845) {
           for (var y2 = 0;y2 < h2; y2++)
             for (var x2 = 0;x2 < w2; x2++) {
-              var si = (y2 * w2 + x2) * 6, qi = (y2 * w2 + x2) * 4;
-              var L2 = data[si + 1] << 8 | data[si];
+              var si2 = (y2 * w2 + x2) * 6, qi = (y2 * w2 + x2) * 4;
+              var L2 = data[si2 + 1] << 8 | data[si2];
               var L2 = Math.pow(2, (L2 + 0.5) / 256 - 64);
-              var u2 = (data[si + 3] + 0.5) / 410;
-              var v2 = (data[si + 5] + 0.5) / 410;
+              var u2 = (data[si2 + 3] + 0.5) / 410;
+              var v2 = (data[si2 + 5] + 0.5) / 410;
               var sX = 9 * u2 / (6 * u2 - 16 * v2 + 12);
               var sY = 4 * v2 / (6 * u2 - 16 * v2 + 12);
               var bY = L2;
@@ -18344,8 +18344,8 @@ var require_parseUtil = __commonJS((exports) => {
   var errors_js_1 = require_errors();
   var en_js_1 = __importDefault(require_en());
   var makeIssue = (params) => {
-    const { data, path, errorMaps, issueData } = params;
-    const fullPath = [...path, ...issueData.path || []];
+    const { data, path: path2, errorMaps, issueData } = params;
+    const fullPath = [...path2, ...issueData.path || []];
     const fullIssue = {
       ...issueData,
       path: fullPath
@@ -18488,11 +18488,11 @@ var require_types2 = __commonJS((exports) => {
   var util_js_1 = require_util();
 
   class ParseInputLazyPath {
-    constructor(parent, value, path, key) {
+    constructor(parent, value, path2, key) {
       this._cachedPath = [];
       this.parent = parent;
       this.data = value;
-      this._path = path;
+      this._path = path2;
       this._key = key;
     }
     get path() {
@@ -22673,7 +22673,7 @@ var require_commonjs10 = __commonJS((exports) => {
       let p1;
       let p22;
       let yp;
-      let yi;
+      let yi2;
       let yw;
       const wm = image2.bitmap.width - 1;
       const hm = image2.bitmap.height - 1;
@@ -22688,7 +22688,7 @@ var require_commonjs10 = __commonJS((exports) => {
       const vmax = [];
       let iterations = 2;
       while (iterations-- > 0) {
-        yi = 0;
+        yi2 = 0;
         yw = 0;
         for (y2 = 0;y2 < image2.bitmap.height; y2++) {
           rsum = image2.bitmap.data[yw] * rad1;
@@ -22703,10 +22703,10 @@ var require_commonjs10 = __commonJS((exports) => {
             asum += image2.bitmap.data[p2];
           }
           for (x2 = 0;x2 < image2.bitmap.width; x2++) {
-            red[yi] = rsum;
-            green[yi] = gsum;
-            blue[yi] = bsum;
-            alpha[yi] = asum;
+            red[yi2] = rsum;
+            green[yi2] = gsum;
+            blue[yi2] = bsum;
+            alpha[yi2] = asum;
             if (y2 === 0) {
               vmin[x2] = ((p2 = x2 + rad1) < wm ? p2 : wm) << 2;
               vmax[x2] = (p2 = x2 - r2) > 0 ? p2 << 2 : 0;
@@ -22717,7 +22717,7 @@ var require_commonjs10 = __commonJS((exports) => {
             gsum += image2.bitmap.data[p1++] - image2.bitmap.data[p22++];
             bsum += image2.bitmap.data[p1++] - image2.bitmap.data[p22++];
             asum += image2.bitmap.data[p1] - image2.bitmap.data[p22++];
-            yi++;
+            yi2++;
           }
           yw += image2.bitmap.width << 2;
         }
@@ -22734,12 +22734,12 @@ var require_commonjs10 = __commonJS((exports) => {
             bsum += blue[yp];
             asum += alpha[yp];
           }
-          yi = x2 << 2;
+          yi2 = x2 << 2;
           for (y2 = 0;y2 < image2.bitmap.height; y2++) {
-            image2.bitmap.data[yi] = (0, utils_1.limit255)(rsum * mulSum >>> shgSum);
-            image2.bitmap.data[yi + 1] = (0, utils_1.limit255)(gsum * mulSum >>> shgSum);
-            image2.bitmap.data[yi + 2] = (0, utils_1.limit255)(bsum * mulSum >>> shgSum);
-            image2.bitmap.data[yi + 3] = (0, utils_1.limit255)(asum * mulSum >>> shgSum);
+            image2.bitmap.data[yi2] = (0, utils_1.limit255)(rsum * mulSum >>> shgSum);
+            image2.bitmap.data[yi2 + 1] = (0, utils_1.limit255)(gsum * mulSum >>> shgSum);
+            image2.bitmap.data[yi2 + 2] = (0, utils_1.limit255)(bsum * mulSum >>> shgSum);
+            image2.bitmap.data[yi2 + 3] = (0, utils_1.limit255)(asum * mulSum >>> shgSum);
             if (x2 === 0) {
               vmin[y2] = ((p2 = y2 + rad1) < hm ? p2 : hm) * image2.bitmap.width;
               vmax[y2] = (p2 = y2 - r2) > 0 ? p2 * image2.bitmap.width : 0;
@@ -22750,7 +22750,7 @@ var require_commonjs10 = __commonJS((exports) => {
             gsum += green[p1] - green[p22];
             bsum += blue[p1] - blue[p22];
             asum += alpha[p1] - alpha[p22];
-            yi += image2.bitmap.width << 2;
+            yi2 += image2.bitmap.width << 2;
           }
         }
       }
@@ -23162,11 +23162,11 @@ var require_commonjs12 = __commonJS((exports) => {
       let rSum;
       let gSum;
       let bSum;
-      let ri;
-      let gi;
-      let bi;
-      let xi;
-      let yi;
+      let ri2;
+      let gi2;
+      let bi2;
+      let xi2;
+      let yi2;
       let idxi;
       image2.scan((x2, y2, idx) => {
         bSum = 0;
@@ -23174,22 +23174,22 @@ var require_commonjs12 = __commonJS((exports) => {
         rSum = 0;
         for (let row = rowIni;row <= rowEnd; row++) {
           for (let col = colIni;col <= colEnd; col++) {
-            xi = x2 + col;
-            yi = y2 + row;
+            xi2 = x2 + col;
+            yi2 = y2 + row;
             weight = kernel[row + rowEnd][col + colEnd];
-            idxi = image2.getPixelIndex(xi, yi, edgeHandling);
+            idxi = image2.getPixelIndex(xi2, yi2, edgeHandling);
             if (idxi === -1) {
-              bi = 0;
-              gi = 0;
-              ri = 0;
+              bi2 = 0;
+              gi2 = 0;
+              ri2 = 0;
             } else {
-              ri = image2.bitmap.data[idxi + 0];
-              gi = image2.bitmap.data[idxi + 1];
-              bi = image2.bitmap.data[idxi + 2];
+              ri2 = image2.bitmap.data[idxi + 0];
+              gi2 = image2.bitmap.data[idxi + 1];
+              bi2 = image2.bitmap.data[idxi + 2];
             }
-            rSum += weight * ri;
-            gSum += weight * gi;
-            bSum += weight * bi;
+            rSum += weight * ri2;
+            gSum += weight * gi2;
+            bSum += weight * bi2;
           }
         }
         if (rSum < 0) {
@@ -23382,11 +23382,11 @@ var require_Mime = __commonJS((exports, module) => {
       }
     }
   };
-  Mime.prototype.getType = function(path) {
-    path = String(path);
-    let last = path.replace(/^.*[/\\]/, "").toLowerCase();
+  Mime.prototype.getType = function(path2) {
+    path2 = String(path2);
+    let last = path2.replace(/^.*[/\\]/, "").toLowerCase();
     let ext = last.replace(/^.*\./, "").toLowerCase();
-    let hasPath = last.length < path.length;
+    let hasPath = last.length < path2.length;
     let hasDot = ext.length < last.length - 1;
     return (hasDot || !hasPath) && this._types[ext] || null;
   };
@@ -29589,7 +29589,7 @@ __export(exports_file_type, {
 });
 import { ReadableStream as WebReadableStream } from "stream/web";
 import { pipeline, PassThrough, Readable } from "stream";
-import fs from "fs/promises";
+import fs2 from "fs/promises";
 import { constants as fileSystemConstants } from "fs";
 function isTokenizerStreamBoundsError(error) {
   if (!(error instanceof RangeError) || error.message !== "offset is out of bounds" || typeof error.stack !== "string") {
@@ -29597,8 +29597,8 @@ function isTokenizerStreamBoundsError(error) {
   }
   return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error.stack);
 }
-async function fileTypeFromFile(path, options) {
-  return new FileTypeParser2(options).fromFile(path, options);
+async function fileTypeFromFile(path2, options) {
+  return new FileTypeParser2(options).fromFile(path2, options);
 }
 async function fileTypeFromStream(stream, options) {
   return new FileTypeParser2(options).fromStream(stream);
@@ -29628,9 +29628,9 @@ var init_file_type = __esm(() => {
         }
       }
     }
-    async fromFile(path) {
+    async fromFile(path2) {
       this.options.signal?.throwIfAborted();
-      const fileHandle = await fs.open(path, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
+      const fileHandle = await fs2.open(path2, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
       const fileStat = await fileHandle.stat();
       if (!fileStat.isFile()) {
         await fileHandle.close();
@@ -29639,7 +29639,7 @@ var init_file_type = __esm(() => {
       const tokenizer = new FileTokenizer(fileHandle, {
         ...this.getTokenizerOptions(),
         fileInfo: {
-          path,
+          path: path2,
           size: fileStat.size
         }
       });
@@ -29898,9 +29898,9 @@ var require_commonjs14 = __commonJS((exports) => {
         const data = await this.getBuffer(mime, options);
         return "data:" + mime + ";base64," + data.toString("base64");
       }
-      async write(path, options) {
-        const mimeType = lite_js_1.default.getType(path);
-        await (0, file_ops_1.writeFile)(path, await this.getBuffer(mimeType, options));
+      async write(path2, options) {
+        const mimeType = lite_js_1.default.getType(path2);
+        await (0, file_ops_1.writeFile)(path2, await this.getBuffer(mimeType, options));
       }
       clone() {
         return new CustomJimp({
@@ -29909,8 +29909,8 @@ var require_commonjs14 = __commonJS((exports) => {
         });
       }
       getPixelIndex(x2, y2, edgeHandling) {
-        let xi;
-        let yi;
+        let xi2;
+        let yi2;
         if (!edgeHandling) {
           edgeHandling = types_1.Edge.EXTEND;
         }
@@ -29919,37 +29919,37 @@ var require_commonjs14 = __commonJS((exports) => {
         }
         x2 = Math.round(x2);
         y2 = Math.round(y2);
-        xi = x2;
-        yi = y2;
+        xi2 = x2;
+        yi2 = y2;
         if (edgeHandling === types_1.Edge.EXTEND) {
           if (x2 < 0)
-            xi = 0;
+            xi2 = 0;
           if (x2 >= this.bitmap.width)
-            xi = this.bitmap.width - 1;
+            xi2 = this.bitmap.width - 1;
           if (y2 < 0)
-            yi = 0;
+            yi2 = 0;
           if (y2 >= this.bitmap.height)
-            yi = this.bitmap.height - 1;
+            yi2 = this.bitmap.height - 1;
         }
         if (edgeHandling === types_1.Edge.WRAP) {
           if (x2 < 0) {
-            xi = this.bitmap.width + x2;
+            xi2 = this.bitmap.width + x2;
           }
           if (x2 >= this.bitmap.width) {
-            xi = x2 % this.bitmap.width;
+            xi2 = x2 % this.bitmap.width;
           }
           if (y2 < 0) {
-            yi = this.bitmap.height + y2;
+            yi2 = this.bitmap.height + y2;
           }
           if (y2 >= this.bitmap.height) {
-            yi = y2 % this.bitmap.height;
+            yi2 = y2 % this.bitmap.height;
           }
         }
-        let i2 = this.bitmap.width * yi + xi << 2;
-        if (xi < 0 || xi >= this.bitmap.width) {
+        let i2 = this.bitmap.width * yi2 + xi2 << 2;
+        if (xi2 < 0 || xi2 >= this.bitmap.width) {
           i2 = -1;
         }
-        if (yi < 0 || yi >= this.bitmap.height) {
+        if (yi2 < 0 || yi2 >= this.bitmap.height) {
           i2 = -1;
         }
         return i2;
@@ -38317,9 +38317,9 @@ var require_load_font = __commonJS((exports) => {
   async function loadFont(file) {
     let fileOrBuffer = file;
     if (typeof window === "undefined" && !load_bitmap_font_js_1.isWebWorker) {
-      const { existsSync, promises: fs2 } = await import("fs");
+      const { existsSync, promises: fs3 } = await import("fs");
       if (existsSync(file)) {
-        fileOrBuffer = await fs2.readFile(file);
+        fileOrBuffer = await fs3.readFile(file);
       }
     }
     const data = await (0, load_bitmap_font_js_1.loadBitmapFontData)(fileOrBuffer);
@@ -38808,8 +38808,8 @@ function trustSatisfied(ruleTrust, eventSource) {
   const provided = sourceToTrustLevel(eventSource);
   return (TRUST_RANK[provided] ?? 0) >= (TRUST_RANK[required] ?? 0);
 }
-function getByPath(obj, path) {
-  const parts = path.split(".");
+function getByPath(obj, path2) {
+  const parts = path2.split(".");
   let cur = obj;
   for (const p2 of parts) {
     if (cur && typeof cur === "object" && p2 in cur) {
@@ -38833,12 +38833,60 @@ function stringifyForMatch(v2) {
     return String(v2);
   }
 }
+function stripExtendedMode(pattern) {
+  let out = "";
+  let inClass = false;
+  let i2 = 0;
+  while (i2 < pattern.length) {
+    const c2 = pattern[i2];
+    if (c2 === "\\" && i2 + 1 < pattern.length) {
+      out += c2 + pattern[i2 + 1];
+      i2 += 2;
+      continue;
+    }
+    if (c2 === "[" && !inClass) {
+      inClass = true;
+      out += c2;
+      i2++;
+      continue;
+    }
+    if (c2 === "]" && inClass) {
+      inClass = false;
+      out += c2;
+      i2++;
+      continue;
+    }
+    if (inClass) {
+      out += c2;
+      i2++;
+      continue;
+    }
+    if (/\s/.test(c2)) {
+      i2++;
+      continue;
+    }
+    if (c2 === "#") {
+      while (i2 < pattern.length && pattern[i2] !== `
+`)
+        i2++;
+      continue;
+    }
+    out += c2;
+    i2++;
+  }
+  return out;
+}
 function extractInlineFlags(pattern) {
-  const m2 = pattern.match(/^\(\?([imsu]+)\)/);
+  const m2 = pattern.match(/^\(\?([imsux]+)\)/);
   if (!m2)
     return { source: pattern, flags: "" };
-  const flags = m2[1].split("").filter((c2, i2, arr) => arr.indexOf(c2) === i2).join("");
-  return { source: pattern.slice(m2[0].length), flags };
+  const rawFlags = m2[1];
+  const hasExtended = rawFlags.includes("x");
+  const flags = rawFlags.split("").filter((c2) => c2 !== "x").filter((c2, i2, arr) => arr.indexOf(c2) === i2).join("");
+  let source = pattern.slice(m2[0].length);
+  if (hasExtended)
+    source = stripExtendedMode(source);
+  return { source, flags };
 }
 function compileRegex(pattern) {
   const cached = regexCache.get(pattern);
@@ -38851,6 +38899,15 @@ function compileRegex(pattern) {
     return re2;
   } catch {
     return null;
+  }
+}
+function tryCompileRegex(pattern) {
+  try {
+    const { source, flags } = extractInlineFlags(pattern);
+    const re2 = new RegExp(source, flags);
+    return { ok: true, re: re2 };
+  } catch (e2) {
+    return { ok: false, error: e2 instanceof Error ? e2.message : String(e2) };
   }
 }
 function matchCondition(match, event) {
@@ -39043,14 +39100,17 @@ function evaluate(event, rules) {
     result.groups.forEach((g2, i2) => {
       vars[String(i2 + 1)] = g2;
     });
+    const AUTHORITATIVE_FROM_EVENT = new Set(["sessionId", "tool", "ruleId", "targetMemberId"]);
     const rm = event.runtimeMeta;
     if (rm) {
       for (const [k2, v2] of Object.entries(rm)) {
         if (v2 == null)
           continue;
-        if (typeof v2 === "string" || typeof v2 === "number" || typeof v2 === "boolean") {
-          vars[k2] = String(v2);
-        }
+        if (typeof v2 !== "string" && typeof v2 !== "number" && typeof v2 !== "boolean")
+          continue;
+        if (AUTHORITATIVE_FROM_EVENT.has(k2) && vars[k2])
+          continue;
+        vars[k2] = String(v2);
       }
     }
     const payloadObj = event.payload;
@@ -39306,15 +39366,15 @@ var init_exec = __esm(() => {
 
 // ../../../../../packages/signal-wire-core/dist/emitters/builtin/audit.js
 import { appendFileSync, mkdirSync } from "fs";
-import { dirname, join } from "path";
-import { homedir } from "os";
+import { dirname, join as join3 } from "path";
+import { homedir as homedir3 } from "os";
 
 class AuditEmitter {
   type = "audit";
   async execute(action, ctx) {
     const a2 = action;
     const ruleId = ctx.rule?.id ?? "";
-    const path = a2.log_path ?? DEFAULT_AUDIT_PATH;
+    const path2 = a2.log_path ?? DEFAULT_AUDIT_PATH;
     const record = {
       ts: new Date().toISOString(),
       correlation_id: ctx.correlationId,
@@ -39323,8 +39383,8 @@ class AuditEmitter {
       actions_taken: ctx.actionsTakenSoFar ?? []
     };
     try {
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, JSON.stringify(record) + `
+      mkdirSync(dirname(path2), { recursive: true });
+      appendFileSync(path2, JSON.stringify(record) + `
 `);
       return {
         type: "audit",
@@ -39346,7 +39406,7 @@ class AuditEmitter {
 }
 var DEFAULT_AUDIT_PATH;
 var init_audit = __esm(() => {
-  DEFAULT_AUDIT_PATH = join(homedir(), ".context", "hooks", "audit", "signal-wire-audit.jsonl");
+  DEFAULT_AUDIT_PATH = join3(homedir3(), ".context", "hooks", "audit", "signal-wire-audit.jsonl");
 });
 
 // ../../../../../packages/signal-wire-core/dist/emitters/builtin/wake.js
@@ -40054,10 +40114,10 @@ function readCoreVersion() {
       return pkg.version;
   } catch {}
   try {
-    const fs2 = __require_gv7hsff9("fs");
-    const path = __require_gv7hsff9("path");
-    const pkgPath = path.resolve(__dirname, "..", "package.json");
-    const pkg = JSON.parse(fs2.readFileSync(pkgPath, "utf-8"));
+    const fs3 = __require_gv7hsff9("fs");
+    const path2 = __require_gv7hsff9("path");
+    const pkgPath = path2.resolve(__dirname, "..", "package.json");
+    const pkg = JSON.parse(fs3.readFileSync(pkgPath, "utf-8"));
     if (typeof pkg.version === "string")
       return pkg.version;
   } catch {}
@@ -40158,8 +40218,8 @@ class InMemoryMetricSink {
 
 // ../../../../../packages/signal-wire-core/dist/observability/logger.js
 import { appendFileSync as appendFileSync2 } from "fs";
-import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
+import { homedir as homedir4 } from "os";
+import { join as join4 } from "path";
 function writeLine(line) {
   const ts = new Date().toISOString();
   const full = `[${ts}] ${coreIdentityTag()} ${line}
@@ -40186,10 +40246,16 @@ function info(message, extra) {
   const suffix = extra ? ` ${JSON.stringify(extra)}` : "";
   writeLine(`INFO ${message}${suffix}`);
 }
+function warn(message, extra) {
+  if (!bannerEmitted)
+    emitBanner();
+  const suffix = extra ? ` ${JSON.stringify(extra)}` : "";
+  writeLine(`WARN ${message}${suffix}`);
+}
 var LOG_FILE, VERBOSE, bannerEmitted = false;
 var init_logger = __esm(() => {
   init_version();
-  LOG_FILE = process.env.SIGNAL_WIRE_CORE_LOG_FILE ?? process.env.SIGNAL_WIRE_LOG_FILE ?? join2(homedir2(), ".claude", "signal-wire-debug.log");
+  LOG_FILE = process.env.SIGNAL_WIRE_CORE_LOG_FILE ?? process.env.SIGNAL_WIRE_LOG_FILE ?? join4(homedir4(), ".claude", "signal-wire-debug.log");
   VERBOSE = process.env.SIGNAL_WIRE_CORE_VERBOSE === "1";
 });
 
@@ -40348,15 +40414,9 @@ function validateRuleSet(ruleSet, registry) {
     for (const field of ["tool", "input_regex", "response_regex", "prompt_regex"]) {
       const v2 = m2[field];
       if (typeof v2 === "string") {
-        try {
-          const flagMatch = v2.match(/^\(\?([imsu]+)\)/);
-          if (flagMatch) {
-            new RegExp(v2.slice(flagMatch[0].length), flagMatch[1]);
-          } else {
-            new RegExp(v2);
-          }
-        } catch {
-          rejected.push({ id: rule.id, reason: `invalid regex in match.${field}` });
+        const r2 = tryCompileRegex(v2);
+        if (!r2.ok) {
+          rejected.push({ id: rule.id, reason: `invalid regex in match.${field}: ${r2.error}` });
           regexOk = false;
           break;
         }
@@ -40366,6 +40426,11 @@ function validateRuleSet(ruleSet, registry) {
       continue;
     seenIds.add(rule.id);
     valid.push(rule);
+  }
+  if (rejected.length > 0) {
+    for (const r2 of rejected) {
+      warn("RULE_REJECTED", { ruleId: r2.id, reason: r2.reason });
+    }
   }
   return { rules: valid, rejectedCount: rejected.length, rejected };
 }
@@ -40382,6 +40447,7 @@ class Pipeline {
   traceSink;
   metricSink;
   now;
+  ruleSetMeta;
   _processing = false;
   constructor(config) {
     this.rules = config.rules;
@@ -40395,6 +40461,7 @@ class Pipeline {
     this.sdkClient = config.sdkClient ?? null;
     this.traceSink = config.traceSink ?? new NoopTraceSink;
     this.metricSink = config.metricSink ?? new NoopMetricSink;
+    this.ruleSetMeta = config.ruleSetMeta;
     try {
       emitBanner({
         rules_loaded: this.rules.length,
@@ -40622,6 +40689,13 @@ class Pipeline {
         durationMs: trace.endedAt - trace.startedAt,
         results: resultsByType
       });
+      if (this.ruleSetMeta?.hint_wrapper) {
+        const wrapper = this.ruleSetMeta.hint_wrapper;
+        for (const r2 of allResults) {
+          if (r2.wrapperTemplate === undefined)
+            r2.wrapperTemplate = wrapper;
+        }
+      }
       return allResults;
     } catch (e2) {
       trace.outcome = "error";
@@ -40708,11 +40782,11 @@ var init_emitters = __esm(() => {
 });
 
 // ../../../../../packages/signal-wire-core/dist/state/file.js
-import { join as join3 } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join5 } from "path";
+import { homedir as homedir5 } from "os";
 var DEFAULT_ROOT;
 var init_file = __esm(() => {
-  DEFAULT_ROOT = join3(homedir3(), ".context", "hooks", "state");
+  DEFAULT_ROOT = join5(homedir5(), ".context", "hooks", "state");
 });
 
 // ../../../../../packages/signal-wire-core/dist/state/redis.js
@@ -40965,16 +41039,21 @@ function contextToEvent(ctx, sessionId) {
     timestamp: Date.now()
   };
 }
-function translateLegacyRules(legacyRules, platform) {
+function translateLegacyRules(legacyRules) {
   const out = [];
   for (const raw of legacyRules) {
-    if (!raw || typeof raw !== "object")
+    if (!raw || typeof raw !== "object") {
+      warn("TRANSLATE_DROPPED", { reason: "not_object" });
       continue;
+    }
     const r2 = raw;
-    if (typeof r2.id !== "string")
+    if (typeof r2.id !== "string") {
+      warn("TRANSLATE_DROPPED", { reason: "missing_id" });
       continue;
-    if (Array.isArray(r2.platforms) && r2.platforms.length > 0 && !r2.platforms.includes(platform))
-      continue;
+    }
+    if (r2.platforms !== undefined) {
+      warn("TRANSLATE_DROPPED", { ruleId: r2.id, reason: "platforms_field_removed", hint: "platforms field deprecated \u2014 encode platform-specificity via match.tool or match.* predicates instead" });
+    }
     const events = [];
     if (Array.isArray(r2.events)) {
       for (const e2 of r2.events) {
@@ -40982,11 +41061,21 @@ function translateLegacyRules(legacyRules, platform) {
           events.push(translateEventType(e2));
       }
     }
-    if (events.length === 0)
+    if (events.length === 0) {
+      warn("TRANSLATE_DROPPED", { ruleId: r2.id, reason: "empty_or_missing_events" });
       continue;
+    }
     const actions = translateActions(r2.action, r2.actions);
-    if (actions.length === 0)
+    if (actions.length === 0) {
+      warn("TRANSLATE_DROPPED", {
+        ruleId: r2.id,
+        reason: "unrecognized_action_shape",
+        actionType: r2.action ? typeof r2.action : "undefined",
+        actionsType: r2.actions ? typeof r2.actions : "undefined",
+        hint: "use actions:[{type,...}] (v2) or action:{hint?,bash?,exec?} (v1 legacy)"
+      });
       continue;
+    }
     out.push({
       id: r2.id,
       enabled: r2.enabled !== false,
@@ -41020,6 +41109,7 @@ function translateActions(legacy1, legacy2) {
 }
 var EVENT_MAP;
 var init_translate = __esm(() => {
+  init_logger();
   EVENT_MAP = {
     UserPromptSubmit: "chat.message",
     PreToolUse: "tool.before",
@@ -41126,15 +41216,32 @@ function trimByBudget(hints, maxChars) {
   }
   return { kept, trimmed };
 }
-function renderOne(h2) {
-  return `<signal-wire-hint rule="${h2.ruleId}" priority="${h2.priority}">
-${h2.text}
-</signal-wire-hint>`;
+function pickWrapper(template) {
+  if (typeof template !== "string" || template.length === 0)
+    return DEFAULT_HINT_WRAPPER;
+  const found = new Set;
+  for (const m2 of template.matchAll(WRAPPER_VAR_RE))
+    found.add(m2[1]);
+  if (found.has("ruleId") && found.has("priority") && found.has("text"))
+    return template;
+  return DEFAULT_HINT_WRAPPER;
 }
-function renderHintBlock(hints) {
+function renderOne(h2, wrapper) {
+  return wrapper.replace(WRAPPER_VAR_RE, (_2, name) => {
+    if (name === "ruleId")
+      return h2.ruleId;
+    if (name === "priority")
+      return h2.priority;
+    if (name === "text")
+      return h2.text;
+    return "";
+  });
+}
+function renderHintBlock(hints, wrapperTemplate) {
   if (hints.length === 0)
     return "";
-  return hints.map(renderOne).join(`
+  const wrapper = pickWrapper(wrapperTemplate);
+  return hints.map((h2) => renderOne(h2, wrapper)).join(`
 `);
 }
 function packHints(results, options = {}) {
@@ -41149,7 +41256,9 @@ function packHints(results, options = {}) {
   const maxChars = options.maxChars ?? 0;
   const { kept, trimmed } = maxChars > 0 ? trimByBudget(sorted, maxChars) : { kept: sorted, trimmed: [] };
   const droppedTrimmed = trimmed.map((h2) => h2.ruleId);
-  const text = renderHintBlock(kept);
+  const inheritedWrapper = results.find((r2) => typeof r2.wrapperTemplate === "string");
+  const effectiveWrapper = options.wrapperTemplate ?? inheritedWrapper?.wrapperTemplate;
+  const text = renderHintBlock(kept, effectiveWrapper);
   const byPriority = {};
   for (const h2 of kept) {
     byPriority[h2.priority] = (byPriority[h2.priority] ?? 0) + 1;
@@ -41168,7 +41277,9 @@ function packHints(results, options = {}) {
     droppedTrimmed
   };
 }
-var PRIORITY_RANK, VAR_RE2;
+var PRIORITY_RANK, VAR_RE2, DEFAULT_HINT_WRAPPER = `<sw rule="{ruleId}" priority="{priority}">
+{text}
+</sw>`, WRAPPER_VAR_RE;
 var init_pack_hints = __esm(() => {
   PRIORITY_RANK = {
     critical: 4,
@@ -41178,6 +41289,7 @@ var init_pack_hints = __esm(() => {
     info: 0
   };
   VAR_RE2 = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
+  WRAPPER_VAR_RE = /\{(ruleId|priority|text)\}/g;
 });
 
 // ../../../../../packages/signal-wire-core/dist/helpers/fleet-status.js
@@ -41227,9 +41339,25 @@ var init_dist = __esm(() => {
 });
 
 // ../opencode-signal-wire/signal-wire.ts
-import { appendFileSync as appendFileSync3, existsSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
-import { homedir as homedir4 } from "os";
-import { join as join4 } from "path";
+import { appendFileSync as appendFileSync3, existsSync, readFileSync as readFileSync2, statSync as statSync3, writeFileSync, renameSync } from "fs";
+import { homedir as homedir6 } from "os";
+import { join as join6 } from "path";
+function resolveContextWindow(modelId) {
+  if (MODEL_CONTEXT_WINDOW[modelId])
+    return MODEL_CONTEXT_WINDOW[modelId];
+  const lower = modelId.toLowerCase();
+  for (const [id, window2] of Object.entries(MODEL_CONTEXT_WINDOW)) {
+    if (lower.includes(id) || id.includes(lower))
+      return window2;
+  }
+  if (/haiku/i.test(modelId))
+    return 200000;
+  if (/(opus-4|sonnet-4|opus-5|sonnet-5)/i.test(modelId))
+    return 1e6;
+  if (/(opus|sonnet)/i.test(modelId))
+    return 200000;
+  return;
+}
 function swLog(msg) {
   const line = `[${new Date().toISOString()}] ${coreIdentityTag()} [${ADAPTER_ID}] ${msg}
 `;
@@ -41241,7 +41369,10 @@ function emitAdapterBanner(rulesLoaded, rulesPath) {
   if (adapterBannerEmitted)
     return;
   adapterBannerEmitted = true;
-  swLog(`ADAPTER_BANNER pid=${process.pid} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? "(unset)"}`);
+  const env = process.env;
+  const sessionEnv = env.OPENCODE_SESSION_ID || env.OPENCODE_SESSION_SLUG || "?";
+  const instanceEnv = env.OPENCODE_AGENT_INSTANCE_ID || "?";
+  swLog(`ADAPTER_BANNER pid=${process.pid} ppid=${process.ppid ?? "?"} cwd=${process.cwd()} session_env=${sessionEnv} instance_env=${instanceEnv} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? "(unset)"}`);
 }
 
 class RulesStore {
@@ -41273,13 +41404,13 @@ class RulesStore {
     }
     let stat;
     try {
-      stat = statSync(this.path);
+      stat = statSync3(this.path);
     } catch {
       return { rules: [], fingerprint: null };
     }
     const fp = { mtimeMs: stat.mtimeMs, size: stat.size };
     try {
-      const raw = JSON.parse(readFileSync(this.path, "utf8"));
+      const raw = JSON.parse(readFileSync2(this.path, "utf8"));
       const legacy = raw.rules ?? [];
       const canonical = translateLegacyRules(legacy, this.platform);
       const minCoreVersion = typeof raw._minCoreVersion === "string" ? raw._minCoreVersion : undefined;
@@ -41308,7 +41439,7 @@ class RulesStore {
       return { reloaded: false, error: "rules file missing" };
     let stat;
     try {
-      stat = statSync(this.path);
+      stat = statSync3(this.path);
     } catch (e2) {
       return { reloaded: false, error: e2 instanceof Error ? e2.message : String(e2) };
     }
@@ -41317,7 +41448,7 @@ class RulesStore {
       return { reloaded: false };
     }
     try {
-      const raw = JSON.parse(readFileSync(this.path, "utf8"));
+      const raw = JSON.parse(readFileSync2(this.path, "utf8"));
       const legacy = raw.rules ?? [];
       const canonical = translateLegacyRules(legacy, this.platform);
       const minCoreVersion = typeof raw._minCoreVersion === "string" ? raw._minCoreVersion : undefined;
@@ -41398,19 +41529,25 @@ class RulesStore {
     if (!existsSync(this.path))
       return [];
     try {
-      const raw = JSON.parse(readFileSync(this.path, "utf8"));
+      const raw = JSON.parse(readFileSync2(this.path, "utf8"));
       return raw.rules ?? [];
     } catch {
       return [];
     }
   }
 }
-var ADAPTER_VERSION = "1.0.0", ADAPTER_MTIME, ADAPTER_ID, LOG_FILE2, adapterBannerEmitted = false, HOT_RELOAD_INTERVAL_MS = 2000, SignalWire;
+var MODEL_CONTEXT_WINDOW, ADAPTER_VERSION = "1.0.0", ADAPTER_MTIME, ADAPTER_ID, LOG_FILE2, adapterBannerEmitted = false, HOT_RELOAD_INTERVAL_MS = 2000, SignalWire;
 var init_signal_wire = __esm(() => {
   init_dist();
+  MODEL_CONTEXT_WINDOW = {
+    "claude-opus-4-7": 1e6,
+    "claude-opus-4-6": 1e6,
+    "claude-sonnet-4-6": 1e6,
+    "claude-haiku-4-5-20251001": 200000
+  };
   ADAPTER_MTIME = new Date().toISOString();
   ADAPTER_ID = `sw-adapter-opencode-claude v${ADAPTER_VERSION}@${ADAPTER_MTIME.slice(11, 19)}`;
-  LOG_FILE2 = join4(homedir4(), ".claude", "signal-wire-debug.log");
+  LOG_FILE2 = join6(homedir6(), ".claude", "signal-wire-debug.log");
   SignalWire = class SignalWire {
     pipeline;
     registry;
@@ -41425,6 +41562,7 @@ var init_signal_wire = __esm(() => {
     lastQuotaUtil5h;
     lastQuotaUtil7d;
     lastContextWindow;
+    lastLoggedSnapshot = {};
     constructor(config) {
       this.sessionId = config.sessionId;
       this.platform = config.platform ?? "opencode";
@@ -41460,6 +41598,17 @@ var init_signal_wire = __esm(() => {
       this.pipeline._setRules(effective);
     }
     setSdkClient(_client) {}
+    setSessionId(candidate) {
+      if (!candidate)
+        return;
+      if (candidate === "unknown")
+        return;
+      if (this.sessionId === candidate)
+        return;
+      const prev = this.sessionId;
+      this.sessionId = candidate;
+      swLog(`SET_SESSION_ID pid=${process.pid} prev=${prev || "?"} new=${candidate}`);
+    }
     trackTokens(u2) {
       const promptSize = (u2.inputTokens ?? 0) + (u2.cacheReadInputTokens ?? 0) + (u2.cacheCreationInputTokens ?? 0);
       const prev = this.contextPosition;
@@ -41478,11 +41627,15 @@ var init_signal_wire = __esm(() => {
     trackModel(modelId) {
       if (typeof modelId !== "string" || modelId.length === 0)
         return;
+      const prevModel = this.lastModel;
+      const prevWindow = this.lastContextWindow;
       this.lastModel = modelId;
-      if (/haiku/i.test(modelId))
-        this.lastContextWindow = 200000;
-      else if (/(opus|sonnet|claude)/i.test(modelId))
-        this.lastContextWindow = 200000;
+      const window2 = resolveContextWindow(modelId);
+      if (window2)
+        this.lastContextWindow = window2;
+      if (prevModel !== modelId || prevWindow !== this.lastContextWindow) {
+        swLog(`TRACK_MODEL pid=${process.pid} session=${this.sessionId || "?"} model=${modelId} window=${this.lastContextWindow ?? "unknown"} resolved_from=${window2 ? "table" : "fallback"}`);
+      }
     }
     trackRateLimit(rl) {
       if (typeof rl.util5h === "number")
@@ -41491,9 +41644,10 @@ var init_signal_wire = __esm(() => {
         this.lastQuotaUtil7d = rl.util7d;
     }
     getRuntimeMeta() {
+      const sid = this.sessionId && this.sessionId !== "unknown" ? this.sessionId : undefined;
       const meta = {
         pid: process.pid,
-        sessionId: this.sessionId || undefined,
+        sessionId: sid,
         contextTokens: this.contextPosition || undefined
       };
       if (this.lastContextWindow != null) {
@@ -41509,24 +41663,37 @@ var init_signal_wire = __esm(() => {
         meta.quotaUtil5h = this.lastQuotaUtil5h;
       if (this.lastQuotaUtil7d != null)
         meta.quotaUtil7d = this.lastQuotaUtil7d;
+      const now = Date.now();
+      const prev = this.lastLoggedSnapshot;
+      const curTokens = typeof meta.contextTokens === "number" ? meta.contextTokens : undefined;
+      const curPct = typeof meta.contextPercent === "number" ? meta.contextPercent : undefined;
+      const pctChanged = (curPct ?? -1) !== (prev.contextPercent ?? -1) && Math.abs((curPct ?? 0) - (prev.contextPercent ?? 0)) >= 1;
+      const modelChanged = this.lastModel !== prev.model;
+      const windowChanged = this.lastContextWindow !== prev.window;
+      const heartbeatDue = !prev.tsMs || now - prev.tsMs >= 60000;
+      if (pctChanged || modelChanged || windowChanged || heartbeatDue) {
+        const reason = modelChanged ? "model_change" : windowChanged ? "window_change" : pctChanged ? "pct_change" : "heartbeat";
+        swLog(`CTX_SNAPSHOT pid=${process.pid} session=${this.sessionId || "?"} model=${this.lastModel ?? "?"} tokens=${curTokens ?? "null"} window=${this.lastContextWindow ?? "null"} pct=${curPct ?? "null"}% remaining=${typeof meta.contextRemaining === "number" ? meta.contextRemaining : "null"} util5h=${this.lastQuotaUtil5h ?? "null"} util7d=${this.lastQuotaUtil7d ?? "null"} reason=${reason}`);
+        this.lastLoggedSnapshot = { model: this.lastModel, window: this.lastContextWindow, contextTokens: curTokens, contextPercent: curPct, tsMs: now };
+      }
       return meta;
     }
     getCurrentRuntimeMeta() {
       return this.getRuntimeMeta();
     }
     refreshTokensFromStatsFile() {
-      const STATS_FILE = join4(homedir4(), ".claude", "claude-max-stats.jsonl");
-      const TAIL_BYTES = 256 * 1024;
+      const STATS_FILE = join6(homedir6(), ".claude", "claude-max-stats.jsonl");
+      const TAIL_BYTES2 = 256 * 1024;
       try {
-        const fs2 = __require_gv7hsff9("fs");
-        if (!fs2.existsSync(STATS_FILE))
+        const fs3 = __require_gv7hsff9("fs");
+        if (!fs3.existsSync(STATS_FILE))
           return false;
-        const stat = fs2.statSync(STATS_FILE);
-        const start = Math.max(0, stat.size - TAIL_BYTES);
-        const fd = fs2.openSync(STATS_FILE, "r");
+        const stat = fs3.statSync(STATS_FILE);
+        const start = Math.max(0, stat.size - TAIL_BYTES2);
+        const fd = fs3.openSync(STATS_FILE, "r");
         const buf = Buffer.alloc(stat.size - start);
-        fs2.readSync(fd, buf, 0, buf.length, start);
-        fs2.closeSync(fd);
+        fs3.readSync(fd, buf, 0, buf.length, start);
+        fs3.closeSync(fd);
         const tail = buf.toString("utf-8");
         const lines = tail.split(`
 `);
@@ -41560,16 +41727,28 @@ var init_signal_wire = __esm(() => {
                 util7d: typeof rec.rateLimit.util7d === "number" ? rec.rateLimit.util7d : null
               });
             }
+            const lineKey = `${rec.model ?? "?"}:${totalIn}`;
+            if (lineKey !== this.lastStatsRefreshKey) {
+              swLog(`STATS_REFRESH pid=${process.pid} session=${this.sessionId || "?"} matched_pid=${rec.pid} rec_type=${rec.type} rec_model=${rec.model ?? "?"} in=${u2.in ?? 0} cacheRead=${u2.cacheRead ?? 0} cacheWrite=${u2.cacheWrite ?? 0} totalIn=${totalIn} util5h=${rec.rateLimit?.util5h ?? "null"} util7d=${rec.rateLimit?.util7d ?? "null"}`);
+              this.lastStatsRefreshKey = lineKey;
+            }
             return true;
           } catch {
             continue;
           }
         }
         return false;
-      } catch {
+      } catch (e2) {
+        const msg = e2 instanceof Error ? e2.message : String(e2);
+        if (msg !== this.lastStatsRefreshError) {
+          swLog(`STATS_REFRESH_FAIL pid=${process.pid} session=${this.sessionId || "?"} error="${msg}"`);
+          this.lastStatsRefreshError = msg;
+        }
         return false;
       }
     }
+    lastStatsRefreshKey;
+    lastStatsRefreshError;
     toggleRule(ruleId, enabled) {
       this.rulesStore.maybeReload();
       const rules = this.rulesStore.getRules();
@@ -41690,10 +41869,10 @@ var init_signal_wire = __esm(() => {
 });
 
 // ../opencode-signal-wire/wake-types.ts
-import { homedir as homedir5 } from "os";
-import { join as join5 } from "path";
+import { homedir as homedir7 } from "os";
+import { join as join7 } from "path";
 function discoveryDir() {
-  return process.env.WAKE_DISCOVERY_DIR ?? join5(homedir5(), ".opencode", "wake");
+  return process.env.WAKE_DISCOVERY_DIR ?? join7(homedir7(), ".opencode", "wake");
 }
 var DISCOVERY_DIR, WARM_CHANNEL_TTL_MS, WAKE_EVENT_TYPES;
 var init_wake_types = __esm(() => {
@@ -41716,10 +41895,27 @@ var init_wake_types = __esm(() => {
   };
 });
 
+// ../opencode-signal-wire/domain-constants.ts
+import { homedir as homedir8 } from "os";
+import { join as join8 } from "path";
+var WAKE_ROOT, AGENT_IDENTITY_DIR, WAKE_DISCOVERY_DIR, BOOT_AUDIT_PATH, SPAWN_AUDIT_PATH, ORG_PROMPT_PATH, IDENTITY_POLICY_PATH, SPAWN_RULES_GLOB, REAPER_INTERVAL_MS, AUDIT_ROTATION_BYTES, FNV_32_PRIME = 2166136261, ACTION_CLIENT_TIMEOUT_MS = 5000;
+var init_domain_constants = __esm(() => {
+  WAKE_ROOT = join8(homedir8(), ".opencode", "wake");
+  AGENT_IDENTITY_DIR = join8(homedir8(), ".opencode", "agent-identity");
+  WAKE_DISCOVERY_DIR = join8(WAKE_ROOT, "agents");
+  BOOT_AUDIT_PATH = join8(WAKE_ROOT, "boot-audit.jsonl");
+  SPAWN_AUDIT_PATH = join8(WAKE_ROOT, "spawn-audit.jsonl");
+  ORG_PROMPT_PATH = join8(WAKE_ROOT, "org-prompt.md");
+  IDENTITY_POLICY_PATH = join8(WAKE_ROOT, "identity-policy.json");
+  SPAWN_RULES_GLOB = join8(WAKE_ROOT, "spawn-rules", "*.ts");
+  REAPER_INTERVAL_MS = 5 * 60000;
+  AUDIT_ROTATION_BYTES = 10 * 1024 * 1024;
+});
+
 // ../opencode-signal-wire/wake-listener.ts
-import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync2, unlinkSync, appendFileSync as appendFileSync4, renameSync as renameSync2 } from "fs";
-import { join as join6 } from "path";
-import { homedir as homedir6 } from "os";
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync3, unlinkSync, appendFileSync as appendFileSync4, renameSync as renameSync2 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir9 } from "os";
 function dbg2(...args) {
   if (!DEBUG)
     return;
@@ -41937,8 +42133,8 @@ function readSynqtaskBearerToken() {
   if (bearerToken)
     return bearerToken;
   try {
-    const authPath = join6(homedir6(), ".local", "share", "opencode", "mcp-auth.json");
-    const authData = JSON.parse(readFileSync2(authPath, "utf-8"));
+    const authPath = join9(homedir9(), ".local", "share", "opencode", "mcp-auth.json");
+    const authData = JSON.parse(readFileSync3(authPath, "utf-8"));
     bearerToken = authData?.synqtask?.tokens?.accessToken ?? "";
   } catch {}
   return bearerToken;
@@ -42002,7 +42198,7 @@ function hasSeenWakeEvent(event) {
   return _seenWakeEventIds.has(event.eventId) || !!fingerprint && _seenWakeFingerprints.has(fingerprint);
 }
 function stableHash(input) {
-  let hash = 2166136261;
+  let hash = FNV_32_PRIME;
   for (let i2 = 0;i2 < input.length; i2++) {
     hash ^= input.charCodeAt(i2);
     hash = Math.imul(hash, 16777619);
@@ -42398,8 +42594,8 @@ async function resolveOrRegisterAgentIdentity(config) {
 }
 function parseAgentsMd() {
   try {
-    const agentsMdPath = join6(process.cwd(), "AGENTS.md");
-    const content = readFileSync2(agentsMdPath, "utf-8");
+    const agentsMdPath = join9(process.cwd(), "AGENTS.md");
+    const content = readFileSync3(agentsMdPath, "utf-8");
     const nameMatch = content.match(/^#\s+(?:Agent\s+)?(.+)/im);
     const name = nameMatch?.[1]?.trim() ?? null;
     const roleMatch = content.match(/##\s+(?:\u0420\u043E\u043B\u044C|Role)[^\n]*\n([\s\S]*?)(?=\n##|\n$)/i);
@@ -42672,7 +42868,7 @@ function updateDiscoverySession(sessionId, agentInstanceId) {
     return false;
   }
   try {
-    const disc = JSON.parse(readFileSync2(_discoveryPath, "utf-8"));
+    const disc = JSON.parse(readFileSync3(_discoveryPath, "utf-8"));
     disc.sessionId = sessionId;
     if (agentInstanceId)
       disc.agentInstanceId = agentInstanceId;
@@ -42715,7 +42911,7 @@ async function resolveSessionId(sessionId) {
     return _cachedSessionId;
   if (_discoveryPath) {
     try {
-      const disc = JSON.parse(readFileSync2(_discoveryPath, "utf-8"));
+      const disc = JSON.parse(readFileSync3(_discoveryPath, "utf-8"));
       if (disc.sessionId && disc.sessionId !== "unknown") {
         _cachedSessionId = disc.sessionId;
         updateBoundSessionGlobal(_cachedSessionId);
@@ -43038,7 +43234,7 @@ ${_agentIdentity.teamPlaybook}
   const actualPort = server.port;
   dbg2(`started on port ${actualPort} for session ${config.sessionId}`);
   const resolvedDiscoveryDir = discoveryDir();
-  const discoveryPath = join6(resolvedDiscoveryDir, `${process.pid}-${config.sessionId}.json`);
+  const discoveryPath = join9(resolvedDiscoveryDir, `${process.pid}-${config.sessionId}.json`);
   try {
     mkdirSync2(resolvedDiscoveryDir, { recursive: true });
     _currentSubscribe = config.subscribe ?? null;
@@ -43124,8 +43320,9 @@ function stopWakeListener(handle) {
 var DEBUG, LOG_FILE3, MAX_QUEUE_DEFAULT = 50, BUSY_RETRY_INTERVAL_DEFAULT = 5, STARTUP_TS, FALLBACK_REPLAY_LIMIT = 20, FALLBACK_REPLAY_TIMEOUT_MS = 3000, DEDUP_CACHE_LIMIT = 500, warmChannels, _agentIdentity = null, _sdkClient = null, LIFECYCLE_SYNC_MIN_INTERVAL_MS = 30000, _lifecycleLastSyncAt = 0, _lifecycleLastKey = "", _lifecycleConfig = null, _lifecycleMemberId = null, _lastActivityCursor = null, _seenWakeEventIds, _seenWakeFingerprints, _taskSyncKeys, _currentSubscribe = null, _currentSubscribePreset = null, _currentMemberType = "unknown", _spawnTotal = 0, _currentDepth = null, _parentMemberId, _parentSessionId, HELPER_TIMEOUT_MS = 60000, _activeHelperTimestamps, _cachedSessionId = null, _discoveryPath = null, _agentDirectory = null;
 var init_wake_listener = __esm(() => {
   init_wake_types();
+  init_domain_constants();
   DEBUG = process.env.WAKE_LISTENER_DEBUG !== "0";
-  LOG_FILE3 = join6(homedir6(), ".claude", "wake-listener-debug.log");
+  LOG_FILE3 = join9(homedir9(), ".claude", "wake-listener-debug.log");
   STARTUP_TS = Date.now();
   warmChannels = new Map;
   _seenWakeEventIds = new Set;
@@ -43137,25 +43334,25 @@ var init_wake_listener = __esm(() => {
 });
 
 // ../opencode-signal-wire/wake-preferences.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync as renameSync3, existsSync as existsSync2 } from "fs";
-import { join as join7, dirname as dirname3 } from "path";
-import { homedir as homedir7 } from "os";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync as renameSync3, existsSync as existsSync2 } from "fs";
+import { join as join10, dirname as dirname3 } from "path";
+import { homedir as homedir10 } from "os";
 function projectPrefsPath(cwd) {
-  return join7(cwd, ".opencode", "wake-preferences.json");
+  return join10(cwd, ".opencode", "wake-preferences.json");
 }
 function loadPreferences(cwd) {
   let global = null;
   let project = null;
   try {
     if (existsSync2(GLOBAL_PREFS_PATH)) {
-      global = JSON.parse(readFileSync3(GLOBAL_PREFS_PATH, "utf-8"));
+      global = JSON.parse(readFileSync4(GLOBAL_PREFS_PATH, "utf-8"));
     }
   } catch {}
   if (cwd) {
     try {
       const pp = projectPrefsPath(cwd);
       if (existsSync2(pp)) {
-        project = JSON.parse(readFileSync3(pp, "utf-8"));
+        project = JSON.parse(readFileSync4(pp, "utf-8"));
       }
     } catch {}
   }
@@ -43188,14 +43385,301 @@ var init_wake_preferences = __esm(() => {
     quiet: []
   };
   PRESET_NAMES = Object.keys(WAKE_PRESETS);
-  GLOBAL_PREFS_PATH = join7(homedir7(), ".opencode", "wake-preferences.json");
+  GLOBAL_PREFS_PATH = join10(homedir10(), ".opencode", "wake-preferences.json");
+});
+
+// ../opencode-signal-wire/run-mode.ts
+var exports_run_mode = {};
+__export(exports_run_mode, {
+  resetRunModeCache: () => resetRunModeCache,
+  getRunMode: () => getRunMode,
+  detectRunMode: () => detectRunMode
+});
+import { readFileSync as readFileSync5 } from "fs";
+function detectRunMode(opts = {}) {
+  if (_cached && !opts.force)
+    return _cached;
+  const signals = {};
+  let score = 0;
+  const explicit = process.env.SYNQTASK_MEMBER_TYPE;
+  if (explicit === "human") {
+    _cached = { mode: "human", score: 999, signals: { explicit: "human" }, fromOverride: true };
+    return _cached;
+  }
+  if (explicit === "agent") {
+    _cached = { mode: "agent", score: -999, signals: { explicit: "agent" }, fromOverride: true };
+    return _cached;
+  }
+  if (process.stdout.isTTY) {
+    score += 3;
+    signals.tty = "+3";
+  } else {
+    signals.tty = "0 (no TTY)";
+  }
+  try {
+    if (opts.hasOAuth?.()) {
+      score += 5;
+      signals.oauth = "+5";
+    }
+  } catch {}
+  if (process.env.OPENCODE_AGENT_INSTANCE_ID) {
+    score -= 3;
+    signals.opencodeAgentId = "-3";
+  }
+  if (process.env.SPAWN_PARENT_MEMBER_ID) {
+    score -= 5;
+    signals.spawnedBy = "-5";
+  }
+  if (process.env.OPENCODE_AGENT_ROLE) {
+    score -= 3;
+    signals.preassignedRole = "-3";
+  }
+  try {
+    const ppid = process.ppid;
+    const comm = readFileSync5(`/proc/${ppid}/comm`, "utf-8").trim();
+    if (comm === "bun" || comm.startsWith("opencode")) {
+      score -= 2;
+      signals.parentProc = `-2 (${comm})`;
+    } else {
+      signals.parentProc = `0 (${comm})`;
+    }
+  } catch {
+    signals.parentProc = "0 (unknown)";
+  }
+  if (process.env.TMUX) {
+    signals.tmux = "0 (neutral)";
+  }
+  const mode = score > 2 ? "human" : score < -2 ? "agent" : "unknown";
+  _cached = { mode, score, signals, fromOverride: false };
+  return _cached;
+}
+function getRunMode() {
+  return _cached?.mode ?? "unknown";
+}
+function resetRunModeCache() {
+  _cached = null;
+}
+var _cached = null;
+var init_run_mode = () => {};
+
+// ../opencode-signal-wire/identity-bootstrap.ts
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, existsSync as existsSync3, chmodSync } from "fs";
+import { join as join11, dirname as dirname4 } from "path";
+function slugifyCwd(cwd) {
+  const parts = cwd.split("/").filter((p2) => p2.length > 0);
+  const tail = parts.slice(-2).join("-");
+  return tail.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+function parseDotEnv(content) {
+  const out = {};
+  for (const line of content.split(`
+`)) {
+    const t2 = line.trim();
+    if (!t2 || t2.startsWith("#"))
+      continue;
+    const eq = t2.indexOf("=");
+    if (eq <= 0)
+      continue;
+    const k2 = t2.slice(0, eq).trim();
+    let v2 = t2.slice(eq + 1).trim();
+    if (v2.startsWith('"') && v2.endsWith('"') || v2.startsWith("'") && v2.endsWith("'")) {
+      v2 = v2.slice(1, -1);
+    }
+    out[k2] = v2;
+  }
+  return out;
+}
+function readCwdDotEnv(cwd) {
+  const p2 = join11(cwd, ".env");
+  try {
+    return parseDotEnv(readFileSync6(p2, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+function getEnv(name, opts, cwdEnv) {
+  const procVal = opts.envOverride ? opts.envOverride[name] : process.env[name];
+  if (procVal != null && procVal !== "")
+    return procVal;
+  return cwdEnv[name];
+}
+function computeDeterministicKey(cwd, opts = { cwd }) {
+  const cwdEnv = readCwdDotEnv(cwd);
+  const explicitName = getEnv("SYNQTASK_AGENT_NAME", opts, cwdEnv);
+  const role = getEnv("SYNQTASK_AGENT_ROLE", opts, cwdEnv) ?? "developer";
+  const key = explicitName ?? `${slugifyCwd(cwd)}-${role}`;
+  return { key, role };
+}
+function cachePath(deterministicKey) {
+  const safe = deterministicKey.replace(/[^a-z0-9/_-]/gi, "_");
+  return join11(IDENTITY_CACHE_DIR, `${safe}.json`);
+}
+function readCache(deterministicKey) {
+  try {
+    const raw = readFileSync6(cachePath(deterministicKey), "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+function writeCache(entry) {
+  const p2 = cachePath(entry.deterministicKey);
+  const dir = dirname4(p2);
+  if (!existsSync3(dir)) {
+    mkdirSync4(dir, { recursive: true });
+    try {
+      chmodSync(dir, 448);
+    } catch {}
+  }
+  const tmp = `${p2}.tmp.${process.pid}`;
+  writeFileSync4(tmp, JSON.stringify(entry, null, 2));
+  try {
+    chmodSync(tmp, 384);
+  } catch {}
+  const { renameSync: renameSync4 } = __require_gv7hsff9("fs");
+  renameSync4(tmp, p2);
+}
+function readRouterDiscovery() {
+  try {
+    return JSON.parse(readFileSync6(ROUTER_JSON_PATH, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+async function provisionViaRouter(router, payload, fetchImpl) {
+  if (!router.bootstrapKey) {
+    return { error: "router_no_bootstrap_key" };
+  }
+  const url2 = `http://${router.host}:${router.port}/identity/provision`;
+  try {
+    const resp = await fetchImpl(url2, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${router.bootstrapKey}`
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      return { error: `router_returned_${resp.status}: ${text.slice(0, 200)}`, status: resp.status };
+    }
+    const data = await resp.json();
+    if (!data.memberId || !data.secret) {
+      return { error: "router_response_missing_fields" };
+    }
+    return data;
+  } catch (e2) {
+    return { error: `network: ${e2?.message ?? String(e2)}` };
+  }
+}
+async function bootstrapIdentity(opts) {
+  const cwd = opts.cwd;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const { key: deterministicKey, role } = computeDeterministicKey(cwd, opts);
+  const { detectRunMode: detectRunMode2 } = await Promise.resolve().then(() => (init_run_mode(), exports_run_mode));
+  const runMode = detectRunMode2();
+  if (!opts.forceProvision) {
+    const cached = readCache(deterministicKey);
+    if (cached?.memberId && cached?.secret) {
+      if (cached.ttlExpiresAt) {
+        const expired = new Date(cached.ttlExpiresAt).getTime() < Date.now();
+        if (!expired) {
+          return {
+            memberId: cached.memberId,
+            secret: cached.secret,
+            deterministicKey,
+            role: cached.role,
+            cwd: cached.cwd,
+            isNewlyProvisioned: false,
+            orgRole: cached.orgRole,
+            team: cached.team ?? null,
+            runMode: runMode.mode,
+            runModeScore: runMode.score
+          };
+        }
+      } else {
+        return {
+          memberId: cached.memberId,
+          secret: cached.secret,
+          deterministicKey,
+          role: cached.role,
+          cwd: cached.cwd,
+          isNewlyProvisioned: false,
+          orgRole: cached.orgRole,
+          team: cached.team ?? null,
+          runMode: runMode.mode,
+          runModeScore: runMode.score
+        };
+      }
+    }
+  }
+  const router = readRouterDiscovery();
+  if (!router) {
+    console.warn(`[identity-bootstrap] router.json not found at ${ROUTER_JSON_PATH}; identity provisioning unavailable`);
+    return null;
+  }
+  const parentMemberId = opts.envOverride?.SPAWN_PARENT_MEMBER_ID ?? process.env.SPAWN_PARENT_MEMBER_ID ?? null;
+  const result = await provisionViaRouter(router, {
+    name: deterministicKey,
+    role,
+    cwd,
+    parentMemberId
+  }, fetchImpl);
+  if ("error" in result) {
+    console.warn(`[identity-bootstrap] provisioning failed: ${result.error}`);
+    return null;
+  }
+  const entry = {
+    memberId: result.memberId,
+    secret: result.secret,
+    deterministicKey,
+    role,
+    cwd,
+    provisionedAt: new Date().toISOString(),
+    orgRole: result.orgRole,
+    team: result.team,
+    ttlExpiresAt: null
+  };
+  try {
+    writeCache(entry);
+  } catch (e2) {
+    console.warn(`[identity-bootstrap] cache write failed (continuing in-memory): ${e2?.message ?? String(e2)}`);
+  }
+  return {
+    memberId: result.memberId,
+    secret: result.secret,
+    deterministicKey,
+    role,
+    cwd,
+    isNewlyProvisioned: result.isNewlyCreated,
+    orgRole: result.orgRole,
+    team: result.team,
+    runMode: runMode.mode,
+    runModeScore: runMode.score
+  };
+}
+function applyIdentityToEnv(identity) {
+  process.env.SYNQTASK_MEMBER_ID = identity.memberId;
+  process.env.SYNQTASK_MEMBER_SECRET = identity.secret;
+  process.env.SYNQTASK_AGENT_ROLE = identity.role;
+  if (!process.env.OPENCODE_AGENT_INSTANCE_ID) {
+    process.env.OPENCODE_AGENT_INSTANCE_ID = `opencode:${identity.deterministicKey}:${process.pid}`;
+  }
+}
+var ROUTER_JSON_PATH, IDENTITY_CACHE_DIR;
+var init_identity_bootstrap = __esm(() => {
+  init_domain_constants();
+  ROUTER_JSON_PATH = join11(WAKE_ROOT, "router.json");
+  IDENTITY_CACHE_DIR = AGENT_IDENTITY_DIR;
 });
 
 // ../opencode-signal-wire/hook-listener.ts
-import { appendFileSync as appendFileSync5, existsSync as existsSync3, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4 } from "fs";
+import { appendFileSync as appendFileSync5, existsSync as existsSync4, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5 } from "fs";
 import { createHash } from "crypto";
-import { homedir as homedir8 } from "os";
-import { join as join8 } from "path";
+import { homedir as homedir11 } from "os";
+import { join as join12 } from "path";
 function logHintPacked(hook, sessionId, out) {
   try {
     const line = `[${new Date().toISOString()}] {"step":"HINT_PACKED","hook":"${hook}","sessionId":"${sessionId ?? "?"}","total":${out.stats.total},"kept":${out.stats.kept},"deduped":${out.stats.deduped},"trimmed":${out.stats.trimmed},"bytes":${out.stats.bytes},"droppedDeduped":${JSON.stringify(out.droppedDeduped)},"droppedTrimmed":${JSON.stringify(out.droppedTrimmed)}}
@@ -43284,7 +43768,7 @@ ${packed.text}`;
   return packed.stats.kept;
 }
 function resolveOpencodeToolOutputDir() {
-  return join8(homedir8(), ".local", "share", "opencode", "tool-output");
+  return join12(homedir11(), ".local", "share", "opencode", "tool-output");
 }
 function computeContentHash(content) {
   return createHash("sha256").update(content).digest("hex").slice(0, 12);
@@ -43299,15 +43783,15 @@ function logCompactDiag(sessionId, ruleId, outcome, bytesDropped, linesDropped) 
 function writeFallbackFile(ruleId, rawOutput) {
   try {
     const dir = resolveOpencodeToolOutputDir();
-    if (!existsSync3(dir)) {
-      mkdirSync4(dir, { recursive: true });
+    if (!existsSync4(dir)) {
+      mkdirSync5(dir, { recursive: true });
     }
     const hash = computeContentHash(rawOutput);
     const safeRuleId = ruleId.replace(/[^a-z0-9-]/gi, "-") || "unknown";
     const filename = `tool_sw_${safeRuleId}_${hash}`;
-    const fullPath = join8(dir, filename);
-    if (!existsSync3(fullPath)) {
-      writeFileSync4(fullPath, rawOutput, "utf8");
+    const fullPath = join12(dir, filename);
+    if (!existsSync4(fullPath)) {
+      writeFileSync5(fullPath, rawOutput, "utf8");
     }
     return fullPath;
   } catch {
@@ -43396,14 +43880,14 @@ ${packed.text}`;
 var RENDER_LOG, EVT_TOOL_BEFORE = "tool.before", EVT_TOOL_AFTER = "tool.after", EVT_CHAT_MESSAGE = "chat.message", COMPACTED_MARKER_RE;
 var init_hook_listener = __esm(() => {
   init_dist();
-  RENDER_LOG = join8(homedir8(), ".claude", "opencode-signal-wire-debug.log");
+  RENDER_LOG = join12(homedir11(), ".claude", "opencode-signal-wire-debug.log");
   COMPACTED_MARKER_RE = /^<!--sw:compacted:[a-z0-9-]+-->/;
 });
 
 // ../opencode-signal-wire/quota-watcher.ts
-import { existsSync as existsSync4, readFileSync as readFileSync4, watch } from "fs";
-import { homedir as homedir9 } from "os";
-import { join as join9 } from "path";
+import { existsSync as existsSync5, readFileSync as readFileSync7, watch } from "fs";
+import { homedir as homedir12 } from "os";
+import { join as join13 } from "path";
 import { randomUUID as randomUUID2 } from "crypto";
 function startQuotaWatcher(opts) {
   const { signalWire, resolveSessionId: resolveSessionId2, log } = opts;
@@ -43416,9 +43900,9 @@ function startQuotaWatcher(opts) {
   let retryTimer = null;
   function readStatus() {
     try {
-      if (!existsSync4(QUOTA_STATUS_JSON))
+      if (!existsSync5(QUOTA_STATUS_JSON))
         return null;
-      const raw = readFileSync4(QUOTA_STATUS_JSON, "utf8");
+      const raw = readFileSync7(QUOTA_STATUS_JSON, "utf8");
       return JSON.parse(raw);
     } catch (e2) {
       log(`quota-watcher: read failed: ${e2?.message ?? e2}`);
@@ -43573,7 +44057,7 @@ function startQuotaWatcher(opts) {
     }, DEBOUNCE_MS);
   }
   try {
-    watcher = watch(join9(homedir9(), ".claude-local"), { persistent: false }, (_evt, filename) => {
+    watcher = watch(join13(homedir12(), ".claude-local"), { persistent: false }, (_evt, filename) => {
       if (filename === "quota-status.json" || filename === "quota-status.json.tmp") {
         scheduleCheck();
       }
@@ -43605,7 +44089,7 @@ function startQuotaWatcher(opts) {
 var QUOTA_STATUS_JSON, DEBOUNCE_MS = 200, RETRY_NO_SESSION_MS = 5000;
 var init_quota_watcher = __esm(() => {
   init_wake_listener();
-  QUOTA_STATUS_JSON = join9(homedir9(), ".claude-local", "quota-status.json");
+  QUOTA_STATUS_JSON = join13(homedir12(), ".claude-local", "quota-status.json");
 });
 
 // ../opencode-signal-wire/token-rotation-bridge.ts
@@ -43693,10 +44177,397 @@ function createLazyContextTokensProvider() {
 }
 var _boundSdk = null, _currentSignalWire = null;
 
+// ../opencode-signal-wire/agent-action-client.ts
+var exports_agent_action_client = {};
+__export(exports_agent_action_client, {
+  requestAgentAction: () => requestAgentAction,
+  isRouterReachable: () => isRouterReachable,
+  RouterUnreachableError: () => RouterUnreachableError,
+  RouterRejectedError: () => RouterRejectedError
+});
+import { readFileSync as readFileSync8 } from "fs";
+import { join as join14 } from "path";
+function readRouterDiscovery2() {
+  try {
+    return JSON.parse(readFileSync8(ROUTER_JSON_PATH2, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+async function requestAgentAction(req2, opts = {}) {
+  const router = readRouterDiscovery2();
+  if (!router) {
+    throw new RouterUnreachableError("no_router_json", `${ROUTER_JSON_PATH2} not found; install synqtask-stack or start wake-router`);
+  }
+  const url2 = `http://${router.host}:${router.port}/agent-action/request`;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS2;
+  try {
+    const resp = await fetchImpl(url2, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${req2.caller.memberSecret}`
+      },
+      body: JSON.stringify(req2),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    let data;
+    try {
+      data = await resp.json();
+    } catch (e2) {
+      throw new RouterUnreachableError("network", `invalid JSON response: ${e2?.message ?? String(e2)}`);
+    }
+    if (data.decision === "denied") {
+      throw new RouterRejectedError(data);
+    }
+    return data;
+  } catch (e2) {
+    if (e2 instanceof RouterRejectedError)
+      throw e2;
+    if (e2 instanceof RouterUnreachableError)
+      throw e2;
+    if (e2?.name === "AbortError" || e2?.message?.includes("timeout")) {
+      throw new RouterUnreachableError("timeout", `request to ${url2} timed out after ${timeoutMs}ms`);
+    }
+    throw new RouterUnreachableError("network", e2?.message ?? String(e2));
+  }
+}
+async function isRouterReachable(timeoutMs = 1000) {
+  const router = readRouterDiscovery2();
+  if (!router)
+    return false;
+  try {
+    const resp = await fetch(`http://${router.host}:${router.port}/health`, {
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+var ROUTER_JSON_PATH2, DEFAULT_TIMEOUT_MS2, RouterUnreachableError, RouterRejectedError;
+var init_agent_action_client = __esm(() => {
+  init_domain_constants();
+  ROUTER_JSON_PATH2 = join14(WAKE_ROOT, "router.json");
+  DEFAULT_TIMEOUT_MS2 = ACTION_CLIENT_TIMEOUT_MS;
+  RouterUnreachableError = class RouterUnreachableError extends Error {
+    reason;
+    constructor(reason, detail) {
+      super(`Router unreachable (${reason}): ${detail}`);
+      this.reason = reason;
+      this.name = "RouterUnreachableError";
+    }
+  };
+  RouterRejectedError = class RouterRejectedError extends Error {
+    response;
+    constructor(response) {
+      super(`Router rejected: ${response.reason}`);
+      this.response = response;
+      this.name = "RouterRejectedError";
+    }
+  };
+});
+
+// ../opencode-signal-wire/spawn-brief-applier.ts
+var exports_spawn_brief_applier = {};
+__export(exports_spawn_brief_applier, {
+  releaseBrief: () => releaseBrief,
+  registerBrief: () => registerBrief,
+  markReminderInjected: () => markReminderInjected,
+  getBriefForSession: () => getBriefForSession,
+  claimBriefForSubSession: () => claimBriefForSubSession,
+  _getBriefsSnapshot: () => _getBriefsSnapshot
+});
+import { readFileSync as readFileSync9, unlinkSync as unlinkSync2 } from "fs";
+function registerBrief(args) {
+  let brief;
+  try {
+    const raw = readFileSync9(args.briefRef, "utf-8");
+    brief = JSON.parse(raw);
+  } catch (e2) {
+    console.error(`[spawn-brief-applier] failed to read brief ${args.briefRef}: ${e2?.message}`);
+    return;
+  }
+  const applied = {
+    ...brief,
+    sessionId: null,
+    briefRef: args.briefRef,
+    decisionLogId: args.decisionLogId,
+    registeredAt: Date.now(),
+    appliedAt: null,
+    reminderInjected: false
+  };
+  briefs.set(args.briefRef, applied);
+  cleanupStaleBriefs();
+}
+function claimBriefForSubSession(sessionId) {
+  let pick = null;
+  let pickKey = null;
+  for (const [key, b2] of briefs.entries()) {
+    if (b2.sessionId !== null)
+      continue;
+    if (pick === null || b2.registeredAt > pick.registeredAt) {
+      pick = b2;
+      pickKey = key;
+    }
+  }
+  if (!pick || !pickKey)
+    return null;
+  pick.sessionId = sessionId;
+  pick.appliedAt = Date.now();
+  try {
+    unlinkSync2(pick.briefRef);
+  } catch (e2) {
+    if (e2?.code !== "ENOENT") {
+      console.warn(`[spawn-brief-applier] failed to unlink brief ${pick.briefRef}: ${e2?.message}`);
+    }
+  }
+  briefs.delete(pickKey);
+  briefs.set(sessionId, pick);
+  return pick;
+}
+function getBriefForSession(sessionId) {
+  return briefs.get(sessionId) ?? null;
+}
+function markReminderInjected(sessionId) {
+  const b2 = briefs.get(sessionId);
+  if (b2)
+    b2.reminderInjected = true;
+}
+function releaseBrief(sessionId) {
+  briefs.delete(sessionId);
+}
+function cleanupStaleBriefs() {
+  const now = Date.now();
+  for (const [key, b2] of briefs.entries()) {
+    if (now - b2.registeredAt > TTL_MS) {
+      try {
+        if (b2.briefRef)
+          unlinkSync2(b2.briefRef);
+      } catch {}
+      briefs.delete(key);
+    }
+  }
+}
+function _getBriefsSnapshot() {
+  let byRef = 0;
+  let byParentMember = 0;
+  for (const b2 of briefs.values()) {
+    if (b2.sessionId === null)
+      byRef++;
+    else
+      byParentMember++;
+  }
+  return { byRef, byParentMember };
+}
+var TTL_MS, briefs;
+var init_spawn_brief_applier = __esm(() => {
+  TTL_MS = 60 * 60 * 1000;
+  briefs = new Map;
+});
+
+// ../opencode-signal-wire/system-prompt-hook.ts
+var exports_system_prompt_hook = {};
+__export(exports_system_prompt_hook, {
+  systemTransformHook: () => systemTransformHook
+});
+function getParentIdentity() {
+  const memberId = process.env.SYNQTASK_MEMBER_ID;
+  if (!memberId)
+    return null;
+  const role = process.env.SYNQTASK_AGENT_ROLE ?? "developer";
+  try {
+    const { readFileSync: readFileSync10 } = __require_gv7hsff9("fs");
+    const { join: join15 } = __require_gv7hsff9("path");
+    const cacheDir = AGENT_IDENTITY_DIR;
+    const { readdirSync } = __require_gv7hsff9("fs");
+    let files;
+    try {
+      files = readdirSync(cacheDir);
+    } catch {
+      return { memberId, role };
+    }
+    for (const f2 of files) {
+      if (!f2.endsWith(".json"))
+        continue;
+      try {
+        const raw = readFileSync10(join15(cacheDir, f2), "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed.memberId === memberId) {
+          return {
+            memberId: parsed.memberId,
+            role: parsed.role ?? role,
+            orgRole: parsed.orgRole
+          };
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {}
+  return { memberId, role };
+}
+function formatRoleBlock(identity) {
+  if (!identity.orgRole?.systemPrompt) {
+    return `## Your Identity
+
+You are operating as memberId=${identity.memberId}, role=${identity.role}.
+` + `(No OrgRole systemPrompt was found in cache \u2014 role definition may need refresh.)`;
+  }
+  const md = identity.orgRole.metadata ?? {};
+  const lines = [
+    `## Your Role: ${identity.role}`,
+    "",
+    identity.orgRole.systemPrompt.trim()
+  ];
+  if (md.tools_allowed) {
+    lines.push("", `**Tools allowed:** ${md.tools_allowed}`);
+  }
+  if (md.tools_blocked) {
+    lines.push(`**Tools blocked:** ${md.tools_blocked}`);
+  }
+  if (md.can_spawn) {
+    lines.push(`**Can spawn roles:** ${md.can_spawn}`);
+  }
+  return lines.join(`
+`);
+}
+async function systemTransformHook(input, output) {
+  try {
+    const sessionID = input.sessionID;
+    if (!sessionID)
+      return;
+    let brief = getBriefForSession(sessionID);
+    if (!brief) {
+      brief = claimBriefForSubSession(sessionID);
+    }
+    if (brief) {
+      output.system[0] = brief.composedSystemPrompt;
+      output.system.length = 1;
+      return;
+    }
+    const identity = getParentIdentity();
+    if (!identity?.orgRole) {
+      return;
+    }
+    const roleBlock = formatRoleBlock(identity);
+    const strategy = identity.orgRole.metadata?.system_prompt_strategy ?? "append";
+    if (strategy === "replace") {
+      output.system[0] = roleBlock;
+      output.system.length = 1;
+    } else {
+      output.system.push(roleBlock);
+    }
+  } catch (e2) {
+    console.error(`[system-prompt-hook] error (non-fatal): ${e2?.message ?? String(e2)}`);
+  }
+}
+var init_system_prompt_hook = __esm(() => {
+  init_spawn_brief_applier();
+  init_domain_constants();
+});
+
+// ../opencode-signal-wire/tool-definition-hook.ts
+var exports_tool_definition_hook = {};
+__export(exports_tool_definition_hook, {
+  toolDefinitionHook: () => toolDefinitionHook,
+  invalidateBlockedCache: () => invalidateBlockedCache,
+  _getBlockedForSession: () => _getBlockedForSession
+});
+function getParentIdentity2() {
+  const memberId = process.env.SYNQTASK_MEMBER_ID;
+  if (!memberId)
+    return null;
+  const role = process.env.SYNQTASK_AGENT_ROLE ?? "developer";
+  try {
+    const { readFileSync: readFileSync10, readdirSync } = __require_gv7hsff9("fs");
+    const { join: join15 } = __require_gv7hsff9("path");
+    const cacheDir = AGENT_IDENTITY_DIR;
+    let files;
+    try {
+      files = readdirSync(cacheDir);
+    } catch {
+      return { memberId, role };
+    }
+    for (const f2 of files) {
+      if (!f2.endsWith(".json"))
+        continue;
+      try {
+        const parsed = JSON.parse(readFileSync10(join15(cacheDir, f2), "utf-8"));
+        if (parsed.memberId === memberId) {
+          return { memberId: parsed.memberId, role: parsed.role ?? role, orgRole: parsed.orgRole };
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {}
+  return { memberId, role };
+}
+function parseList(raw) {
+  if (!raw)
+    return [];
+  if (raw.startsWith("[")) {
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  return raw.split(",").map((s2) => s2.trim()).filter((s2) => s2.length > 0);
+}
+function getBlockedForSession(sessionID) {
+  if (!sessionID) {
+    return blockedCache.get("__parent__") ?? computeParentBlocked();
+  }
+  const brief = getBriefForSession(sessionID);
+  if (brief) {
+    const cached = blockedCache.get(sessionID);
+    if (cached)
+      return cached;
+    blockedCache.set(sessionID, brief.blockedTools);
+    return brief.blockedTools;
+  }
+  return blockedCache.get("__parent__") ?? computeParentBlocked();
+}
+function computeParentBlocked() {
+  const identity = getParentIdentity2();
+  const blocked = parseList(identity?.orgRole?.metadata?.tools_blocked);
+  blockedCache.set("__parent__", blocked);
+  return blocked;
+}
+function invalidateBlockedCache() {
+  blockedCache.clear();
+}
+function _getBlockedForSession(sessionID) {
+  return getBlockedForSession(sessionID);
+}
+async function toolDefinitionHook(input, output) {
+  try {
+    const blocked = computeParentBlocked();
+    if (!blocked.includes(input.toolID))
+      return;
+    const identity = getParentIdentity2();
+    const role = identity?.role ?? "unknown";
+    output.description = `[BLOCKED for role ${role}] This tool is not available to your role. ` + `Calls to this tool will be hard-blocked at execution. ` + `Use one of your allowed tools, or escalate to a higher-privilege role via SynqTask delegation.`;
+    output.parameters = { type: "object", properties: {}, additionalProperties: false };
+  } catch (e2) {
+    console.error(`[tool-definition-hook] error (non-fatal): ${e2?.message ?? String(e2)}`);
+  }
+}
+var blockedCache;
+var init_tool_definition_hook = __esm(() => {
+  init_spawn_brief_applier();
+  init_domain_constants();
+  blockedCache = new Map;
+});
+
 // ../opencode-signal-wire/plugin.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
-import { homedir as homedir10 } from "os";
-import { join as join10 } from "path";
+import { appendFileSync as appendFileSync6, existsSync as existsSync6, readFileSync as readFileSync10 } from "fs";
+import { homedir as homedir13 } from "os";
+import { join as join15 } from "path";
 function dbg3(...args) {
   if (!DEBUG2)
     return;
@@ -43713,12 +44584,12 @@ function maskPresence(value) {
   return value === undefined || value === null || value === "" ? "absent" : "present";
 }
 function readOwnPackage() {
-  const path = join10(import.meta.dir, "package.json");
+  const path2 = join15(import.meta.dir, "package.json");
   try {
-    const pkg = JSON.parse(readFileSync5(path, "utf-8"));
-    return { name: pkg.name ?? "unknown", version: pkg.version ?? "unknown", path };
+    const pkg = JSON.parse(readFileSync10(path2, "utf-8"));
+    return { name: pkg.name ?? "unknown", version: pkg.version ?? "unknown", path: path2 };
   } catch {
-    return { name: "unknown", version: "unknown", path };
+    return { name: "unknown", version: "unknown", path: path2 };
   }
 }
 function getServerUrl(input) {
@@ -43730,10 +44601,10 @@ function getServerUrl(input) {
 }
 function readProjectConfig(cwd) {
   try {
-    const configPath = join10(cwd, "opencode.json");
-    if (!existsSync5(configPath))
+    const configPath = join15(cwd, "opencode.json");
+    if (!existsSync6(configPath))
       return null;
-    return JSON.parse(readFileSync5(configPath, "utf-8"));
+    return JSON.parse(readFileSync10(configPath, "utf-8"));
   } catch (e2) {
     dbg3(`config read failed: ${e2?.message}`);
     return null;
@@ -43785,62 +44656,169 @@ async function findNewSessionByDirectory(client, directory, notBeforeMs) {
     return { count: candidates.length };
   return { id: candidates[0].id, directory: candidates[0].directory, count: 1 };
 }
-async function handlePreToolUseSpawnCheck(toolName, sessionId, input) {
+function loadSubagentRoleMap() {
+  if (_subagentRoleMap)
+    return _subagentRoleMap;
+  const mapPath = join15(WAKE_ROOT, "subagent-role-map.json");
+  try {
+    const raw = readFileSync10(mapPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const map = {};
+    for (const [k2, v2] of Object.entries(parsed)) {
+      if (k2.startsWith("_"))
+        continue;
+      if (typeof v2 === "string")
+        map[k2] = v2;
+    }
+    _subagentRoleMap = map;
+    return map;
+  } catch {
+    return { default: "staff-helper" };
+  }
+}
+function inferTargetRole(subagentType) {
+  if (!subagentType) {
+    return loadSubagentRoleMap().default ?? "staff-helper";
+  }
+  const map = loadSubagentRoleMap();
+  if (map[subagentType])
+    return map[subagentType];
+  for (const [pattern, role] of Object.entries(map)) {
+    if (pattern.endsWith("*") && subagentType.startsWith(pattern.slice(0, -1))) {
+      return role;
+    }
+  }
+  return map.default ?? "staff-helper";
+}
+async function routeTaskThroughEngine(toolName, sessionId, input, output) {
   const spawnTools = ["task", "Task", "task_tool", "call_omo_agent"];
   if (!spawnTools.includes(toolName))
     return;
-  try {
-    const identity = getAgentIdentity();
-    const depth = await resolveCurrentDepth(sessionId);
-    if (!identity || !identity.roleName) {
-      const maxDepth = parseInt(process.env.__MAX_HELPER_DEPTH ?? "1", 10);
-      if (depth >= maxDepth) {
-        return {
-          decision: "block",
-          message: [
-            `Helper blocked: depth ${depth}/${maxDepth}.`,
-            `Do the work yourself and return the result; do not spawn another task agent at this level.`
-          ].join(`
-`)
-        };
-      }
+  const description = String(input?.description ?? input?.prompt ?? input?.message ?? "");
+  if (description.length > 0 && description.length < 200) {
+    return {
+      decision: "block",
+      message: `Delegation blocked: description too short (${description.length} chars, need 200+). ` + `Include concrete task, constraints, files, and expected output.`
+    };
+  }
+  const override = process.env.SW_ALLOW_TASK_WITHOUT_ROUTER === "1";
+  const [{ requestAgentAction: requestAgentAction2, RouterUnreachableError: RouterUnreachableError2, RouterRejectedError: RouterRejectedError2, isRouterReachable: isRouterReachable2 }, { detectRunMode: detectRunMode2 }] = await Promise.all([
+    Promise.resolve().then(() => (init_agent_action_client(), exports_agent_action_client)),
+    Promise.resolve().then(() => (init_run_mode(), exports_run_mode))
+  ]);
+  const memberId = process.env.SYNQTASK_MEMBER_ID;
+  const memberSecret = process.env.SYNQTASK_MEMBER_SECRET;
+  if (!memberId || !memberSecret) {
+    if (override) {
+      console.error(`[SW] \u26A0\uFE0F\u26A0\uFE0F\u26A0\uFE0F SW_ALLOW_TASK_WITHOUT_ROUTER=1: task tool firing without provisioned identity. ` + `This bypasses RBAC and audit. ONLY for debugging.`);
       helperStarted();
-      dbg3(`helper spawn OK depth=${depth}/${maxDepth} active=${getSpawnActive()} total=${getSpawnTotal()}`);
       return;
     }
-    const check = checkSpawnAllowed(identity, depth, getSpawnActive());
-    if (!check.allowed) {
-      const roleName = identity.roleName ?? "unknown";
-      const reason = check.depth >= check.maxDepth ? `Depth ${check.depth}/${check.maxDepth} for role '${roleName}'.` : `Active helpers ${check.active}/${check.maxConcurrent} for role '${roleName}'.`;
-      return {
-        decision: "block",
-        message: [`Spawn blocked: ${reason}`, `Do the work yourself or coordinate through SynqTask instead of spawning.`].join(`
-`)
-      };
-    }
-    const description = String(input?.description ?? input?.prompt ?? input?.message ?? "");
-    if (description.length < 200) {
-      return {
-        decision: "block",
-        message: `Delegation blocked: description too short (${description.length} chars, need 200+). Include concrete task, constraints, files, and expected output.`
-      };
-    }
-    helperStarted();
-    dbg3(`agent spawn OK role=${identity.roleName} depth=${depth} active=${getSpawnActive()} total=${getSpawnTotal()}`);
-  } catch (e2) {
-    dbg3(`pre_tool_use spawn check failed-open: ${e2?.message}`);
+    return {
+      decision: "block",
+      message: `Task tool blocked: plugin has no SynqTask identity.
+` + `
+` + `Run \`wake-status install\` (or check that ${WAKE_ROOT}/router.json exists
+` + `and ${AGENT_IDENTITY_DIR}/ contains your cached identity).
+` + `
+` + `Debug override (NOT for normal use): SW_ALLOW_TASK_WITHOUT_ROUTER=1`
+    };
   }
-  return;
+  const reachable = await isRouterReachable2(800);
+  if (!reachable) {
+    if (override) {
+      console.error(`[SW] \u26A0\uFE0F\u26A0\uFE0F\u26A0\uFE0F SW_ALLOW_TASK_WITHOUT_ROUTER=1: router unreachable but task tool firing anyway. ` + `RBAC bypassed. ONLY for debugging.`);
+      helperStarted();
+      return;
+    }
+    return {
+      decision: "block",
+      message: `Task tool blocked: wake-router is unreachable.
+` + `
+` + `Run \`systemctl --user start synqtask-stack\` to start the router.
+` + `Check status: \`wake-status\` or \`curl http://127.0.0.1:9800/health\`.
+` + `
+` + `Debug override (NOT for normal use): SW_ALLOW_TASK_WITHOUT_ROUTER=1`
+    };
+  }
+  const runMode = detectRunMode2().mode;
+  const subagentType = input?.subagent_type ?? input?.subagentType;
+  const targetRole = inferTargetRole(subagentType);
+  const depth = await resolveCurrentDepth(sessionId);
+  try {
+    const result = await requestAgentAction2({
+      caller: {
+        memberId,
+        memberSecret,
+        sessionId,
+        spawnDepth: depth,
+        pid: process.pid,
+        runMode
+      },
+      intent: "inline_helper",
+      target: { role: targetRole },
+      task: {
+        title: input?.description?.slice(0, 80) ?? "subagent task",
+        description: description || "(no description provided)"
+      }
+    }, { timeoutMs: 6000 });
+    if (result.decision === "inline_ok" && result.inline) {
+      const { registerBrief: registerBrief2 } = await Promise.resolve().then(() => (init_spawn_brief_applier(), exports_spawn_brief_applier));
+      registerBrief2({
+        briefRef: result.inline.spawnBriefRef,
+        decisionLogId: result.decisionLogId,
+        parentMemberId: memberId
+      });
+      helperStarted();
+      dbg3(`task routed via engine: decision=inline_ok role=${targetRole} decisionLogId=${result.decisionLogId.slice(0, 8)} promptHash=${result.audit.promptHash?.slice(0, 8)} briefRef=${result.inline.spawnBriefRef}`);
+      return;
+    }
+    return {
+      decision: "block",
+      message: `Unexpected engine decision: ${result.decision} (${result.reason})`
+    };
+  } catch (e2) {
+    if (e2 instanceof RouterRejectedError2) {
+      const resp = e2.response;
+      const alt = resp.denial?.alternative ? `
+
+Alternative: ${resp.denial.alternative}` : "";
+      return {
+        decision: "block",
+        message: `Task blocked by router: ${resp.reason}${alt}
+
+(decisionLogId: ${resp.decisionLogId})`
+      };
+    }
+    if (e2 instanceof RouterUnreachableError2) {
+      return {
+        decision: "block",
+        message: `Task blocked: router became unreachable during request (${e2.reason}).
+Check \`wake-status\` or \`journalctl --user -u synqtask-stack -n 50\`.`
+      };
+    }
+    dbg3(`task routing error: ${e2?.message ?? String(e2)}`);
+    return {
+      decision: "block",
+      message: `Task routing error: ${e2?.message ?? "unknown"}.
+Run \`wake-status\` to diagnose.`
+    };
+  }
 }
-var DEBUG2, LOG_FILE4, startupSeq = 0, plugin_default;
+async function handlePreToolUseSpawnCheck(toolName, sessionId, input) {
+  return routeTaskThroughEngine(toolName, sessionId, input, undefined);
+}
+var DEBUG2, LOG_FILE4, startupSeq = 0, _subagentRoleMap = null, plugin_default;
 var init_plugin = __esm(() => {
   init_signal_wire();
   init_wake_listener();
   init_wake_preferences();
+  init_identity_bootstrap();
   init_hook_listener();
   init_quota_watcher();
+  init_domain_constants();
   DEBUG2 = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== "0";
-  LOG_FILE4 = join10(homedir10(), ".claude", "opencode-signal-wire-debug.log");
+  LOG_FILE4 = join15(homedir13(), ".claude", "opencode-signal-wire-debug.log");
   plugin_default = {
     id: "opencode-signal-wire",
     server: async (input) => {
@@ -43851,6 +44829,36 @@ var init_plugin = __esm(() => {
       const serverUrl = getServerUrl(input);
       const sessionId = input.sessionID ?? "unknown";
       let agentInstanceId = process.env.OPENCODE_AGENT_INSTANCE_ID ?? `opencode:${sessionId}:${process.pid}`;
+      let provisionedIdentity = null;
+      try {
+        provisionedIdentity = await bootstrapIdentity({ cwd });
+        if (provisionedIdentity) {
+          applyIdentityToEnv(provisionedIdentity);
+          logStep("IDENTITY_PROVISIONED", {
+            memberId: provisionedIdentity.memberId,
+            role: provisionedIdentity.role,
+            deterministicKey: provisionedIdentity.deterministicKey,
+            isNew: provisionedIdentity.isNewlyProvisioned,
+            orgRoleSlug: provisionedIdentity.orgRole?.slug ?? "unknown"
+          });
+        } else {
+          logStep("IDENTITY_NOT_PROVISIONED", {
+            reason: "no_router_json_and_no_cache",
+            impact: "task_tool_will_block_until_router_reachable",
+            recovery: "run `wake-status install` then restart opencode"
+          });
+          if (process.env.SYNQTASK_MEMBER_ID && !process.env.OPENCODE_AGENT_INSTANCE_ID) {
+            delete process.env.SYNQTASK_MEMBER_ID;
+            delete process.env.SYNQTASK_MEMBER_SECRET;
+          }
+        }
+      } catch (e2) {
+        logStep("IDENTITY_BOOTSTRAP_ERROR", {
+          error: e2?.message ?? String(e2),
+          impact: "task_tool_will_block_until_router_reachable",
+          recovery: "check journalctl --user -u synqtask-stack and wake-status"
+        });
+      }
       const { memberId, memberType, agentRegistration, projectConfigFound, agentIdSource } = resolveMemberHints(cwd);
       logStep("PLUGIN_BANNER", {
         package: pkg.name,
@@ -43939,6 +44947,11 @@ var init_plugin = __esm(() => {
         const bound = bindWakeListenerSession(wakeHandle, candidateSessionId, { agentInstanceId, reason });
         if (bound)
           boundSessionId = candidateSessionId;
+        if (bound && signalWire) {
+          try {
+            signalWire.setSessionId(candidateSessionId);
+          } catch {}
+        }
         logStep(bound ? "SESSION_BOUND" : "SESSION_BIND_SKIPPED", {
           reason,
           sessionId: candidateSessionId,
@@ -44060,6 +45073,14 @@ var init_plugin = __esm(() => {
         pre_tool_use: async ({ toolName, input: input2 }) => {
           return await handlePreToolUseSpawnCheck(toolName, boundSessionId ?? sessionId, input2);
         },
+        "experimental.chat.system.transform": async (input2, output) => {
+          const { systemTransformHook: systemTransformHook2 } = await Promise.resolve().then(() => (init_system_prompt_hook(), exports_system_prompt_hook));
+          await systemTransformHook2(input2, output);
+        },
+        "tool.definition": async (input2, output) => {
+          const { toolDefinitionHook: toolDefinitionHook2 } = await Promise.resolve().then(() => (init_tool_definition_hook(), exports_tool_definition_hook));
+          await toolDefinitionHook2(input2, output);
+        },
         "chat.message": async (input2, output) => {
           try {
             const sdk = getBoundSdk();
@@ -44081,6 +45102,11 @@ var init_plugin = __esm(() => {
             const event = normalizeChatMessage(input2 ?? {}, output ?? { parts: [] });
             if (!event.sessionId && boundSessionId) {
               event.sessionId = boundSessionId;
+            }
+            if (event.sessionId && signalWire) {
+              try {
+                signalWire.setSessionId(event.sessionId);
+              } catch {}
             }
             const modelId = input2?.model?.modelID;
             if (typeof modelId === "string" && modelId.length > 0) {
@@ -44125,6 +45151,47 @@ var init_plugin = __esm(() => {
           }
         },
         "tool.execute.before": async (input2, output) => {
+          try {
+            const toolName = input2?.tool ?? "";
+            const sessionID = input2?.sessionID ?? boundSessionId ?? "";
+            const { getBriefForSession: getBriefForSession2 } = await Promise.resolve().then(() => (init_spawn_brief_applier(), exports_spawn_brief_applier));
+            const brief = sessionID ? getBriefForSession2(sessionID) : null;
+            if (brief?.blockedTools?.includes(toolName)) {
+              if (output?.args) {
+                output.args = {
+                  _swBlocked: true,
+                  _swReason: `Tool '${toolName}' is blocked for this sub-session's role (ephemeral brief). Use one of: ${brief.allowedTools.join(", ")}`,
+                  _swDecisionLogId: brief.decisionLogId
+                };
+              }
+              logStep("TOOL_BLOCKED_BY_BRIEF", {
+                tool: toolName,
+                sessionId: sessionID,
+                decisionLogId: brief.decisionLogId,
+                allowedTools: brief.allowedTools
+              });
+              return;
+            }
+            const memberId2 = process.env.SYNQTASK_MEMBER_ID;
+            if (memberId2 && !brief) {
+              const { _getBlockedForSession: _getBlockedForSession2 } = await Promise.resolve().then(() => (init_tool_definition_hook(), exports_tool_definition_hook));
+              const blocked = _getBlockedForSession2(sessionID);
+              if (blocked.includes(toolName)) {
+                const role = process.env.SYNQTASK_AGENT_ROLE ?? "unknown";
+                if (output?.args) {
+                  output.args = {
+                    _swBlocked: true,
+                    _swReason: `Tool '${toolName}' is blocked for your role '${role}'. Allowed tools are listed in your AGENT.md role section. To use this tool, delegate to a higher-privilege role via 'task' tool or SynqTask.`,
+                    _swRole: role
+                  };
+                }
+                logStep("TOOL_BLOCKED_BY_ROLE", { tool: toolName, sessionId: sessionID, role });
+                return;
+              }
+            }
+          } catch (e2) {
+            logStep("TOOL_BLOCK_CHECK_FAILED_OPEN", { error: e2?.message ?? String(e2) });
+          }
           if (!signalWireEngine)
             return;
           try {
@@ -44234,290 +45301,360 @@ var init_opencode_signal_wire = __esm(() => {
 import { appendFileSync as _traceWrite } from "fs";
 
 // ../../dist/index.js
-import { createHash as n, randomBytes as a } from "crypto";
-import { writeFileSync as o, readFileSync as l, mkdirSync as h, chmodSync as c } from "fs";
-import { dirname as u, join as d } from "path";
-import { homedir as p } from "os";
-import { createHash as C, randomBytes as x, randomUUID as N } from "crypto";
-import { readFileSync as L, writeFileSync as P, chmodSync as F, mkdirSync as H, rmdirSync as B, statSync as U, unlinkSync as K, appendFileSync as W } from "fs";
-import { join as J } from "path";
-import { homedir as j } from "os";
-import { appendFileSync as it, mkdirSync as st, readdirSync as rt, statSync as nt, unlinkSync as at, writeFileSync as ot } from "fs";
-import { createHash as lt } from "crypto";
-import { homedir as ht } from "os";
-import { join as ct } from "path";
-import { statSync as ut, readFileSync as dt } from "fs";
-import { homedir as pt } from "os";
-import { join as ft } from "path";
-import { watch as Lt, appendFileSync as Pt, statSync as Ft, existsSync as Ht, renameSync as Bt, unlinkSync as Ut } from "fs";
-import { homedir as Kt } from "os";
-import { join as Wt } from "path";
-import { readFileSync as he, writeFileSync as ce, mkdirSync as ue } from "fs";
-import { dirname as de } from "path";
-import { randomUUID as pe } from "crypto";
-import { readFileSync as ye, statSync as we } from "fs";
-import { spawn as xe, spawnSync as Ne } from "child_process";
-import { request as Le } from "https";
-import { randomBytes as Pe, createHash as Fe } from "crypto";
-var t = Object.defineProperty;
-var e = Object.getOwnPropertyNames;
-var i = (e2, i2) => t(e2, "name", { value: i2, configurable: true });
-var s = ((t2) => "function" < "u" ? __require_gv7hsff9 : typeof Proxy < "u" ? new Proxy(t2, { get: (t3, e2) => ("function" < "u" ? __require_gv7hsff9 : t3)[e2] }) : t2)(function(t2) {
+import { readFileSync as L, statSync as P } from "fs";
+import { join as H } from "path";
+import { homedir as F } from "os";
+import { createHash as V, randomBytes as X } from "crypto";
+import { writeFileSync as Z, readFileSync as ee, mkdirSync as te, chmodSync as ie } from "fs";
+import { dirname as se, join as re } from "path";
+import { homedir as ne } from "os";
+import { createHash as Re, randomBytes as $e, randomUUID as ve } from "crypto";
+import { readFileSync as Se, writeFileSync as De, chmodSync as be, mkdirSync as Oe, rmdirSync as Me, statSync as Ae, unlinkSync as Ie, appendFileSync as Ce } from "fs";
+import { join as Ne } from "path";
+import { homedir as xe } from "os";
+import { appendFileSync as qe, mkdirSync as Ge, readdirSync as ze, statSync as Ye, unlinkSync as Qe, writeFileSync as Ve } from "fs";
+import { createHash as Xe } from "crypto";
+import { homedir as Ze } from "os";
+import { join as et } from "path";
+import { statSync as tt, readFileSync as it } from "fs";
+import { homedir as st } from "os";
+import { join as rt } from "path";
+import { watch as St, appendFileSync as Dt, statSync as bt, existsSync as Ot, renameSync as Mt, unlinkSync as At } from "fs";
+import { homedir as It } from "os";
+import { join as Ct } from "path";
+import { readFileSync as ii, writeFileSync as si, mkdirSync as ri } from "fs";
+import { dirname as ni } from "path";
+import { randomUUID as ai } from "crypto";
+import { readFileSync as ci, statSync as ui } from "fs";
+import { spawn as Di, spawnSync as bi } from "child_process";
+import { request as Oi } from "https";
+import { randomBytes as Mi, createHash as Ai } from "crypto";
+var e;
+var t;
+var i;
+var s;
+var r;
+var n;
+var a;
+var o;
+var l;
+var h;
+var c;
+var u;
+var d;
+var f;
+var p;
+var m;
+var y;
+var g;
+var w;
+var _;
+var T;
+var E;
+var k;
+var R;
+var $;
+var v = Object.defineProperty;
+var S = Object.getOwnPropertyDescriptor;
+var D = Object.getOwnPropertyNames;
+var b = Object.prototype.hasOwnProperty;
+var O = (e2, t2) => v(e2, "name", { value: t2, configurable: true });
+var M = ((e2) => "function" < "u" ? __require_gv7hsff9 : typeof Proxy < "u" ? new Proxy(e2, { get: (e3, t2) => ("function" < "u" ? __require_gv7hsff9 : e3)[t2] }) : e2)(function(e2) {
   if ("function" < "u")
     return __require_gv7hsff9.apply(this, arguments);
-  throw Error('Dynamic require of "' + t2 + '" is not supported');
+  throw Error('Dynamic require of "' + e2 + '" is not supported');
 });
-var r = {};
-((e2, i2) => {
-  for (var s2 in i2)
-    t(e2, s2, { get: i2[s2], enumerable: true });
-})(r, { getClaudeConfigDir: () => f, getDefaultCredentialsPath: () => m, oauthLogin: () => _ });
-function f() {
-  return (process.env.CLAUDE_CONFIG_DIR ?? d(p(), ".claude")).normalize("NFC");
+var A = (e2, t2) => function() {
+  return e2 && (t2 = (0, e2[D(e2)[0]])(e2 = 0)), t2;
+};
+var I = (e2, t2) => {
+  for (var i2 in t2)
+    v(e2, i2, { get: t2[i2], enumerable: true });
+};
+var C = A({ "src/anthropic-endpoints.ts"() {
+  i = (t = "https://" + (e = "api.anthropic.com")) + "/v1/messages", s = `${t}/v1/messages/count_tokens`, n = (r = "https://platform.claude.com") + "/v1/oauth/token", a = "https://claude.com/cai/oauth/authorize", o = `${r}/oauth/authorize`, l = `${r}/oauth/code/callback`, h = Object.freeze({ API_HOST: e, API_BASE: t, API_MESSAGES: i, API_MESSAGES_COUNT_TOKENS: s, PLATFORM_BASE: r, OAUTH_TOKEN_URL: n, OAUTH_AUTHORIZE_URL: a, OAUTH_CONSOLE_AUTHORIZE_URL: o, OAUTH_MANUAL_REDIRECT_URI: l });
+} });
+var N = A({ "src/anthropic-headers.ts"() {
+  u = c = "2023-06-01", d = "Content-Type", f = "Authorization", p = "Accept", m = "User-Agent", y = "anthropic-version", g = "anthropic-beta", w = "anthropic-dangerous-direct-browser-access", _ = "x-app", T = "X-Claude-Code-Session-Id", E = "application/json", k = "application/json, text/event-stream", R = "text/html", $ = Object.freeze({ CONTENT_TYPE: d, AUTHORIZATION: f, ACCEPT: p, USER_AGENT: m, ANTHROPIC_VERSION: y, ANTHROPIC_BETA: g, ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS: w, X_APP: _, X_CLAUDE_CODE_SESSION_ID: T, API_VERSION: c, CONTENT_TYPE_JSON: E, ACCEPT_JSON_SSE: k, CONTENT_TYPE_TEXT_HTML: R });
+} });
+var x = {};
+I(x, { isBodyDumpEnabled: () => J, isDryRun: () => K, readFlags: () => B });
+function U(e2) {
+  let t2 = process.env[e2];
+  return t2 === "1" || t2 !== "0" && undefined;
 }
-function m() {
-  return d(f(), ".credentials.json");
+function B() {
+  try {
+    let e3 = P(W);
+    if (e3.mtimeMs !== q || !z) {
+      q = e3.mtimeMs, z = true;
+      let t3 = JSON.parse(L(W, "utf8"));
+      G = { ledger_dry_run: t3.ledger_dry_run ?? j.ledger_dry_run, dump_bodies_full: t3.dump_bodies_full ?? j.dump_bodies_full };
+    }
+  } catch {
+    z || (G = { ...j });
+  }
+  let e2 = U("LEDGER_DRY_RUN"), t2 = U("CLAUDE_DUMP_BODIES_FULL");
+  return { ledger_dry_run: e2 !== undefined ? e2 : G.ledger_dry_run, dump_bodies_full: t2 !== undefined ? t2 : G.dump_bodies_full };
 }
-function g() {
-  return k(a(32));
+function K() {
+  return B().ledger_dry_run;
 }
-function y(t2) {
-  return k(n("sha256").update(t2).digest());
+function J() {
+  return B().dump_bodies_full;
 }
-function w() {
-  return k(a(32));
+var W;
+var j;
+var q;
+var G;
+var z;
+var Y = A({ "src/runtime-flags.ts"() {
+  W = H(F(), ".claude", "runtime-flags.json"), j = { ledger_dry_run: true, dump_bodies_full: true }, q = 0, G = { ...j }, z = false, O(U, "envOverride"), O(B, "readFlags"), O(K, "isDryRun"), O(J, "isBodyDumpEnabled");
+} });
+var Q = {};
+I(Q, { getClaudeConfigDir: () => ae, getDefaultCredentialsPath: () => oe, oauthLogin: () => de });
+function ae() {
+  return (process.env.CLAUDE_CONFIG_DIR ?? re(ne(), ".claude")).normalize("NFC");
 }
-function k(t2) {
-  return t2.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+function oe() {
+  return re(ae(), ".credentials.json");
 }
-async function _(t2 = {}) {
-  let e2 = t2.credentialsPath ?? m(), i2 = g(), s2 = y(i2), r2 = w(), { port: n2, waitForCode: a2, close: d2 } = await T(r2, t2.port), p2 = `http://localhost:${n2}/callback`, f2 = t2.loginWithClaudeAi !== false ? S : v, k2 = new URLSearchParams({ client_id: R, response_type: "code", scope: b, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
-  t2.loginHint && k2.set("login_hint", t2.loginHint), t2.loginMethod && k2.set("login_method", t2.loginMethod), t2.orgUUID && k2.set("orgUUID", t2.orgUUID);
-  let _2, $, O = `${f2}?${k2.toString()}&redirect_uri=${encodeURIComponent(p2)}`, A = `${f2}?${k2.toString()}&redirect_uri=${encodeURIComponent(D)}`;
-  t2.onAuthUrl ? t2.onAuthUrl(O, A) : (console.log(`
+function le() {
+  return ue(X(32));
+}
+function he(e2) {
+  return ue(V("sha256").update(e2).digest());
+}
+function ce() {
+  return ue(X(32));
+}
+function ue(e2) {
+  return e2.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+async function de(e2 = {}) {
+  let t2 = e2.credentialsPath ?? oe(), i2 = le(), s2 = he(i2), r2 = ce(), { port: n2, waitForCode: a2, close: o2 } = await fe(r2, e2.port), l2 = `http://localhost:${n2}/callback`, h2 = e2.loginWithClaudeAi !== false ? we : ge, c2 = new URLSearchParams({ client_id: me, response_type: "code", scope: Ee, code_challenge: s2, code_challenge_method: "S256", state: r2, code: "true" });
+  e2.loginHint && c2.set("login_hint", e2.loginHint), e2.loginMethod && c2.set("login_method", e2.loginMethod), e2.orgUUID && c2.set("orgUUID", e2.orgUUID);
+  let u2, f2, p2 = `${h2}?${c2.toString()}&redirect_uri=${encodeURIComponent(l2)}`, m2 = `${h2}?${c2.toString()}&redirect_uri=${encodeURIComponent(Te)}`;
+  e2.onAuthUrl ? e2.onAuthUrl(p2, m2) : (console.log(`
 \uD83D\uDD10 Login to Claude
 `), console.log(`Open this URL in your browser:
-`), console.log(`  ${A}
-`)), t2.openBrowser !== false && E(O).catch(() => {});
+`), console.log(`  ${m2}
+`)), e2.openBrowser !== false && pe(p2).catch(() => {});
   try {
-    _2 = await a2, $ = p2;
-  } catch (t3) {
-    throw d2(), t3;
+    u2 = await a2, f2 = l2;
+  } catch (e3) {
+    throw o2(), e3;
   }
-  d2();
-  let I = await fetch(M, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "authorization_code", code: _2, redirect_uri: $, client_id: R, code_verifier: i2, state: r2 }) });
-  if (!I.ok) {
-    let t3 = await I.text();
-    throw new Error(`Token exchange failed (${I.status}): ${t3}`);
+  o2();
+  let y2 = await fetch(_e, { method: "POST", headers: { [d]: E }, body: JSON.stringify({ grant_type: "authorization_code", code: u2, redirect_uri: f2, client_id: me, code_verifier: i2, state: r2 }) });
+  if (!y2.ok) {
+    let e3 = await y2.text();
+    throw new Error(`Token exchange failed (${y2.status}): ${e3}`);
   }
-  let C2 = await I.json(), x2 = Date.now() + 1000 * C2.expires_in, N2 = { accessToken: C2.access_token, refreshToken: C2.refresh_token, expiresAt: x2, scopes: C2.scope?.split(" ") ?? [] }, L2 = {};
+  let g2 = await y2.json(), w2 = Date.now() + 1000 * g2.expires_in, _2 = { accessToken: g2.access_token, refreshToken: g2.refresh_token, expiresAt: w2, scopes: g2.scope?.split(" ") ?? [] }, T2 = {};
   try {
-    L2 = JSON.parse(l(e2, "utf8"));
+    T2 = JSON.parse(ee(t2, "utf8"));
   } catch {}
-  L2.claudeAiOauth = N2;
-  let P2 = u(e2);
+  T2.claudeAiOauth = _2;
+  let k2 = se(t2);
   try {
-    h(P2, { recursive: true });
+    te(k2, { recursive: true });
   } catch {}
-  return o(e2, JSON.stringify(L2, null, 2), "utf8"), c(e2, 384), console.log(`
-\u2705 Login successful! Credentials saved to ${e2}
-`), { accessToken: N2.accessToken, refreshToken: N2.refreshToken, expiresAt: N2.expiresAt, credentialsPath: e2 };
+  return Z(t2, JSON.stringify(T2, null, 2), "utf8"), ie(t2, 384), console.log(`
+\u2705 Login successful! Credentials saved to ${t2}
+`), { accessToken: _2.accessToken, refreshToken: _2.refreshToken, expiresAt: _2.expiresAt, credentialsPath: t2 };
 }
-async function T(t2, e2) {
-  let s2, r2, n2 = new Promise((t3, e3) => {
-    s2 = t3, r2 = e3;
-  }), a2 = Bun.serve({ port: e2 ?? 0, async fetch(e3) {
-    let i2 = new URL(e3.url);
-    if (i2.pathname !== "/callback")
+async function fe(e2, t2) {
+  let i2, s2, r2 = new Promise((e3, t3) => {
+    i2 = e3, s2 = t3;
+  }), n2 = Bun.serve({ port: t2 ?? 0, async fetch(t3) {
+    let r3 = new URL(t3.url);
+    if (r3.pathname !== "/callback")
       return new Response("Not found", { status: 404 });
-    let n3 = i2.searchParams.get("code"), a3 = i2.searchParams.get("state"), o3 = i2.searchParams.get("error");
-    return o3 ? (r2(new Error(`OAuth error: ${o3} \u2014 ${i2.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } })) : n3 && a3 === t2 ? (s2(n3), new Response(null, { status: 302, headers: { Location: `${$}/oauth/code/success?app=claude-code` } })) : (r2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
-  } }), o2 = setTimeout(() => {
-    r2(new Error("Login timed out (5 minutes). Try again.")), a2.stop();
+    let n3 = r3.searchParams.get("code"), a3 = r3.searchParams.get("state"), o2 = r3.searchParams.get("error");
+    return o2 ? (s2(new Error(`OAuth error: ${o2} \u2014 ${r3.searchParams.get("error_description") ?? ""}`)), new Response("<html><body><h1>Login failed</h1><p>You can close this tab.</p></body></html>", { status: 400, headers: { [d]: R } })) : n3 && a3 === e2 ? (i2(n3), new Response(null, { status: 302, headers: { Location: `${ye}/oauth/code/success?app=claude-code` } })) : (s2(new Error("Invalid callback: missing code or state mismatch")), new Response("Invalid request", { status: 400 }));
+  } }), a2 = setTimeout(() => {
+    s2(new Error("Login timed out (5 minutes). Try again.")), n2.stop();
   }, 300000);
-  return { port: a2.port, waitForCode: n2.finally(() => clearTimeout(o2)), close: i(() => {
-    clearTimeout(o2), a2.stop();
+  return { port: n2.port, waitForCode: r2.finally(() => clearTimeout(a2)), close: O(() => {
+    clearTimeout(a2), n2.stop();
   }, "close") };
 }
-async function E(t2) {
-  let e2 = (() => {
+async function pe(e2) {
+  let t2 = (() => {
     switch (process.platform) {
       case "darwin":
-        return [["open", t2]];
+        return [["open", e2]];
       case "win32":
-        return [["cmd", "/c", "start", t2]];
+        return [["cmd", "/c", "start", e2]];
       default:
-        return [["xdg-open", t2], ["wslview", t2], ["sensible-browser", t2]];
+        return [["xdg-open", e2], ["wslview", e2], ["sensible-browser", e2]];
     }
   })();
-  for (let t3 of e2)
+  for (let e3 of t2)
     try {
-      let e3 = Bun.spawn({ cmd: t3, stdout: "ignore", stderr: "ignore" });
-      if (await e3.exited, e3.exitCode === 0)
+      let t3 = Bun.spawn({ cmd: e3, stdout: "ignore", stderr: "ignore" });
+      if (await t3.exited, t3.exitCode === 0)
         return;
     } catch {}
 }
-var R;
-var $;
-var v;
-var S;
-var M;
-var D;
-var b;
-var O;
-var A;
-var I = (O = { "src/auth.ts"() {
-  R = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", v = ($ = "https://platform.claude.com") + "/oauth/authorize", S = "https://claude.com/cai/oauth/authorize", M = `${$}/v1/oauth/token`, D = `${$}/oauth/code/callback`, i(f, "getClaudeConfigDir"), i(m, "getDefaultCredentialsPath"), b = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), i(g, "generateCodeVerifier"), i(y, "generateCodeChallenge"), i(w, "generateState"), i(k, "base64url"), i(_, "oauthLogin"), i(T, "startCallbackServer"), i(E, "tryOpenBrowser");
-} }, function() {
-  return O && (A = (0, O[e(O)[0]])(O = 0)), A;
-});
-var q = class extends Error {
-  constructor(t2, e2) {
-    super(t2), this.cause = e2, this.name = "ClaudeCodeSDKError";
+var me;
+var ye;
+var ge;
+var we;
+var _e;
+var Te;
+var Ee;
+var ke = A({ "src/auth.ts"() {
+  C(), N(), me = "9d1c250a-e61b-44d9-88ed-5944d1962f5e", ye = r, ge = o, we = a, _e = n, Te = l, O(ae, "getClaudeConfigDir"), O(oe, "getDefaultCredentialsPath"), Ee = ["user:profile", "user:inference", "org:create_api_key", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"].join(" "), O(le, "generateCodeVerifier"), O(he, "generateCodeChallenge"), O(ce, "generateState"), O(ue, "base64url"), O(de, "oauthLogin"), O(fe, "startCallbackServer"), O(pe, "tryOpenBrowser");
+} });
+var Le = class extends Error {
+  constructor(e2, t2) {
+    super(e2), this.cause = t2, this.name = "ClaudeCodeSDKError";
   }
   static {
-    i(this, "ClaudeCodeSDKError");
+    O(this, "ClaudeCodeSDKError");
   }
 };
-var z = class extends q {
+var Pe = class extends Le {
   static {
-    i(this, "AuthError");
+    O(this, "AuthError");
   }
-  constructor(t2, e2) {
-    super(t2, e2), this.name = "AuthError";
+  constructor(e2, t2) {
+    super(e2, t2), this.name = "AuthError";
   }
 };
-var G = class extends q {
-  constructor(t2, e2, i2, s2) {
-    super(t2, s2), this.status = e2, this.requestId = i2, this.name = "APIError";
+var He = class extends Le {
+  constructor(e2, t2, i2, s2) {
+    super(e2, s2), this.status = t2, this.requestId = i2, this.name = "APIError";
   }
   static {
-    i(this, "APIError");
+    O(this, "APIError");
   }
 };
-var Q = class extends q {
-  constructor(t2, e2, i2 = 429, s2) {
-    super(t2, s2), this.rateLimitInfo = e2, this.status = i2, this.name = "RateLimitError";
+var Fe = class extends Le {
+  constructor(e2, t2, i2 = 429, s2) {
+    super(e2, s2), this.rateLimitInfo = t2, this.status = i2, this.name = "RateLimitError";
   }
   static {
-    i(this, "RateLimitError");
+    O(this, "RateLimitError");
   }
 };
-var Y = class extends q {
-  constructor(t2, e2, i2) {
-    super(`CACHE_REWRITE_BLOCKED: session idle ${Math.round(t2 / 1000)}s on model=${i2}, next request would cost ~${e2} cache_write tokens. Unset CLAUDE_MAX_REWRITE_BLOCK or raise CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC to proceed.`), this.idleMs = t2, this.estimatedTokens = e2, this.model = i2, this.name = "CacheRewriteBlockedError";
+var Ue = class extends Le {
+  constructor(e2, t2, i2) {
+    super(`CACHE_REWRITE_BLOCKED: session idle ${Math.round(e2 / 1000)}s on model=${i2}, next request would cost ~${t2} cache_write tokens. Unset CLAUDE_MAX_REWRITE_BLOCK or raise CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC to proceed.`), this.idleMs = e2, this.estimatedTokens = t2, this.model = i2, this.name = "CacheRewriteBlockedError";
   }
   static {
-    i(this, "CacheRewriteBlockedError");
+    O(this, "CacheRewriteBlockedError");
   }
   code = "CACHE_REWRITE_BLOCKED";
 };
-var V = { "claude-opus-4-7": { name: "Claude Opus 4.7", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-opus-4-6": { name: "Claude Opus 4.6", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-sonnet-4-6": { name: "Claude Sonnet 4.6", context: 1e6, defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } }, "claude-haiku-4-5-20251001": { name: "Claude Haiku 4.5", context: 200000, defaultOutput: 32000, maxOutput: 64000, adaptiveThinking: false, cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 } } };
-var X = { defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: false };
-function Z(t2, e2) {
-  if (typeof e2 == "number" && e2 > 0)
-    return e2;
-  let i2 = tt(t2), s2 = i2?.maxOutput ?? X.maxOutput, r2 = i2?.defaultOutput ?? X.defaultOutput, n2 = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+var Be = { "claude-opus-4-7": { name: "Claude Opus 4.7", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-opus-4-6": { name: "Claude Opus 4.6", context: 1e6, defaultOutput: 64000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 } }, "claude-sonnet-4-6": { name: "Claude Sonnet 4.6", context: 1e6, defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: true, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } }, "claude-haiku-4-5-20251001": { name: "Claude Haiku 4.5", context: 200000, defaultOutput: 32000, maxOutput: 64000, adaptiveThinking: false, cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 } } };
+var Ke = { defaultOutput: 32000, maxOutput: 128000, adaptiveThinking: false };
+function Je(e2, t2) {
+  if (typeof t2 == "number" && t2 > 0)
+    return t2;
+  let i2 = We(e2), s2 = i2?.maxOutput ?? Ke.maxOutput, r2 = i2?.defaultOutput ?? Ke.defaultOutput, n2 = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
   if (n2) {
-    let t3 = parseInt(n2, 10);
-    if (Number.isFinite(t3) && t3 > 0)
-      return Math.min(t3, s2);
+    let e3 = parseInt(n2, 10);
+    if (Number.isFinite(e3) && e3 > 0)
+      return Math.min(e3, s2);
   }
   return r2;
 }
-function tt(t2) {
-  if (V[t2])
-    return V[t2];
-  let e2 = t2.toLowerCase();
-  for (let [t3, i2] of Object.entries(V))
-    if (e2.includes(t3) || t3.includes(e2))
+function We(e2) {
+  if (Be[e2])
+    return Be[e2];
+  let t2 = e2.toLowerCase();
+  for (let [e3, i2] of Object.entries(Be))
+    if (t2.includes(e3) || e3.includes(t2))
       return i2;
-  for (let [t3, i2] of Object.entries(V)) {
-    let s2 = t3.replace(/^claude-/, "").split("-").slice(0, 3).join("-");
-    if (e2.includes(s2))
+  for (let [e3, i2] of Object.entries(Be)) {
+    let s2 = e3.replace(/^claude-/, "").split("-").slice(0, 3).join("-");
+    if (t2.includes(s2))
       return i2;
   }
 }
-function et(t2) {
-  let e2 = tt(t2);
-  if (e2)
-    return e2.adaptiveThinking;
-  let i2 = t2.toLowerCase();
+function je(e2) {
+  let t2 = We(e2);
+  if (t2)
+    return t2.adaptiveThinking;
+  let i2 = e2.toLowerCase();
   return i2.includes("opus-4-7") || i2.includes("opus-4-6") || i2.includes("sonnet-4-6") || i2.includes("sonnet-4-7");
 }
-i(Z, "resolveMaxTokens"), i(tt, "getModelMetadata"), i(et, "supportsAdaptiveThinking");
-var mt = { enabled: true, initialCalls: 3, ringRetentionMs: 7200000, ringMaxMb: 300, suspiciousContextSize: 5, suspiciousRetentionMs: 86400000, suspiciousMaxMb: 100, coldCwThreshold: 1e4, metadataRetentionMs: 604800000 };
-var gt = { cacheTtlMs: 300000, safetyMarginMs: 15000, intervalMs: 120000, intervalClampMin: 60000, retryDelaysMs: [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20].map((t2) => 1000 * t2), rewriteWarnIdleMs: 300000, rewriteWarnTokens: 50000, healthProbeIntervalsMs: [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4], healthProbeTimeoutMs: 3000, enabled: true, idleTimeoutMs: 1 / 0, minTokens: 2000, rewriteBlockEnabled: false, dump: mt, tokenRotationContextThreshold: 150000, tokenRotationPollIntervalMs: 30000, orgIdCacheTtlMs: 300000, tokenRotationLogMaxBytes: 10485760, tokenRotationLogRetentionDays: 7 };
-var wt = ft(pt(), ".claude", "keepalive.json");
-var kt = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH || wt;
-var _t = 0;
-var Tt = null;
-var Et = new Set;
-function Rt() {
+O(Je, "resolveMaxTokens"), O(We, "getModelMetadata"), O(je, "supportsAdaptiveThinking"), C();
+var nt = { enabled: true, initialCalls: 3, ringRetentionMs: 7200000, ringMaxMb: 300, suspiciousContextSize: 5, suspiciousRetentionMs: 86400000, suspiciousMaxMb: 100, coldCwThreshold: 1e4, metadataRetentionMs: 604800000 };
+var at = { cacheTtlMs: 300000, safetyMarginMs: 15000, intervalMs: 120000, intervalClampMin: 60000, retryDelaysMs: [2, 3, 5, 7, 10, 12, 15, 17, 20, 20, 20, 20, 20].map((e2) => 1000 * e2), rewriteWarnIdleMs: 300000, rewriteWarnTokens: 50000, healthProbeIntervalsMs: [3000, 5000, 7000, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1e4], healthProbeTimeoutMs: 3000, enabled: true, idleTimeoutMs: 1 / 0, minTokens: 2000, rewriteBlockEnabled: false, dump: nt, tokenRotationContextThreshold: 150000, tokenRotationPollIntervalMs: 30000, orgIdCacheTtlMs: 300000, tokenRotationLogMaxBytes: 10485760, tokenRotationLogRetentionDays: 7 };
+var lt = rt(st(), ".claude", "keepalive.json");
+var ht = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH || lt;
+var ct = 0;
+var ut = null;
+var dt = new Set;
+function ft() {
   try {
-    let t2 = ut(kt);
-    return t2.mtimeMs === _t && Tt ? null : (_t = t2.mtimeMs, Et.clear(), JSON.parse(dt(kt, "utf8")));
+    let e2 = tt(ht);
+    return e2.mtimeMs === ct && ut ? null : (ct = e2.mtimeMs, dt.clear(), JSON.parse(it(ht, "utf8")));
   } catch {
     return null;
   }
 }
-function $t(t2, e2, i2, s2, r2) {
-  if (t2 == null)
+function pt(e2, t2, i2, s2, r2) {
+  if (e2 == null)
     return i2;
-  let n2 = typeof t2 == "number" ? t2 : Number(t2);
-  return Number.isFinite(n2) ? n2 < s2 || n2 > r2 ? (Et.has(e2) || (console.error(`[keepalive-config] ${e2}=${n2} out of range [${s2}, ${r2}] \u2014 clamping`), Et.add(e2)), Math.max(s2, Math.min(r2, n2))) : n2 : (Et.has(e2) || (console.error(`[keepalive-config] ${e2}=${JSON.stringify(t2)} is not a number \u2014 using fallback ${i2}`), Et.add(e2)), i2);
+  let n2 = typeof e2 == "number" ? e2 : Number(e2);
+  return Number.isFinite(n2) ? n2 < s2 || n2 > r2 ? (dt.has(t2) || (console.error(`[keepalive-config] ${t2}=${n2} out of range [${s2}, ${r2}] \u2014 clamping`), dt.add(t2)), Math.max(s2, Math.min(r2, n2))) : n2 : (dt.has(t2) || (console.error(`[keepalive-config] ${t2}=${JSON.stringify(e2)} is not a number \u2014 using fallback ${i2}`), dt.add(t2)), i2);
 }
-function vt(t2, e2, i2, s2 = 1, r2 = 30) {
-  if (t2 == null)
+function mt(e2, t2, i2, s2 = 1, r2 = 30) {
+  if (e2 == null)
     return i2;
-  if (!Array.isArray(t2))
-    return Et.has(e2) || (console.error(`[keepalive-config] ${e2} is not an array \u2014 using fallback`), Et.add(e2)), i2;
-  let n2 = t2.map((t3) => typeof t3 == "number" ? t3 : Number(t3)).filter((t3) => Number.isFinite(t3) && t3 > 0);
-  return n2.length < s2 || n2.length > r2 ? (Et.has(e2) || (console.error(`[keepalive-config] ${e2} length ${n2.length} out of [${s2}, ${r2}] \u2014 using fallback`), Et.add(e2)), i2) : n2;
+  if (!Array.isArray(e2))
+    return dt.has(t2) || (console.error(`[keepalive-config] ${t2} is not an array \u2014 using fallback`), dt.add(t2)), i2;
+  let n2 = e2.map((e3) => typeof e3 == "number" ? e3 : Number(e3)).filter((e3) => Number.isFinite(e3) && e3 > 0);
+  return n2.length < s2 || n2.length > r2 ? (dt.has(t2) || (console.error(`[keepalive-config] ${t2} length ${n2.length} out of [${s2}, ${r2}] \u2014 using fallback`), dt.add(t2)), i2) : n2;
 }
-function St(t2, e2) {
-  return t2 == null ? e2 : typeof t2 == "boolean" ? t2 : typeof t2 == "string" ? t2 === "true" || t2 === "1" || t2 === "yes" : !!t2;
+function yt(e2, t2) {
+  return e2 == null ? t2 : typeof e2 == "boolean" ? e2 : typeof e2 == "string" ? e2 === "true" || e2 === "1" || e2 === "yes" : !!e2;
 }
-function Mt() {
-  let t2 = Rt();
-  return t2 === null && Tt ? Tt : bt(t2 ?? null);
+function gt() {
+  let e2 = ft();
+  return e2 === null && ut ? ut : _t(e2 ?? null);
 }
-function Dt() {
-  return _t = 0, Tt = null, Mt();
+function wt() {
+  return ct = 0, ut = null, gt();
 }
-function bt(t2) {
-  let e2 = t2 === null ? "defaults" : Object.keys(t2).length > 0 ? "mixed" : "defaults", i2 = $t(t2?.cacheTtlMs ?? (typeof t2?.cacheTtlSec == "number" ? 1000 * t2.cacheTtlSec : undefined), "cacheTtlMs", gt.cacheTtlMs, 60000, 7200000), s2 = $t(t2?.safetyMarginMs ?? (typeof t2?.safetyMarginSec == "number" ? 1000 * t2.safetyMarginSec : undefined), "safetyMarginMs", gt.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = $t(t2?.intervalMs ?? (typeof t2?.intervalSec == "number" ? 1000 * t2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = gt.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
+function _t(e2) {
+  let t2 = e2 === null ? "defaults" : Object.keys(e2).length > 0 ? "mixed" : "defaults", i2 = pt(e2?.cacheTtlMs ?? (typeof e2?.cacheTtlSec == "number" ? 1000 * e2.cacheTtlSec : undefined), "cacheTtlMs", at.cacheTtlMs, 60000, 7200000), s2 = pt(e2?.safetyMarginMs ?? (typeof e2?.safetyMarginSec == "number" ? 1000 * e2.safetyMarginSec : undefined), "safetyMarginMs", at.safetyMarginMs, 1000, 300000), r2 = Math.max(60000, Math.min(i2 / 2, 1800000)), n2 = pt(e2?.intervalMs ?? (typeof e2?.intervalSec == "number" ? 1000 * e2.intervalSec : undefined), "intervalMs", r2, 60000, i2 - s2 - 1000), a2 = at.intervalClampMin, o2 = Math.max(a2 + 1, i2 - s2 - 60000);
   n2 < a2 && (n2 = a2), n2 > o2 && (n2 = o2);
-  let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: vt(t2?.retryDelaysMs ?? (Array.isArray(t2?.retryDelaysSec) ? t2.retryDelaysSec.map((t3) => typeof t3 == "number" ? 1000 * t3 : NaN) : undefined), "retryDelaysMs", gt.retryDelaysMs), rewriteWarnIdleMs: $t(t2?.rewriteWarnIdleMs ?? (typeof t2?.rewriteWarnIdleSec == "number" ? 1000 * t2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: $t(t2?.rewriteWarnTokens, "rewriteWarnTokens", gt.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: vt(t2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", gt.healthProbeIntervalsMs), healthProbeTimeoutMs: $t(t2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", gt.healthProbeTimeoutMs, 500, 60000), enabled: St(t2?.enabled, gt.enabled), idleTimeoutMs: t2?.idleTimeoutMs === null || t2?.idleTimeoutSec === null ? 1 / 0 : $t(t2?.idleTimeoutMs ?? (typeof t2?.idleTimeoutSec == "number" ? 1000 * t2.idleTimeoutSec : undefined), "idleTimeoutMs", gt.idleTimeoutMs === 1 / 0 ? 86400000 : gt.idleTimeoutMs, 0, 86400000), minTokens: $t(t2?.minTokens, "minTokens", gt.minTokens, 1, 1e6), rewriteBlockEnabled: St(t2?.rewriteBlockEnabled, gt.rewriteBlockEnabled), dump: mt, tokenRotationContextThreshold: $t(t2?.tokenRotationContextThreshold, "tokenRotationContextThreshold", gt.tokenRotationContextThreshold, 1000, 1e7), tokenRotationPollIntervalMs: $t(t2?.tokenRotationPollIntervalMs, "tokenRotationPollIntervalMs", gt.tokenRotationPollIntervalMs, 5000, 3600000), orgIdCacheTtlMs: $t(t2?.orgIdCacheTtlMs, "orgIdCacheTtlMs", gt.orgIdCacheTtlMs, 1e4, 86400000), tokenRotationLogMaxBytes: $t(t2?.tokenRotationLogMaxBytes, "tokenRotationLogMaxBytes", gt.tokenRotationLogMaxBytes, 1024, 1073741824), tokenRotationLogRetentionDays: $t(t2?.tokenRotationLogRetentionDays, "tokenRotationLogRetentionDays", gt.tokenRotationLogRetentionDays, 1, 3650), t: e2 };
-  return Tt = l2, l2;
+  let l2 = { cacheTtlMs: i2, safetyMarginMs: s2, intervalMs: n2, intervalClampMin: a2, intervalClampMax: o2, retryDelaysMs: mt(e2?.retryDelaysMs ?? (Array.isArray(e2?.retryDelaysSec) ? e2.retryDelaysSec.map((e3) => typeof e3 == "number" ? 1000 * e3 : NaN) : undefined), "retryDelaysMs", at.retryDelaysMs), rewriteWarnIdleMs: pt(e2?.rewriteWarnIdleMs ?? (typeof e2?.rewriteWarnIdleSec == "number" ? 1000 * e2.rewriteWarnIdleSec : undefined), "rewriteWarnIdleMs", Math.max(60000, i2 - s2), 1000, 86400000), rewriteWarnTokens: pt(e2?.rewriteWarnTokens, "rewriteWarnTokens", at.rewriteWarnTokens, 100, 1e6), healthProbeIntervalsMs: mt(e2?.healthProbeIntervalsMs, "healthProbeIntervalsMs", at.healthProbeIntervalsMs), healthProbeTimeoutMs: pt(e2?.healthProbeTimeoutMs, "healthProbeTimeoutMs", at.healthProbeTimeoutMs, 500, 60000), enabled: yt(e2?.enabled, at.enabled), idleTimeoutMs: e2?.idleTimeoutMs === null || e2?.idleTimeoutSec === null ? 1 / 0 : pt(e2?.idleTimeoutMs ?? (typeof e2?.idleTimeoutSec == "number" ? 1000 * e2.idleTimeoutSec : undefined), "idleTimeoutMs", at.idleTimeoutMs === 1 / 0 ? 86400000 : at.idleTimeoutMs, 0, 86400000), minTokens: pt(e2?.minTokens, "minTokens", at.minTokens, 1, 1e6), rewriteBlockEnabled: yt(e2?.rewriteBlockEnabled, at.rewriteBlockEnabled), dump: nt, tokenRotationContextThreshold: pt(e2?.tokenRotationContextThreshold, "tokenRotationContextThreshold", at.tokenRotationContextThreshold, 1000, 1e7), tokenRotationPollIntervalMs: pt(e2?.tokenRotationPollIntervalMs, "tokenRotationPollIntervalMs", at.tokenRotationPollIntervalMs, 5000, 3600000), orgIdCacheTtlMs: pt(e2?.orgIdCacheTtlMs, "orgIdCacheTtlMs", at.orgIdCacheTtlMs, 1e4, 86400000), tokenRotationLogMaxBytes: pt(e2?.tokenRotationLogMaxBytes, "tokenRotationLogMaxBytes", at.tokenRotationLogMaxBytes, 1024, 1073741824), tokenRotationLogRetentionDays: pt(e2?.tokenRotationLogRetentionDays, "tokenRotationLogRetentionDays", at.tokenRotationLogRetentionDays, 1, 3650), t: t2 };
+  return ut = l2, l2;
 }
-function Ot() {
-  return kt;
+function Tt() {
+  return ht;
 }
-function At() {
-  return Mt().cacheTtlMs;
+function Et() {
+  return gt().cacheTtlMs;
 }
-function It() {
-  return Mt().safetyMarginMs;
+function kt() {
+  return gt().safetyMarginMs;
 }
-function Ct(t2) {
-  let e2 = t2;
-  if (!e2)
+function Rt(e2) {
+  let t2 = e2;
+  if (!t2)
     return "permanent";
-  let i2 = e2.status;
+  let i2 = t2.status;
   if (i2 === 401 || i2 === 403)
     return "auth";
   if (i2 === 429 || i2 === 503 || i2 === 529 || i2 && i2 >= 500)
     return "server_transient";
   if (i2 && i2 >= 400 && i2 < 500)
     return "permanent";
-  let s2 = e2.code ?? e2.cause?.code ?? "", r2 = e2.name ?? e2.cause?.name ?? "", n2 = `${(e2.message ?? "").toLowerCase()} ${(e2.cause?.message ?? "").toLowerCase()}`.trim();
+  let s2 = t2.code ?? t2.cause?.code ?? "", r2 = t2.name ?? t2.cause?.name ?? "", n2 = `${(t2.message ?? "").toLowerCase()} ${(t2.cause?.message ?? "").toLowerCase()}`.trim();
   return r2 === "AbortError" || r2 === "TimeoutError" || n2.includes("aborted") || n2.includes("the operation timed out") || n2.includes("request timed out") || s2 && new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_ABORTED", "ABORT_ERR", "ERR_NETWORK", "ConnectionRefused", "FailedToOpenSocket"]).has(s2) || n2.includes("unable to connect") || n2.includes("failed to open socket") || n2.includes("connection refused") || n2.includes("network is unreachable") || n2.includes("network error") || n2.includes("fetch failed") || n2.includes("timeout") || n2.includes("dns") || n2.includes("socket hang up") || n2.includes("terminated") ? "network" : "server_transient";
 }
-i(Rt, "readRawConfig"), i($t, "num"), i(vt, "numArray"), i(St, "bool"), i(Mt, "loadKeepaliveConfig"), i(Dt, "reloadKeepaliveConfig"), i(bt, "_resolve"), i(Ot, "getConfigPath"), i(At, "getCacheTtlMs"), i(It, "getSafetyMarginMs"), i(Ct, "classifyError");
-var xt = class _KeepaliveEngine {
+O(ft, "readRawConfig"), O(pt, "num"), O(mt, "numArray"), O(yt, "bool"), O(gt, "loadKeepaliveConfig"), O(wt, "reloadKeepaliveConfig"), O(_t, "_resolve"), O(Tt, "getConfigPath"), O(Et, "getCacheTtlMs"), O(kt, "getSafetyMarginMs"), O(Rt, "classifyError");
+var $t = class _KeepaliveEngine {
   static {
-    i(this, "KeepaliveEngine");
+    O(this, "KeepaliveEngine");
   }
   cacheTtlMs;
   safetyMarginMs;
@@ -44548,48 +45685,48 @@ var xt = class _KeepaliveEngine {
   inFlight = false;
   jitterMs = 0;
   snapshotCallCount = 0;
-  constructor(t2) {
-    this.getToken = t2.getToken, this.doFetch = t2.doFetch, this.getRateLimitInfo = t2.getRateLimitInfo, this.isOwnerAlive = t2.isOwnerAlive ?? (() => true);
-    let e2 = t2.config ?? {}, i2 = Mt();
+  constructor(e2) {
+    this.getToken = e2.getToken, this.doFetch = e2.doFetch, this.getRateLimitInfo = e2.getRateLimitInfo, this.isOwnerAlive = e2.isOwnerAlive ?? (() => true);
+    let t2 = e2.config ?? {}, i2 = gt();
     this.cacheTtlMs = i2.cacheTtlMs, this.safetyMarginMs = i2.safetyMarginMs, this.retryDelaysMs = i2.retryDelaysMs, this.healthProbeIntervalsMs = i2.healthProbeIntervalsMs, this.healthProbeTimeoutMs = i2.healthProbeTimeoutMs;
-    let s2 = e2.intervalMs ?? i2.intervalMs;
-    s2 < i2.intervalClampMin && (console.error(`[claude-sdk] keepalive intervalMs=${s2} below safe min (${i2.intervalClampMin}); clamped`), s2 = i2.intervalClampMin), s2 > i2.intervalClampMax && (console.error(`[claude-sdk] keepalive intervalMs=${s2} above safe max (${i2.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`), s2 = i2.intervalClampMax), this.config = { enabled: e2.enabled ?? i2.enabled, intervalMs: s2, idleTimeoutMs: e2.idleTimeoutMs ?? i2.idleTimeoutMs, minTokens: e2.minTokens ?? i2.minTokens, rewriteWarnIdleMs: e2.rewriteWarnIdleMs ?? i2.rewriteWarnIdleMs, rewriteWarnTokens: e2.rewriteWarnTokens ?? i2.rewriteWarnTokens, rewriteBlockIdleMs: e2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: e2.rewriteBlockEnabled ?? i2.rewriteBlockEnabled, onHeartbeat: e2.onHeartbeat, onTick: e2.onTick, onDisarmed: e2.onDisarmed, onRewriteWarning: e2.onRewriteWarning, onNetworkStateChange: e2.onNetworkStateChange };
+    let s2 = t2.intervalMs ?? i2.intervalMs;
+    s2 < i2.intervalClampMin && (console.error(`[claude-sdk] keepalive intervalMs=${s2} below safe min (${i2.intervalClampMin}); clamped`), s2 = i2.intervalClampMin), s2 > i2.intervalClampMax && (console.error(`[claude-sdk] keepalive intervalMs=${s2} above safe max (${i2.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`), s2 = i2.intervalClampMax), this.config = { enabled: t2.enabled ?? i2.enabled, intervalMs: s2, idleTimeoutMs: t2.idleTimeoutMs ?? i2.idleTimeoutMs, minTokens: t2.minTokens ?? i2.minTokens, rewriteWarnIdleMs: t2.rewriteWarnIdleMs ?? i2.rewriteWarnIdleMs, rewriteWarnTokens: t2.rewriteWarnTokens ?? i2.rewriteWarnTokens, rewriteBlockIdleMs: t2.rewriteBlockIdleMs ?? 1 / 0, rewriteBlockEnabled: t2.rewriteBlockEnabled ?? i2.rewriteBlockEnabled, onHeartbeat: t2.onHeartbeat, onTick: t2.onTick, onDisarmed: t2.onDisarmed, onRewriteWarning: t2.onRewriteWarning, onNetworkStateChange: t2.onNetworkStateChange };
   }
-  notifyRealRequestStart(t2, e2, i2) {
-    this.i = t2, this.o = JSON.parse(JSON.stringify(e2)), this.l = { ...i2 }, this.abortController?.abort(), this.inFlight = false;
+  notifyRealRequestStart(e2, t2, i2) {
+    this.i = e2, this.o = JSON.parse(JSON.stringify(t2)), this.l = { ...i2 }, this.abortController?.abort(), this.inFlight = false;
   }
-  notifyRealRequestComplete(t2) {
-    let e2 = Date.now();
-    if (this.lastActivityAt = e2, this.lastRealActivityAt = e2, this.cacheWrittenAt = e2, (this.healthProbeTimer || this.networkState !== "healthy") && (this.stopHealthProbe(), this.networkState !== "healthy")) {
-      let t3 = this.networkState;
+  notifyRealRequestComplete(e2) {
+    let t2 = Date.now();
+    if (this.lastActivityAt = t2, this.lastRealActivityAt = t2, this.cacheWrittenAt = t2, (this.healthProbeTimer || this.networkState !== "healthy") && (this.stopHealthProbe(), this.networkState !== "healthy")) {
+      let e3 = this.networkState;
       this.networkState = "healthy";
       try {
-        this.config.onNetworkStateChange?.({ from: t3, to: "healthy", at: e2 });
+        this.config.onNetworkStateChange?.({ from: e3, to: "healthy", at: t2 });
       } catch {}
     }
     if (!this.config.enabled)
       return;
     let i2 = this.i, s2 = this.o, r2 = this.l;
     if (i2 && s2 && r2) {
-      let e3 = (t2.inputTokens ?? 0) + (t2.cacheReadInputTokens ?? 0) + (t2.cacheCreationInputTokens ?? 0), n2 = this.registry.get(i2);
-      e3 >= this.config.minTokens && (!n2 || e3 >= n2.inputTokens) && this.registry.set(i2, { body: s2, headers: r2, model: i2, inputTokens: e3 }), e3 > (this.lastKnownCacheTokensByModel.get(i2) ?? 0) && this.lastKnownCacheTokensByModel.set(i2, e3), this.writeSnapshotDebug(i2, s2, t2), this.o = null, this.l = null;
+      let t3 = (e2.inputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), n2 = this.registry.get(i2);
+      t3 >= this.config.minTokens && (!n2 || t3 >= n2.inputTokens) && this.registry.set(i2, { body: s2, headers: r2, model: i2, inputTokens: t3 }), t3 > (this.lastKnownCacheTokensByModel.get(i2) ?? 0) && this.lastKnownCacheTokensByModel.set(i2, t3), this.writeSnapshotDebug(i2, s2, e2), this.o = null, this.l = null;
     }
     this.registry.size > 0 && this.startTimer();
   }
-  checkRewriteGuard(t2) {
-    let e2 = this.cacheWrittenAt;
-    if (e2 === 0)
+  checkRewriteGuard(e2) {
+    let t2 = this.cacheWrittenAt;
+    if (t2 === 0)
       return;
-    let i2 = Date.now() - e2, s2 = this.config.rewriteWarnIdleMs, r2 = this.config.rewriteBlockIdleMs;
+    let i2 = Date.now() - t2, s2 = this.config.rewriteWarnIdleMs, r2 = this.config.rewriteBlockIdleMs;
     if (i2 < s2)
       return;
-    let n2 = this.lastKnownCacheTokensByModel.get(t2) ?? 0, a2 = this.config.rewriteBlockEnabled && i2 >= r2;
+    let n2 = this.lastKnownCacheTokensByModel.get(e2) ?? 0, a2 = this.config.rewriteBlockEnabled && i2 >= r2;
     if (n2 >= this.config.rewriteWarnTokens || a2)
       try {
-        this.config.onRewriteWarning?.({ idleMs: i2, estimatedTokens: n2, blocked: a2, model: t2 });
+        this.config.onRewriteWarning?.({ idleMs: i2, estimatedTokens: n2, blocked: a2, model: e2 });
       } catch {}
     if (a2)
-      throw new Y(i2, n2, t2);
+      throw new Ue(i2, n2, e2);
   }
   stop() {
     this.timer && (clearInterval(this.timer), this.timer = null), this.retryTimer && (clearTimeout(this.retryTimer), this.retryTimer = null), this.abortController?.abort(), this.registry.clear(), this.inFlight = false, this.stopHealthProbe();
@@ -44597,13 +45734,13 @@ var xt = class _KeepaliveEngine {
   startTimer() {
     if (this.timer)
       return;
-    let t2 = Math.min(30000, Math.max(5000, Math.floor(this.config.intervalMs / 6)));
-    this.timer = setInterval(() => this.tick(), t2), this.timer && typeof this.timer == "object" && "unref" in this.timer && this.timer.unref();
+    let e2 = Math.min(30000, Math.max(5000, Math.floor(this.config.intervalMs / 6)));
+    this.timer = setInterval(() => this.tick(), e2), this.timer && typeof this.timer == "object" && "unref" in this.timer && this.timer.unref();
   }
   async tick() {
     try {
-      let t3 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, e3 = Math.round((Date.now() - this.lastActivityAt) / 1000), i3 = Math.max(0, Math.round((this.config.intervalMs - (Date.now() - this.lastActivityAt)) / 1000)), s3 = this.inFlight ? "firing" : this.registry.size === 0 ? "empty_registry" : "armed";
-      it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${s3} regSize=${this.registry.size} idleSec=${e3} nextFireSec=${i3} cacheAgeSec=${t3 < 0 ? "na" : Math.round(t3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}
+      let e3 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, t3 = Math.round((Date.now() - this.lastActivityAt) / 1000), i3 = Math.max(0, Math.round((this.config.intervalMs - (Date.now() - this.lastActivityAt)) / 1000)), s3 = this.inFlight ? "firing" : this.registry.size === 0 ? "empty_registry" : "armed";
+      qe(et(Ze(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${s3} regSize=${this.registry.size} idleSec=${t3} nextFireSec=${i3} cacheAgeSec=${e3 < 0 ? "na" : Math.round(e3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}
 `);
     } catch {}
     if (this.registry.size === 0 || this.inFlight)
@@ -44613,85 +45750,85 @@ var xt = class _KeepaliveEngine {
         return this.logClearDiag("owner_dead", { ownerCheck: "tick" }), this.registry.clear(), this.stop(), void this.onDisarmed("owner_dead");
     } catch {}
     if (this.cacheWrittenAt > 0) {
-      let t3 = Date.now() - this.cacheWrittenAt;
-      if (t3 > this.cacheTtlMs) {
+      let e3 = Date.now() - this.cacheWrittenAt;
+      if (e3 > this.cacheTtlMs) {
         try {
-          it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(t3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((t3 - this.cacheTtlMs) / 1000)}
+          qe(et(Ze(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} cacheAgeSec=${Math.round(e3 / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((e3 - this.cacheTtlMs) / 1000)}
 `);
         } catch {}
-        return this.logClearDiag("cache_expired_during_sleep", { overSec: Math.round((t3 - this.cacheTtlMs) / 1000) }), this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
+        return this.logClearDiag("cache_expired_during_sleep", { overSec: Math.round((e3 - this.cacheTtlMs) / 1000) }), this.registry.clear(), void this.onDisarmed("cache_expired_during_sleep");
       }
     }
-    let t2 = Mt();
-    if (!t2.enabled)
-      return this.logClearDiag("config_disabled", { liveConfigEnabled: t2.enabled }), this.registry.clear(), void this.stop();
-    if (t2.cacheTtlMs !== this.cacheTtlMs) {
-      let e3 = this.cacheTtlMs;
-      this.cacheTtlMs = t2.cacheTtlMs;
+    let e2 = gt();
+    if (!e2.enabled)
+      return this.logClearDiag("config_disabled", { liveConfigEnabled: e2.enabled }), this.registry.clear(), void this.stop();
+    if (e2.cacheTtlMs !== this.cacheTtlMs) {
+      let t3 = this.cacheTtlMs;
+      this.cacheTtlMs = e2.cacheTtlMs;
       try {
-        it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] CACHE_TTL_RELOADED pid=${process.pid} oldMs=${e3} newMs=${t2.cacheTtlMs} oldMin=${Math.round(e3 / 60000)} newMin=${Math.round(t2.cacheTtlMs / 60000)}
+        qe(et(Ze(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] CACHE_TTL_RELOADED pid=${process.pid} oldMs=${t3} newMs=${e2.cacheTtlMs} oldMin=${Math.round(t3 / 60000)} newMin=${Math.round(e2.cacheTtlMs / 60000)}
 `);
       } catch {}
     }
-    if (t2.safetyMarginMs !== this.safetyMarginMs) {
-      let e3 = this.safetyMarginMs;
-      this.safetyMarginMs = t2.safetyMarginMs;
+    if (e2.safetyMarginMs !== this.safetyMarginMs) {
+      let t3 = this.safetyMarginMs;
+      this.safetyMarginMs = e2.safetyMarginMs;
       try {
-        it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] SAFETY_MARGIN_RELOADED pid=${process.pid} oldMs=${e3} newMs=${t2.safetyMarginMs}
+        qe(et(Ze(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] SAFETY_MARGIN_RELOADED pid=${process.pid} oldMs=${t3} newMs=${e2.safetyMarginMs}
 `);
       } catch {}
     }
-    let e2 = Math.max(t2.intervalClampMin, Math.min(t2.intervalMs, t2.intervalClampMax));
-    e2 !== this.config.intervalMs && (this.config.intervalMs = e2), t2.idleTimeoutMs !== this.config.idleTimeoutMs && (this.config.idleTimeoutMs = t2.idleTimeoutMs), t2.minTokens !== this.config.minTokens && (this.config.minTokens = t2.minTokens);
+    let t2 = Math.max(e2.intervalClampMin, Math.min(e2.intervalMs, e2.intervalClampMax));
+    t2 !== this.config.intervalMs && (this.config.intervalMs = t2), e2.idleTimeoutMs !== this.config.idleTimeoutMs && (this.config.idleTimeoutMs = e2.idleTimeoutMs), e2.minTokens !== this.config.minTokens && (this.config.minTokens = e2.minTokens);
     let i2 = Date.now() - this.lastRealActivityAt;
     if (this.config.idleTimeoutMs !== 1 / 0 && i2 > this.config.idleTimeoutMs)
       return this.logClearDiag("idle_timeout", { realIdleMs: i2, idleTimeoutMs: this.config.idleTimeoutMs }), this.registry.clear(), void this.stop();
     let s2 = null;
-    for (let t3 of this.registry.values())
-      (!s2 || t3.inputTokens > s2.inputTokens) && (s2 = t3);
+    for (let e3 of this.registry.values())
+      (!s2 || e3.inputTokens > s2.inputTokens) && (s2 = e3);
     if (!s2)
       return;
     let r2 = Date.now() - this.lastActivityAt;
     if (this.jitterMs || (this.jitterMs = Math.floor(30000 * Math.random())), this.config.onTick?.({ idleMs: r2, nextFireMs: Math.max(0, this.config.intervalMs - r2), model: s2.model, tokens: s2.inputTokens }), !(r2 < 0.9 * this.config.intervalMs + this.jitterMs)) {
       this.inFlight = true;
       try {
-        let t3 = await this.getToken(), e3 = JSON.parse(JSON.stringify(s2.body)), i3 = e3.thinking?.budget_tokens ?? 0;
-        e3.max_tokens = i3 > 0 ? i3 + 1 : 1;
-        let n2 = { ...s2.headers, Authorization: `Bearer ${t3}` }, a2 = new AbortController;
+        let e3 = await this.getToken(), t3 = JSON.parse(JSON.stringify(s2.body)), i3 = t3.thinking?.budget_tokens ?? 0;
+        t3.max_tokens = i3 > 0 ? i3 + 1 : 1;
+        let n2 = { ...s2.headers, Authorization: `Bearer ${e3}` }, a2 = new AbortController;
         this.abortController = a2;
         let o2 = Date.now(), l2 = { inputTokens: 0, outputTokens: 0 };
-        for await (let t4 of this.doFetch(e3, n2, a2.signal))
-          t4.type === "message_stop" && (l2 = t4.usage);
+        for await (let e4 of this.doFetch(t3, n2, a2.signal))
+          e4.type === "message_stop" && (l2 = e4.usage);
         let h2 = Date.now() - o2;
         this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
         let c2 = this.getRateLimitInfo();
         this.config.onHeartbeat?.({ usage: l2, durationMs: h2, idleMs: r2, model: s2.model, rateLimit: { status: c2.status, claim: c2.claim, resetAt: c2.resetAt } });
-      } catch (t3) {
-        let e3 = Ct(t3);
-        if (e3 === "network") {
-          let t4 = Date.now() - this.cacheWrittenAt, e4 = this.cacheTtlMs - t4 <= this.safetyMarginMs;
-          this.onDisarmed("network_error"), this.startHealthProbe({ reviveMode: e4 });
+      } catch (e3) {
+        let t3 = Rt(e3);
+        if (t3 === "network") {
+          let e4 = Date.now() - this.cacheWrittenAt, t4 = this.cacheTtlMs - e4 <= this.safetyMarginMs;
+          this.onDisarmed("network_error"), this.startHealthProbe({ reviveMode: t4 });
         } else
-          e3 === "server_transient" ? this.retryChain(s2) : e3 === "auth" ? (this.logClearDiag("auth_error", { category: e3, errStatus: t3?.status }), this.registry.clear(), this.onDisarmed("auth_error")) : (this.logClearDiag("permanent_error", { category: e3, errStatus: t3?.status, errMessage: t3?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error"));
+          t3 === "server_transient" ? this.retryChain(s2) : t3 === "auth" ? (this.logClearDiag("auth_error", { category: t3, errStatus: e3?.status }), this.registry.clear(), this.onDisarmed("auth_error")) : (this.logClearDiag("permanent_error", { category: t3, errStatus: e3?.status, errMessage: e3?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error"));
       } finally {
         this.inFlight = false, this.abortController = null;
       }
     }
   }
-  logClearDiag(t2, e2) {
+  logClearDiag(e2, t2) {
     try {
-      let i2 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, s2 = this.cacheTtlMs - i2, r2 = Date.now() - this.lastActivityAt, n2 = Date.now() - this.lastRealActivityAt, a2 = { reason: t2, cacheAgeMs: i2, cacheTtlMs: this.cacheTtlMs, ttlRemainingMs: s2, safetyMarginMs: this.safetyMarginMs, idleMs: r2, realIdleMs: n2, regSize: this.registry.size, inFlight: this.inFlight, cacheWrittenAt: this.cacheWrittenAt, lastActivityAt: this.lastActivityAt, lastRealActivityAt: this.lastRealActivityAt, ...e2 }, o2 = Object.entries(a2).map(([t3, e3]) => `${t3}=${e3}`).join(" ");
-      it(ct(ht(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_CLEAR_DIAG pid=${process.pid} ${o2}
+      let i2 = this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1, s2 = this.cacheTtlMs - i2, r2 = Date.now() - this.lastActivityAt, n2 = Date.now() - this.lastRealActivityAt, a2 = { reason: e2, cacheAgeMs: i2, cacheTtlMs: this.cacheTtlMs, ttlRemainingMs: s2, safetyMarginMs: this.safetyMarginMs, idleMs: r2, realIdleMs: n2, regSize: this.registry.size, inFlight: this.inFlight, cacheWrittenAt: this.cacheWrittenAt, lastActivityAt: this.lastActivityAt, lastRealActivityAt: this.lastRealActivityAt, ...t2 }, o2 = Object.entries(a2).map(([e3, t3]) => `${e3}=${t3}`).join(" ");
+      qe(et(Ze(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] KA_CLEAR_DIAG pid=${process.pid} ${o2}
 `);
     } catch {}
   }
-  retryChain(t2, e2 = 0) {
-    if (e2 >= this.retryDelaysMs.length)
-      return this.logClearDiag("retry_exhausted", { attemptIndex: e2, retryDelaysMsLen: this.retryDelaysMs.length }), this.registry.clear(), void this.onDisarmed("retry_exhausted");
-    let i2 = Date.now() - this.cacheWrittenAt, s2 = this.cacheTtlMs - i2, r2 = 1000 * this.retryDelaysMs[e2];
+  retryChain(e2, t2 = 0) {
+    if (t2 >= this.retryDelaysMs.length)
+      return this.logClearDiag("retry_exhausted", { attemptIndex: t2, retryDelaysMsLen: this.retryDelaysMs.length }), this.registry.clear(), void this.onDisarmed("retry_exhausted");
+    let i2 = Date.now() - this.cacheWrittenAt, s2 = this.cacheTtlMs - i2, r2 = 1000 * this.retryDelaysMs[t2];
     if (s2 < r2 + this.safetyMarginMs) {
-      let t3 = i2 < this.cacheTtlMs / 2 ? "retry_budget_exceeds_ttl" : "cache_ttl_exhausted";
-      return this.logClearDiag(t3, { cmpLeft: s2, cmpRight: r2 + this.safetyMarginMs, nextDelayMs: r2, attemptIndex: e2, retryDelaysMsRaw: JSON.stringify(this.retryDelaysMs) }), this.registry.clear(), void this.onDisarmed(t3);
+      let e3 = i2 < this.cacheTtlMs / 2 ? "retry_budget_exceeds_ttl" : "cache_ttl_exhausted";
+      return this.logClearDiag(e3, { cmpLeft: s2, cmpRight: r2 + this.safetyMarginMs, nextDelayMs: r2, attemptIndex: t2, retryDelaysMsRaw: JSON.stringify(this.retryDelaysMs) }), this.registry.clear(), void this.onDisarmed(e3);
     }
     this.retryTimer = setTimeout(async () => {
       this.retryTimer = null;
@@ -44706,106 +45843,106 @@ var xt = class _KeepaliveEngine {
         return this.logClearDiag("cache_ttl_expired_mid_retry", { ageNowMs: i3 }), this.registry.clear(), void this.onDisarmed("cache_ttl_expired_mid_retry");
       this.inFlight = true;
       try {
-        let e3 = await this.getToken(), i4 = JSON.parse(JSON.stringify(t2.body)), s3 = i4.thinking?.budget_tokens ?? 0;
+        let t3 = await this.getToken(), i4 = JSON.parse(JSON.stringify(e2.body)), s3 = i4.thinking?.budget_tokens ?? 0;
         i4.max_tokens = s3 > 0 ? s3 + 1 : 1;
-        let r3 = { ...t2.headers, Authorization: `Bearer ${e3}` }, n2 = new AbortController;
+        let r3 = { ...e2.headers, Authorization: `Bearer ${t3}` }, n2 = new AbortController;
         this.abortController = n2;
-        for await (let t3 of this.doFetch(i4, r3, n2.signal))
+        for await (let e3 of this.doFetch(i4, r3, n2.signal))
           ;
         this.lastActivityAt = Date.now(), this.cacheWrittenAt = Date.now();
       } catch (i4) {
-        let s3 = Ct(i4);
+        let s3 = Rt(i4);
         if (s3 === "network") {
           this.inFlight = false, this.abortController = null;
-          let t3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
-          return this.onDisarmed("network_error_mid_retry"), void this.startHealthProbe({ reviveMode: t3 });
+          let e3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt) <= this.safetyMarginMs;
+          return this.onDisarmed("network_error_mid_retry"), void this.startHealthProbe({ reviveMode: e3 });
         }
         if (s3 === "server_transient")
-          return this.inFlight = false, this.abortController = null, void this.retryChain(t2, e2 + 1);
-        this.logClearDiag("permanent_error_mid_retry", { category: s3, attemptIndex: e2, errStatus: i4?.status, errMessage: i4?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error_mid_retry");
+          return this.inFlight = false, this.abortController = null, void this.retryChain(e2, t2 + 1);
+        this.logClearDiag("permanent_error_mid_retry", { category: s3, attemptIndex: t2, errStatus: i4?.status, errMessage: i4?.message?.slice(0, 200) }), this.registry.clear(), this.onDisarmed("permanent_error_mid_retry");
       } finally {
         this.inFlight = false, this.abortController = null;
       }
     }, r2);
   }
-  onDisarmed(t2) {
+  onDisarmed(e2) {
     this.abortController?.abort(), this.abortController = null, this.inFlight = false, this.retryTimer && (clearTimeout(this.retryTimer), this.retryTimer = null);
     try {
-      this.config.onDisarmed?.({ reason: t2, at: Date.now() });
+      this.config.onDisarmed?.({ reason: e2, at: Date.now() });
     } catch {}
-    if (new Set(["retry_exhausted", "cache_ttl_exhausted", "cache_ttl_expired_mid_retry", "retry_budget_exceeds_ttl"]).has(t2) && !this.healthProbeTimer) {
-      let t3 = Date.now() - this.cacheWrittenAt, e2 = this.cacheTtlMs - t3 <= this.safetyMarginMs;
-      this.startHealthProbe({ reviveMode: e2 });
+    if (new Set(["retry_exhausted", "cache_ttl_exhausted", "cache_ttl_expired_mid_retry", "retry_budget_exceeds_ttl"]).has(e2) && !this.healthProbeTimer) {
+      let e3 = Date.now() - this.cacheWrittenAt, t2 = this.cacheTtlMs - e3 <= this.safetyMarginMs;
+      this.startHealthProbe({ reviveMode: t2 });
     }
   }
   startHealthProbe(t2 = {}) {
     if (this.healthProbeTimer)
       return;
     this.healthProbeAttempt = 0;
-    let e2 = this.networkState;
-    if (this.networkState = "degraded", e2 !== "degraded")
+    let i2 = this.networkState;
+    if (this.networkState = "degraded", i2 !== "degraded")
       try {
-        this.config.onNetworkStateChange?.({ from: e2, to: "degraded", at: Date.now() });
+        this.config.onNetworkStateChange?.({ from: i2, to: "degraded", at: Date.now() });
       } catch {}
-    let s2 = i(() => {
-      let t3 = this.healthProbeIntervalsMs, e3 = t3[Math.min(this.healthProbeAttempt, t3.length - 1)];
-      this.healthProbeTimer = setTimeout(r2, e3), this.healthProbeTimer && typeof this.healthProbeTimer == "object" && "unref" in this.healthProbeTimer && this.healthProbeTimer.unref();
-    }, "scheduleNext"), r2 = i(async () => {
+    let s2 = O(() => {
+      let e2 = this.healthProbeIntervalsMs, t3 = e2[Math.min(this.healthProbeAttempt, e2.length - 1)];
+      this.healthProbeTimer = setTimeout(r2, t3), this.healthProbeTimer && typeof this.healthProbeTimer == "object" && "unref" in this.healthProbeTimer && this.healthProbeTimer.unref();
+    }, "scheduleNext"), r2 = O(async () => {
       if (this.healthProbeTimer = null, this.healthProbeAttempt++, Date.now() - this.cacheWrittenAt >= this.cacheTtlMs - this.safetyMarginMs && !t2.reviveMode)
         return void this.stopHealthProbe();
       if (this.healthProbeAttempt > this.healthProbeIntervalsMs.length)
         return void this.stopHealthProbe();
-      let e3 = false;
+      let i3 = false;
       try {
         let { connect: t3 } = await import("net");
-        await new Promise((e4, i3) => {
-          let s3 = t3({ host: "api.anthropic.com", port: 443 }), r4 = setTimeout(() => {
-            s3.destroy(), i3(new Error("timeout"));
+        await new Promise((i4, s3) => {
+          let r4 = t3({ host: e, port: 443 }), n3 = setTimeout(() => {
+            r4.destroy(), s3(new Error("timeout"));
           }, this.healthProbeTimeoutMs);
-          s3.once("connect", () => {
-            clearTimeout(r4), s3.end(), e4();
-          }), s3.once("error", (t4) => {
-            clearTimeout(r4), i3(t4);
+          r4.once("connect", () => {
+            clearTimeout(n3), r4.end(), i4();
+          }), r4.once("error", (e2) => {
+            clearTimeout(n3), s3(e2);
           });
-        }), e3 = true;
+        }), i3 = true;
       } catch {
-        e3 = false;
+        i3 = false;
       }
-      if (!e3)
+      if (!i3)
         return void s2();
       this.stopHealthProbe();
-      let i2 = this.networkState;
+      let r3 = this.networkState;
       this.networkState = "healthy";
       try {
-        this.config.onNetworkStateChange?.({ from: i2, to: "healthy", at: Date.now() });
+        this.config.onNetworkStateChange?.({ from: r3, to: "healthy", at: Date.now() });
       } catch {}
-      let r3 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt);
-      this.registry.size > 0 && r3 > this.safetyMarginMs && this.tick();
+      let n2 = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt);
+      this.registry.size > 0 && n2 > this.safetyMarginMs && this.tick();
     }, "probe");
     r2();
   }
   stopHealthProbe() {
     this.healthProbeTimer && (clearTimeout(this.healthProbeTimer), this.healthProbeTimer = null), this.healthProbeAttempt = 0;
   }
-  writeSnapshotDebug(t2, e2, i2) {
+  writeSnapshotDebug(e2, t2, i2) {
     try {
-      let s2 = ct(ht(), ".claude", "snapshots");
-      st(s2, { recursive: true });
+      let s2 = et(Ze(), ".claude", "snapshots");
+      Ge(s2, { recursive: true });
       try {
-        let t3 = Date.now() - _KeepaliveEngine.SNAPSHOT_TTL_MS;
-        for (let e3 of rt(s2)) {
-          let i3 = ct(s2, e3);
-          nt(i3).mtimeMs < t3 && at(i3);
+        let e3 = Date.now() - _KeepaliveEngine.SNAPSHOT_TTL_MS;
+        for (let t3 of ze(s2)) {
+          let i3 = et(s2, t3);
+          Ye(i3).mtimeMs < e3 && Qe(i3);
         }
       } catch {}
       this.snapshotCallCount++;
-      let { messages: r2, system: n2, tools: a2 } = e2, o2 = typeof n2 == "string" ? n2 : JSON.stringify(n2), l2 = lt("md5").update(o2).digest("hex").slice(0, 8), h2 = { ts: new Date().toISOString(), pid: process.pid, callNum: this.snapshotCallCount, model: t2, messages: r2?.length ?? 0, tools: a2?.length ?? 0, sysHash: l2, sysLen: o2.length, usage: { input: i2.inputTokens ?? 0, cacheRead: i2.cacheReadInputTokens ?? 0, cacheWrite: i2.cacheCreationInputTokens ?? 0 }, firstMsg: r2?.[0] ? { role: r2[0].role, contentLen: JSON.stringify(r2[0].content).length, contentHash: lt("md5").update(JSON.stringify(r2[0].content)).digest("hex").slice(0, 8) } : null, lastMsg: r2?.length ? { role: r2[r2.length - 1].role, contentLen: JSON.stringify(r2[r2.length - 1].content).length } : null, toolsHash: a2?.length ? lt("md5").update(JSON.stringify(a2.map((t3) => t3.name ?? "").join(","))).digest("hex").slice(0, 8) : null }, c2 = `${process.pid}-${Date.now()}.json`;
-      if (ot(ct(s2, c2), JSON.stringify(h2, null, 2) + `
+      let { messages: r2, system: n2, tools: a2 } = t2, o2 = typeof n2 == "string" ? n2 : JSON.stringify(n2), l2 = Xe("md5").update(o2).digest("hex").slice(0, 8), h2 = { ts: new Date().toISOString(), pid: process.pid, callNum: this.snapshotCallCount, model: e2, messages: r2?.length ?? 0, tools: a2?.length ?? 0, sysHash: l2, sysLen: o2.length, usage: { input: i2.inputTokens ?? 0, cacheRead: i2.cacheReadInputTokens ?? 0, cacheWrite: i2.cacheCreationInputTokens ?? 0 }, firstMsg: r2?.[0] ? { role: r2[0].role, contentLen: JSON.stringify(r2[0].content).length, contentHash: Xe("md5").update(JSON.stringify(r2[0].content)).digest("hex").slice(0, 8) } : null, lastMsg: r2?.length ? { role: r2[r2.length - 1].role, contentLen: JSON.stringify(r2[r2.length - 1].content).length } : null, toolsHash: a2?.length ? Xe("md5").update(JSON.stringify(a2.map((e3) => e3.name ?? "").join(","))).digest("hex").slice(0, 8) : null }, c2 = `${process.pid}-${Date.now()}.json`;
+      if (Ve(et(s2, c2), JSON.stringify(h2, null, 2) + `
 `), _KeepaliveEngine.DUMP_BODY || this.snapshotCallCount <= 3) {
-        let t3 = ct(s2, "bodies");
-        st(t3, { recursive: true });
+        let e3 = et(s2, "bodies");
+        Ge(e3, { recursive: true });
         let i3 = `${process.pid}-call${this.snapshotCallCount}-${Date.now()}.json`;
-        ot(ct(t3, i3), JSON.stringify(e2, null, 2) + `
+        Ve(et(e3, i3), JSON.stringify(t2, null, 2) + `
 `);
       }
     } catch {}
@@ -44822,29 +45959,29 @@ var xt = class _KeepaliveEngine {
   get m() {
     return this.lastKnownCacheTokensByModel;
   }
-  k(t2) {
-    this.lastRealActivityAt = t2;
+  _(e2) {
+    this.lastRealActivityAt = e2;
   }
-  _(t2) {
-    this.cacheWrittenAt = t2;
+  T(e2) {
+    this.cacheWrittenAt = e2;
   }
-  get T() {
+  get k() {
     return this.cacheWrittenAt;
   }
-  R(t2, e2, i2) {
-    this.i = t2, this.o = e2, this.l = i2;
+  R(e2, t2, i2) {
+    this.i = e2, this.o = t2, this.l = i2;
   }
 };
-function Nt(t2) {
-  return !t2 || t2.length < 21 ? "" : t2.slice(13, 21);
+function vt(e2) {
+  return !e2 || e2.length < 21 ? "" : e2.slice(13, 21);
 }
-i(Nt, "tokenHint");
-var Jt = class {
-  constructor(t2, e2, i2) {
-    this.credentialStore = t2, this.contextTokensProvider = e2, this.getConfig = i2, this.startWatcher(), this.startPollFallback();
+O(vt, "tokenHint");
+var Nt = class {
+  constructor(e2, t2, i2) {
+    this.credentialStore = e2, this.contextTokensProvider = t2, this.getConfig = i2, this.startWatcher(), this.startPollFallback();
   }
   static {
-    i(this, "TokenRotationManager");
+    O(this, "TokenRotationManager");
   }
   pendingRotation = null;
   orgIdCache = null;
@@ -44858,24 +45995,24 @@ var Jt = class {
   async checkPending() {
     if (await this.detectRotation("ensureAuth"), this.pendingRotation === null)
       return { action: "no-pending" };
-    let t2 = null;
+    let e2 = null;
     if (this.contextTokensProvider)
       try {
-        let e3 = this.contextTokensProvider();
-        t2 = typeof e3 == "number" ? e3 : null;
-      } catch (e3) {
-        t2 = null, this.contextProviderThrew || (this.contextProviderThrew = true, this.logBestEffort(`[${new Date().toISOString()}] TOKEN_PROVIDER_THREW pid=${process.pid} error=${e3.message}`));
+        let t3 = this.contextTokensProvider();
+        e2 = typeof t3 == "number" ? t3 : null;
+      } catch (t3) {
+        e2 = null, this.contextProviderThrew || (this.contextProviderThrew = true, this.logBestEffort(`[${new Date().toISOString()}] TOKEN_PROVIDER_THREW pid=${process.pid} error=${t3.message}`));
       }
-    let e2 = this.getConfig().tokenRotationContextThreshold;
-    if (t2 === null || t2 < e2) {
+    let t2 = this.getConfig().tokenRotationContextThreshold;
+    if (e2 === null || e2 < t2) {
       await this.applyPending("context-drop");
-      let t3 = await this.credentialStore.read();
-      return t3 ? { action: "apply-now", credentials: t3, mode: "applied" } : { action: "no-pending" };
+      let e3 = await this.credentialStore.read();
+      return e3 ? { action: "apply-now", credentials: e3, mode: "applied" } : { action: "no-pending" };
     }
     return { action: "continue-with-old", pending: this.pendingRotation };
   }
-  async applyPending(t2, e2) {
-    if (t2 === "forced-expired" && e2 === undefined)
+  async applyPending(e2, t2) {
+    if (e2 === "forced-expired" && t2 === undefined)
       throw new Error("forcedReason required when reason=forced-expired");
     if (this.pendingRotation === null)
       return;
@@ -44883,22 +46020,22 @@ var Jt = class {
       return this.logBestEffort(`[${new Date().toISOString()}] TOKEN_APPLY_NO_CREDS pid=${process.pid}`), void (this.pendingRotation = null);
     let { oldHint: i2, newHint: s2, oldOrgId: r2, newOrgId: n2, detectedAt: a2 } = this.pendingRotation;
     this.lastSeenHint = s2, this.pendingRotation = null, this.orgIdCache = null;
-    let o2 = t2 === "forced-expired" ? "forced" : "applied", l2 = t2, h2 = null;
+    let o2 = e2 === "forced-expired" ? "forced" : "applied", l2 = e2, h2 = null;
     if (this.contextTokensProvider)
       try {
-        let t3 = this.contextTokensProvider();
-        h2 = typeof t3 == "number" ? t3 : null;
+        let e3 = this.contextTokensProvider();
+        h2 = typeof e3 == "number" ? e3 : null;
       } catch {
         h2 = null;
       }
-    let c2 = { pid: process.pid, spawnDepth: 0, sessionId: null, oldHint: i2, newHint: s2, oldOrgId: r2, newOrgId: n2, contextTokens: h2, mode: o2, appliedAt: l2, forcedReason: e2 ?? null, detectedAt: new Date(a2).toISOString() };
-    t2 === "forced-expired" ? this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_FORCED pid=${process.pid} forcedReason=${e2} oldHint=${i2} newHint=${s2}`) : this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_APPLIED pid=${process.pid} reason=${t2} oldHint=${i2} newHint=${s2} newOrgId=${n2 ?? "null"}`), this.emitEvent(c2);
+    let c2 = { pid: process.pid, spawnDepth: 0, sessionId: null, oldHint: i2, newHint: s2, oldOrgId: r2, newOrgId: n2, contextTokens: h2, mode: o2, appliedAt: l2, forcedReason: t2 ?? null, detectedAt: new Date(a2).toISOString() };
+    e2 === "forced-expired" ? this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_FORCED pid=${process.pid} forcedReason=${t2} oldHint=${i2} newHint=${s2}`) : this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_APPLIED pid=${process.pid} reason=${e2} oldHint=${i2} newHint=${s2} newOrgId=${n2 ?? "null"}`), this.emitEvent(c2);
   }
   hasPending() {
     return this.pendingRotation !== null;
   }
-  setEventEmitter(t2) {
-    this.eventEmitter = t2;
+  setEventEmitter(e2) {
+    this.eventEmitter = e2;
   }
   close() {
     if (this.closed = true, this.watcher) {
@@ -44910,201 +46047,205 @@ var Jt = class {
     this.pollTimer && (clearInterval(this.pollTimer), this.pollTimer = null);
   }
   startWatcher() {
-    let t2 = this.credentialStore.path;
-    if (typeof t2 == "string")
+    let e2 = this.credentialStore.path;
+    if (typeof e2 == "string")
       try {
-        this.watcher = Lt(t2, { persistent: false }, (t3) => {
-          (t3 === "change" || t3 === "rename") && queueMicrotask(() => {
+        this.watcher = St(e2, { persistent: false }, (e3) => {
+          (e3 === "change" || e3 === "rename") && queueMicrotask(() => {
             this.detectRotation("fs.watch").catch(() => {});
           });
-        }), this.watcher.on("error", (t3) => {
-          this.logBestEffort(`[${new Date().toISOString()}] TOKEN_WATCHER_ERROR pid=${process.pid} error=${t3.message}`);
+        }), this.watcher.on("error", (e3) => {
+          this.logBestEffort(`[${new Date().toISOString()}] TOKEN_WATCHER_ERROR pid=${process.pid} error=${e3.message}`);
         });
-      } catch (t3) {
-        this.logBestEffort(`[${new Date().toISOString()}] TOKEN_WATCHER_INIT_FAILED pid=${process.pid} error=${t3.message}`);
+      } catch (e3) {
+        this.logBestEffort(`[${new Date().toISOString()}] TOKEN_WATCHER_INIT_FAILED pid=${process.pid} error=${e3.message}`);
       }
   }
   startPollFallback() {
-    let t2 = this.getConfig().tokenRotationPollIntervalMs;
+    let e2 = this.getConfig().tokenRotationPollIntervalMs;
     this.pollTimer = setInterval(() => {
       this.closed || this.detectRotation("poll").catch(() => {});
-    }, t2), this.pollTimer.unref();
+    }, e2), this.pollTimer.unref();
   }
-  async detectRotation(t2) {
+  async detectRotation(e2) {
     if (this.closed)
       return;
-    let e2;
+    let t2;
     try {
-      e2 = await this.credentialStore.read();
-    } catch (e3) {
-      return void this.logBestEffort(`[${new Date().toISOString()}] TOKEN_DETECT_READ_FAILED pid=${process.pid} source=${t2} error=${e3.message}`);
+      t2 = await this.credentialStore.read();
+    } catch (t3) {
+      return void this.logBestEffort(`[${new Date().toISOString()}] TOKEN_DETECT_READ_FAILED pid=${process.pid} source=${e2} error=${t3.message}`);
     }
-    if (!e2)
+    if (!t2)
       return;
-    let i2 = Nt(e2.accessToken);
+    let i2 = vt(t2.accessToken);
     if (i2 === this.lastSeenHint)
       return;
     if (this.lastSeenHint === "")
-      return this.lastSeenHint = i2, void (this.orgIdCache = { orgId: this.extractOrgId(e2.refreshToken), cachedAt: Date.now() });
+      return this.lastSeenHint = i2, void (this.orgIdCache = { orgId: this.extractOrgId(t2.refreshToken), cachedAt: Date.now() });
     if (this.pendingRotation !== null && i2 === this.pendingRotation.newHint)
       return;
     if (this.pendingRotation !== null && i2 === this.pendingRotation.oldHint) {
-      let t3 = this.pendingRotation;
-      return this.pendingRotation = null, this.lastSeenHint = i2, void this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_CANCELLED pid=${process.pid} oldHint=${t3.oldHint} newHint=${t3.newHint} reason=revert`);
+      let e3 = this.pendingRotation;
+      return this.pendingRotation = null, this.lastSeenHint = i2, void this.logBestEffort(`[${new Date().toISOString()}] TOKEN_ROTATION_CANCELLED pid=${process.pid} oldHint=${e3.oldHint} newHint=${e3.newHint} reason=revert`);
     }
-    let s2 = this.lastSeenHint, r2 = i2, n2 = await this.getCachedOrgId(), a2 = this.extractOrgId(e2.refreshToken), o2 = null;
+    let s2 = this.lastSeenHint, r2 = i2, n2 = await this.getCachedOrgId(), a2 = this.extractOrgId(t2.refreshToken), o2 = null;
     if (this.contextTokensProvider)
       try {
-        let t3 = this.contextTokensProvider();
-        o2 = typeof t3 == "number" ? t3 : null;
-      } catch (t3) {
-        o2 = null, this.contextProviderThrew || (this.contextProviderThrew = true, this.logBestEffort(`[${new Date().toISOString()}] TOKEN_PROVIDER_THREW pid=${process.pid} error=${t3.message}`));
+        let e3 = this.contextTokensProvider();
+        o2 = typeof e3 == "number" ? e3 : null;
+      } catch (e3) {
+        o2 = null, this.contextProviderThrew || (this.contextProviderThrew = true, this.logBestEffort(`[${new Date().toISOString()}] TOKEN_PROVIDER_THREW pid=${process.pid} error=${e3.message}`));
       }
     let l2, h2, c2, u2 = this.getConfig().tokenRotationContextThreshold;
     n2 !== null && n2 === a2 ? (l2 = "same-org", h2 = "immediate", c2 = "TOKEN_ROTATION_SAME_ORG", this.lastSeenHint = r2, this.pendingRotation = null, this.orgIdCache = null) : o2 === null || o2 < u2 ? (l2 = "applied", h2 = "immediate", c2 = "TOKEN_ROTATION_APPLIED", this.lastSeenHint = r2, this.pendingRotation = null, this.orgIdCache = null) : (l2 = "deferred", h2 = null, c2 = "TOKEN_ROTATION_DEFERRED", this.pendingRotation = { oldHint: s2, newHint: r2, oldOrgId: n2, newOrgId: a2, detectedAt: Date.now() });
     let d2 = { pid: process.pid, spawnDepth: 0, sessionId: null, oldHint: s2, newHint: r2, oldOrgId: n2, newOrgId: a2, contextTokens: o2, mode: l2, appliedAt: h2, forcedReason: null, detectedAt: new Date().toISOString() };
-    this.logBestEffort(`[${new Date().toISOString()}] ${c2} pid=${process.pid} source=${t2} oldHint=${s2} newHint=${r2} oldOrgId=${n2 ?? "null"} newOrgId=${a2 ?? "null"} contextTokens=${o2 ?? "null"}`), this.emitEvent(d2);
+    this.logBestEffort(`[${new Date().toISOString()}] ${c2} pid=${process.pid} source=${e2} oldHint=${s2} newHint=${r2} oldOrgId=${n2 ?? "null"} newOrgId=${a2 ?? "null"} contextTokens=${o2 ?? "null"}`), this.emitEvent(d2);
   }
-  extractOrgId(t2) {
-    if (!t2)
+  extractOrgId(e2) {
+    if (!e2)
       return null;
     try {
-      let e2 = t2.split(".");
-      if (e2.length !== 3)
+      let t2 = e2.split(".");
+      if (t2.length !== 3)
         return null;
-      let i2 = Buffer.from(e2[1], "base64url").toString("utf8"), s2 = JSON.parse(i2);
+      let i2 = Buffer.from(t2[1], "base64url").toString("utf8"), s2 = JSON.parse(i2);
       return typeof s2.organization_id == "string" ? s2.organization_id : null;
     } catch {
       return null;
     }
   }
   async getCachedOrgId() {
-    let t2, e2 = this.getConfig().orgIdCacheTtlMs, i2 = Date.now();
-    if (this.orgIdCache && i2 - this.orgIdCache.cachedAt < e2)
+    let e2, t2 = this.getConfig().orgIdCacheTtlMs, i2 = Date.now();
+    if (this.orgIdCache && i2 - this.orgIdCache.cachedAt < t2)
       return this.orgIdCache.orgId;
     try {
-      t2 = await this.credentialStore.read();
+      e2 = await this.credentialStore.read();
     } catch {
       return null;
     }
-    let s2 = t2 ? this.extractOrgId(t2.refreshToken) : null;
+    let s2 = e2 ? this.extractOrgId(e2.refreshToken) : null;
     return this.orgIdCache = { orgId: s2, cachedAt: i2 }, s2;
   }
-  appendRotationLog(t2) {
+  appendRotationLog(e2) {
     try {
-      let e2 = Wt(Kt(), ".claude", "token-rotation.log");
-      Pt(e2, JSON.stringify(t2) + `
+      let t2 = Ct(It(), ".claude", "token-rotation.log");
+      Dt(t2, JSON.stringify(e2) + `
 `), this.appendCallCount += 1, (this.appendCallCount === 1 || this.appendCallCount % 100 == 0) && this.maybeRotateLog();
     } catch {}
   }
   maybeRotateLog() {
     try {
-      let t2 = this.getConfig(), e2 = Wt(Kt(), ".claude", "token-rotation.log");
-      if (!Ht(e2) || Ft(e2).size < t2.tokenRotationLogMaxBytes)
+      let e2 = this.getConfig(), t2 = Ct(It(), ".claude", "token-rotation.log");
+      if (!Ot(t2) || bt(t2).size < e2.tokenRotationLogMaxBytes)
         return;
-      let i2 = `${e2}.1`, s2 = `${e2}.2`;
-      if (Ht(s2)) {
-        let e3 = Ft(s2).mtimeMs;
-        if (Date.now() - e3 > 86400 * t2.tokenRotationLogRetentionDays * 1000)
+      let i2 = `${t2}.1`, s2 = `${t2}.2`;
+      if (Ot(s2)) {
+        let t3 = bt(s2).mtimeMs;
+        if (Date.now() - t3 > 86400 * e2.tokenRotationLogRetentionDays * 1000)
           try {
-            Ut(s2);
+            At(s2);
           } catch {}
       }
-      if (Ht(i2))
+      if (Ot(i2))
         try {
-          Bt(i2, s2);
+          Mt(i2, s2);
         } catch {}
       try {
-        Bt(e2, i2);
+        Mt(t2, i2);
       } catch {}
     } catch {}
   }
-  emitEvent(t2) {
+  emitEvent(e2) {
     if (this.eventEmitter)
       try {
-        this.eventEmitter(t2);
-      } catch (t3) {
-        this.logBestEffort(`[${new Date().toISOString()}] TOKEN_EMITTER_THREW pid=${process.pid} error=${t3.message}`);
+        this.eventEmitter(e2);
+      } catch (e3) {
+        this.logBestEffort(`[${new Date().toISOString()}] TOKEN_EMITTER_THREW pid=${process.pid} error=${e3.message}`);
       }
-    this.appendRotationLog(t2);
+    this.appendRotationLog(e2);
   }
-  logBestEffort(t2) {
+  logBestEffort(e2) {
     try {
-      Pt(Wt(Kt(), ".claude", "claude-max-debug.log"), t2 + `
+      Dt(Ct(It(), ".claude", "claude-max-debug.log"), e2 + `
 `);
     } catch {}
   }
 };
-var jt = 300000;
-var qt = 0.25;
-var zt = 300000;
-var Gt = 1200000;
-var Qt = J(j(), ".claude", ".refresh-cooldown");
-var Yt = 1800000;
-var Vt = "2.1.90";
-var Xt = { todowrite: "todo_write" };
-var Zt = Object.fromEntries(Object.entries(Xt).map(([t2, e2]) => [e2, t2]));
-function te(t2) {
-  if (!t2?.length)
-    return { remapped: t2, didRemap: false };
-  let e2 = false;
-  return { remapped: t2.map((t3) => {
-    let i2 = Xt[t3.name];
-    return i2 ? (e2 = true, { ...t3, name: i2 }) : t3;
-  }), didRemap: e2 };
+C(), N();
+var xt = t;
+var Lt = c;
+var Pt = n;
+var Ht = 300000;
+var Ft = 0.25;
+var Ut = 300000;
+var Bt = 1200000;
+var Kt = Ne(xe(), ".claude", ".refresh-cooldown");
+var Jt = 1800000;
+var Wt = "2.1.112";
+var jt = { todowrite: "todo_write" };
+var qt = Object.fromEntries(Object.entries(jt).map(([e2, t2]) => [t2, e2]));
+function Gt(e2) {
+  if (!e2?.length)
+    return { remapped: e2, didRemap: false };
+  let t2 = false;
+  return { remapped: e2.map((e3) => {
+    let i2 = jt[e3.name];
+    return i2 ? (t2 = true, { ...e3, name: i2 }) : e3;
+  }), didRemap: t2 };
 }
-function ee(t2) {
-  return Zt[t2] ?? t2;
+function zt(e2) {
+  return qt[e2] ?? e2;
 }
-i(te, "remapToolNames"), i(ee, "unremapToolName");
-var ie = J(j(), ".claude", ".token-refresh-lock");
-async function se() {
-  for (let t2 = 0;t2 < 30; t2++)
+O(Gt, "remapToolNames"), O(zt, "unremapToolName");
+var Yt = Ne(xe(), ".claude", ".token-refresh-lock");
+async function Qt() {
+  for (let e2 = 0;e2 < 30; e2++)
     try {
-      return H(ie), P(J(ie, "pid"), `${process.pid}
+      return Oe(Yt), De(Ne(Yt, "pid"), `${process.pid}
 ${Date.now()}`), () => {
         try {
-          K(J(ie, "pid")), B(ie);
+          Ie(Ne(Yt, "pid")), Me(Yt);
         } catch {}
       };
-    } catch (t3) {
-      if (t3.code === "EEXIST") {
+    } catch (e3) {
+      if (e3.code === "EEXIST") {
         try {
-          let t4 = L(J(ie, "pid"), "utf8"), e2 = parseInt(t4.split(`
+          let e4 = Se(Ne(Yt, "pid"), "utf8"), t2 = parseInt(e4.split(`
 `)[1] ?? "0");
-          if (Date.now() - e2 > 30000) {
+          if (Date.now() - t2 > 30000) {
             try {
-              K(J(ie, "pid"));
+              Ie(Ne(Yt, "pid"));
             } catch {}
             try {
-              B(ie);
+              Me(Yt);
             } catch {}
             continue;
           }
         } catch {}
-        await new Promise((t4) => setTimeout(t4, 1000 + 1000 * Math.random()));
+        await new Promise((e4) => setTimeout(e4, 1000 + 1000 * Math.random()));
         continue;
       }
       return null;
     }
   return null;
 }
-async function re(t2, e2, i2) {
-  let s2 = Date.now() + e2;
+async function Vt(e2, t2, i2) {
+  let s2 = Date.now() + t2;
   for (;Date.now() < s2; ) {
     try {
-      let e3 = await t2.read();
-      if (e3 && e3.expiresAt - Date.now() >= i2)
-        return { accessToken: e3.accessToken, refreshToken: e3.refreshToken, expiresAt: e3.expiresAt };
+      let t3 = await e2.read();
+      if (t3 && t3.expiresAt - Date.now() >= i2)
+        return { accessToken: t3.accessToken, refreshToken: t3.refreshToken, expiresAt: t3.expiresAt };
     } catch {}
-    await new Promise((t3) => setTimeout(t3, 500));
+    await new Promise((e3) => setTimeout(e3, 500));
   }
   return null;
 }
-i(se, "acquireTokenRefreshLock"), i(re, "pollDiskForFreshToken");
-var ne = class {
+O(Qt, "acquireTokenRefreshLock"), O(Vt, "pollDiskForFreshToken");
+var Xt = class {
   static {
-    i(this, "ClaudeCodeSDK");
+    O(this, "ClaudeCodeSDK");
   }
   accessToken = null;
   refreshToken = null;
@@ -45129,262 +46270,288 @@ var ne = class {
   onTokenStatus;
   keepalive;
   $ = null;
-  constructor(t2 = {}) {
-    this.sessionId = N(), this.deviceId = t2.deviceId ?? x(32).toString("hex"), this.accountUuid = t2.accountUuid ?? this.readAccountUuid(), this.timeout = t2.timeout ?? 600000, this.maxRetries = t2.maxRetries ?? 10, this.onTokenStatus = t2.onTokenStatus, this.keepalive = new xt({ config: t2.keepalive, getToken: i(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: i((t3, e2, i2) => this.doStreamRequest(t3, e2, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimitInfo, "getRateLimitInfo") }), t2.credentialStore ? this.credentialStore = t2.credentialStore : t2.accessToken ? (this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken ?? null, this.expiresAt = t2.expiresAt ?? null, this.credentialStore = new oe({ accessToken: t2.accessToken, refreshToken: t2.refreshToken ?? "", expiresAt: t2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new ae(t2.credentialsPath ?? J(j(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {})), this.tokenRotation = new Jt(this.credentialStore, t2.contextTokensProvider, () => Mt());
+  constructor(e2 = {}) {
+    this.sessionId = ve(), this.deviceId = e2.deviceId ?? $e(32).toString("hex"), this.accountUuid = e2.accountUuid ?? this.readAccountUuid(), this.timeout = e2.timeout ?? 600000, this.maxRetries = e2.maxRetries ?? 10, this.onTokenStatus = e2.onTokenStatus, this.keepalive = new $t({ config: e2.keepalive, getToken: O(async () => (await this.ensureAuth(), this.accessToken ?? ""), "getToken"), doFetch: O((e3, t2, i2) => this.doStreamRequest(e3, t2, i2), "doFetch"), getRateLimitInfo: O(() => this.lastRateLimitInfo, "getRateLimitInfo") }), e2.credentialStore ? this.credentialStore = e2.credentialStore : e2.accessToken ? (this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken ?? null, this.expiresAt = e2.expiresAt ?? null, this.credentialStore = new ei({ accessToken: e2.accessToken, refreshToken: e2.refreshToken ?? "", expiresAt: e2.expiresAt ?? 0 }), this.expiresAt && this.refreshToken && this.scheduleProactiveRotation()) : (this.credentialStore = new Zt(e2.credentialsPath ?? Ne(xe(), ".claude", ".credentials.json")), this.initialLoad = this.loadFromStore().catch(() => {})), this.tokenRotation = new Nt(this.credentialStore, e2.contextTokensProvider, () => gt());
   }
   close() {
     this.tokenRotation.close();
   }
-  async generate(t2) {
-    let e2 = [];
-    for await (let i2 of this.stream(t2))
-      e2.push(i2);
-    return this.assembleResponse(e2, t2.model);
+  async generate(e2) {
+    let t2 = [];
+    for await (let i2 of this.stream(e2))
+      t2.push(i2);
+    return this.assembleResponse(t2, e2.model);
   }
-  async* stream(t2) {
-    this.keepalive.checkRewriteGuard(t2.model), await this.ensureAuth();
-    let e2, i2 = this.buildRequestBody(t2), s2 = this.buildHeaders(t2);
-    this.keepalive.notifyRealRequestStart(t2.model, i2, s2), this.$ = null;
+  async* stream(e2) {
+    this.keepalive.checkRewriteGuard(e2.model), await this.ensureAuth();
+    let t2, i2 = this.buildRequestBody(e2), s2 = this.buildHeaders(e2);
+    this.keepalive.notifyRealRequestStart(e2.model, i2, s2), this.$ = null;
     for (let r2 = 1;r2 <= this.maxRetries + 1; r2++) {
-      if (t2.signal?.aborted)
-        throw new q("Aborted");
+      if (e2.signal?.aborted)
+        throw new Le("Aborted");
       try {
-        return yield* this.doStreamRequest(i2, s2, t2.signal), void (this.$ && (this.keepalive.notifyRealRequestComplete(this.$), this.$ = null));
+        return yield* this.doStreamRequest(i2, s2, e2.signal), void (this.$ && (this.keepalive.notifyRealRequestComplete(this.$), this.$ = null));
       } catch (i3) {
-        if (e2 = i3, i3 instanceof G) {
+        if (t2 = i3, i3 instanceof He) {
           if (i3.status === 401 && r2 <= this.maxRetries) {
-            await this.handleAuth401(), s2.Authorization = `Bearer ${this.accessToken}`;
+            await this.handleAuth401(), s2[f] = `Bearer ${this.accessToken}`;
             continue;
           }
           if (i3.status === 429)
-            throw i3 instanceof Q ? i3 : new Q("Rate limited", this.lastRateLimitInfo, 429, i3);
+            throw i3 instanceof Fe ? i3 : new Fe("Rate limited", this.lastRateLimitInfo, 429, i3);
           if (i3.status >= 500 && r2 <= this.maxRetries) {
-            let e3 = this.getRetryDelay(r2, this.lastRateLimitInfo.retryAfter?.toString() ?? null);
-            await this.sleep(e3, t2.signal);
+            let t3 = this.getRetryDelay(r2, this.lastRateLimitInfo.retryAfter?.toString() ?? null);
+            await this.sleep(t3, e2.signal);
             continue;
           }
         }
         throw i3;
       }
     }
-    throw e2;
+    throw t2;
   }
   getRateLimitInfo() {
     return this.lastRateLimitInfo;
   }
-  async* doStreamRequest(t2, e2, i2) {
-    let r2 = new AbortController, n2 = setTimeout(() => r2.abort(), this.timeout);
-    i2 && i2.addEventListener("abort", () => r2.abort(), { once: true });
-    let a2, o2 = Date.now(), l2 = JSON.stringify(t2);
-    if (l2.length > 19922944) {
-      let e3 = (l2.length / 1024 / 1024).toFixed(1);
+  async* doStreamRequest(e2, t2, i2) {
+    let s2 = new AbortController, r2 = setTimeout(() => s2.abort(), this.timeout);
+    i2 && i2.addEventListener("abort", () => s2.abort(), { once: true });
+    let n2, a2 = Date.now(), o2 = JSON.stringify(e2);
+    if (o2.length > 19922944) {
+      let t3 = (o2.length / 1024 / 1024).toFixed(1);
       try {
-        let { appendFileSync: t3 } = s("fs");
-        t3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] BODY_TOO_LARGE pid=${process.pid} bodyLen=${l2.length} (${e3}MB) \u2014 refusing to send (would 413)
+        let { appendFileSync: e3 } = M("fs");
+        e3(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] BODY_TOO_LARGE pid=${process.pid} bodyLen=${o2.length} (${t3}MB) \u2014 refusing to send (would 413)
 `);
       } catch {}
-      let i3 = t2.messages?.length ?? 0;
-      throw new Error(`Request body too large: ${e3}MB exceeds the 19MB safety threshold (API hard limit ~20MB). Got ${i3} messages. Run /compact to summarize history, or start a fresh session. If this is unexpected, the consumer's per-image / total-body management may have a gap.`);
+      let i3 = e2.messages?.length ?? 0;
+      throw new Error(`Request body too large: ${t3}MB exceeds the 19MB safety threshold (API hard limit ~20MB). Got ${i3} messages. Run /compact to summarize history, or start a fresh session. If this is unexpected, the consumer's per-image / total-body management may have a gap.`);
     }
     try {
-      let { appendFileSync: i3 } = s("fs");
-      i3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${t2.model} msgs=${t2.messages?.length ?? 0}
+      let { appendFileSync: i3 } = M("fs");
+      i3(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_START pid=${process.pid} model=${e2.model} msgs=${e2.messages?.length ?? 0}
 `);
-      let r3 = t2.tools?.map((t3) => t3.name).join(",") ?? "none", n3 = typeof t2.system == "string" ? t2.system.substring(0, 200) : JSON.stringify(t2.system)?.substring(0, 200);
-      if (i3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(e2).substring(0, 300)} tools=[${r3.substring(0, 500)}] sys=${n3} bodyLen=${l2.length}
+      let s3 = e2.tools?.map((e3) => e3.name).join(",") ?? "none", r3 = typeof e2.system == "string" ? e2.system.substring(0, 200) : JSON.stringify(e2.system)?.substring(0, 200);
+      if (i3(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(t2).substring(0, 300)} tools=[${s3.substring(0, 500)}] sys=${r3} bodyLen=${o2.length}
 `), process.env.CLAUDE_MAX_DUMP_REQUESTS === "1") {
-        let s2 = { ...t2, messages: `[${t2.messages?.length ?? 0} messages]`, system: `[${typeof t2.system == "string" ? t2.system.length : "array"}]` };
-        i3(J(j(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: e2, body: s2 }) + `
+        let s4 = { ...e2, messages: `[${e2.messages?.length ?? 0} messages]`, system: `[${typeof e2.system == "string" ? e2.system.length : "array"}]` };
+        i3(Ne(xe(), ".claude", "claude-max-request-dump.jsonl"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers: t2, body: s4 }) + `
 `);
       }
-    } catch {}
-    try {
-      a2 = await fetch("https://api.anthropic.com/v1/messages?beta=true", { method: "POST", headers: e2, body: l2, signal: r2.signal });
-    } catch (t3) {
-      clearTimeout(n2);
+      let n3 = true;
       try {
-        let { appendFileSync: e3 } = s("fs");
-        e3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - o2}ms err=${t3.message}
+        let { readFlags: e3 } = (Y(), l2 = x, ((e4, t3, i4, s4) => {
+          if (t3 && typeof t3 == "object" || typeof t3 == "function")
+            for (let i5 of D(t3))
+              !b.call(e4, i5) && i5 !== undefined && v(e4, i5, { get: () => t3[i5], enumerable: !(s4 = S(t3, i5)) || s4.enumerable });
+          return e4;
+        })(v({}, "__esModule", { value: true }), l2));
+        n3 = e3().dump_bodies_full;
+      } catch {
+        n3 = process.env.CLAUDE_DUMP_BODIES_FULL === "1";
+      }
+      if (n3)
+        try {
+          let { mkdirSync: e3, writeFileSync: t3 } = M("fs"), s4 = Ne(xe(), ".claude", "body-dumps");
+          e3(s4, { recursive: true });
+          let r4 = globalThis.__claudeMaxBodyTurn = (globalThis.__claudeMaxBodyTurn ?? 0) + 1, n4 = `${process.pid}-${r4.toString().padStart(4, "0")}-${Date.now()}.json`;
+          t3(Ne(s4, n4), o2), i3(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] BODY_DUMPED pid=${process.pid} turn=${r4} bytes=${o2.length} file=${n4}
+`);
+        } catch (e3) {
+          i3(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] BODY_DUMP_FAILED pid=${process.pid} err=${e3?.message}
+`);
+        }
+    } catch {}
+    var l2;
+    try {
+      n2 = await fetch(`${xt}/v1/messages?beta=true`, { method: "POST", headers: t2, body: o2, signal: s2.signal });
+    } catch (e3) {
+      clearTimeout(r2);
+      try {
+        let { appendFileSync: t3 } = M("fs");
+        t3(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now() - a2}ms err=${e3.message}
 `);
       } catch {}
-      throw new q("Network error", t3);
+      throw new Le("Network error", e3);
     }
-    clearTimeout(n2);
+    clearTimeout(r2);
     try {
-      let { appendFileSync: t3 } = s("fs"), e3 = {};
-      a2.headers.forEach((t4, i4) => {
-        e3[i4] = t4;
+      let { appendFileSync: e3 } = M("fs"), t3 = {};
+      n2.headers.forEach((e4, i4) => {
+        t3[i4] = e4;
       });
-      let i3 = { ts: new Date().toISOString(), pid: process.pid, status: a2.status, statusText: a2.statusText, ttfbMs: Date.now() - o2, headers: e3 };
-      t3(J(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
-`), t3(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${a2.status} ttfb=${Date.now() - o2}ms
+      let i3 = { ts: new Date().toISOString(), pid: process.pid, status: n2.status, statusText: n2.statusText, ttfbMs: Date.now() - a2, headers: t3 };
+      e3(Ne(xe(), ".claude", "claude-max-api-responses.log"), JSON.stringify(i3) + `
+`), e3(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${n2.status} ttfb=${Date.now() - a2}ms
 `);
     } catch {}
-    if (this.lastRateLimitInfo = this.parseRateLimitHeaders(a2.headers), !a2.ok) {
-      let t3 = "";
+    if (this.lastRateLimitInfo = this.parseRateLimitHeaders(n2.headers), !n2.ok) {
+      let e3 = "";
       try {
-        t3 = await a2.text();
+        e3 = await n2.text();
       } catch {}
-      let e3 = a2.headers.get("request-id");
+      let t3 = n2.headers.get("request-id");
       try {
-        let { appendFileSync: i3 } = s("fs"), r3 = {};
-        a2.headers.forEach((t4, e4) => {
-          r3[e4] = t4;
-        }), i3(J(j(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: a2.status, requestId: e3, headers: r3, body: t3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
+        let { appendFileSync: i3 } = M("fs"), s3 = {};
+        n2.headers.forEach((e4, t4) => {
+          s3[t4] = e4;
+        }), i3(Ne(xe(), ".claude", "claude-max-api-responses.log"), JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, type: "ERROR", status: n2.status, requestId: t3, headers: s3, body: e3.slice(0, 5000), rateLimitInfo: this.lastRateLimitInfo }) + `
 `);
       } catch {}
-      throw a2.status === 429 ? new Q(`Rate limited: ${t3}`, this.lastRateLimitInfo, 429) : new G(`API error ${a2.status}: ${t3}`, a2.status, e3);
+      throw n2.status === 429 ? new Fe(`Rate limited: ${e3}`, this.lastRateLimitInfo, 429) : new He(`API error ${n2.status}: ${e3}`, n2.status, t3);
     }
-    if (!a2.body)
-      throw new q("No response body");
-    yield* this.parseSSE(a2.body, i2);
+    if (!n2.body)
+      throw new Le("No response body");
+    yield* this.parseSSE(n2.body, i2);
   }
-  async* parseSSE(t2, e2) {
-    let i2 = new TextDecoder, r2 = t2.getReader(), n2 = "", a2 = new Map, o2 = { inputTokens: 0, outputTokens: 0 }, l2 = null;
+  async* parseSSE(e2, t2) {
+    let i2 = new TextDecoder, s2 = e2.getReader(), r2 = "", n2 = new Map, a2 = { inputTokens: 0, outputTokens: 0 }, o2 = null;
     try {
       for (;; ) {
-        if (e2?.aborted)
-          return void r2.cancel();
-        let { done: t3, value: h2 } = await r2.read();
-        if (t3)
+        if (t2?.aborted)
+          return void s2.cancel();
+        let { done: e3, value: l2 } = await s2.read();
+        if (e3)
           break;
-        n2 += i2.decode(h2, { stream: true });
-        let c2 = n2.split(`
+        r2 += i2.decode(l2, { stream: true });
+        let h2 = r2.split(`
 `);
-        n2 = c2.pop() ?? "";
-        for (let t4 of c2) {
-          if (!t4.startsWith("data: "))
+        r2 = h2.pop() ?? "";
+        for (let e4 of h2) {
+          if (!e4.startsWith("data: "))
             continue;
-          let e3, i3 = t4.slice(6);
+          let t3, i3 = e4.slice(6);
           if (i3 === "[DONE]")
             continue;
           try {
-            e3 = JSON.parse(i3);
+            t3 = JSON.parse(i3);
           } catch {
             continue;
           }
-          let r3 = e3.type;
-          if (r3 === "message_start") {
+          let s3 = t3.type;
+          if (s3 === "message_start") {
             try {
-              let { appendFileSync: t6 } = s("fs"), { join: i4 } = s("path"), { homedir: r4 } = s("os");
-              t6(i4(r4(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] MESSAGE_START: ${JSON.stringify(e3).slice(0, 2000)}
+              let { appendFileSync: e6 } = M("fs"), { join: i4 } = M("path"), { homedir: s4 } = M("os");
+              e6(i4(s4(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] MESSAGE_START: ${JSON.stringify(t3).slice(0, 2000)}
 `);
             } catch {}
-            let t5 = e3.message?.usage;
-            if (t5) {
-              o2 = { inputTokens: t5.input_tokens ?? 0, outputTokens: t5.output_tokens ?? 0, cacheCreationInputTokens: t5.cache_creation_input_tokens, cacheReadInputTokens: t5.cache_read_input_tokens };
+            let e5 = t3.message?.usage;
+            if (e5) {
+              a2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens, cacheReadInputTokens: e5.cache_read_input_tokens };
+              let t4 = e5.cache_creation;
+              t4 && typeof t4 == "object" && (typeof t4.ephemeral_5m_input_tokens == "number" && (a2.cacheCreation5mInputTokens = t4.ephemeral_5m_input_tokens), typeof t4.ephemeral_1h_input_tokens == "number" && (a2.cacheCreation1hInputTokens = t4.ephemeral_1h_input_tokens)), typeof e5.cache_deleted_input_tokens == "number" && (a2.cacheDeletedInputTokens = e5.cache_deleted_input_tokens);
               try {
-                W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(t5)}
+                Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(e5)}
 `);
               } catch {}
             }
             continue;
           }
-          if (r3 === "content_block_start") {
-            let { index: t5, content_block: i4 } = e3;
+          if (s3 === "content_block_start") {
+            let { index: e5, content_block: i4 } = t3;
             if (i4.type === "tool_use") {
-              let e4 = ee(i4.name);
-              a2.set(t5, { type: "tool_use", id: i4.id, name: e4, input: "" }), yield { type: "tool_use_start", id: i4.id, name: e4 };
+              let t4 = zt(i4.name);
+              n2.set(e5, { type: "tool_use", id: i4.id, name: t4, input: "" }), yield { type: "tool_use_start", id: i4.id, name: t4 };
             } else
-              i4.type === "text" ? a2.set(t5, { type: "text", text: "" }) : i4.type === "thinking" && a2.set(t5, { type: "thinking", thinking: "", signature: i4.signature ?? undefined });
+              i4.type === "text" ? n2.set(e5, { type: "text", text: "" }) : i4.type === "thinking" && n2.set(e5, { type: "thinking", thinking: "", signature: i4.signature ?? undefined });
             continue;
           }
-          if (r3 === "content_block_delta") {
-            let t5 = e3.index, i4 = a2.get(t5), s2 = e3.delta;
-            s2.type === "text_delta" && s2.text !== undefined ? (i4 && (i4.text = (i4.text ?? "") + s2.text), s2.text && (yield { type: "text_delta", text: s2.text })) : s2.type === "thinking_delta" && s2.thinking !== undefined ? (i4 && (i4.thinking = (i4.thinking ?? "") + s2.thinking), s2.thinking && (yield { type: "thinking_delta", text: s2.thinking })) : s2.type === "signature_delta" && s2.signature !== undefined ? i4 && (i4.signature = (i4.signature ?? "") + s2.signature) : s2.type === "input_json_delta" && s2.partial_json !== undefined && (i4 && (i4.input = (i4.input ?? "") + s2.partial_json), s2.partial_json && (yield { type: "tool_use_delta", partialInput: s2.partial_json }));
+          if (s3 === "content_block_delta") {
+            let e5 = t3.index, i4 = n2.get(e5), s4 = t3.delta;
+            s4.type === "text_delta" && s4.text !== undefined ? (i4 && (i4.text = (i4.text ?? "") + s4.text), s4.text && (yield { type: "text_delta", text: s4.text })) : s4.type === "thinking_delta" && s4.thinking !== undefined ? (i4 && (i4.thinking = (i4.thinking ?? "") + s4.thinking), s4.thinking && (yield { type: "thinking_delta", text: s4.thinking })) : s4.type === "signature_delta" && s4.signature !== undefined ? i4 && (i4.signature = (i4.signature ?? "") + s4.signature) : s4.type === "input_json_delta" && s4.partial_json !== undefined && (i4 && (i4.input = (i4.input ?? "") + s4.partial_json), s4.partial_json && (yield { type: "tool_use_delta", partialInput: s4.partial_json }));
             continue;
           }
-          if (r3 === "content_block_stop") {
-            let t5 = e3.index, i4 = a2.get(t5);
+          if (s3 === "content_block_stop") {
+            let e5 = t3.index, i4 = n2.get(e5);
             if (i4?.type === "tool_use" && i4.id && i4.name) {
-              let t6 = {};
+              let e6 = {};
               try {
-                t6 = JSON.parse(i4.input ?? "{}");
+                e6 = JSON.parse(i4.input ?? "{}");
               } catch {}
-              yield { type: "tool_use_end", id: i4.id, name: i4.name, input: t6 };
+              yield { type: "tool_use_end", id: i4.id, name: i4.name, input: e6 };
             }
             if (i4?.type === "thinking") {
-              let t6 = e3.signature ?? e3.content_block?.signature;
-              t6 && (i4.signature = t6), yield { type: "thinking_end", signature: i4.signature ?? undefined };
+              let e6 = t3.signature ?? t3.content_block?.signature;
+              e6 && (i4.signature = e6), yield { type: "thinking_end", signature: i4.signature ?? undefined };
             }
             continue;
           }
-          if (r3 === "message_delta") {
-            let t5 = e3.delta;
-            t5?.stop_reason && (l2 = t5.stop_reason);
-            let i4 = e3.usage;
-            i4?.output_tokens && (o2 = { ...o2, outputTokens: i4.output_tokens });
+          if (s3 === "message_delta") {
+            let e5 = t3.delta;
+            e5?.stop_reason && (o2 = e5.stop_reason);
+            let i4 = t3.usage;
+            i4?.output_tokens && (a2 = { ...a2, outputTokens: i4.output_tokens });
             continue;
           }
-          r3 === "message_stop" && (this.$ = o2, yield { type: "message_stop", usage: o2, stopReason: l2 });
+          s3 === "message_stop" && (this.$ = a2, yield { type: "message_stop", usage: a2, stopReason: o2 });
         }
       }
     } finally {
-      r2.releaseLock();
+      s2.releaseLock();
     }
   }
   stopKeepalive() {
     this.keepalive.stop(), this.tokenRotationTimer && (clearTimeout(this.tokenRotationTimer), this.tokenRotationTimer = null);
   }
-  buildHeaders(t2) {
-    let e2 = this.buildBetas(t2);
-    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": e2.join(","), "anthropic-dangerous-direct-browser-access": "true", "x-app": "cli", "User-Agent": `claude-cli/${Vt}`, "X-Claude-Code-Session-Id": this.sessionId };
+  buildHeaders(e2) {
+    let t2 = this.buildBetas(e2);
+    return { [d]: E, [f]: `Bearer ${this.accessToken}`, [y]: Lt, [g]: t2.join(","), [w]: "true", [_]: "cli", [m]: `claude-cli/${Wt}`, [T]: this.sessionId };
   }
-  buildRequestBody(t2) {
-    let e2, i2 = this.computeFingerprint(t2.messages), s2 = `x-anthropic-billing-header: cc_version=${Vt}.${i2}; cc_entrypoint=cli; cch=00000;`;
-    e2 = (typeof t2.system == "string" ? t2.system : Array.isArray(t2.system) ? JSON.stringify(t2.system) : "").includes("x-anthropic-billing-header") ? t2.system : typeof t2.system == "string" ? s2 + `
-` + t2.system : Array.isArray(t2.system) ? [{ type: "text", text: s2 }, ...t2.system] : s2;
-    let r2 = { model: t2.model, messages: t2.messages, max_tokens: Z(t2.model, t2.maxTokens), stream: true, system: e2, metadata: { user_id: JSON.stringify({ device_id: this.deviceId, account_uuid: this.accountUuid, session_id: this.sessionId }) } };
-    if (t2.tools && t2.tools.length > 0) {
-      let { remapped: e3 } = te(t2.tools);
-      if (r2.tools = e3, t2.toolChoice) {
-        let e4 = typeof t2.toolChoice == "string" ? { type: t2.toolChoice } : { ...t2.toolChoice };
-        e4.type === "tool" && e4.name && Xt[e4.name] && (e4.name = Xt[e4.name]), r2.tool_choice = e4;
+  buildRequestBody(e2) {
+    let t2, i2 = this.computeFingerprint(e2.messages), s2 = `x-anthropic-billing-header: cc_version=${Wt}.${i2}; cc_entrypoint=cli; cch=00000;`;
+    t2 = (typeof e2.system == "string" ? e2.system : Array.isArray(e2.system) ? JSON.stringify(e2.system) : "").includes("x-anthropic-billing-header") ? e2.system : typeof e2.system == "string" ? s2 + `
+` + e2.system : Array.isArray(e2.system) ? [{ type: "text", text: s2 }, ...e2.system] : s2;
+    let r2 = { model: e2.model, messages: e2.messages, max_tokens: Je(e2.model, e2.maxTokens), stream: true, system: t2, metadata: { user_id: JSON.stringify({ device_id: this.deviceId, account_uuid: this.accountUuid, session_id: this.sessionId }) } };
+    if (e2.tools && e2.tools.length > 0) {
+      let { remapped: t3 } = Gt(e2.tools);
+      if (r2.tools = t3, e2.toolChoice) {
+        let t4 = typeof e2.toolChoice == "string" ? { type: e2.toolChoice } : { ...e2.toolChoice };
+        t4.type === "tool" && t4.name && jt[t4.name] && (t4.name = jt[t4.name]), r2.tool_choice = t4;
       }
     }
-    t2.caching !== false && this.addCacheMarkers(r2);
-    let n2 = t2.model.toLowerCase(), a2 = n2.includes("opus-4-6") || n2.includes("sonnet-4-6") || n2.includes("opus-4-7") || n2.includes("sonnet-4-7"), o2 = t2.thinking?.type === "disabled";
-    return !o2 && a2 ? r2.thinking = { type: "adaptive" } : t2.thinking?.type === "enabled" && (r2.thinking = { type: "enabled", budget_tokens: t2.thinking.budgetTokens }), !(!o2 && (a2 || t2.thinking?.type === "enabled")) && t2.temperature !== undefined && (r2.temperature = t2.temperature), t2.topP !== undefined && (r2.top_p = t2.topP), t2.effort && a2 && (r2.output_config = { effort: t2.effort }), t2.stopSequences?.length && (r2.stop_sequences = t2.stopSequences), t2.fast && (r2.speed = "fast"), r2;
+    e2.caching !== false && this.addCacheMarkers(r2);
+    let n2 = e2.model.toLowerCase(), a2 = n2.includes("opus-4-6") || n2.includes("sonnet-4-6") || n2.includes("opus-4-7") || n2.includes("sonnet-4-7"), o2 = e2.thinking?.type === "disabled";
+    return !o2 && a2 ? r2.thinking = { type: "adaptive" } : e2.thinking?.type === "enabled" && (r2.thinking = { type: "enabled", budget_tokens: e2.thinking.budgetTokens }), !(!o2 && (a2 || e2.thinking?.type === "enabled")) && e2.temperature !== undefined && (r2.temperature = e2.temperature), e2.topP !== undefined && (r2.top_p = e2.topP), e2.effort && a2 && (r2.output_config = { effort: e2.effort }), e2.stopSequences?.length && (r2.stop_sequences = e2.stopSequences), e2.fast && (r2.speed = "fast"), r2;
   }
-  addCacheMarkers(t2) {
-    let e2 = { cache_control: { type: "ephemeral", ttl: "1h" } }, i2 = t2.system;
+  addCacheMarkers(e2) {
+    let t2 = { cache_control: { type: "ephemeral", ttl: "1h" } }, i2 = e2.system;
     if (typeof i2 == "string")
-      t2.system = [{ type: "text", text: i2, ...e2 }];
+      e2.system = [{ type: "text", text: i2, ...t2 }];
     else if (Array.isArray(i2)) {
-      let t3 = i2;
-      t3.length > 0 && (t3[t3.length - 1] = { ...t3[t3.length - 1], ...e2 });
+      let e3 = i2;
+      e3.length > 0 && (e3[e3.length - 1] = { ...e3[e3.length - 1], ...t2 });
     }
-    let s2 = t2.tools;
-    s2 && s2.length > 0 && (s2[s2.length - 1] = { ...s2[s2.length - 1], ...e2 });
-    let r2 = t2.messages;
+    let s2 = e2.tools;
+    s2 && s2.length > 0 && (s2[s2.length - 1] = { ...s2[s2.length - 1], ...t2 });
+    let r2 = e2.messages;
     if (r2.length === 0)
       return;
     let n2 = r2[r2.length - 1];
     if (typeof n2.content == "string")
-      n2.content = [{ type: "text", text: n2.content, ...e2 }];
+      n2.content = [{ type: "text", text: n2.content, ...t2 }];
     else if (Array.isArray(n2.content) && n2.content.length > 0) {
-      let t3 = n2.content[n2.content.length - 1];
-      n2.content[n2.content.length - 1] = { ...t3, ...e2 };
+      let e3 = n2.content[n2.content.length - 1];
+      n2.content[n2.content.length - 1] = { ...e3, ...t2 };
     }
   }
-  buildBetas(t2) {
-    let e2 = [], i2 = t2.model.toLowerCase().includes("haiku");
-    return i2 || e2.push("claude-code-20250219"), e2.push("oauth-2025-04-20"), /\[1m\]/i.test(t2.model) && e2.push("context-1m-2025-08-07"), !i2 && t2.thinking?.type !== "disabled" && e2.push("interleaved-thinking-2025-05-14"), t2.effort && e2.push("effort-2025-11-24"), t2.fast && e2.push("fast-mode-2026-02-01"), i2 || e2.push("context-management-2025-06-27"), e2.push("task-budgets-2026-03-13"), e2.push("redact-thinking-2026-02-12"), e2.push("prompt-caching-scope-2026-01-05"), e2.push("fine-grained-tool-streaming-2025-05-14"), t2.extraBetas && e2.push(...t2.extraBetas), e2;
+  buildBetas(e2) {
+    let t2 = [], i2 = e2.model.toLowerCase().includes("haiku");
+    return i2 || t2.push("claude-code-20250219"), t2.push("oauth-2025-04-20"), /\[1m\]/i.test(e2.model) && t2.push("context-1m-2025-08-07"), !i2 && e2.thinking?.type !== "disabled" && t2.push("interleaved-thinking-2025-05-14"), e2.effort && t2.push("effort-2025-11-24"), e2.fast && t2.push("fast-mode-2026-02-01"), i2 || t2.push("context-management-2025-06-27"), t2.push("task-budgets-2026-03-13"), t2.push("redact-thinking-2026-02-12"), t2.push("prompt-caching-scope-2026-01-05"), t2.push("fine-grained-tool-streaming-2025-05-14"), e2.extraBetas && t2.push(...e2.extraBetas), t2;
   }
   async ensureAuth() {
     if ((await this.tokenRotation.checkPending()).action === "apply-now" && (this.accessToken = null, this.refreshToken = null, this.expiresAt = 0), this.accessToken && this.credentialStore.hasChanged)
       try {
         if (await this.credentialStore.hasChanged()) {
           try {
-            let t2 = Nt(this.accessToken);
-            W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${t2} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token
+            let e2 = vt(this.accessToken);
+            Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${e2} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token
 `);
           } catch {}
           this.accessToken = null, this.refreshToken = null, this.expiresAt = 0;
         }
-      } catch (t2) {
+      } catch (e2) {
         try {
-          W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_MTIME_CHECK_FAILED pid=${process.pid} error=${t2?.message ?? String(t2)}
+          Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_MTIME_CHECK_FAILED pid=${process.pid} error=${e2?.message ?? String(e2)}
 `);
         } catch {}
       }
@@ -45397,27 +46564,27 @@ var ne = class {
     this.credentialStore.hasChanged && await this.credentialStore.hasChanged() && await this.loadFromStore(), (!this.accessToken || this.isTokenExpired()) && (!this.accessToken && (await this.loadFromStore(), this.accessToken && !this.isTokenExpired()) || (this.tokenRotation.hasPending() && this.isTokenExpired() && await this.tokenRotation.applyPending("forced-expired", "old-token-expired"), this.accessToken && this.isTokenExpired() && await this.refreshTokenWithTripleCheck()));
   }
   async loadFromStore() {
-    let t2 = this.accessToken, e2 = await this.credentialStore.read();
-    if (!e2?.accessToken)
-      throw new z('No OAuth tokens found. Run "claude login" first or provide credentials.');
-    this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, this.expiresAt = e2.expiresAt, !this.tokenIssuedAt && this.expiresAt && (this.tokenIssuedAt = Date.now()), this.scheduleProactiveRotation();
+    let e2 = this.accessToken, t2 = await this.credentialStore.read();
+    if (!t2?.accessToken)
+      throw new Pe('No OAuth tokens found. Run "claude login" first or provide credentials.');
+    this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, !this.tokenIssuedAt && this.expiresAt && (this.tokenIssuedAt = Date.now()), this.scheduleProactiveRotation();
     try {
-      let i2 = Nt(e2.accessToken);
-      if (t2)
-        if (t2 !== e2.accessToken) {
-          let e3 = Nt(t2);
-          W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${e3} newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
+      let i2 = vt(t2.accessToken);
+      if (e2)
+        if (e2 !== t2.accessToken) {
+          let t3 = vt(e2);
+          Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${t3} newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
 `);
         } else
-          W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=reload hint=${i2}
+          Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=reload hint=${i2}
 `);
       else
-        W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
+        Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${i2} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}
 `);
     } catch {}
   }
   isTokenExpired() {
-    return !!this.expiresAt && Date.now() + jt >= this.expiresAt;
+    return !!this.expiresAt && Date.now() + Ht >= this.expiresAt;
   }
   async forceRefreshToken() {
     if (this.dbg("FORCE REFRESH requested by caller"), this.initialLoad && await this.initialLoad, !this.refreshToken)
@@ -45427,26 +46594,26 @@ var ne = class {
     this.clearRefreshCooldown(), this.lastRefreshAttemptAt = 0;
     try {
       return await this.doTokenRefresh(true), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.emitTokenStatus("rotated", "Token force-refreshed successfully"), this.scheduleProactiveRotation(), true;
-    } catch (t2) {
-      let e2 = t2?.message ?? String(t2);
-      return this.dbg(`FORCE REFRESH FAILED: ${e2}`), this.emitTokenStatus("warning", `Force refresh failed: ${e2}`), false;
+    } catch (e2) {
+      let t2 = e2?.message ?? String(e2);
+      return this.dbg(`FORCE REFRESH FAILED: ${t2}`), this.emitTokenStatus("warning", `Force refresh failed: ${t2}`), false;
     }
   }
   async forceReLogin() {
     this.initialLoad && await this.initialLoad, this.dbg("FORCE RE-LOGIN requested \u2014 opening browser OAuth flow"), this.emitTokenStatus("critical", "Initiating browser re-login \u2014 refresh token may be dead");
     try {
-      let { oauthLogin: t2 } = await Promise.resolve().then(() => (I(), r)), e2 = this.credentialStore instanceof ae ? this.credentialStore.path : J(j(), ".claude", ".credentials.json"), i2 = await t2({ credentialsPath: e2 });
+      let { oauthLogin: e2 } = await Promise.resolve().then(() => (ke(), Q)), t2 = this.credentialStore instanceof Zt ? this.credentialStore.path : Ne(xe(), ".claude", ".credentials.json"), i2 = await e2({ credentialsPath: t2 });
       return this.accessToken = i2.accessToken, this.refreshToken = i2.refreshToken, this.expiresAt = i2.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.emitTokenStatus("rotated", "Re-login successful \u2014 fresh tokens"), this.scheduleProactiveRotation(), this.dbg(`RE-LOGIN SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()}`), true;
-    } catch (t2) {
-      let e2 = t2?.message ?? String(t2);
-      return this.dbg(`RE-LOGIN FAILED: ${e2}`), this.emitTokenStatus("expired", `Re-login failed: ${e2}`), false;
+    } catch (e2) {
+      let t2 = e2?.message ?? String(e2);
+      return this.dbg(`RE-LOGIN FAILED: ${t2}`), this.emitTokenStatus("expired", `Re-login failed: ${t2}`), false;
     }
   }
   getTokenHealth() {
     if (!this.expiresAt)
       return { expiresAt: null, expiresInMs: 0, lifetimePct: 0, failedRefreshes: this.proactiveRefreshFailures, status: "unknown" };
-    let t2, e2 = Date.now(), i2 = this.expiresAt - e2, s2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? Math.max(0, i2 / s2) : 0;
-    return t2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < qt ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: t2 };
+    let e2, t2 = Date.now(), i2 = this.expiresAt - t2, s2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? Math.max(0, i2 / s2) : 0;
+    return e2 = i2 <= 0 ? "expired" : r2 < 0.1 ? "critical" : r2 < Ft ? "warning" : "healthy", { expiresAt: this.expiresAt, expiresInMs: i2, lifetimePct: r2, failedRefreshes: this.proactiveRefreshFailures, status: e2 };
   }
   async getTokenHealthAsync() {
     return this.initialLoad && await this.initialLoad, this.getTokenHealth();
@@ -45454,151 +46621,151 @@ var ne = class {
   scheduleProactiveRotation() {
     if (this.tokenRotationTimer && (clearTimeout(this.tokenRotationTimer), this.tokenRotationTimer = null), !this.expiresAt || !this.refreshToken)
       return;
-    let t2 = Date.now(), e2 = this.expiresAt - t2;
-    if (e2 <= 0)
+    let e2 = Date.now(), t2 = this.expiresAt - e2;
+    if (t2 <= 0)
       return void this.emitTokenStatus("expired", "Token has expired");
-    let i2 = Math.max(0.8 * e2, zt), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, e2 - jt);
+    let i2 = Math.max(0.8 * t2, Ut), s2 = Math.floor(60000 * Math.random()), r2 = Math.min(i2 + s2, t2 - Ht);
     if (r2 <= 0)
       return this.dbg(`proactive rotation: delay=${r2}ms <= 0, scheduling emergency refresh in 30s`), void (this.tokenRotationTimer || (this.tokenRotationTimer = setTimeout(() => {
         this.tokenRotationTimer = null, this.proactiveRefresh();
       }, 30000), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && ("unref" in this.tokenRotationTimer) && this.tokenRotationTimer.unref()));
-    let n2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * e2, a2 = n2 > 0 ? e2 / n2 : 1;
-    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < qt && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(e2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
+    let n2 = this.tokenIssuedAt > 0 ? this.expiresAt - this.tokenIssuedAt : 2 * t2, a2 = n2 > 0 ? t2 / n2 : 1;
+    a2 < 0.1 && this.proactiveRefreshFailures > 0 ? (this.dbg(`\u26A0\uFE0F CRITICAL: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("critical", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)) : a2 < Ft && this.proactiveRefreshFailures > 0 && (this.dbg(`\u26A0 WARNING: token ${Math.round(100 * a2)}% life left, ${this.proactiveRefreshFailures} failed refreshes`), this.emitTokenStatus("warning", `Token ${Math.round(100 * a2)}% life remaining, ${this.proactiveRefreshFailures} refresh failures`)), this.dbg(`proactive rotation scheduled in ${Math.round(r2 / 1000)}s (expires in ${Math.round(t2 / 1000)}s, ${Math.round(100 * a2)}% life, failures=${this.proactiveRefreshFailures})`), this.tokenRotationTimer = setTimeout(() => {
       this.tokenRotationTimer = null, this.proactiveRefresh();
     }, r2), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
   }
   async proactiveRefresh() {
     if (this.isRefreshOnCooldown()) {
       try {
-        let t3 = await this.credentialStore.read();
-        if (t3 && !(Date.now() + jt >= t3.expiresAt)) {
-          let e3 = t3.expiresAt - Date.now();
-          if (e3 >= Gt)
-            return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(e3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(e3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
-          this.dbg(`proactive refresh: disk token has only ${Math.round(e3 / 60000)}min left (need ${Math.round(20)}min) \u2014 waiting for cooldown`);
+        let e3 = await this.credentialStore.read();
+        if (e3 && !(Date.now() + Ht >= e3.expiresAt)) {
+          let t3 = e3.expiresAt - Date.now();
+          if (t3 >= Bt)
+            return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive refresh: picked up fresh token during cooldown (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
+          this.dbg(`proactive refresh: disk token has only ${Math.round(t3 / 60000)}min left (need ${Math.round(20)}min) \u2014 waiting for cooldown`);
         }
       } catch {}
       if (this.dbg("proactive refresh skipped: global cooldown active, no fresh token found"), !this.tokenRotationTimer) {
-        let t3 = Math.max(zt, 60000);
+        let e3 = Math.max(Ut, 60000);
         this.tokenRotationTimer = setTimeout(() => {
           this.tokenRotationTimer = null, this.proactiveRefresh();
-        }, t3), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
+        }, e3), this.tokenRotationTimer && typeof this.tokenRotationTimer == "object" && "unref" in this.tokenRotationTimer && this.tokenRotationTimer.unref();
       }
       return;
     }
-    let t2 = Date.now();
-    if (t2 - this.lastRefreshAttemptAt < zt)
+    let e2 = Date.now();
+    if (e2 - this.lastRefreshAttemptAt < Ut)
       return void this.dbg("proactive refresh skipped: too recent");
-    this.lastRefreshAttemptAt = t2, this.dbg("proactive rotation: refreshing token silently...");
-    let e2 = await se();
-    if (!e2) {
+    this.lastRefreshAttemptAt = e2, this.dbg("proactive rotation: refreshing token silently...");
+    let t2 = await Qt();
+    if (!t2) {
       this.dbg("proactive rotation: lock unavailable (another PID refreshing) \u2014 polling disk");
-      let t3 = await re(this.credentialStore, 45000, Gt);
-      if (t3) {
-        this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0;
-        let e3 = t3.expiresAt - Date.now();
-        this.dbg(`proactive rotation: picked up fresh token from disk (${Math.round(e3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(e3 / 60000)}min remaining)`);
+      let e3 = await Vt(this.credentialStore, 45000, Bt);
+      if (e3) {
+        this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0;
+        let t3 = e3.expiresAt - Date.now();
+        this.dbg(`proactive rotation: picked up fresh token from disk (${Math.round(t3 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t3 / 60000)}min remaining)`);
       } else
         this.dbg("proactive rotation: lock unavailable and no fresh token appeared \u2014 will retry on next schedule");
       return void this.scheduleProactiveRotation();
     }
     try {
-      let t3 = await this.credentialStore.read();
-      if (t3 && !(Date.now() + jt >= t3.expiresAt)) {
-        let e4 = t3.expiresAt - Date.now();
-        if (e4 >= Gt)
-          return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(e4 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(e4 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
+      let e3 = await this.credentialStore.read();
+      if (e3 && !(Date.now() + Ht >= e3.expiresAt)) {
+        let t4 = e3.expiresAt - Date.now();
+        if (t4 >= Bt)
+          return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.tokenIssuedAt = Date.now(), this.proactiveRefreshFailures = 0, this.dbg(`proactive rotation: picked up fresh token from lock winner (${Math.round(t4 / 60000)}min remaining)`), this.emitTokenStatus("rotated", `Token refreshed by another process (${Math.round(t4 / 60000)}min remaining)`), void this.scheduleProactiveRotation();
       }
-      let e3 = this.expiresAt ?? 0;
+      let t3 = this.expiresAt ?? 0;
       await this.doTokenRefresh(true), this.proactiveRefreshFailures = 0, this.refreshConsecutive429s = 0, this.clearRefreshCooldown(), this.tokenIssuedAt = Date.now();
-      let i2 = (this.expiresAt ?? 0) - Date.now(), s2 = e3 > 0 ? e3 - (this.tokenIssuedAt - 1000) : 2 * i2;
+      let i2 = (this.expiresAt ?? 0) - Date.now(), s2 = t3 > 0 ? t3 - (this.tokenIssuedAt - 1000) : 2 * i2;
       i2 > 0 && i2 < 0.5 * s2 && this.dbg(`\u26A0\uFE0F SHRINKING TOKEN: new ${Math.round(i2 / 60000)}min vs prev ${Math.round(s2 / 60000)}min \u2014 backing off rotation`), this.dbg(`proactive rotation SUCCESS \u2014 new token expires at ${new Date(this.expiresAt).toISOString()} (${Math.round(i2 / 60000)}min lifetime)`), this.emitTokenStatus("rotated", `Token rotated silently \u2014 expires ${new Date(this.expiresAt).toISOString()}`), this.scheduleProactiveRotation();
-    } catch (t3) {
+    } catch (e3) {
       this.proactiveRefreshFailures++;
-      let e3 = t3?.message ?? String(t3);
-      if (this.dbg(`proactive rotation FAILED (#${this.proactiveRefreshFailures}): ${e3}`), e3.includes("429") || e3.includes("rate limit")) {
+      let t3 = e3?.message ?? String(e3);
+      if (this.dbg(`proactive rotation FAILED (#${this.proactiveRefreshFailures}): ${t3}`), t3.includes("429") || t3.includes("rate limit")) {
         this.refreshConsecutive429s++;
-        let t4 = Math.min(zt * Math.pow(2, this.refreshConsecutive429s), Yt);
-        this.setRefreshCooldown(t4), this.dbg(`proactive rotation: 429 cooldown ${Math.round(t4 / 1000)}s (attempt #${this.refreshConsecutive429s})`);
+        let e4 = Math.min(Ut * Math.pow(2, this.refreshConsecutive429s), Jt);
+        this.setRefreshCooldown(e4), this.dbg(`proactive rotation: 429 cooldown ${Math.round(e4 / 1000)}s (attempt #${this.refreshConsecutive429s})`);
       }
       let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = this.tokenIssuedAt > 0 && this.expiresAt ? this.expiresAt - this.tokenIssuedAt : 2 * i2, r2 = s2 > 0 ? i2 / s2 : 0;
-      i2 <= jt ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${e3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}. Consider forceReLogin()`) : r2 < qt && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${e3}`), this.expiresAt && this.expiresAt > Date.now() + jt ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
+      i2 <= Ht ? this.emitTokenStatus("expired", `Token expired after ${this.proactiveRefreshFailures} failed refresh attempts: ${t3}`) : r2 < 0.1 ? this.emitTokenStatus("critical", `CRITICAL: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}. Consider forceReLogin()`) : r2 < Ft && this.emitTokenStatus("warning", `WARNING: ${Math.round(i2 / 60000)}min left, ${this.proactiveRefreshFailures} failures. Last: ${t3}`), this.expiresAt && this.expiresAt > Date.now() + Ht ? this.scheduleProactiveRotation() : (this.dbg("proactive rotation: token nearly expired \u2014 emitting expired status"), this.emitTokenStatus("expired", `Token expired \u2014 refresh failed ${this.proactiveRefreshFailures} times. Call forceReLogin() to recover.`));
     } finally {
-      e2 && e2();
+      t2 && t2();
     }
   }
-  emitTokenStatus(t2, e2) {
-    let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = { level: t2, message: e2, expiresInMs: i2, failedAttempts: this.proactiveRefreshFailures, needsReLogin: t2 === "expired" || t2 === "critical" && this.proactiveRefreshFailures >= 3 }, r2 = t2 === "rotated" ? "\u2705" : t2 === "warning" ? "\u26A0\uFE0F" : t2 === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
-    this.dbg(`${r2} [${t2.toUpperCase()}] ${e2} (expires in ${Math.round(i2 / 60000)}min, failures=${this.proactiveRefreshFailures})`), this.onTokenStatus?.(s2);
+  emitTokenStatus(e2, t2) {
+    let i2 = this.expiresAt ? this.expiresAt - Date.now() : 0, s2 = { level: e2, message: t2, expiresInMs: i2, failedAttempts: this.proactiveRefreshFailures, needsReLogin: e2 === "expired" || e2 === "critical" && this.proactiveRefreshFailures >= 3 }, r2 = e2 === "rotated" ? "\u2705" : e2 === "warning" ? "\u26A0\uFE0F" : e2 === "critical" ? "\uD83D\uDD34" : "\uD83D\uDC80";
+    this.dbg(`${r2} [${e2.toUpperCase()}] ${t2} (expires in ${Math.round(i2 / 60000)}min, failures=${this.proactiveRefreshFailures})`), this.onTokenStatus?.(s2);
   }
   isRefreshOnCooldown() {
     try {
-      let t2 = L(Qt, "utf8"), e2 = parseInt(t2.trim());
-      if (Date.now() < e2)
+      let e2 = Se(Kt, "utf8"), t2 = parseInt(e2.trim());
+      if (Date.now() < t2)
         return true;
       try {
-        K(Qt);
+        Ie(Kt);
       } catch {}
     } catch {}
     return false;
   }
-  setRefreshCooldown(t2) {
+  setRefreshCooldown(e2) {
     try {
-      let e2 = J(j(), ".claude");
+      let t2 = Ne(xe(), ".claude");
       try {
-        H(e2, { recursive: true });
+        Oe(t2, { recursive: true });
       } catch {}
-      P(Qt, `${Date.now() + t2}
+      De(Kt, `${Date.now() + e2}
 `);
     } catch {}
   }
   clearRefreshCooldown() {
     try {
-      K(Qt);
+      Ie(Kt);
     } catch {}
     this.refreshConsecutive429s = 0;
   }
-  dbg(t2) {
+  dbg(e2) {
     try {
-      W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${t2}
+      Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${e2}
 `);
     } catch {}
   }
   async refreshTokenWithTripleCheck() {
-    let t2 = await this.credentialStore.read();
-    if (t2 && !(Date.now() + jt >= t2.expiresAt))
-      return this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, void (this.expiresAt = t2.expiresAt);
-    let e2 = await se();
-    if (!e2) {
+    let e2 = await this.credentialStore.read();
+    if (e2 && !(Date.now() + Ht >= e2.expiresAt))
+      return this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, void (this.expiresAt = e2.expiresAt);
+    let t2 = await Qt();
+    if (!t2) {
       this.dbg("refresh: lock unavailable (another PID refreshing) \u2014 polling disk");
-      let t3 = await re(this.credentialStore, 45000, jt);
-      return t3 ? (this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, void this.dbg(`refresh: picked up fresh token from disk (${Math.round((t3.expiresAt - Date.now()) / 60000)}min remaining)`)) : (this.dbg("refresh: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh as last resort"), void await this.doTokenRefresh());
+      let e3 = await Vt(this.credentialStore, 45000, Ht);
+      return e3 ? (this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, void this.dbg(`refresh: picked up fresh token from disk (${Math.round((e3.expiresAt - Date.now()) / 60000)}min remaining)`)) : (this.dbg("refresh: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh as last resort"), void await this.doTokenRefresh());
     }
     try {
-      let t3 = await this.credentialStore.read();
-      if (t3 && !(Date.now() + jt >= t3.expiresAt))
-        return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, void (this.expiresAt = t3.expiresAt);
+      let e3 = await this.credentialStore.read();
+      if (e3 && !(Date.now() + Ht >= e3.expiresAt))
+        return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, void (this.expiresAt = e3.expiresAt);
       await this.doTokenRefresh();
     } finally {
-      e2();
+      t2();
     }
   }
   async handleAuth401() {
-    let t2 = this.accessToken;
-    this.pending401 && this.lastFailedToken === t2 || (this.lastFailedToken = t2, this.pending401 = (async () => {
-      let e2 = await this.credentialStore.read();
-      if (e2 && e2.accessToken !== t2)
-        return this.accessToken = e2.accessToken, this.refreshToken = e2.refreshToken, this.expiresAt = e2.expiresAt, true;
-      let i2 = await se();
+    let e2 = this.accessToken;
+    this.pending401 && this.lastFailedToken === e2 || (this.lastFailedToken = e2, this.pending401 = (async () => {
+      let t2 = await this.credentialStore.read();
+      if (t2 && t2.accessToken !== e2)
+        return this.accessToken = t2.accessToken, this.refreshToken = t2.refreshToken, this.expiresAt = t2.expiresAt, true;
+      let i2 = await Qt();
       if (!i2) {
         this.dbg("handleAuth401: lock unavailable \u2014 polling disk for fresh token");
-        let e3 = await re(this.credentialStore, 45000, jt);
-        return e3 && e3.accessToken !== t2 ? (this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, this.dbg(`handleAuth401: picked up fresh token from disk (${Math.round((e3.expiresAt - Date.now()) / 60000)}min remaining)`), true) : (this.dbg("handleAuth401: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh"), await this.doTokenRefresh(), true);
+        let t3 = await Vt(this.credentialStore, 45000, Ht);
+        return t3 && t3.accessToken !== e2 ? (this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, this.dbg(`handleAuth401: picked up fresh token from disk (${Math.round((t3.expiresAt - Date.now()) / 60000)}min remaining)`), true) : (this.dbg("handleAuth401: no fresh token from disk after 45s wait \u2014 attempting unlocked refresh"), await this.doTokenRefresh(), true);
       }
       try {
-        let e3 = await this.credentialStore.read();
-        if (e3 && e3.accessToken !== t2 && !(Date.now() + jt >= e3.expiresAt))
-          return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, true;
+        let t3 = await this.credentialStore.read();
+        if (t3 && t3.accessToken !== e2 && !(Date.now() + Ht >= t3.expiresAt))
+          return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, true;
         await this.doTokenRefresh();
       } finally {
         i2();
@@ -45608,367 +46775,367 @@ var ne = class {
       this.pending401 = null, this.lastFailedToken = null;
     })), await this.pending401;
   }
-  async doTokenRefresh(t2 = false) {
+  async doTokenRefresh(e2 = false) {
     if (!this.refreshToken)
-      throw new z("Token expired and no refresh token available.");
-    if (this.isRefreshOnCooldown() && !t2) {
-      let t3 = await this.credentialStore.read();
-      if (t3 && !(Date.now() + jt >= t3.expiresAt))
-        return this.accessToken = t3.accessToken, this.refreshToken = t3.refreshToken, this.expiresAt = t3.expiresAt, void this.dbg("refresh skipped (cooldown) \u2014 another process already refreshed");
+      throw new Pe("Token expired and no refresh token available.");
+    if (this.isRefreshOnCooldown() && !e2) {
+      let e3 = await this.credentialStore.read();
+      if (e3 && !(Date.now() + Ht >= e3.expiresAt))
+        return this.accessToken = e3.accessToken, this.refreshToken = e3.refreshToken, this.expiresAt = e3.expiresAt, void this.dbg("refresh skipped (cooldown) \u2014 another process already refreshed");
       if (this.expiresAt && this.expiresAt > Date.now() + 600000)
-        throw new z("Token refresh on cooldown due to rate limiting. Will retry later.");
+        throw new Pe("Token refresh on cooldown due to rate limiting. Will retry later.");
       this.dbg("refresh: ignoring cooldown \u2014 token critically close to expiry");
     }
-    let e2 = [500, 1500, 3000, 5000, 8000], i2 = this.credentialStore.path ?? J(j(), ".claude", ".credentials.json");
+    let t2 = [500, 1500, 3000, 5000, 8000], i2 = this.credentialStore.path ?? Ne(xe(), ".claude", ".credentials.json");
     try {
-      let e3 = U(i2).mtimeMs, s3 = Date.now() - e3;
+      let t3 = Ae(i2).mtimeMs, s3 = Date.now() - t3;
       if (s3 < 60000) {
-        let e4 = await this.credentialStore.read();
-        if (e4 && !(Date.now() + jt >= e4.expiresAt)) {
-          let i3 = e4.expiresAt - Date.now(), r2 = e4.accessToken !== this.accessToken;
-          if (!t2 || r2 && i3 >= Gt)
-            return this.accessToken = e4.accessToken, this.refreshToken = e4.refreshToken, this.expiresAt = e4.expiresAt, this.tokenIssuedAt = Date.now(), this.dbg(`refresh: skipped (mtime fresh ${Math.round(s3 / 1000)}s ago, ${Math.round(i3 / 60000)}min remaining) \u2014 picked up sibling/CLI write`), void this.scheduleProactiveRotation();
+        let t4 = await this.credentialStore.read();
+        if (t4 && !(Date.now() + Ht >= t4.expiresAt)) {
+          let i3 = t4.expiresAt - Date.now(), r2 = t4.accessToken !== this.accessToken;
+          if (!e2 || r2 && i3 >= Bt)
+            return this.accessToken = t4.accessToken, this.refreshToken = t4.refreshToken, this.expiresAt = t4.expiresAt, this.tokenIssuedAt = Date.now(), this.dbg(`refresh: skipped (mtime fresh ${Math.round(s3 / 1000)}s ago, ${Math.round(i3 / 60000)}min remaining) \u2014 picked up sibling/CLI write`), void this.scheduleProactiveRotation();
         }
       }
     } catch {}
     for (let i3 = 0;i3 < 5; i3++) {
       let s3 = await this.credentialStore.read();
-      if (s3 && !(Date.now() + jt >= s3.expiresAt)) {
-        if (!t2)
+      if (s3 && !(Date.now() + Ht >= s3.expiresAt)) {
+        if (!e2)
           return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process already refreshed (attempt ${i3})`);
-        let e3 = s3.expiresAt - Date.now();
-        if (s3.accessToken !== this.accessToken && e3 >= Gt)
-          return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(e3 / 60000)}min remaining) (attempt ${i3})`);
-        s3.accessToken !== this.accessToken ? (this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(e3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
+        let t3 = s3.expiresAt - Date.now();
+        if (s3.accessToken !== this.accessToken && t3 >= Bt)
+          return this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, void this.dbg(`refresh: another process got fresh token (${Math.round(t3 / 60000)}min remaining) (attempt ${i3})`);
+        s3.accessToken !== this.accessToken ? (this.accessToken = s3.accessToken, this.refreshToken = s3.refreshToken, this.expiresAt = s3.expiresAt, this.dbg(`refresh: force=true, disk token different but only ${Math.round(t3 / 60000)}min left \u2014 proceeding to actual refresh (attempt ${i3})`)) : this.dbg(`refresh: force=true, token still same, proceeding to actual refresh (attempt ${i3})`);
       }
-      let r2 = await fetch("https://platform.claude.com/v1/oauth/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: this.refreshToken, client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e" }), signal: AbortSignal.timeout(15000) });
+      let r2 = await fetch(Pt, { method: "POST", headers: { [d]: E }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: this.refreshToken, client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e" }), signal: AbortSignal.timeout(15000) });
       if (r2.ok) {
-        let t3 = await r2.json();
-        this.accessToken = t3.access_token, this.refreshToken = t3.refresh_token ?? this.refreshToken, this.expiresAt = Date.now() + 1000 * t3.expires_in, this.tokenIssuedAt = Date.now();
-        let e3 = await this.credentialStore.read(), i4 = e3?.scopes?.length ? e3.scopes : ["user:file_upload", "user:inference", "user:mcp_servers", "user:profile", "user:sessions:claude_code"];
-        return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK \u2014 expires in ${Math.round(t3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
+        let e3 = await r2.json();
+        this.accessToken = e3.access_token, this.refreshToken = e3.refresh_token ?? this.refreshToken, this.expiresAt = Date.now() + 1000 * e3.expires_in, this.tokenIssuedAt = Date.now();
+        let t3 = await this.credentialStore.read(), i4 = t3?.scopes?.length ? t3.scopes : ["user:file_upload", "user:inference", "user:mcp_servers", "user:profile", "user:sessions:claude_code"];
+        return await this.credentialStore.write({ accessToken: this.accessToken, refreshToken: this.refreshToken, expiresAt: this.expiresAt, scopes: i4 }), this.dbg(`token refreshed OK \u2014 expires in ${Math.round(e3.expires_in / 60)}min at ${new Date(this.expiresAt).toISOString()}`), void this.scheduleProactiveRotation();
       }
       if (r2.status === 429) {
-        let t3 = Math.min(60000, Yt);
-        throw this.setRefreshCooldown(t3), this.dbg(`TOKEN_REFRESH_RETRY status=429 attempt=${i3 + 1}/5 \u2014 bailing out, cooldown ${t3}ms (per-token rate limit)`), new z("Token refresh rate-limited (429) \u2014 will pickup from disk or retry after cooldown");
+        let e3 = Math.min(60000, Jt);
+        throw this.setRefreshCooldown(e3), this.dbg(`TOKEN_REFRESH_RETRY status=429 attempt=${i3 + 1}/5 \u2014 bailing out, cooldown ${e3}ms (per-token rate limit)`), new Pe("Token refresh rate-limited (429) \u2014 will pickup from disk or retry after cooldown");
       }
       if (r2.status >= 500 && i3 < 4) {
-        let t3 = e2[i3] ?? 8000, s4 = Math.random() * t3 * 0.5;
-        this.dbg(`TOKEN_REFRESH_RETRY status=${r2.status} attempt=${i3 + 1}/5 delay=${Math.round(t3 + s4)}ms`), await new Promise((e3) => setTimeout(e3, t3 + s4));
+        let e3 = t2[i3] ?? 8000, s4 = Math.random() * e3 * 0.5;
+        this.dbg(`TOKEN_REFRESH_RETRY status=${r2.status} attempt=${i3 + 1}/5 delay=${Math.round(e3 + s4)}ms`), await new Promise((t3) => setTimeout(t3, e3 + s4));
         continue;
       }
-      throw new z(`Token refresh failed: ${r2.status} ${r2.statusText}`);
+      throw new Pe(`Token refresh failed: ${r2.status} ${r2.statusText}`);
     }
     let s2 = await this.credentialStore.read();
-    if (!s2 || Date.now() + jt >= s2.expiresAt)
-      throw new z("Token refresh failed after all retries and race recovery");
+    if (!s2 || Date.now() + Ht >= s2.expiresAt)
+      throw new Pe("Token refresh failed after all retries and race recovery");
     this.accessToken = s2.accessToken, this.refreshToken = s2.refreshToken, this.expiresAt = s2.expiresAt;
     try {
-      W(J(j(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
+      Ce(Ne(xe(), ".claude", "claude-max-debug.log"), `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}
 `);
     } catch {}
   }
-  assembleResponse(t2, e2) {
+  assembleResponse(e2, t2) {
     let i2, s2 = [], r2 = [], n2 = [], a2 = { inputTokens: 0, outputTokens: 0 }, o2 = null, l2 = "", h2 = "";
-    for (let e3 of t2)
-      switch (e3.type) {
+    for (let t3 of e2)
+      switch (t3.type) {
         case "text_delta":
-          l2 += e3.text;
+          l2 += t3.text;
           break;
         case "thinking_delta":
-          h2 += e3.text;
+          h2 += t3.text;
           break;
         case "thinking_end":
-          i2 = e3.signature, h2 && (r2.push({ type: "thinking", thinking: h2, signature: i2 }), h2 = "");
-          break;
-        case "tool_use_end":
-          n2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
-          break;
-        case "message_stop":
-          a2 = e3.usage, o2 = e3.stopReason;
-          break;
-        case "error":
-          throw e3.error;
-      }
-    return l2 && s2.push({ type: "text", text: l2 }), h2 && r2.push({ type: "thinking", thinking: h2, signature: i2 }), s2.push(...n2), { content: s2, thinking: r2.length > 0 ? r2 : undefined, toolCalls: n2.length > 0 ? n2 : undefined, usage: a2, stopReason: o2, rateLimitInfo: this.lastRateLimitInfo, model: e2 };
-  }
-  parseRateLimitHeaders(t2) {
-    let e2 = {};
-    if (t2.forEach((t3, i3) => {
-      (i3.includes("ratelimit") || i3.includes("anthropic") || i3.includes("retry") || i3.includes("x-")) && (e2[i3] = t3);
-    }), Object.keys(e2).length > 0)
-      try {
-        let { appendFileSync: t3 } = s("fs"), { join: i3 } = s("path"), { homedir: r3 } = s("os");
-        t3(i3(r3(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] ${JSON.stringify(e2)}
-`);
-      } catch {}
-    let i2 = t2.get("retry-after"), r2 = t2.get("anthropic-ratelimit-unified-reset"), n2 = r2 ? Number(r2) : null, a2 = t2.get("anthropic-ratelimit-unified-5h-utilization"), o2 = t2.get("anthropic-ratelimit-unified-7d-utilization");
-    return { status: t2.get("anthropic-ratelimit-unified-status"), resetAt: Number.isFinite(n2) ? n2 : null, claim: t2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: i2 ? parseFloat(i2) : null, utilization5h: a2 ? parseFloat(a2) : null, utilization7d: o2 ? parseFloat(o2) : null };
-  }
-  getRetryDelay(t2, e2) {
-    if (e2) {
-      let t3 = parseInt(e2, 10);
-      if (!isNaN(t3))
-        return 1000 * t3;
-    }
-    let i2 = Math.min(300 * Math.pow(2, t2 - 1), 5000);
-    return i2 + 0.25 * Math.random() * i2;
-  }
-  sleep(t2, e2) {
-    return new Promise((i2, s2) => {
-      if (e2?.aborted)
-        return void s2(new q("Aborted"));
-      let r2 = setTimeout(i2, t2);
-      e2?.addEventListener("abort", () => {
-        clearTimeout(r2), s2(new q("Aborted"));
-      }, { once: true });
-    });
-  }
-  computeFingerprint(t2) {
-    let e2 = "";
-    for (let i3 of t2) {
-      let t3 = i3;
-      if (t3.role === "user") {
-        if (typeof t3.content == "string") {
-          e2 = t3.content;
-          break;
-        }
-        if (Array.isArray(t3.content)) {
-          for (let i4 of t3.content)
-            if (i4.type === "text") {
-              e2 = i4.text;
-              break;
-            }
-          if (e2)
-            break;
-        }
-      }
-    }
-    let i2 = `59cf53e54c78${[4, 7, 20].map((t3) => e2[t3] || "0").join("")}${Vt}`;
-    return C("sha256").update(i2).digest("hex").slice(0, 3);
-  }
-  readAccountUuid() {
-    try {
-      let t2 = J(j(), ".claude", "claude_code_config.json");
-      return JSON.parse(L(t2, "utf8")).oauthAccount?.accountUuid ?? "";
-    } catch {
-      return "";
-    }
-  }
-};
-var ae = class {
-  constructor(t2) {
-    this.path = t2;
-  }
-  static {
-    i(this, "FileCredentialStore");
-  }
-  lastMtimeMs = 0;
-  async read() {
-    try {
-      let t2 = L(this.path, "utf8");
-      return this.lastMtimeMs = this.getMtime(), JSON.parse(t2).claudeAiOauth ?? null;
-    } catch {
-      return null;
-    }
-  }
-  async write(t2) {
-    let e2 = {};
-    try {
-      e2 = JSON.parse(L(this.path, "utf8"));
-    } catch {}
-    e2.claudeAiOauth = t2;
-    let i2 = J(this.path, "..");
-    try {
-      H(i2, { recursive: true });
-    } catch {}
-    P(this.path, JSON.stringify(e2, null, 2), "utf8"), F(this.path, 384), this.lastMtimeMs = this.getMtime();
-  }
-  async hasChanged() {
-    let t2 = this.getMtime();
-    return t2 !== this.lastMtimeMs && (this.lastMtimeMs = t2, true);
-  }
-  getMtime() {
-    try {
-      return U(this.path).mtimeMs;
-    } catch {
-      return 0;
-    }
-  }
-};
-var oe = class {
-  static {
-    i(this, "MemoryCredentialStore");
-  }
-  credentials;
-  constructor(t2) {
-    this.credentials = { ...t2 };
-  }
-  async read() {
-    return this.credentials.accessToken ? { ...this.credentials } : null;
-  }
-  async write(t2) {
-    this.credentials = { ...t2 };
-  }
-};
-var le = class _Conversation {
-  static {
-    i(this, "Conversation");
-  }
-  sdk;
-  options;
-  S = [];
-  M = { inputTokens: 0, outputTokens: 0 };
-  constructor(t2, e2) {
-    this.sdk = t2, this.options = e2;
-  }
-  get messages() {
-    return this.S;
-  }
-  get totalUsage() {
-    return { ...this.M };
-  }
-  get length() {
-    return this.S.length;
-  }
-  async send(t2, e2) {
-    this.appendUserMessage(t2);
-    let i2 = this.buildGenerateOptions(e2), s2 = await this.sdk.generate(i2);
-    return this.appendAssistantFromResponse(s2), this.accumulateUsage(s2.usage), s2;
-  }
-  async* stream(t2, e2) {
-    this.appendUserMessage(t2);
-    let i2 = this.buildGenerateOptions(e2), s2 = [], r2 = [], n2 = [], a2 = { inputTokens: 0, outputTokens: 0 };
-    for await (let t3 of this.sdk.stream(i2))
-      switch (yield t3, t3.type) {
-        case "text_delta":
-          s2.push(t3.text);
-          break;
-        case "thinking_delta":
-          r2.push(t3.text);
+          i2 = t3.signature, h2 && (r2.push({ type: "thinking", thinking: h2, signature: i2 }), h2 = "");
           break;
         case "tool_use_end":
           n2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
           break;
         case "message_stop":
-          a2 = t3.usage;
+          a2 = t3.usage, o2 = t3.stopReason;
+          break;
+        case "error":
+          throw t3.error;
+      }
+    return l2 && s2.push({ type: "text", text: l2 }), h2 && r2.push({ type: "thinking", thinking: h2, signature: i2 }), s2.push(...n2), { content: s2, thinking: r2.length > 0 ? r2 : undefined, toolCalls: n2.length > 0 ? n2 : undefined, usage: a2, stopReason: o2, rateLimitInfo: this.lastRateLimitInfo, model: t2 };
+  }
+  parseRateLimitHeaders(e2) {
+    let t2 = {};
+    if (e2.forEach((e3, i3) => {
+      (i3.includes("ratelimit") || i3.includes("anthropic") || i3.includes("retry") || i3.includes("x-")) && (t2[i3] = e3);
+    }), Object.keys(t2).length > 0)
+      try {
+        let { appendFileSync: e3 } = M("fs"), { join: i3 } = M("path"), { homedir: s3 } = M("os");
+        e3(i3(s3(), ".claude", "claude-max-headers.log"), `[${new Date().toISOString()}] ${JSON.stringify(t2)}
+`);
+      } catch {}
+    let i2 = e2.get("retry-after"), s2 = e2.get("anthropic-ratelimit-unified-reset"), r2 = s2 ? Number(s2) : null, n2 = e2.get("anthropic-ratelimit-unified-5h-utilization"), a2 = e2.get("anthropic-ratelimit-unified-7d-utilization");
+    return { status: e2.get("anthropic-ratelimit-unified-status"), resetAt: Number.isFinite(r2) ? r2 : null, claim: e2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: i2 ? parseFloat(i2) : null, utilization5h: n2 ? parseFloat(n2) : null, utilization7d: a2 ? parseFloat(a2) : null };
+  }
+  getRetryDelay(e2, t2) {
+    if (t2) {
+      let e3 = parseInt(t2, 10);
+      if (!isNaN(e3))
+        return 1000 * e3;
+    }
+    let i2 = Math.min(300 * Math.pow(2, e2 - 1), 5000);
+    return i2 + 0.25 * Math.random() * i2;
+  }
+  sleep(e2, t2) {
+    return new Promise((i2, s2) => {
+      if (t2?.aborted)
+        return void s2(new Le("Aborted"));
+      let r2 = setTimeout(i2, e2);
+      t2?.addEventListener("abort", () => {
+        clearTimeout(r2), s2(new Le("Aborted"));
+      }, { once: true });
+    });
+  }
+  computeFingerprint(e2) {
+    let t2 = "";
+    for (let i3 of e2) {
+      let e3 = i3;
+      if (e3.role === "user") {
+        if (typeof e3.content == "string") {
+          t2 = e3.content;
+          break;
+        }
+        if (Array.isArray(e3.content)) {
+          for (let i4 of e3.content)
+            if (i4.type === "text") {
+              t2 = i4.text;
+              break;
+            }
+          if (t2)
+            break;
+        }
+      }
+    }
+    let i2 = `59cf53e54c78${[4, 7, 20].map((e3) => t2[e3] || "0").join("")}${Wt}`;
+    return Re("sha256").update(i2).digest("hex").slice(0, 3);
+  }
+  readAccountUuid() {
+    try {
+      let e2 = Ne(xe(), ".claude", "claude_code_config.json");
+      return JSON.parse(Se(e2, "utf8")).oauthAccount?.accountUuid ?? "";
+    } catch {
+      return "";
+    }
+  }
+};
+var Zt = class {
+  constructor(e2) {
+    this.path = e2;
+  }
+  static {
+    O(this, "FileCredentialStore");
+  }
+  lastMtimeMs = 0;
+  async read() {
+    try {
+      let e2 = Se(this.path, "utf8");
+      return this.lastMtimeMs = this.getMtime(), JSON.parse(e2).claudeAiOauth ?? null;
+    } catch {
+      return null;
+    }
+  }
+  async write(e2) {
+    let t2 = {};
+    try {
+      t2 = JSON.parse(Se(this.path, "utf8"));
+    } catch {}
+    t2.claudeAiOauth = e2;
+    let i2 = Ne(this.path, "..");
+    try {
+      Oe(i2, { recursive: true });
+    } catch {}
+    De(this.path, JSON.stringify(t2, null, 2), "utf8"), be(this.path, 384), this.lastMtimeMs = this.getMtime();
+  }
+  async hasChanged() {
+    let e2 = this.getMtime();
+    return e2 !== this.lastMtimeMs && (this.lastMtimeMs = e2, true);
+  }
+  getMtime() {
+    try {
+      return Ae(this.path).mtimeMs;
+    } catch {
+      return 0;
+    }
+  }
+};
+var ei = class {
+  static {
+    O(this, "MemoryCredentialStore");
+  }
+  credentials;
+  constructor(e2) {
+    this.credentials = { ...e2 };
+  }
+  async read() {
+    return this.credentials.accessToken ? { ...this.credentials } : null;
+  }
+  async write(e2) {
+    this.credentials = { ...e2 };
+  }
+};
+var ti = class _Conversation {
+  static {
+    O(this, "Conversation");
+  }
+  sdk;
+  options;
+  S = [];
+  D = { inputTokens: 0, outputTokens: 0 };
+  constructor(e2, t2) {
+    this.sdk = e2, this.options = t2;
+  }
+  get messages() {
+    return this.S;
+  }
+  get totalUsage() {
+    return { ...this.D };
+  }
+  get length() {
+    return this.S.length;
+  }
+  async send(e2, t2) {
+    this.appendUserMessage(e2);
+    let i2 = this.buildGenerateOptions(t2), s2 = await this.sdk.generate(i2);
+    return this.appendAssistantFromResponse(s2), this.accumulateUsage(s2.usage), s2;
+  }
+  async* stream(e2, t2) {
+    this.appendUserMessage(e2);
+    let i2 = this.buildGenerateOptions(t2), s2 = [], r2 = [], n2 = [], a2 = { inputTokens: 0, outputTokens: 0 };
+    for await (let e3 of this.sdk.stream(i2))
+      switch (yield e3, e3.type) {
+        case "text_delta":
+          s2.push(e3.text);
+          break;
+        case "thinking_delta":
+          r2.push(e3.text);
+          break;
+        case "tool_use_end":
+          n2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
+          break;
+        case "message_stop":
+          a2 = e3.usage;
       }
     let o2 = [];
     s2.length > 0 && o2.push({ type: "text", text: s2.join("") });
-    for (let t3 of n2)
-      o2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
+    for (let e3 of n2)
+      o2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
     o2.length > 0 && this.S.push({ role: "assistant", content: o2 }), this.accumulateUsage(a2);
   }
-  addToolResult(t2, e2, i2) {
-    let s2 = { type: "tool_result", tool_use_id: t2, content: e2, ...i2 && { is_error: true } };
+  addToolResult(e2, t2, i2) {
+    let s2 = { type: "tool_result", tool_use_id: e2, content: t2, ...i2 && { is_error: true } };
     this.S.push({ role: "user", content: [s2] });
   }
-  addToolResults(t2) {
-    let e2 = t2.map((t3) => ({ type: "tool_result", tool_use_id: t3.toolUseId, content: t3.content, ...t3.isError && { is_error: true } }));
-    this.S.push({ role: "user", content: e2 });
+  addToolResults(e2) {
+    let t2 = e2.map((e3) => ({ type: "tool_result", tool_use_id: e3.toolUseId, content: e3.content, ...e3.isError && { is_error: true } }));
+    this.S.push({ role: "user", content: t2 });
   }
-  async continue(t2) {
-    let e2 = this.buildGenerateOptions(t2), i2 = await this.sdk.generate(e2);
+  async continue(e2) {
+    let t2 = this.buildGenerateOptions(e2), i2 = await this.sdk.generate(t2);
     return this.appendAssistantFromResponse(i2), this.accumulateUsage(i2.usage), i2;
   }
-  async* continueStream(t2) {
-    let e2 = this.buildGenerateOptions(t2), i2 = [], s2 = [], r2 = { inputTokens: 0, outputTokens: 0 };
-    for await (let t3 of this.sdk.stream(e2))
-      switch (yield t3, t3.type) {
+  async* continueStream(e2) {
+    let t2 = this.buildGenerateOptions(e2), i2 = [], s2 = [], r2 = { inputTokens: 0, outputTokens: 0 };
+    for await (let e3 of this.sdk.stream(t2))
+      switch (yield e3, e3.type) {
         case "text_delta":
-          i2.push(t3.text);
+          i2.push(e3.text);
           break;
         case "tool_use_end":
-          s2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
+          s2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
           break;
         case "message_stop":
-          r2 = t3.usage;
+          r2 = e3.usage;
       }
     let n2 = [];
     i2.length > 0 && n2.push({ type: "text", text: i2.join("") });
-    for (let t3 of s2)
-      n2.push({ type: "tool_use", id: t3.id, name: t3.name, input: t3.input });
+    for (let e3 of s2)
+      n2.push({ type: "tool_use", id: e3.id, name: e3.name, input: e3.input });
     n2.length > 0 && this.S.push({ role: "assistant", content: n2 }), this.accumulateUsage(r2);
   }
-  rewind(t2) {
-    if (t2 < 0 || t2 >= this.S.length)
-      throw new Error(`Invalid rewind index: ${t2}`);
-    return this.S.splice(t2);
+  rewind(e2) {
+    if (e2 < 0 || e2 >= this.S.length)
+      throw new Error(`Invalid rewind index: ${e2}`);
+    return this.S.splice(e2);
   }
   undoLastTurn() {
-    for (let t2 = this.S.length - 1;t2 >= 0; t2--) {
-      let e2 = this.S[t2];
-      if (e2.role === "user") {
-        let i2 = e2.content;
+    for (let e2 = this.S.length - 1;e2 >= 0; e2--) {
+      let t2 = this.S[e2];
+      if (t2.role === "user") {
+        let i2 = t2.content;
         if (!(Array.isArray(i2) && i2.length > 0 && i2[0].type === "tool_result"))
-          return this.rewind(t2);
+          return this.rewind(e2);
       }
     }
     return [];
   }
   branch() {
-    let t2 = new _Conversation(this.sdk, { ...this.options });
-    return t2.S = [...this.S], t2.M = { ...this.M }, t2;
+    let e2 = new _Conversation(this.sdk, { ...this.options });
+    return e2.S = [...this.S], e2.D = { ...this.D }, e2;
   }
   getHistory() {
-    return this.S.map((t2, e2) => {
+    return this.S.map((e2, t2) => {
       let i2 = "";
-      if (typeof t2.content == "string")
-        i2 = t2.content.slice(0, 100);
-      else if (Array.isArray(t2.content)) {
-        let e3 = t2.content[0];
-        e3?.type === "text" ? i2 = e3.text?.slice(0, 100) ?? "" : e3?.type === "tool_result" ? i2 = `[tool_result: ${e3.tool_use_id}]` : e3?.type === "tool_use" && (i2 = `[tool_use: ${e3.name}]`);
+      if (typeof e2.content == "string")
+        i2 = e2.content.slice(0, 100);
+      else if (Array.isArray(e2.content)) {
+        let t3 = e2.content[0];
+        t3?.type === "text" ? i2 = t3.text?.slice(0, 100) ?? "" : t3?.type === "tool_result" ? i2 = `[tool_result: ${t3.tool_use_id}]` : t3?.type === "tool_use" && (i2 = `[tool_use: ${t3.name}]`);
       }
-      return { index: e2, role: t2.role, preview: i2 };
+      return { index: t2, role: e2.role, preview: i2 };
     });
   }
-  appendUserMessage(t2) {
-    this.S.push({ role: "user", content: t2 });
+  appendUserMessage(e2) {
+    this.S.push({ role: "user", content: e2 });
   }
-  appendAssistantFromResponse(t2) {
-    let e2 = [];
-    for (let i2 of t2.content)
-      i2.type === "text" ? e2.push({ type: "text", text: i2.text }) : i2.type === "tool_use" && e2.push({ type: "tool_use", id: i2.id, name: i2.name, input: i2.input });
-    e2.length > 0 && this.S.push({ role: "assistant", content: e2 });
+  appendAssistantFromResponse(e2) {
+    let t2 = [];
+    for (let i2 of e2.content)
+      i2.type === "text" ? t2.push({ type: "text", text: i2.text }) : i2.type === "tool_use" && t2.push({ type: "tool_use", id: i2.id, name: i2.name, input: i2.input });
+    t2.length > 0 && this.S.push({ role: "assistant", content: t2 });
   }
-  buildGenerateOptions(t2) {
-    return { model: this.options.model, messages: [...this.S], system: this.options.system, tools: t2?.tools ?? this.options.tools, toolChoice: t2?.toolChoice ?? this.options.toolChoice, maxTokens: this.options.maxTokens, thinking: this.options.thinking, effort: this.options.effort, fast: this.options.fast, signal: t2?.signal ?? this.options.signal, extraBetas: this.options.extraBetas, caching: this.options.caching };
+  buildGenerateOptions(e2) {
+    return { model: this.options.model, messages: [...this.S], system: this.options.system, tools: e2?.tools ?? this.options.tools, toolChoice: e2?.toolChoice ?? this.options.toolChoice, maxTokens: this.options.maxTokens, thinking: this.options.thinking, effort: this.options.effort, fast: this.options.fast, signal: e2?.signal ?? this.options.signal, extraBetas: this.options.extraBetas, caching: this.options.caching };
   }
-  accumulateUsage(t2) {
-    this.M.inputTokens += t2.inputTokens, this.M.outputTokens += t2.outputTokens, this.M.cacheCreationInputTokens = (this.M.cacheCreationInputTokens ?? 0) + (t2.cacheCreationInputTokens ?? 0), this.M.cacheReadInputTokens = (this.M.cacheReadInputTokens ?? 0) + (t2.cacheReadInputTokens ?? 0);
+  accumulateUsage(e2) {
+    this.D.inputTokens += e2.inputTokens, this.D.outputTokens += e2.outputTokens, this.D.cacheCreationInputTokens = (this.D.cacheCreationInputTokens ?? 0) + (e2.cacheCreationInputTokens ?? 0), this.D.cacheReadInputTokens = (this.D.cacheReadInputTokens ?? 0) + (e2.cacheReadInputTokens ?? 0);
   }
 };
-function fe(t2, e2) {
-  ue(de(t2), { recursive: true });
+function oi(e2, t2) {
+  ri(ni(e2), { recursive: true });
   let i2 = null, s2 = [];
-  for (let t3 of e2) {
-    let e3 = pe(), r2 = { type: t3.role === "user" ? "user" : "assistant", uuid: e3, parentUuid: i2, timestamp: Date.now(), content: t3.content };
-    s2.push(JSON.stringify(r2)), i2 = e3;
+  for (let e3 of t2) {
+    let t3 = ai(), r2 = { type: e3.role === "user" ? "user" : "assistant", uuid: t3, parentUuid: i2, timestamp: Date.now(), content: e3.content };
+    s2.push(JSON.stringify(r2)), i2 = t3;
   }
-  ce(t2, s2.join(`
+  si(e2, s2.join(`
 `) + `
 `, "utf8");
 }
-function me(t2) {
-  let e2 = he(t2, "utf8"), i2 = [];
-  for (let t3 of e2.split(`
+function li(e2) {
+  let t2 = ii(e2, "utf8"), i2 = [];
+  for (let e3 of t2.split(`
 `)) {
-    if (!t3.trim())
+    if (!e3.trim())
       continue;
-    let e3;
+    let t3;
     try {
-      e3 = JSON.parse(t3);
+      t3 = JSON.parse(e3);
     } catch {
       continue;
     }
-    (e3.type === "user" || e3.type === "assistant") && i2.push({ role: e3.type === "user" ? "user" : "assistant", content: e3.content });
+    (t3.type === "user" || t3.type === "assistant") && i2.push({ role: t3.type === "user" ? "user" : "assistant", content: t3.content });
   }
   return i2;
 }
-i(fe, "saveSession"), i(me, "loadSession");
-var ge = class {
+O(oi, "saveSession"), O(li, "loadSession");
+var hi = class {
   static {
-    i(this, "CacheMetricsCollector");
+    O(this, "CacheMetricsCollector");
   }
   samples = [];
   timer = null;
@@ -45981,43 +47148,43 @@ var ge = class {
   regressionMinSamples;
   onSummary;
   onRegression;
-  constructor(t2 = {}) {
-    this.windowMs = t2.windowMs ?? 60000, this.reportIntervalMs = t2.reportIntervalMs ?? this.windowMs, this.regressionThreshold = t2.regressionThreshold ?? 0.7, this.regressionPreviousFloor = t2.regressionPreviousFloor ?? 0.85, this.regressionMinSamples = t2.regressionMinSamples ?? 50, this.onSummary = t2.onSummary, this.onRegression = t2.onRegression, this.reportIntervalMs > 0 && (this.timer = setInterval(() => this.report(), this.reportIntervalMs), typeof this.timer == "object" && ("unref" in this.timer) && this.timer.unref());
+  constructor(e2 = {}) {
+    this.windowMs = e2.windowMs ?? 60000, this.reportIntervalMs = e2.reportIntervalMs ?? this.windowMs, this.regressionThreshold = e2.regressionThreshold ?? 0.7, this.regressionPreviousFloor = e2.regressionPreviousFloor ?? 0.85, this.regressionMinSamples = e2.regressionMinSamples ?? 50, this.onSummary = e2.onSummary, this.onRegression = e2.onRegression, this.reportIntervalMs > 0 && (this.timer = setInterval(() => this.report(), this.reportIntervalMs), typeof this.timer == "object" && ("unref" in this.timer) && this.timer.unref());
   }
-  recordRequest(t2) {
-    this.samples.push({ ts: Date.now(), ...t2 });
+  recordRequest(e2) {
+    this.samples.push({ ts: Date.now(), ...e2 });
   }
   summary() {
     this.prune();
-    let t2 = this.samples.length, e2 = this.samples.filter((t3) => t3.cacheRead > 0).length, i2 = this.samples.filter((t3) => t3.firstCall && t3.cacheRead === 0).length, s2 = this.samples.filter((t3) => t3.kind === "real").length, r2 = this.samples.filter((t3) => t3.kind === "ka").length, n2 = this.samples.reduce((t3, e3) => t3 + e3.cacheRead, 0), a2 = this.samples.reduce((t3, e3) => t3 + e3.cacheWrite, 0), o2 = this.samples.reduce((t3, e3) => t3 + e3.input, 0), l2 = this.samples.reduce((t3, e3) => Math.max(t3, e3.cacheRead), 0), h2 = new Set(this.samples.map((t3) => t3.sysHash).filter(Boolean)).size, c2 = Math.round(0.9 * n2);
-    return { windowMs: this.windowMs, windowEndsAt: new Date().toISOString(), total: t2, hitRate: t2 > 0 ? e2 / t2 : 0, coldStartCount: i2, realCount: s2, kaCount: r2, avgCacheRead: t2 > 0 ? n2 / t2 : 0, avgCacheWrite: t2 > 0 ? a2 / t2 : 0, avgInput: t2 > 0 ? o2 / t2 : 0, maxCacheRead: l2, distinctSysHash: h2, estimatedSavedTokens: c2 };
+    let e2 = this.samples.length, t2 = this.samples.filter((e3) => e3.cacheRead > 0).length, i2 = this.samples.filter((e3) => e3.firstCall && e3.cacheRead === 0).length, s2 = this.samples.filter((e3) => e3.kind === "real").length, r2 = this.samples.filter((e3) => e3.kind === "ka").length, n2 = this.samples.reduce((e3, t3) => e3 + t3.cacheRead, 0), a2 = this.samples.reduce((e3, t3) => e3 + t3.cacheWrite, 0), o2 = this.samples.reduce((e3, t3) => e3 + t3.input, 0), l2 = this.samples.reduce((e3, t3) => Math.max(e3, t3.cacheRead), 0), h2 = new Set(this.samples.map((e3) => e3.sysHash).filter(Boolean)).size, c2 = Math.round(0.9 * n2);
+    return { windowMs: this.windowMs, windowEndsAt: new Date().toISOString(), total: e2, hitRate: e2 > 0 ? t2 / e2 : 0, coldStartCount: i2, realCount: s2, kaCount: r2, avgCacheRead: e2 > 0 ? n2 / e2 : 0, avgCacheWrite: e2 > 0 ? a2 / e2 : 0, avgInput: e2 > 0 ? o2 / e2 : 0, maxCacheRead: l2, distinctSysHash: h2, estimatedSavedTokens: c2 };
   }
   report() {
-    let t2 = this.summary();
-    t2.total !== 0 && (this.onSummary?.(t2), this.previousSampleCount >= this.regressionMinSamples && this.previousHitRate >= this.regressionPreviousFloor && t2.total >= this.regressionMinSamples && t2.hitRate < this.regressionThreshold && this.onRegression?.({ detectedAt: t2.windowEndsAt, windowMs: this.windowMs, currentHitRate: t2.hitRate, previousHitRate: this.previousHitRate, drop: this.previousHitRate - t2.hitRate, reason: `hit_rate dropped from ${this.previousHitRate.toFixed(3)} to ${t2.hitRate.toFixed(3)} (\u0394=${(this.previousHitRate - t2.hitRate).toFixed(3)}); ${t2.total} samples in current window` }), this.previousHitRate = t2.hitRate, this.previousSampleCount = t2.total);
+    let e2 = this.summary();
+    e2.total !== 0 && (this.onSummary?.(e2), this.previousSampleCount >= this.regressionMinSamples && this.previousHitRate >= this.regressionPreviousFloor && e2.total >= this.regressionMinSamples && e2.hitRate < this.regressionThreshold && this.onRegression?.({ detectedAt: e2.windowEndsAt, windowMs: this.windowMs, currentHitRate: e2.hitRate, previousHitRate: this.previousHitRate, drop: this.previousHitRate - e2.hitRate, reason: `hit_rate dropped from ${this.previousHitRate.toFixed(3)} to ${e2.hitRate.toFixed(3)} (\u0394=${(this.previousHitRate - e2.hitRate).toFixed(3)}); ${e2.total} samples in current window` }), this.previousHitRate = e2.hitRate, this.previousSampleCount = e2.total);
   }
   prune() {
-    let t2 = Date.now() - this.windowMs;
-    for (;this.samples.length > 0 && this.samples[0].ts < t2; )
+    let e2 = Date.now() - this.windowMs;
+    for (;this.samples.length > 0 && this.samples[0].ts < e2; )
       this.samples.shift();
   }
   stop() {
     this.timer && (clearInterval(this.timer), this.timer = null);
   }
-  get D() {
+  get O() {
     return this.samples;
   }
 };
-var ke = class {
+var di = class {
   static {
-    i(this, "FileCredentialsProvider");
+    O(this, "FileCredentialsProvider");
   }
   path;
   expiryBufferMs;
   cached = null;
   lastMtimeMs = 0;
-  constructor(t2 = {}) {
-    this.path = t2.path ?? _e(), this.expiryBufferMs = t2.expiryBufferMs ?? 300000;
+  constructor(e2 = {}) {
+    this.path = e2.path ?? fi(), this.expiryBufferMs = e2.expiryBufferMs ?? 300000;
   }
   async getAccessToken() {
     if (this.mtimeChanged() && (this.cached = null), (!this.cached || this.isExpired(this.cached)) && (this.cached = this.readFromDisk()), !this.cached?.accessToken)
@@ -46029,8 +47196,8 @@ var ke = class {
   }
   readFromDisk() {
     try {
-      let t2 = ye(this.path, "utf8");
-      return this.lastMtimeMs = this.getMtime(), JSON.parse(t2).claudeAiOauth ?? null;
+      let e2 = ci(this.path, "utf8");
+      return this.lastMtimeMs = this.getMtime(), JSON.parse(e2).claudeAiOauth ?? null;
     } catch {
       return null;
     }
@@ -46040,75 +47207,75 @@ var ke = class {
   }
   getMtime() {
     try {
-      return we(this.path).mtimeMs;
+      return ui(this.path).mtimeMs;
     } catch {
       return 0;
     }
   }
-  isExpired(t2) {
-    return !!t2.expiresAt && Date.now() + this.expiryBufferMs >= t2.expiresAt;
+  isExpired(e2) {
+    return !!e2.expiresAt && Date.now() + this.expiryBufferMs >= e2.expiresAt;
   }
 };
-function _e() {
-  let t2 = process.env.HOME || process.env.USERPROFILE || "";
-  return `${process.env.CLAUDE_CONFIG_DIR || `${t2}/.claude`}/.credentials.json`;
+function fi() {
+  let e2 = process.env.HOME || process.env.USERPROFILE || "";
+  return `${process.env.CLAUDE_CONFIG_DIR || `${e2}/.claude`}/.credentials.json`;
 }
-i(_e, "defaultCredentialsPath");
-var Te = { error: 0, info: 1, debug: 2 };
-var Ee = class {
+O(fi, "defaultCredentialsPath");
+var pi = { error: 0, info: 1, debug: 2 };
+var mi = class {
   static {
-    i(this, "ConsoleEventEmitter");
+    O(this, "ConsoleEventEmitter");
   }
   minRank;
   format;
   write;
-  constructor(t2 = {}) {
-    this.minRank = Te[t2.minLevel ?? "info"] ?? 1, this.format = t2.format ?? "human", this.write = t2.writeTarget ?? ((t3) => process.stderr.write(t3 + `
+  constructor(e2 = {}) {
+    this.minRank = pi[e2.minLevel ?? "info"] ?? 1, this.format = e2.format ?? "human", this.write = e2.writeTarget ?? ((e3) => process.stderr.write(e3 + `
 `));
   }
-  emit(t2) {
+  emit(e2) {
     try {
-      if ((Te[t2.level] ?? 1) > this.minRank)
+      if ((pi[e2.level] ?? 1) > this.minRank)
         return;
-      let e2 = t2.ts ?? new Date().toISOString();
+      let t2 = e2.ts ?? new Date().toISOString();
       if (this.format === "json")
-        return void this.write(JSON.stringify({ ts: e2, ...t2 }));
-      let i2 = e2.slice(11, 23), s2 = t2.level.toUpperCase().padEnd(5), r2 = t2.kind.padEnd(22), n2 = [];
-      for (let [e3, i3] of Object.entries(t2)) {
-        if (["ts", "level", "kind", "msg"].includes(e3) || i3 == null)
+        return void this.write(JSON.stringify({ ts: t2, ...e2 }));
+      let i2 = t2.slice(11, 23), s2 = e2.level.toUpperCase().padEnd(5), r2 = e2.kind.padEnd(22), n2 = [];
+      for (let [t3, i3] of Object.entries(e2)) {
+        if (["ts", "level", "kind", "msg"].includes(t3) || i3 == null)
           continue;
-        let t3 = typeof i3 == "object" ? JSON.stringify(i3) : String(i3);
-        n2.push(`${e3}=${t3.length > 120 ? t3.slice(0, 117) + "..." : t3}`);
+        let e3 = typeof i3 == "object" ? JSON.stringify(i3) : String(i3);
+        n2.push(`${t3}=${e3.length > 120 ? e3.slice(0, 117) + "..." : e3}`);
       }
-      let a2 = t2.msg ? ` ${t2.msg}` : "", o2 = n2.length ? " " + n2.join(" ") : "";
+      let a2 = e2.msg ? ` ${e2.msg}` : "", o2 = n2.length ? " " + n2.join(" ") : "";
       this.write(`${i2} ${s2} ${r2}${a2}${o2}`);
     } catch {}
   }
 };
-var Re = class {
+var yi = class {
   static {
-    i(this, "NullEventEmitter");
+    O(this, "NullEventEmitter");
   }
-  emit(t2) {}
+  emit(e2) {}
 };
-var $e = class {
+var gi = class {
   static {
-    i(this, "InMemorySessionStore");
+    O(this, "InMemorySessionStore");
   }
   sessions = new Map;
   liveness;
-  constructor(t2 = new ve) {
-    this.liveness = t2;
+  constructor(e2 = new wi) {
+    this.liveness = e2;
   }
-  getOrCreate(t2, e2, i2) {
-    let s2 = this.sessions.get(t2);
+  getOrCreate(e2, t2, i2) {
+    let s2 = this.sessions.get(e2);
     if (s2)
       return s2;
-    let r2 = { sessionId: t2, pid: e2, firstSeenAt: Date.now(), lastRequestAt: Date.now(), engine: i2(), model: null, lastUsage: null };
-    return this.sessions.set(t2, r2), r2;
+    let r2 = { sessionId: e2, pid: t2, firstSeenAt: Date.now(), lastRequestAt: Date.now(), engine: i2(), model: null, lastUsage: null };
+    return this.sessions.set(e2, r2), r2;
   }
-  get(t2) {
-    return this.sessions.get(t2);
+  get(e2) {
+    return this.sessions.get(e2);
   }
   list() {
     return Array.from(this.sessions.values());
@@ -46116,55 +47283,56 @@ var $e = class {
   size() {
     return this.sessions.size;
   }
-  isOwnerAlive(t2) {
-    let e2 = this.sessions.get(t2);
-    return !e2 || e2.pid === null || e2.pid !== 1 && this.liveness.isAlive(e2.pid);
+  isOwnerAlive(e2) {
+    let t2 = this.sessions.get(e2);
+    return !t2 || t2.pid === null || t2.pid !== 1 && this.liveness.isAlive(t2.pid);
   }
   reapDead() {
-    let t2 = [];
-    for (let [e2, i2] of this.sessions.entries())
+    let e2 = [];
+    for (let [t2, i2] of this.sessions.entries())
       if (i2.pid !== null && (i2.pid === 1 || !this.liveness.isAlive(i2.pid))) {
         try {
           i2.engine?.stop?.();
         } catch {}
-        this.sessions.delete(e2), t2.push(e2);
+        this.sessions.delete(t2), e2.push(t2);
       }
-    return t2;
+    return e2;
   }
   stopAll() {
-    for (let t2 of this.sessions.values())
+    for (let e2 of this.sessions.values())
       try {
-        t2.engine?.stop?.();
+        e2.engine?.stop?.();
       } catch {}
     this.sessions.clear();
   }
 };
-var ve = class {
+var wi = class {
   static {
-    i(this, "DefaultLivenessChecker");
+    O(this, "DefaultLivenessChecker");
   }
-  isAlive(t2) {
-    if (!t2 || t2 < 1)
+  isAlive(e2) {
+    if (!e2 || e2 < 1)
       return false;
     try {
-      return process.kill(t2, 0), true;
-    } catch (t3) {
-      return t3.code === "EPERM";
+      return process.kill(e2, 0), true;
+    } catch (e3) {
+      return e3.code === "EPERM";
     }
   }
 };
-var Se = class {
+var _i = class {
   static {
-    i(this, "NativeFetchUpstream");
+    O(this, "NativeFetchUpstream");
   }
-  async fetch(t2, e2) {
-    return fetch(t2, e2);
+  async fetch(e2, t2) {
+    return fetch(e2, t2);
   }
 };
-var Me = { anthropicBaseUrl: "https://api.anthropic.com", kaIntervalSec: undefined, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
-var De = class {
+C(), N();
+var Ti = { anthropicBaseUrl: t, kaIntervalSec: undefined, kaIdleTimeoutSec: 0, kaMinTokens: 2000, kaRewriteWarnIdleSec: 300, kaRewriteWarnTokens: 50000, kaRewriteBlockIdleSec: 0, kaRewriteBlockEnabled: false };
+var Ei = class {
   static {
-    i(this, "ProxyClient");
+    O(this, "ProxyClient");
   }
   config;
   metrics;
@@ -46175,11 +47343,11 @@ var De = class {
   liveness;
   reaperTimer;
   lastRateLimit = { status: null, resetAt: null, claim: null, retryAfter: null, utilization5h: null, utilization7d: null };
-  constructor(t2) {
-    this.config = { ...Me, ...t2.config }, this.credentials = t2.credentialsProvider, this.events = t2.eventEmitter ?? new Ee, this.liveness = t2.livenessChecker ?? new ve, this.store = t2.sessionStore ?? new $e(this.liveness), this.upstream = t2.upstreamFetcher ?? new Se, this.metrics = new ge({ windowMs: 60000, reportIntervalMs: 60000, onSummary: i((t3) => this.events.emit({ level: "info", kind: "CACHE_METRICS_SUMMARY", ...t3 }), "onSummary"), onRegression: i((t3) => this.events.emit({ level: "error", kind: "CACHE_REGRESSION_DETECTED", ...t3 }), "onRegression") }), this.reaperTimer = setInterval(() => {
-      let t3 = this.store.reapDead();
-      for (let e2 of t3)
-        this.events.emit({ level: "info", kind: "SESSION_DEAD", sessionId: e2, reason: "pid_gone" });
+  constructor(e2) {
+    this.config = { ...Ti, ...e2.config }, this.credentials = e2.credentialsProvider, this.events = e2.eventEmitter ?? new mi, this.liveness = e2.livenessChecker ?? new wi, this.store = e2.sessionStore ?? new gi(this.liveness), this.upstream = e2.upstreamFetcher ?? new _i, this.metrics = new hi({ windowMs: 60000, reportIntervalMs: 60000, onSummary: O((e3) => this.events.emit({ level: "info", kind: "CACHE_METRICS_SUMMARY", ...e3 }), "onSummary"), onRegression: O((e3) => this.events.emit({ level: "error", kind: "CACHE_REGRESSION_DETECTED", ...e3 }), "onRegression") }), this.reaperTimer = setInterval(() => {
+      let e3 = this.store.reapDead();
+      for (let t2 of e3)
+        this.events.emit({ level: "info", kind: "SESSION_DEAD", sessionId: t2, reason: "pid_gone" });
     }, 1e4), this.reaperTimer && typeof this.reaperTimer == "object" && "unref" in this.reaperTimer && this.reaperTimer.unref();
   }
   get rateLimitSnapshot() {
@@ -46200,172 +47368,176 @@ var De = class {
   stop() {
     clearInterval(this.reaperTimer), this.metrics.stop(), this.store.stopAll();
   }
-  async handleRequest(t2, e2, i2) {
+  async handleRequest(e2, t2, i2) {
     let s2 = i2.sessionId, r2 = i2.sourcePid ?? null, n2 = this.store.getOrCreate(s2, r2, () => this.createEngine(s2));
     n2.lastRequestAt = Date.now();
-    let a2, o2 = typeof t2 == "string" ? t2 : new TextDecoder().decode(t2), l2 = typeof t2 == "string" ? new TextEncoder().encode(t2).byteLength : t2.byteLength;
+    let a2, o2 = typeof e2 == "string" ? e2 : new TextDecoder().decode(e2), l2 = typeof e2 == "string" ? new TextEncoder().encode(e2).byteLength : e2.byteLength;
     try {
       a2 = JSON.parse(o2);
     } catch {
-      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), Ie(400, { error: "Invalid JSON" });
+      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: "Invalid JSON body" }), vi(400, { error: "Invalid JSON" });
     }
     let h2 = a2.model ?? "unknown";
     n2.model = h2;
     let c2 = {};
-    for (let [t3, i3] of Object.entries(e2)) {
-      let e3 = t3.toLowerCase();
-      be.includes(e3) || (c2[t3] = i3);
+    for (let [e3, i3] of Object.entries(t2)) {
+      let t3 = e3.toLowerCase();
+      ki.includes(t3) || (c2[e3] = i3);
     }
     c2["accept-encoding"] = "identity";
     try {
-      let t3 = await this.credentials.getAccessToken();
-      c2.Authorization = `Bearer ${t3}`;
-    } catch (t3) {
-      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: t3?.message ?? "No OAuth credentials" }), Ie(401, { error: { type: "authentication_error", message: t3?.message ?? "No OAuth credentials" } });
+      let e3 = await this.credentials.getAccessToken();
+      c2[f] = `Bearer ${e3}`;
+    } catch (e3) {
+      return this.events.emit({ level: "error", kind: "TOKEN_NEEDS_RELOGIN", sessionId: s2, msg: e3?.message ?? "No OAuth credentials" }), vi(401, { error: { type: "authentication_error", message: e3?.message ?? "No OAuth credentials" } });
     }
-    let u2 = c2["anthropic-beta"] ?? c2["Anthropic-Beta"] ?? "";
+    let u2 = c2[g] ?? c2["Anthropic-Beta"] ?? "";
     if (!u2.includes("oauth-2025-04-20")) {
-      let t3 = u2 ? u2 + "," : "";
-      c2["anthropic-beta"] = t3 + "oauth-2025-04-20", delete c2["Anthropic-Beta"];
+      let e3 = u2 ? u2 + "," : "";
+      c2[g] = e3 + "oauth-2025-04-20", delete c2["Anthropic-Beta"];
     }
     this.events.emit({ level: "info", kind: "REAL_REQUEST_START", sessionId: s2, model: h2, bodyBytes: l2 }), n2.engine.notifyRealRequestStart(h2, a2, c2);
     try {
       n2.engine.checkRewriteGuard(h2);
-    } catch (t3) {
-      if (t3?.code === "CACHE_REWRITE_BLOCKED")
-        return Ie(429, { error: { type: "cache_rewrite_blocked", message: t3.message } });
-      throw t3;
+    } catch (e3) {
+      if (e3?.code === "CACHE_REWRITE_BLOCKED")
+        return vi(429, { error: { type: "cache_rewrite_blocked", message: e3.message } });
+      throw e3;
     }
-    let d2, p2, f2, m2 = Date.now();
+    let d2, p2, m2, y2 = Date.now();
     try {
       d2 = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, { method: "POST", headers: c2, body: o2, signal: i2.signal });
-    } catch (t3) {
-      return this.handleNetworkError(s2, t3);
+    } catch (e3) {
+      return this.handleNetworkError(s2, e3);
     }
-    if (this.lastRateLimit = Ae(d2.headers), !d2.ok) {
-      let t3 = await d2.text().catch(() => "");
-      return d2.status === 401 && this.credentials.invalidate(), this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, status: d2.status, msg: t3.slice(0, 200) }), new Response(t3, { status: d2.status, headers: d2.headers });
+    if (this.lastRateLimit = $i(d2.headers), !d2.ok) {
+      let e3 = await d2.text().catch(() => "");
+      return d2.status === 401 && this.credentials.invalidate(), this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, status: d2.status, msg: e3.slice(0, 200) }), new Response(e3, { status: d2.status, headers: d2.headers });
     }
     if (!d2.body)
       return new Response("No upstream body", { status: 502 });
     try {
-      let t3 = d2.body.tee();
-      p2 = t3[0], f2 = t3[1];
-    } catch (t3) {
-      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `tee() failed: ${t3?.message}` }), new Response(d2.body, { status: d2.status, headers: d2.headers });
+      let e3 = d2.body.tee();
+      p2 = e3[0], m2 = e3[1];
+    } catch (e3) {
+      return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `tee() failed: ${e3?.message}` }), new Response(d2.body, { status: d2.status, headers: d2.headers });
     }
-    this.parseSSEAndNotify(f2, n2, s2, h2, m2).catch((t3) => {
-      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `parse promise rejected: ${t3?.message}` });
+    this.parseSSEAndNotify(m2, n2, s2, h2, y2).catch((e3) => {
+      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: s2, msg: `parse promise rejected: ${e3?.message}` });
     });
-    let g2 = new Headers(d2.headers);
-    return g2.delete("content-encoding"), g2.delete("content-length"), new Response(p2, { status: d2.status, headers: g2 });
+    let w2 = new Headers(d2.headers);
+    return w2.delete("content-encoding"), w2.delete("content-length"), new Response(p2, { status: d2.status, headers: w2 });
   }
-  createEngine(t2) {
-    let e2 = this.config;
-    return new xt({ config: { intervalMs: e2.kaIntervalSec !== undefined ? 1000 * e2.kaIntervalSec : undefined, idleTimeoutMs: e2.kaIdleTimeoutSec > 0 ? 1000 * e2.kaIdleTimeoutSec : 1 / 0, minTokens: e2.kaMinTokens, rewriteWarnIdleMs: 1000 * e2.kaRewriteWarnIdleSec, rewriteWarnTokens: e2.kaRewriteWarnTokens, rewriteBlockIdleMs: e2.kaRewriteBlockIdleSec > 0 ? 1000 * e2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: e2.kaRewriteBlockEnabled, onHeartbeat: i((e3) => {
-      this.metrics.recordRequest({ kind: "ka", cacheRead: e3.usage.cacheReadInputTokens ?? 0, cacheWrite: e3.usage.cacheCreationInputTokens ?? 0, input: e3.usage.inputTokens ?? 0, model: e3.model }), this.events.emit({ level: "info", kind: "KA_FIRE_COMPLETE", sessionId: t2, model: e3.model, durationMs: e3.durationMs, idleMs: e3.idleMs, usage: { inputTokens: e3.usage.inputTokens, outputTokens: e3.usage.outputTokens, cacheReadInputTokens: e3.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: e3.usage.cacheCreationInputTokens ?? 0 }, rateLimit: e3.rateLimit });
-    }, "onHeartbeat"), onTick: i((i2) => {
-      let s2 = 1000 * (e2.kaIntervalSec ?? 120);
-      i2.idleMs > 0.9 * s2 && this.events.emit({ level: "debug", kind: "KA_TICK_IDLE", sessionId: t2, idleMs: i2.idleMs, nextFireMs: i2.nextFireMs, model: i2.model, tokens: i2.tokens });
-    }, "onTick"), onDisarmed: i((e3) => this.events.emit({ level: "error", kind: "KA_DISARM", sessionId: t2, reason: e3.reason, msg: `KA disarmed for session ${t2.slice(0, 8)} \u2014 reason=${e3.reason}` }), "onDisarmed"), onRewriteWarning: i((e3) => this.events.emit({ level: e3.blocked ? "error" : "info", kind: e3.blocked ? "REWRITE_BLOCK" : "REWRITE_WARN", sessionId: t2, idleMs: e3.idleMs, estimatedTokens: e3.estimatedTokens, blocked: e3.blocked, model: e3.model }), "onRewriteWarning"), onNetworkStateChange: i((e3) => this.events.emit({ level: e3.to === "degraded" ? "error" : "info", kind: e3.to === "degraded" ? "NETWORK_DEGRADED" : "NETWORK_HEALTHY", sessionId: t2, from: e3.from, to: e3.to }), "onNetworkStateChange") }, getToken: i(() => this.credentials.getAccessToken(), "getToken"), doFetch: i((t3, e3, i2) => this.engineDoFetch(t3, e3, i2), "doFetch"), getRateLimitInfo: i(() => this.lastRateLimit, "getRateLimitInfo"), isOwnerAlive: i(() => this.store.isOwnerAlive(t2), "isOwnerAlive") });
+  createEngine(e2) {
+    let t2 = this.config;
+    return new $t({ config: { intervalMs: t2.kaIntervalSec !== undefined ? 1000 * t2.kaIntervalSec : undefined, idleTimeoutMs: t2.kaIdleTimeoutSec > 0 ? 1000 * t2.kaIdleTimeoutSec : 1 / 0, minTokens: t2.kaMinTokens, rewriteWarnIdleMs: 1000 * t2.kaRewriteWarnIdleSec, rewriteWarnTokens: t2.kaRewriteWarnTokens, rewriteBlockIdleMs: t2.kaRewriteBlockIdleSec > 0 ? 1000 * t2.kaRewriteBlockIdleSec : 1 / 0, rewriteBlockEnabled: t2.kaRewriteBlockEnabled, onHeartbeat: O((t3) => {
+      this.metrics.recordRequest({ kind: "ka", cacheRead: t3.usage.cacheReadInputTokens ?? 0, cacheWrite: t3.usage.cacheCreationInputTokens ?? 0, input: t3.usage.inputTokens ?? 0, model: t3.model }), this.events.emit({ level: "info", kind: "KA_FIRE_COMPLETE", sessionId: e2, model: t3.model, durationMs: t3.durationMs, idleMs: t3.idleMs, usage: { inputTokens: t3.usage.inputTokens, outputTokens: t3.usage.outputTokens, cacheReadInputTokens: t3.usage.cacheReadInputTokens ?? 0, cacheCreationInputTokens: t3.usage.cacheCreationInputTokens ?? 0 }, rateLimit: t3.rateLimit });
+    }, "onHeartbeat"), onTick: O((i2) => {
+      let s2 = 1000 * (t2.kaIntervalSec ?? 120);
+      i2.idleMs > 0.9 * s2 && this.events.emit({ level: "debug", kind: "KA_TICK_IDLE", sessionId: e2, idleMs: i2.idleMs, nextFireMs: i2.nextFireMs, model: i2.model, tokens: i2.tokens });
+    }, "onTick"), onDisarmed: O((t3) => this.events.emit({ level: "error", kind: "KA_DISARM", sessionId: e2, reason: t3.reason, msg: `KA disarmed for session ${e2.slice(0, 8)} \u2014 reason=${t3.reason}` }), "onDisarmed"), onRewriteWarning: O((t3) => this.events.emit({ level: t3.blocked ? "error" : "info", kind: t3.blocked ? "REWRITE_BLOCK" : "REWRITE_WARN", sessionId: e2, idleMs: t3.idleMs, estimatedTokens: t3.estimatedTokens, blocked: t3.blocked, model: t3.model }), "onRewriteWarning"), onNetworkStateChange: O((t3) => this.events.emit({ level: t3.to === "degraded" ? "error" : "info", kind: t3.to === "degraded" ? "NETWORK_DEGRADED" : "NETWORK_HEALTHY", sessionId: e2, from: t3.from, to: t3.to }), "onNetworkStateChange") }, getToken: O(() => this.credentials.getAccessToken(), "getToken"), doFetch: O((e3, t3, i2) => this.engineDoFetch(e3, t3, i2), "doFetch"), getRateLimitInfo: O(() => this.lastRateLimit, "getRateLimitInfo"), isOwnerAlive: O(() => this.store.isOwnerAlive(e2), "isOwnerAlive") });
   }
-  async* engineDoFetch(t2, e2, i2) {
-    let s2 = JSON.stringify(t2), r2 = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, { method: "POST", headers: e2, body: s2, signal: i2 });
+  async* engineDoFetch(e2, t2, i2) {
+    let s2 = JSON.stringify(e2), r2 = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, { method: "POST", headers: t2, body: s2, signal: i2 });
     if (!r2.ok) {
-      let t3 = await r2.text().catch(() => ""), e3 = new Error(`HTTP ${r2.status}: ${t3.slice(0, 200)}`);
-      throw e3.status = r2.status, r2.status === 401 && this.credentials.invalidate(), e3;
+      let e3 = await r2.text().catch(() => ""), t3 = new Error(`HTTP ${r2.status}: ${e3.slice(0, 200)}`);
+      throw t3.status = r2.status, r2.status === 401 && this.credentials.invalidate(), t3;
     }
     if (!r2.body)
       throw new Error("No response body");
-    yield* Ce(r2.body, i2);
+    yield* Si(r2.body, i2);
   }
-  async parseSSEAndNotify(t2, e2, i2, s2, r2) {
+  async parseSSEAndNotify(e2, t2, i2, s2, r2) {
     try {
-      let n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, a2 = new TextDecoder, o2 = t2.getReader(), l2 = "";
+      let n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, a2 = new TextDecoder, o2 = e2.getReader(), l2 = "";
       for (;; ) {
-        let t3, e3;
+        let e3, t3;
         try {
           let i3 = await o2.read();
-          t3 = i3.done, e3 = i3.value;
-        } catch (t4) {
-          return void this.events.emit({ level: "debug", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `stream read aborted: ${t4?.message}` });
+          e3 = i3.done, t3 = i3.value;
+        } catch (e4) {
+          return void this.events.emit({ level: "debug", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `stream read aborted: ${e4?.message}` });
         }
-        if (t3)
+        if (e3)
           break;
-        if (!e3)
+        if (!t3)
           continue;
-        l2 += a2.decode(e3, { stream: true });
+        l2 += a2.decode(t3, { stream: true });
         let s3 = l2.split(`
 `);
         l2 = s3.pop() ?? "";
-        for (let t4 of s3) {
-          if (!t4.startsWith("data: "))
+        for (let e4 of s3) {
+          if (!e4.startsWith("data: "))
             continue;
-          let e4 = t4.slice(6);
-          if (e4 !== "[DONE]")
+          let t4 = e4.slice(6);
+          if (t4 !== "[DONE]")
             try {
-              let t5 = JSON.parse(e4);
-              if (t5.type === "message_start" && t5.message?.usage) {
-                let e5 = t5.message.usage;
-                n2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: e5.cache_read_input_tokens ?? 0 };
+              let e5 = JSON.parse(t4);
+              if (e5.type === "message_start" && e5.message?.usage) {
+                let t5 = e5.message.usage;
+                n2 = { inputTokens: t5.input_tokens ?? 0, outputTokens: t5.output_tokens ?? 0, cacheCreationInputTokens: t5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: t5.cache_read_input_tokens ?? 0 };
+                let i3 = t5.cache_creation;
+                i3 && typeof i3 == "object" && (typeof i3.ephemeral_5m_input_tokens == "number" && (n2.cacheCreation5mInputTokens = i3.ephemeral_5m_input_tokens), typeof i3.ephemeral_1h_input_tokens == "number" && (n2.cacheCreation1hInputTokens = i3.ephemeral_1h_input_tokens)), typeof t5.cache_deleted_input_tokens == "number" && (n2.cacheDeletedInputTokens = t5.cache_deleted_input_tokens);
               } else
-                t5.type === "message_delta" && t5.usage?.output_tokens && (n2.outputTokens = t5.usage.output_tokens);
+                e5.type === "message_delta" && e5.usage?.output_tokens && (n2.outputTokens = e5.usage.output_tokens);
             } catch {}
         }
       }
-      let h2 = e2.lastUsage === null;
-      e2.lastUsage = n2;
+      let h2 = t2.lastUsage === null;
+      t2.lastUsage = n2;
       try {
-        e2.engine.notifyRealRequestComplete(n2);
-      } catch (t3) {
-        this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `engine.notifyRealRequestComplete: ${t3?.message}` });
+        t2.engine.notifyRealRequestComplete(n2);
+      } catch (e3) {
+        this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `engine.notifyRealRequestComplete: ${e3?.message}` });
       }
       this.metrics.recordRequest({ kind: "real", cacheRead: n2.cacheReadInputTokens ?? 0, cacheWrite: n2.cacheCreationInputTokens ?? 0, input: n2.inputTokens ?? 0, model: s2, firstCall: h2 }), this.events.emit({ level: "info", kind: "REAL_REQUEST_COMPLETE", sessionId: i2, model: s2, durationMs: Date.now() - r2, usage: n2, rateLimit: { util5h: this.lastRateLimit.utilization5h, util7d: this.lastRateLimit.utilization7d, status: this.lastRateLimit.status } });
-    } catch (t3) {
-      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `SSE parse error: ${t3?.message ?? t3}` });
+    } catch (e3) {
+      this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: i2, msg: `SSE parse error: ${e3?.message ?? e3}` });
     }
   }
-  handleNetworkError(t2, e2) {
-    let i2 = e2?.code ?? e2?.cause?.code ?? "", s2 = String(e2?.message ?? "").toLowerCase(), r2 = Oe.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
-    return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: t2, status: r2 ? 503 : 502, msg: `upstream fetch threw: ${i2 || ""} ${s2}`.trim().slice(0, 200) }), r2 ? new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Upstream network error \u2014 proxy cannot reach Anthropic. Retrying will help once network is restored." } }), { status: 503, headers: { "content-type": "application/json", "retry-after": "2" } }) : new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: `Upstream request failed: ${s2 || i2 || "unknown"}` } }), { status: 502, headers: { "content-type": "application/json" } });
+  handleNetworkError(e2, t2) {
+    let i2 = t2?.code ?? t2?.cause?.code ?? "", s2 = String(t2?.message ?? "").toLowerCase(), r2 = Ri.has(i2) || s2.includes("unable to connect") || s2.includes("failed to open socket") || s2.includes("connection refused") || s2.includes("network");
+    return this.events.emit({ level: "error", kind: "REAL_REQUEST_ERROR", sessionId: e2, status: r2 ? 503 : 502, msg: `upstream fetch threw: ${i2 || ""} ${s2}`.trim().slice(0, 200) }), r2 ? new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Upstream network error \u2014 proxy cannot reach Anthropic. Retrying will help once network is restored." } }), { status: 503, headers: { [d]: E, "retry-after": "2" } }) : new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: `Upstream request failed: ${s2 || i2 || "unknown"}` } }), { status: 502, headers: { [d]: E } });
   }
 };
-var be = ["host", "content-length", "connection", "authorization", "accept-encoding"];
-var Oe = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
-function Ae(t2) {
-  return { status: t2.get("anthropic-ratelimit-unified-status"), resetAt: t2.get("anthropic-ratelimit-unified-reset") ? Number(t2.get("anthropic-ratelimit-unified-reset")) : null, claim: t2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: t2.get("retry-after") ? parseFloat(t2.get("retry-after")) : null, utilization5h: t2.get("anthropic-ratelimit-unified-5h-utilization") ? parseFloat(t2.get("anthropic-ratelimit-unified-5h-utilization")) : null, utilization7d: t2.get("anthropic-ratelimit-unified-7d-utilization") ? parseFloat(t2.get("anthropic-ratelimit-unified-7d-utilization")) : null };
+var ki = ["host", "content-length", "connection", "authorization", "accept-encoding"];
+var Ri = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
+function $i(e2) {
+  return { status: e2.get("anthropic-ratelimit-unified-status"), resetAt: e2.get("anthropic-ratelimit-unified-reset") ? Number(e2.get("anthropic-ratelimit-unified-reset")) : null, claim: e2.get("anthropic-ratelimit-unified-representative-claim"), retryAfter: e2.get("retry-after") ? parseFloat(e2.get("retry-after")) : null, utilization5h: e2.get("anthropic-ratelimit-unified-5h-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-5h-utilization")) : null, utilization7d: e2.get("anthropic-ratelimit-unified-7d-utilization") ? parseFloat(e2.get("anthropic-ratelimit-unified-7d-utilization")) : null };
 }
-function Ie(t2, e2) {
-  return new Response(JSON.stringify(e2), { status: t2, headers: { "content-type": "application/json" } });
+function vi(e2, t2) {
+  return new Response(JSON.stringify(t2), { status: e2, headers: { [d]: E } });
 }
-async function* Ce(t2, e2) {
-  let i2 = new TextDecoder, s2 = t2.getReader(), r2 = "", n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+async function* Si(e2, t2) {
+  let i2 = new TextDecoder, s2 = e2.getReader(), r2 = "", n2 = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
   try {
     for (;; ) {
-      if (e2?.aborted)
+      if (t2?.aborted)
         return void s2.cancel();
-      let { done: t3, value: a2 } = await s2.read();
-      if (t3)
+      let { done: e3, value: a2 } = await s2.read();
+      if (e3)
         break;
       r2 += i2.decode(a2, { stream: true });
       let o2 = r2.split(`
 `);
       r2 = o2.pop() ?? "";
-      for (let t4 of o2) {
-        if (!t4.startsWith("data: "))
+      for (let e4 of o2) {
+        if (!e4.startsWith("data: "))
           continue;
-        let e3, i3 = t4.slice(6);
+        let t3, i3 = e4.slice(6);
         if (i3 !== "[DONE]") {
           try {
-            e3 = JSON.parse(i3);
+            t3 = JSON.parse(i3);
           } catch {
             continue;
           }
-          if (e3.type === "message_start" && e3.message?.usage) {
-            let t5 = e3.message.usage;
-            n2 = { inputTokens: t5.input_tokens ?? 0, outputTokens: t5.output_tokens ?? 0, cacheCreationInputTokens: t5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: t5.cache_read_input_tokens ?? 0 };
+          if (t3.type === "message_start" && t3.message?.usage) {
+            let e5 = t3.message.usage;
+            n2 = { inputTokens: e5.input_tokens ?? 0, outputTokens: e5.output_tokens ?? 0, cacheCreationInputTokens: e5.cache_creation_input_tokens ?? 0, cacheReadInputTokens: e5.cache_read_input_tokens ?? 0 };
+            let i4 = e5.cache_creation;
+            i4 && typeof i4 == "object" && (typeof i4.ephemeral_5m_input_tokens == "number" && (n2.cacheCreation5mInputTokens = i4.ephemeral_5m_input_tokens), typeof i4.ephemeral_1h_input_tokens == "number" && (n2.cacheCreation1hInputTokens = i4.ephemeral_1h_input_tokens)), typeof e5.cache_deleted_input_tokens == "number" && (n2.cacheDeletedInputTokens = e5.cache_deleted_input_tokens);
           } else
-            e3.type === "message_delta" && e3.usage?.output_tokens ? n2.outputTokens = e3.usage.output_tokens : e3.type === "message_stop" && (yield { type: "message_stop", usage: n2, stopReason: null });
+            t3.type === "message_delta" && t3.usage?.output_tokens ? n2.outputTokens = t3.usage.output_tokens : t3.type === "message_stop" && (yield { type: "message_stop", usage: n2, stopReason: null });
         }
       }
     }
@@ -46373,252 +47545,618 @@ async function* Ce(t2, e2) {
     s2.releaseLock();
   }
 }
-i(Ae, "parseRateLimitHeaders"), i(Ie, "jsonResponse"), i(Ce, "parseSSEToEvents"), I(), I();
-var He = '{"type":"KeepAlive"}';
-var Be = 16000;
-var Ue = Math.floor(3200);
-async function Ke(t2, e2, s2) {
-  let r2 = s2?.baseUrl ?? "https://api.anthropic.com", n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(Be), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
+O($i, "parseRateLimitHeaders"), O(vi, "jsonResponse"), O(Si, "parseSSEToEvents"), ke(), ke(), C(), N(), C(), N();
+var Ii = '{"type":"KeepAlive"}';
+var Ci = 16000;
+var Ni = Math.floor(3200);
+async function xi(e2, i2, s2) {
+  let r2 = s2?.baseUrl ?? t, n2 = new URLSearchParams({ encoding: "linear16", sample_rate: String(Ci), channels: String(1), endpointing_ms: "300", utterance_end_ms: "1000", language: s2?.language ?? "en" });
   if (s2?.keyterms?.length)
-    for (let t3 of s2.keyterms)
-      n2.append("keyterms", t3);
-  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = Pe(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, p2 = null, f2 = "", m2 = await new Promise((e3, i2) => {
+    for (let e3 of s2.keyterms)
+      n2.append("keyterms", e3);
+  let a2 = `/api/ws/speech_to_text/voice_stream?${n2.toString()}`, o2 = Mi(16).toString("base64"), l2 = null, h2 = false, c2 = false, u2 = false, d2 = null, p2 = null, y2 = "", g2 = await new Promise((t2, i3) => {
     let s3 = setTimeout(() => {
-      i2(new Error("voice_stream WebSocket connection timeout (10s)"));
-    }, 1e4), n3 = new URL(r2), l3 = Le({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { Authorization: `Bearer ${t2}`, "User-Agent": "claude-cli/1.0.0 (subscriber, cli)", "x-app": "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
-    l3.on("upgrade", (t3, r3, n4) => {
+      i3(new Error("voice_stream WebSocket connection timeout (10s)"));
+    }, 1e4), n3 = new URL(r2), l3 = Oi({ hostname: n3.hostname, port: n3.port || 443, path: a2, method: "GET", headers: { [f]: `Bearer ${e2}`, [m]: "claude-cli/1.0.0 (subscriber, cli)", [_]: "cli", Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": o2 } });
+    l3.on("upgrade", (e3, r3, n4) => {
       clearTimeout(s3);
-      let a3 = Fe("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
-      if (t3.headers["sec-websocket-accept"] !== a3)
-        return r3.destroy(), void i2(new Error("WebSocket handshake failed: invalid accept header"));
-      e3(r3);
-    }), l3.on("response", (t3) => {
-      if (t3.statusCode === 101 && t3.socket)
-        return clearTimeout(s3), void e3(t3.socket);
-      clearTimeout(s3), i2(new Error(`WebSocket upgrade rejected: HTTP ${t3.statusCode}`));
-    }), l3.on("error", (t3) => {
-      clearTimeout(s3), i2(new Error(`voice_stream connection failed: ${t3.message}`));
+      let a3 = Ai("sha1").update(o2 + "258EAFA5-E914-47DA-95CA-5AB5DC11E5B3").digest("base64");
+      if (e3.headers["sec-websocket-accept"] !== a3)
+        return r3.destroy(), void i3(new Error("WebSocket handshake failed: invalid accept header"));
+      t2(r3);
+    }), l3.on("response", (e3) => {
+      if (e3.statusCode === 101 && e3.socket)
+        return clearTimeout(s3), void t2(e3.socket);
+      clearTimeout(s3), i3(new Error(`WebSocket upgrade rejected: HTTP ${e3.statusCode}`));
+    }), l3.on("error", (e3) => {
+      clearTimeout(s3), i3(new Error(`voice_stream connection failed: ${e3.message}`));
     }), l3.end();
   });
-  function g2(t3) {
-    k2(Buffer.from(t3, "utf8"), 1);
+  function w2(e3) {
+    k2(Buffer.from(e3, "utf8"), 1);
   }
-  function y2(t3) {
-    k2(t3, 2);
+  function T2(e3) {
+    k2(e3, 2);
   }
-  function w2() {
+  function E2() {
     k2(Buffer.alloc(0), 8);
   }
-  function k2(t3, e3) {
-    if (m2.destroyed)
+  function k2(e3, t2) {
+    if (g2.destroyed)
       return;
-    let i2, s3 = Pe(4), r3 = Buffer.alloc(t3.length);
-    for (let e4 = 0;e4 < t3.length; e4++)
-      r3[e4] = t3[e4] ^ s3[e4 % 4];
-    t3.length < 126 ? (i2 = Buffer.alloc(6), i2[0] = 128 | e3, i2[1] = 128 | t3.length, s3.copy(i2, 2)) : t3.length < 65536 ? (i2 = Buffer.alloc(8), i2[0] = 128 | e3, i2[1] = 254, i2.writeUInt16BE(t3.length, 2), s3.copy(i2, 4)) : (i2 = Buffer.alloc(14), i2[0] = 128 | e3, i2[1] = 255, i2.writeBigUInt64BE(BigInt(t3.length), 2), s3.copy(i2, 10)), m2.write(Buffer.concat([i2, r3]));
+    let i3, s3 = Mi(4), r3 = Buffer.alloc(e3.length);
+    for (let t3 = 0;t3 < e3.length; t3++)
+      r3[t3] = e3[t3] ^ s3[t3 % 4];
+    e3.length < 126 ? (i3 = Buffer.alloc(6), i3[0] = 128 | t2, i3[1] = 128 | e3.length, s3.copy(i3, 2)) : e3.length < 65536 ? (i3 = Buffer.alloc(8), i3[0] = 128 | t2, i3[1] = 254, i3.writeUInt16BE(e3.length, 2), s3.copy(i3, 4)) : (i3 = Buffer.alloc(14), i3[0] = 128 | t2, i3[1] = 255, i3.writeBigUInt64BE(BigInt(e3.length), 2), s3.copy(i3, 10)), g2.write(Buffer.concat([i3, r3]));
   }
-  h2 = true, i(g2, "wsSendText"), i(y2, "wsSendBinary"), i(w2, "wsSendClose"), i(k2, "wsSendFrame");
-  let _2 = Buffer.alloc(0);
-  function T2() {
-    for (;_2.length >= 2; ) {
-      let t3 = _2[0], e3 = _2[1], i2 = 15 & t3, s3 = !!(128 & e3), r3 = 127 & e3, n3 = 2;
+  h2 = true, O(w2, "wsSendText"), O(T2, "wsSendBinary"), O(E2, "wsSendClose"), O(k2, "wsSendFrame");
+  let R2 = Buffer.alloc(0);
+  function $2() {
+    for (;R2.length >= 2; ) {
+      let e3 = R2[0], t2 = R2[1], i3 = 15 & e3, s3 = !!(128 & t2), r3 = 127 & t2, n3 = 2;
       if (r3 === 126) {
-        if (_2.length < 4)
+        if (R2.length < 4)
           return;
-        r3 = _2.readUInt16BE(2), n3 = 4;
+        r3 = R2.readUInt16BE(2), n3 = 4;
       } else if (r3 === 127) {
-        if (_2.length < 10)
+        if (R2.length < 10)
           return;
-        r3 = Number(_2.readBigUInt64BE(2)), n3 = 10;
+        r3 = Number(R2.readBigUInt64BE(2)), n3 = 10;
       }
       s3 && (n3 += 4);
       let a3 = n3 + r3;
-      if (_2.length < a3)
+      if (R2.length < a3)
         return;
-      let o3 = _2.subarray(n3, a3);
+      let o3 = R2.subarray(n3, a3);
       if (s3) {
-        let t4 = _2.subarray(n3 - 4, n3);
+        let e4 = R2.subarray(n3 - 4, n3);
         o3 = Buffer.from(o3);
-        for (let e4 = 0;e4 < o3.length; e4++)
-          o3[e4] = o3[e4] ^ t4[e4 % 4];
+        for (let t3 = 0;t3 < o3.length; t3++)
+          o3[t3] = o3[t3] ^ e4[t3 % 4];
       }
-      if (_2 = _2.subarray(a3), i2 === 1)
-        E2(o3.toString("utf8"));
+      if (R2 = R2.subarray(a3), i3 === 1)
+        v2(o3.toString("utf8"));
       else {
-        if (i2 === 8)
-          return void R2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
-        i2 === 9 && k2(o3, 10);
+        if (i3 === 8)
+          return void S2(o3.length >= 2 ? o3.readUInt16BE(0) : 1005, o3.length > 2 ? o3.subarray(2).toString("utf8") : "");
+        i3 === 9 && k2(o3, 10);
       }
     }
   }
-  function E2(t3) {
-    let i2;
+  function v2(e3) {
+    let t2;
     try {
-      i2 = JSON.parse(t3);
+      t2 = JSON.parse(e3);
     } catch {
       return;
     }
-    switch (i2.type) {
+    switch (t2.type) {
       case "TranscriptText": {
-        let t4 = i2.data;
-        c2 && p2?.(), t4 && (f2 = t4, e2.onTranscript(t4, false));
+        let e4 = t2.data;
+        c2 && p2?.(), e4 && (y2 = e4, i2.onTranscript(e4, false));
         break;
       }
       case "TranscriptEndpoint": {
-        let t4 = f2;
-        f2 = "", t4 && e2.onTranscript(t4, true), c2 && d2?.("post_closestream_endpoint");
+        let e4 = y2;
+        y2 = "", e4 && i2.onTranscript(e4, true), c2 && d2?.("post_closestream_endpoint");
         break;
       }
       case "TranscriptError": {
-        let t4 = i2.description ?? i2.error_code ?? "unknown transcription error";
-        u2 || e2.onError(t4);
+        let e4 = t2.description ?? t2.error_code ?? "unknown transcription error";
+        u2 || i2.onError(e4);
         break;
       }
       case "error": {
-        let t4 = i2.message ?? JSON.stringify(i2);
-        u2 || e2.onError(t4);
+        let e4 = t2.message ?? JSON.stringify(t2);
+        u2 || i2.onError(e4);
         break;
       }
     }
   }
-  function R2(t3, i2) {
-    if (h2 = false, l2 && (clearInterval(l2), l2 = null), f2) {
-      let t4 = f2;
-      f2 = "", e2.onTranscript(t4, true);
+  function S2(e3, t2) {
+    if (h2 = false, l2 && (clearInterval(l2), l2 = null), y2) {
+      let e4 = y2;
+      y2 = "", i2.onTranscript(e4, true);
     }
-    d2?.("ws_close"), !u2 && t3 !== 1000 && t3 !== 1005 && e2.onError(`Connection closed: code ${t3}${i2 ? ` \u2014 ${i2}` : ""}`), e2.onClose(), m2.destroy();
+    d2?.("ws_close"), !u2 && e3 !== 1000 && e3 !== 1005 && i2.onError(`Connection closed: code ${e3}${t2 ? ` \u2014 ${t2}` : ""}`), i2.onClose(), g2.destroy();
   }
-  return i(T2, "processFrames"), i(E2, "handleMessage"), i(R2, "handleClose"), m2.on("data", (t3) => {
-    _2 = Buffer.concat([_2, t3]), T2();
-  }), m2.on("close", () => {
-    h2 && R2(1006, "connection lost");
-  }), m2.on("error", (t3) => {
-    u2 || e2.onError(`Socket error: ${t3.message}`);
-  }), g2(He), l2 = setInterval(() => {
-    h2 && g2(He);
-  }, 8000), { send(t3) {
-    !h2 || c2 || y2(Buffer.from(t3));
-  }, finalize: () => u2 || c2 ? Promise.resolve("already_closed") : (u2 = true, new Promise((t3) => {
-    let s3 = setTimeout(() => d2?.("safety_timeout"), 5000), r3 = setTimeout(() => d2?.("no_data_timeout"), 1500);
-    p2 = i(() => {
-      clearTimeout(r3), p2 = null;
-    }, "cancelNoDataTimer"), d2 = i((i2) => {
-      if (clearTimeout(s3), clearTimeout(r3), d2 = null, p2 = null, f2) {
-        let t4 = f2;
-        f2 = "", e2.onTranscript(t4, true);
+  return O($2, "processFrames"), O(v2, "handleMessage"), O(S2, "handleClose"), g2.on("data", (e3) => {
+    R2 = Buffer.concat([R2, e3]), $2();
+  }), g2.on("close", () => {
+    h2 && S2(1006, "connection lost");
+  }), g2.on("error", (e3) => {
+    u2 || i2.onError(`Socket error: ${e3.message}`);
+  }), w2(Ii), l2 = setInterval(() => {
+    h2 && w2(Ii);
+  }, 8000), { send(e3) {
+    !h2 || c2 || T2(Buffer.from(e3));
+  }, finalize: () => u2 || c2 ? Promise.resolve("already_closed") : (u2 = true, new Promise((e3) => {
+    let t2 = setTimeout(() => d2?.("safety_timeout"), 5000), s3 = setTimeout(() => d2?.("no_data_timeout"), 1500);
+    p2 = O(() => {
+      clearTimeout(s3), p2 = null;
+    }, "cancelNoDataTimer"), d2 = O((r3) => {
+      if (clearTimeout(t2), clearTimeout(s3), d2 = null, p2 = null, y2) {
+        let e4 = y2;
+        y2 = "", i2.onTranscript(e4, true);
       }
-      t3(i2);
-    }, "resolveFinalize"), m2.destroyed ? d2("ws_already_closed") : setTimeout(() => {
-      c2 = true, h2 && g2('{"type":"CloseStream"}');
+      e3(r3);
+    }, "resolveFinalize"), g2.destroyed ? d2("ws_already_closed") : setTimeout(() => {
+      c2 = true, h2 && w2('{"type":"CloseStream"}');
     }, 0);
   })), close() {
-    c2 = true, l2 && (clearInterval(l2), l2 = null), h2 = false, m2.destroyed || (w2(), m2.destroy());
-  }, isConnected: () => h2 && !m2.destroyed };
+    c2 = true, l2 && (clearInterval(l2), l2 = null), h2 = false, g2.destroyed || (E2(), g2.destroy());
+  }, isConnected: () => h2 && !g2.destroyed };
 }
-async function We(t2, e2, s2) {
-  let r2 = [], n2 = null, a2 = await Ke(t2, { onTranscript: i((t3, e3) => {
-    e3 ? r2.push(t3.trim()) : s2?.onInterim?.(t3);
-  }, "onTranscript"), onError: i((t3) => {
-    n2 = t3;
-  }, "onError"), onClose: i(() => {}, "onClose") }, s2);
+async function Li(e2, t2, i2) {
+  let s2 = [], r2 = null, n2 = await xi(e2, { onTranscript: O((e3, t3) => {
+    t3 ? s2.push(e3.trim()) : i2?.onInterim?.(e3);
+  }, "onTranscript"), onError: O((e3) => {
+    r2 = e3;
+  }, "onError"), onClose: O(() => {}, "onClose") }, i2);
   try {
-    let t3 = await Qe(e2), i2 = t3;
-    t3.length > 44 && t3[0] === 82 && t3[1] === 73 && t3[2] === 70 && t3[3] === 70 && (i2 = t3.subarray(44));
-    let r3 = s2?.realtime !== false;
-    for (let t4 = 0;t4 < i2.length && a2.isConnected(); t4 += Ue) {
-      let e3 = i2.subarray(t4, Math.min(t4 + Ue, i2.length));
-      a2.send(e3), r3 && t4 + Ue < i2.length && await Ge(80);
+    let e3 = await Ki(t2), s3 = e3;
+    e3.length > 44 && e3[0] === 82 && e3[1] === 73 && e3[2] === 70 && e3[3] === 70 && (s3 = e3.subarray(44));
+    let r3 = i2?.realtime !== false;
+    for (let e4 = 0;e4 < s3.length && n2.isConnected(); e4 += Ni) {
+      let t3 = s3.subarray(e4, Math.min(e4 + Ni, s3.length));
+      n2.send(t3), r3 && e4 + Ni < s3.length && await Bi(80);
     }
-    await a2.finalize();
+    await n2.finalize();
   } finally {
-    a2.close();
+    n2.close();
   }
-  if (n2)
-    throw new Error(`Transcription error: ${n2}`);
-  return r2.join(" ");
+  if (r2)
+    throw new Error(`Transcription error: ${r2}`);
+  return s2.join(" ");
 }
-async function Je(t2, e2, s2) {
-  let r2 = [], n2 = null, a2 = await Ke(t2, { onTranscript: i((t3, e3) => {
-    e3 ? r2.push(t3.trim()) : s2?.onInterim?.(t3);
-  }, "onTranscript"), onError: i((t3) => {
-    n2 = t3;
-  }, "onError"), onClose: i(() => {}, "onClose") }, s2);
+async function Pi(e2, t2, i2) {
+  let s2 = [], r2 = null, n2 = await xi(e2, { onTranscript: O((e3, t3) => {
+    t3 ? s2.push(e3.trim()) : i2?.onInterim?.(e3);
+  }, "onTranscript"), onError: O((e3) => {
+    r2 = e3;
+  }, "onError"), onClose: O(() => {}, "onClose") }, i2);
   try {
-    let t3 = Ye();
-    if (!t3)
+    let e3 = Ji();
+    if (!e3)
       throw new Error("No audio converter found. Install ffmpeg or sox.");
-    await Ve(a2, e2, t3, s2?.realtime !== false), await a2.finalize();
+    await Wi(n2, t2, e3, i2?.realtime !== false), await n2.finalize();
   } finally {
-    a2.close();
+    n2.close();
   }
-  if (n2)
-    throw new Error(`Transcription error: ${n2}`);
-  return r2.join(" ");
+  if (r2)
+    throw new Error(`Transcription error: ${r2}`);
+  return s2.join(" ");
 }
-function je(t2, e2) {
-  if (ze("rec")) {
-    let i2 = xe("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(Be), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
-    return i2.stdout?.on("data", t2), i2.stderr?.on("data", () => {}), i2.on("close", e2), i2.on("error", e2), { stop() {
+function Hi(e2, t2) {
+  if (Ui("rec")) {
+    let i2 = Di("rec", ["-q", "--buffer", "1024", "-t", "raw", "-r", String(Ci), "-e", "signed", "-b", String(16), "-c", String(1), "-", "silence", "1", "0.1", "3%", "1", "2.0", "3%"], { stdio: ["pipe", "pipe", "pipe"] });
+    return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
-  if (ze("arecord")) {
-    let i2 = xe("arecord", ["-f", "S16_LE", "-r", String(Be), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
-    return i2.stdout?.on("data", t2), i2.stderr?.on("data", () => {}), i2.on("close", e2), i2.on("error", e2), { stop() {
+  if (Ui("arecord")) {
+    let i2 = Di("arecord", ["-f", "S16_LE", "-r", String(Ci), "-c", String(1), "-t", "raw", "-q", "-"], { stdio: ["pipe", "pipe", "pipe"] });
+    return i2.stdout?.on("data", e2), i2.stderr?.on("data", () => {}), i2.on("close", t2), i2.on("error", t2), { stop() {
       i2.kill("SIGTERM");
     } };
   }
   return null;
 }
-function qe() {
-  return ze("rec") ? { available: true, tool: "sox", installHint: null } : ze("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
+function Fi() {
+  return Ui("rec") ? { available: true, tool: "sox", installHint: null } : Ui("arecord") ? { available: true, tool: "arecord", installHint: null } : { available: false, tool: null, installHint: { darwin: "brew install sox", linux: "sudo apt-get install sox  # or: sudo apt-get install alsa-utils" }[process.platform] ?? "Install SoX (sox) or ALSA utils (arecord)" };
 }
-function ze(t2) {
-  return Ne(t2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
+function Ui(e2) {
+  return bi(e2, ["--version"], { stdio: "ignore", timeout: 3000 }).error === undefined;
 }
-function Ge(t2) {
-  return new Promise((e2) => setTimeout(e2, t2));
+function Bi(e2) {
+  return new Promise((t2) => setTimeout(t2, e2));
 }
-async function Qe(t2) {
-  let { readFile: e2 } = await import("fs/promises");
-  return e2(t2);
+async function Ki(e2) {
+  let { readFile: t2 } = await import("fs/promises");
+  return t2(e2);
 }
-function Ye() {
-  return ze("ffmpeg") ? "ffmpeg" : ze("sox") ? "sox" : null;
+function Ji() {
+  return Ui("ffmpeg") ? "ffmpeg" : Ui("sox") ? "sox" : null;
 }
-async function Ve(t2, e2, i2, s2) {
-  let r2 = i2 === "ffmpeg" ? ["-i", e2, "-f", "s16le", "-ar", String(Be), "-ac", String(1), "pipe:1"] : [e2, "-t", "raw", "-r", String(Be), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = xe(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
-  return new Promise((e3, r3) => {
+async function Wi(e2, t2, i2, s2) {
+  let r2 = i2 === "ffmpeg" ? ["-i", t2, "-f", "s16le", "-ar", String(Ci), "-ac", String(1), "pipe:1"] : [t2, "-t", "raw", "-r", String(Ci), "-e", "signed", "-b", String(16), "-c", String(1), "-"], n2 = Di(i2, r2, { stdio: ["pipe", "pipe", "pipe"] });
+  return new Promise((t3, r3) => {
     let a2 = Date.now();
-    n2.stdout?.on("data", async (e4) => {
-      if (t2.isConnected()) {
-        if (t2.send(e4), s2) {
-          let t3 = e4.length / 32000 * 1000, i3 = Date.now() - a2, s3 = Math.max(0, 0.8 * t3 - i3);
-          s3 > 10 && (n2.stdout?.pause(), await Ge(s3), n2.stdout?.resume()), a2 = Date.now();
+    n2.stdout?.on("data", async (t4) => {
+      if (e2.isConnected()) {
+        if (e2.send(t4), s2) {
+          let e3 = t4.length / 32000 * 1000, i3 = Date.now() - a2, s3 = Math.max(0, 0.8 * e3 - i3);
+          s3 > 10 && (n2.stdout?.pause(), await Bi(s3), n2.stdout?.resume()), a2 = Date.now();
         }
       } else
         n2.kill("SIGTERM");
-    }), n2.stderr?.on("data", () => {}), n2.on("close", (t3) => {
-      t3 !== 0 && t3 !== null ? r3(new Error(`${i2} exited with code ${t3}`)) : e3();
+    }), n2.stderr?.on("data", () => {}), n2.on("close", (e3) => {
+      e3 !== 0 && e3 !== null ? r3(new Error(`${i2} exited with code ${e3}`)) : t3();
     }), n2.on("error", r3);
   });
 }
-i(Ke, "connectVoiceStream"), i(We, "transcribeFile"), i(Je, "transcribeAudioFile"), i(je, "startMicRecording"), i(qe, "checkVoiceDeps"), i(ze, "hasCommand"), i(Ge, "sleep"), i(Qe, "readFileAsBuffer"), i(Ye, "findConverter"), i(Ve, "streamConvertedAudio");
+O(xi, "connectVoiceStream"), O(Li, "transcribeFile"), O(Pi, "transcribeAudioFile"), O(Hi, "startMicRecording"), O(Fi, "checkVoiceDeps"), O(Ui, "hasCommand"), O(Bi, "sleep"), O(Ki, "readFileAsBuffer"), O(Ji, "findConverter"), O(Wi, "streamConvertedAudio");
+
+// src/cache-config.ts
+import { openSync, readSync, closeSync, statSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+
+// src/log-event.ts
+import fs from "fs";
+import path from "path";
+import os from "os";
+var LOG_DIR = path.join(os.homedir(), ".local", "share", "opencode", "logs", "context-ledger");
+var EVENTS_LOG = path.join(LOG_DIR, "events.jsonl");
+var _dirEnsured = false;
+function ensureDir() {
+  if (_dirEnsured)
+    return true;
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    _dirEnsured = true;
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+function logEvent(step, details = {}) {
+  if (process.env.LEDGER_TELEMETRY_VERBOSE === "0")
+    return;
+  if (!ensureDir())
+    return;
+  const entry = {
+    ts: new Date().toISOString(),
+    step,
+    ...details
+  };
+  let line;
+  try {
+    line = JSON.stringify(entry) + `
+`;
+  } catch (err) {
+    return;
+  }
+  try {
+    fs.appendFileSync(EVENTS_LOG, line);
+  } catch (err) {}
+}
+
+// src/cache-config.ts
+var CACHE_CONTROL_TTL = process.env.CACHE_CONTROL_TTL || "1h";
+var CACHE_CONTROL_1H = Object.freeze({
+  type: "ephemeral",
+  ttl: CACHE_CONTROL_TTL
+});
+var CACHE_CONTROL_GLOBAL_1H = Object.freeze({
+  type: "ephemeral",
+  ttl: CACHE_CONTROL_TTL,
+  scope: "global"
+});
+var DEFAULT_TTL_1H_ALLOWLIST = Object.freeze([
+  "repl_main_thread*",
+  "sdk",
+  "auto_mode"
+]);
+function matchAllowlist(querySource, allowlist) {
+  return allowlist.some((p2) => p2.endsWith("*") ? querySource.startsWith(p2.slice(0, -1)) : querySource === p2);
+}
+function chooseTTL(querySource, isOverage, effectiveTtl = "1h") {
+  if (process.env.FORCE_PROMPT_CACHING_5M)
+    return "5m";
+  if (process.env.ENABLE_PROMPT_CACHING_1H)
+    return "1h";
+  if (isOverage)
+    return "5m";
+  return matchAllowlist(querySource, DEFAULT_TTL_1H_ALLOWLIST) ? effectiveTtl : "5m";
+}
+var OVERAGE_STATS_PATH_ENV = "CLAUDE_MAX_STATS_PATH_OVERRIDE";
+var DEFAULT_STATS_PATH = join(homedir(), ".claude-local", "claude-max-stats.jsonl");
+var cachedOverage = null;
+var observedNonAllowedStatuses = new Set;
+var TAIL_BYTES = 4096;
+var OVERAGE_CACHE_MS = 60000;
+function isUsingOverage() {
+  const now = Date.now();
+  if (cachedOverage && cachedOverage.expiresAt > now) {
+    return cachedOverage.value;
+  }
+  const statsPath = process.env[OVERAGE_STATS_PATH_ENV] || DEFAULT_STATS_PATH;
+  let result = false;
+  try {
+    const st2 = statSync(statsPath);
+    if (st2.size === 0) {
+      cachedOverage = { value: false, expiresAt: now + OVERAGE_CACHE_MS };
+      return false;
+    }
+    const fd = openSync(statsPath, "r");
+    try {
+      const readLen = Math.min(TAIL_BYTES, st2.size);
+      const buf = Buffer.alloc(readLen);
+      const offset = st2.size - readLen;
+      readSync(fd, buf, 0, readLen, offset);
+      const tail = buf.toString("utf8");
+      const lines = tail.split(`
+`).filter((l2) => l2.trim().length > 0);
+      if (lines.length === 0) {
+        result = false;
+      } else {
+        const lastLine = lines[lines.length - 1];
+        const entry = JSON.parse(lastLine);
+        const status = entry?.rateLimit?.status;
+        if (typeof status === "string" && status !== "allowed") {
+          result = true;
+          if (!observedNonAllowedStatuses.has(status)) {
+            observedNonAllowedStatuses.add(status);
+            logEvent("LEDGER_OVERAGE_OBSERVED", { rate_limit_status: status });
+          }
+        } else {
+          result = false;
+        }
+      }
+    } finally {
+      closeSync(fd);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logEvent("LEDGER_OVERAGE_READ_FAIL", { error: msg });
+    result = false;
+  }
+  cachedOverage = { value: result, expiresAt: now + OVERAGE_CACHE_MS };
+  return result;
+}
+var KEEPALIVE_PATH_ENV = "CLAUDE_KEEPALIVE_CONFIG_PATH_OVERRIDE";
+var DEFAULT_KEEPALIVE_PATH = join(homedir(), ".claude-local", "keepalive.json");
+var cachedEffectiveTtl = null;
+var EFFECTIVE_TTL_CACHE_MS = 60000;
+function getEffectiveTtl() {
+  if (process.env.FORCE_PROMPT_CACHING_5M)
+    return "5m";
+  if (process.env.ENABLE_PROMPT_CACHING_1H)
+    return "1h";
+  const now = Date.now();
+  if (cachedEffectiveTtl && cachedEffectiveTtl.expiresAt > now) {
+    return cachedEffectiveTtl.value;
+  }
+  const cfgPath = process.env[KEEPALIVE_PATH_ENV] || DEFAULT_KEEPALIVE_PATH;
+  let result = "1h";
+  try {
+    const st2 = statSync(cfgPath);
+    if (st2.size === 0) {
+      cachedEffectiveTtl = { value: "1h", expiresAt: now + EFFECTIVE_TTL_CACHE_MS };
+      return "1h";
+    }
+    const fd = openSync(cfgPath, "r");
+    try {
+      const buf = Buffer.alloc(st2.size);
+      readSync(fd, buf, 0, st2.size, 0);
+      const text = buf.toString("utf8");
+      const parsed = JSON.parse(text);
+      const sec = parsed?.cacheTtlSec;
+      if (typeof sec === "number" && Number.isFinite(sec)) {
+        if (sec <= 600) {
+          result = "5m";
+        } else {
+          result = "1h";
+        }
+      }
+    } finally {
+      closeSync(fd);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = err?.code;
+    if (code !== "ENOENT") {
+      logEvent("LEDGER_KEEPALIVE_CONFIG_INVALID", {
+        path: cfgPath,
+        error: msg
+      });
+    }
+    result = "1h";
+  }
+  cachedEffectiveTtl = { value: result, expiresAt: now + EFFECTIVE_TTL_CACHE_MS };
+  return result;
+}
+var BREAKPOINT_INVENTORY = Object.freeze([
+  {
+    slot: 1,
+    position: "end of global instruction block (User-level rules: CLAUDE.md or AGENTS.md or plugin-injected)",
+    file: "src/system-blocks.ts",
+    source: "opencode-cache-prefix-stability PRP rev 1.4.0"
+  },
+  {
+    slot: 2,
+    position: "end of (project + opencode body) system block",
+    file: "opencode core",
+    source: "pre-existing \u2014 opencode core stamps"
+  },
+  {
+    slot: 3,
+    position: "end of last tool definition",
+    file: "addCacheMarkers in claude-code-sdk",
+    source: "pre-existing"
+  },
+  {
+    slot: 4,
+    position: "last tool_result in messages",
+    file: "opencode core",
+    source: "pre-existing \u2014 moves every turn"
+  }
+]);
+
+// src/runtime-flags.ts
+import { readFileSync, statSync as statSync2 } from "fs";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
+var FLAGS_PATH = join2(homedir2(), ".claude", "runtime-flags.json");
+var DEFAULTS = {
+  cache_prefix_split_enabled: true,
+  prefix_health_alert_drop_threshold: 1e4,
+  prefix_health_alert_drop_consecutive: 3,
+  prefix_health_alert_stability_window: 50,
+  cache_scope_global_enabled: false,
+  telemetry_v2_enabled: true
+};
+var FLAG_TYPES = {
+  cache_prefix_split_enabled: "boolean",
+  prefix_health_alert_drop_threshold: "number",
+  prefix_health_alert_drop_consecutive: "number",
+  prefix_health_alert_stability_window: "number",
+  cache_scope_global_enabled: "boolean",
+  telemetry_v2_enabled: "boolean",
+  ledger_dry_run: "boolean",
+  dump_bodies_full: "boolean",
+  enable_tool_summary_hint: "boolean",
+  ledger_self_reflect_dry_run: "boolean"
+};
+function validateFlags(parsed) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return "runtime-flags.json: root must be a JSON object";
+  }
+  const types = FLAG_TYPES;
+  for (const [key, value] of Object.entries(parsed)) {
+    if (key.startsWith("_"))
+      continue;
+    const expected = types[key];
+    if (!expected) {
+      return `Unrecognized runtime flag: '${key}' (not in known schema)`;
+    }
+    if (typeof value !== expected) {
+      return `Runtime flag '${key}' must be ${expected}, got ${typeof value}`;
+    }
+  }
+  return null;
+}
+var _mtimeMs = 0;
+var _cache = { ...DEFAULTS };
+var _hasRead = false;
+function readFlags() {
+  try {
+    const st2 = statSync2(FLAGS_PATH);
+    if (st2.mtimeMs !== _mtimeMs || !_hasRead) {
+      const parsed = JSON.parse(readFileSync(FLAGS_PATH, "utf8"));
+      const schemaErr = validateFlags(parsed);
+      if (schemaErr) {
+        logEvent("LEDGER_RUNTIME_FLAGS_INVALID", {
+          error: schemaErr,
+          fallback: _hasRead ? "last-good cache" : "defaults"
+        });
+        _mtimeMs = st2.mtimeMs;
+        if (!_hasRead)
+          _cache = { ...DEFAULTS };
+        return { ..._cache };
+      }
+      _mtimeMs = st2.mtimeMs;
+      _hasRead = true;
+      _cache = {
+        cache_prefix_split_enabled: parsed.cache_prefix_split_enabled ?? DEFAULTS.cache_prefix_split_enabled,
+        prefix_health_alert_drop_threshold: parsed.prefix_health_alert_drop_threshold ?? DEFAULTS.prefix_health_alert_drop_threshold,
+        prefix_health_alert_drop_consecutive: parsed.prefix_health_alert_drop_consecutive ?? DEFAULTS.prefix_health_alert_drop_consecutive,
+        prefix_health_alert_stability_window: parsed.prefix_health_alert_stability_window ?? DEFAULTS.prefix_health_alert_stability_window,
+        cache_scope_global_enabled: parsed.cache_scope_global_enabled ?? DEFAULTS.cache_scope_global_enabled,
+        telemetry_v2_enabled: parsed.telemetry_v2_enabled ?? DEFAULTS.telemetry_v2_enabled
+      };
+    }
+  } catch {
+    if (!_hasRead) {
+      _cache = { ...DEFAULTS };
+    }
+  }
+  return { ..._cache };
+}
+function isCachePrefixSplitEnabled() {
+  return readFlags().cache_prefix_split_enabled;
+}
+function isCacheScopeGlobalEnabled() {
+  return readFlags().cache_scope_global_enabled;
+}
+
+// src/system-blocks.ts
+var DEFAULT_QUERY_SOURCE = "repl_main_thread";
+function normalizeOpencodeSystem(value) {
+  if (value == null)
+    return "";
+  if (typeof value === "string")
+    return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+function buildSystemBlocks(input) {
+  const splitEnabled = isCachePrefixSplitEnabled();
+  const opencodeText = normalizeOpencodeSystem(input.opencodeSystem);
+  const ttl = chooseTTL(input.querySource ?? DEFAULT_QUERY_SOURCE, isUsingOverage(), getEffectiveTtl());
+  if (splitEnabled) {
+    const blocks2 = [];
+    if (input.globalRules) {
+      blocks2.push({
+        type: "text",
+        text: input.globalRules,
+        cache_control: isCacheScopeGlobalEnabled() ? { type: "ephemeral", ttl, scope: "global" } : { type: "ephemeral", ttl }
+      });
+    }
+    const middleParts = [];
+    if (input.projectRules)
+      middleParts.push(input.projectRules);
+    if (opencodeText)
+      middleParts.push(opencodeText);
+    if (middleParts.length > 0) {
+      blocks2.push({
+        type: "text",
+        text: middleParts.join(`
+
+`)
+      });
+    }
+    if (input.volatileMemory) {
+      blocks2.push({
+        type: "text",
+        text: input.volatileMemory
+      });
+    }
+    return blocks2;
+  }
+  const blocks = [];
+  const combinedParts = [];
+  if (input.globalRules)
+    combinedParts.push(input.globalRules);
+  if (input.projectRules)
+    combinedParts.push(input.projectRules);
+  if (opencodeText)
+    combinedParts.push(opencodeText);
+  if (combinedParts.length > 0) {
+    blocks.push({
+      type: "text",
+      text: combinedParts.join(`
+
+`)
+    });
+  }
+  if (input.volatileMemory) {
+    blocks.push({
+      type: "text",
+      text: input.volatileMemory
+    });
+  }
+  return blocks;
+}
 
 // provider.ts
 import { appendFileSync as appendFileSync7 } from "fs";
 import { execSync } from "child_process";
-import { join as join11 } from "path";
-import { homedir as homedir11 } from "os";
+import { join as join16 } from "path";
+import { homedir as homedir14 } from "os";
 var __dirname = "/home/relishev/projects/vibe/claude-code-sdk/packages/opencode-claude";
 try {
   _traceWrite("/tmp/opencode-claude-trace.log", `PROVIDER.TS pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()}
 `);
 } catch {}
 var DEBUG3 = process.env.CLAUDE_MAX_DEBUG !== "0";
-var LOG_FILE5 = join11(homedir11(), ".claude", "claude-max-debug.log");
-var STATS_FILE = join11(homedir11(), ".claude", "claude-max-stats.log");
-var STATS_JSONL = join11(homedir11(), ".claude", "claude-max-stats.jsonl");
+var LOG_FILE5 = join16(homedir14(), ".claude", "claude-max-debug.log");
+var STATS_FILE = join16(homedir14(), ".claude", "claude-max-stats.log");
+var STATS_JSONL = join16(homedir14(), ".claude", "claude-max-stats.jsonl");
 var PID = process.pid;
 var SESSION = process.env.OPENCODE_SESSION_SLUG ?? process.env.OPENCODE_SESSION_ID?.slice(0, 12) ?? "?";
 var MAX_MEMORY_LINES = 500;
@@ -46634,6 +48172,24 @@ function logStats(line, structured) {
 `);
     } catch {}
   }
+}
+function buildStatsUsage(u2) {
+  const out = {
+    in: u2?.inputTokens ?? 0,
+    out: u2?.outputTokens ?? 0,
+    cacheRead: u2?.cacheReadInputTokens ?? 0,
+    cacheWrite: u2?.cacheCreationInputTokens ?? 0
+  };
+  if (typeof u2?.cacheCreation5mInputTokens === "number") {
+    out.cacheWrite5m = u2.cacheCreation5mInputTokens;
+  }
+  if (typeof u2?.cacheCreation1hInputTokens === "number") {
+    out.cacheWrite1h = u2.cacheCreation1hInputTokens;
+  }
+  if (typeof u2?.cacheDeletedInputTokens === "number") {
+    out.cacheDeleted = u2.cacheDeletedInputTokens;
+  }
+  return out;
 }
 function dbg4(...args) {
   if (!DEBUG3)
@@ -46894,12 +48450,12 @@ function getGitRoot() {
 var _fileCache = new Map;
 function readCachedFile(filePath) {
   try {
-    const { statSync: statSync2, readFileSync: readFileSync6 } = __require_gv7hsff9("fs");
-    const st2 = statSync2(filePath);
+    const { statSync: statSync4, readFileSync: readFileSync11 } = __require_gv7hsff9("fs");
+    const st2 = statSync4(filePath);
     const cached = _fileCache.get(filePath);
     if (cached && cached.mtimeMs === st2.mtimeMs)
       return cached.content;
-    const content = readFileSync6(filePath, "utf8");
+    const content = readFileSync11(filePath, "utf8");
     _fileCache.set(filePath, { content, mtimeMs: st2.mtimeMs });
     return content;
   } catch {
@@ -46933,24 +48489,25 @@ function truncateMemory(raw) {
 }
 var _stableInjectionFrozen = undefined;
 var _volatileInjectionFrozen = undefined;
+var _stablePartsFrozen = undefined;
 function buildContextInjectionParts() {
-  if (_stableInjectionFrozen !== undefined && _volatileInjectionFrozen !== undefined) {
-    return { stable: _stableInjectionFrozen, volatile: _volatileInjectionFrozen };
+  if (_stableInjectionFrozen !== undefined && _volatileInjectionFrozen !== undefined && _stablePartsFrozen !== undefined) {
+    return { stable: _stableInjectionFrozen, volatile: _volatileInjectionFrozen, stableParts: _stablePartsFrozen };
   }
   const tInject = Date.now();
-  const home = homedir11();
+  const home = homedir14();
   const cwd = process.cwd();
   const gitRoot = getGitRoot();
   const projectBase = gitRoot || cwd;
   const sanitized = sanitizePathForProjects(projectBase);
-  const memoryPath = join11(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
+  const memoryPath = join16(home, ".claude", "projects", sanitized, "memory", "MEMORY.md");
   const stableSources = [
-    { path: join11(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
+    { path: join16(home, ".claude", "CLAUDE.md"), tag: "claude-rules" }
   ];
   if (cwd !== home) {
-    stableSources.push({ path: join11(cwd, "CLAUDE.md"), tag: "claude-rules" });
-    const dotClaudePath = join11(cwd, ".claude", "CLAUDE.md");
-    if (dotClaudePath !== join11(home, ".claude", "CLAUDE.md")) {
+    stableSources.push({ path: join16(cwd, "CLAUDE.md"), tag: "claude-rules" });
+    const dotClaudePath = join16(cwd, ".claude", "CLAUDE.md");
+    if (dotClaudePath !== join16(home, ".claude", "CLAUDE.md")) {
       stableSources.push({ path: dotClaudePath, tag: "claude-rules" });
     }
   }
@@ -46994,7 +48551,8 @@ ${text}
   });
   _stableInjectionFrozen = stable;
   _volatileInjectionFrozen = volatile;
-  return { stable, volatile };
+  _stablePartsFrozen = stableParts;
+  return { stable, volatile, stableParts };
 }
 function buildContextInjection() {
   const { stable, volatile } = buildContextInjectionParts();
@@ -47039,25 +48597,36 @@ async function convertPrompt(prompt) {
         if (system.length === 0)
           system = undefined;
       }
-      const { stable: stableInj, volatile: volatileInj } = buildContextInjectionParts();
-      if (stableInj || volatileInj) {
-        if (typeof system === "string") {
-          system = [
-            stableInj,
-            system,
-            volatileInj
-          ].filter(Boolean).join(`
+      const { volatile: volatileInj, stableParts } = buildContextInjectionParts();
+      const globalRules = stableParts[0] ?? null;
+      const projectRules = stableParts.length > 1 ? stableParts.slice(1).join(`
 
-`) || undefined;
-        } else if (Array.isArray(system)) {
-          if (stableInj)
-            system.unshift({ type: "text", text: stableInj });
-          if (volatileInj)
-            system.push({ type: "text", text: volatileInj });
-        } else {
-          system = [stableInj, volatileInj].filter(Boolean).join(`
-
-`) || undefined;
+`) : null;
+      const querySource = "repl_main_thread";
+      system = buildSystemBlocks({ opencodeSystem: system, globalRules, projectRules, volatileMemory: volatileInj, querySource });
+      {
+        const blocks = system;
+        const block1Size = blocks?.[0]?.text?.length ?? 0;
+        const block2Size = blocks?.[1]?.text?.length ?? 0;
+        const chosenTtl = chooseTTL(querySource, isUsingOverage(), getEffectiveTtl());
+        const chosenTtlMs = chosenTtl === "5m" ? 300000 : 3600000;
+        const kaConfig = gt();
+        const keepaliveTtlMs = kaConfig.cacheTtlMs;
+        logEvent("LEDGER_SYSTEM_BLOCK_LAYOUT", {
+          scope_global: isCacheScopeGlobalEnabled(),
+          block1_size: block1Size,
+          block2_size: block2Size,
+          ttl: chosenTtl,
+          query_source: querySource,
+          keepalive_ttl_ms: keepaliveTtlMs
+        });
+        if (chosenTtlMs !== keepaliveTtlMs) {
+          logEvent("LEDGER_TTL_PROFILE_MISMATCH", {
+            chosen_ttl: chosenTtl,
+            chosen_ttl_ms: chosenTtlMs,
+            keepalive_ttl_ms: keepaliveTtlMs,
+            severity: "warning"
+          });
         }
       }
       continue;
@@ -47438,7 +49007,7 @@ function createLanguageModel(sdk, modelId, providerId) {
       const sdkOpts = {
         model: modelId,
         messages,
-        maxTokens: Z(modelId, options.maxOutputTokens),
+        maxTokens: Je(modelId, options.maxOutputTokens),
         signal: options.abortSignal
       };
       if (system)
@@ -47495,7 +49064,7 @@ function createLanguageModel(sdk, modelId, providerId) {
         model: modelId,
         dur: 0,
         stop: response.stopReason,
-        usage: { in: u2?.inputTokens ?? 0, out: u2?.outputTokens ?? 0, cacheRead: u2?.cacheReadInputTokens ?? 0, cacheWrite: u2?.cacheCreationInputTokens ?? 0 },
+        usage: buildStatsUsage(u2),
         rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined
       });
       return {
@@ -47525,7 +49094,7 @@ function createLanguageModel(sdk, modelId, providerId) {
       const sdkOpts = {
         model: modelId,
         messages,
-        maxTokens: Z(modelId, options.maxOutputTokens),
+        maxTokens: Je(modelId, options.maxOutputTokens),
         signal: options.abortSignal
       };
       if (system)
@@ -47540,7 +49109,7 @@ function createLanguageModel(sdk, modelId, providerId) {
         sdkOpts.stopSequences = options.stopSequences;
       const po = options.providerOptions?.["claude-max"] ?? options.providerOptions ?? {};
       const thinking = po.thinking ?? po;
-      const isAdaptive = et(modelId);
+      const isAdaptive = je(modelId);
       if (thinking?.type === "enabled" && thinking?.budgetTokens) {
         sdkOpts.thinking = { type: "enabled", budgetTokens: thinking.budgetTokens };
         dbg4("doStream thinking from variant:", sdkOpts.thinking);
@@ -47652,7 +49221,7 @@ function createLanguageModel(sdk, modelId, providerId) {
                     model: modelId,
                     dur,
                     stop: event.stopReason,
-                    usage: { in: u2?.inputTokens ?? 0, out: u2?.outputTokens ?? 0, cacheRead: u2?.cacheReadInputTokens ?? 0, cacheWrite: u2?.cacheCreationInputTokens ?? 0 },
+                    usage: buildStatsUsage(u2),
                     rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined
                   });
                   dbg4(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason });
@@ -47706,7 +49275,7 @@ function createClaudeMax(options = {}) {
   const rewriteBlockIdleMs = (parseInt(process.env.CLAUDE_MAX_REWRITE_BLOCK_IDLE_SEC ?? "1800", 10) || 1800) * 1000;
   let cacheConfigSnapshot = {};
   try {
-    const c2 = Mt();
+    const c2 = gt();
     cacheConfigSnapshot = {
       cacheTtlMs: c2.cacheTtlMs,
       cacheTtlMin: Math.round(c2.cacheTtlMs / 60000),
@@ -47722,10 +49291,10 @@ function createClaudeMax(options = {}) {
   let __pkgVersion = "unknown";
   let __sdkVersion = "unknown";
   try {
-    const path = __require_gv7hsff9("path");
-    const fs2 = __require_gv7hsff9("fs");
-    const pkgPath = path.resolve(__dirname, "..", "package.json");
-    const pkg = JSON.parse(fs2.readFileSync(pkgPath, "utf-8"));
+    const path2 = __require_gv7hsff9("path");
+    const fs3 = __require_gv7hsff9("fs");
+    const pkgPath = path2.resolve(__dirname, "..", "package.json");
+    const pkg = JSON.parse(fs3.readFileSync(pkgPath, "utf-8"));
     __pkgVersion = pkg.version ?? "unknown";
     try {
       const sdkPkg = require_package();
@@ -47768,7 +49337,7 @@ function createClaudeMax(options = {}) {
     }
     return null;
   };
-  const sdk = new ne({
+  const sdk = new Xt({
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
     expiresAt: options.expiresAt,
@@ -47807,7 +49376,7 @@ function createClaudeMax(options = {}) {
           model: stats.model,
           dur: stats.durationMs,
           idle: Math.round(stats.idleMs / 1000),
-          usage: { in: stats.usage.inputTokens, out: stats.usage.outputTokens, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0 },
+          usage: buildStatsUsage(stats.usage),
           rateLimit: stats.rateLimit ?? undefined
         });
         dbg4("keepalive FIRED", { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit });
@@ -47864,6 +49433,7 @@ export {
   validateAndNormalizeImage,
   repairTodowriteInput,
   createClaudeMax,
+  buildStatsUsage,
   buildContextInjectionParts,
   buildContextInjection
 };

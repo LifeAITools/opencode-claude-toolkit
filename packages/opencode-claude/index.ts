@@ -28,11 +28,26 @@ import { homedir } from 'os'
 
 // ─── OAuth Constants (matching Claude CLI exactly) ─────────
 // Source: src/constants/oauth.ts (PROD_OAUTH_CONFIG)
+// Endpoint URLs sourced from SSOT (@life-ai-tools/claude-code-sdk:
+// anthropic-endpoints.ts) per REQ-12 / SSOT-01.
+
+import {
+  ANTHROPIC_PLATFORM_BASE,
+  ANTHROPIC_OAUTH_AUTHORIZE_URL,
+  ANTHROPIC_OAUTH_TOKEN_URL,
+  ANTHROPIC_API_BASE,
+  HEADER_CONTENT_TYPE,
+  HEADER_AUTHORIZATION,
+  HEADER_ACCEPT,
+  CONTENT_TYPE_JSON,
+  ACCEPT_JSON_SSE,
+  CONTENT_TYPE_TEXT_HTML,
+} from '@life-ai-tools/claude-code-sdk'
 
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
-const AUTH_BASE = 'https://platform.claude.com'
-const AUTH_URL = 'https://claude.com/cai/oauth/authorize'
-const TOKEN_URL = `${AUTH_BASE}/v1/oauth/token`
+const AUTH_BASE = ANTHROPIC_PLATFORM_BASE
+const AUTH_URL = ANTHROPIC_OAUTH_AUTHORIZE_URL
+const TOKEN_URL = ANTHROPIC_OAUTH_TOKEN_URL
 // Route through local proxy which handles OAuth auth
 // Proxy replaces x-api-key with Bearer token and adds correct beta headers
 
@@ -54,6 +69,7 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000
 //
 // If you need to add or update a model, edit src/models.ts in the root SDK package.
 import { MAX_MODELS, supportsAdaptiveThinking } from '@life-ai-tools/claude-code-sdk'
+// (Endpoints + headers SSOT imported at top of file, near the OAuth constants.)
 
 // ─── PKCE Helpers ──────────────────────────────────────────
 
@@ -165,7 +181,7 @@ class CredentialManager {
 
       const res = await fetch(TOKEN_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
         body: JSON.stringify({
           grant_type: 'refresh_token',
           refresh_token: this.refreshToken,
@@ -243,9 +259,9 @@ async function resolveOAuthIdentity(): Promise<{
     const res = await fetch(serverUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-        'Authorization': `Bearer ${accessToken}`,
+        [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON,
+        [HEADER_ACCEPT]: ACCEPT_JSON_SSE,
+        [HEADER_AUTHORIZATION]: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         jsonrpc: '2.0', id: 1,
@@ -383,7 +399,7 @@ export default {
             if (_serverUrl) {
               fetch(`${_serverUrl}/tui/toast`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
                 body: JSON.stringify({ text: `⚠️ Wake identity not resolved: ${_identityError}`, type: 'warning' }),
               }).catch(() => {})
             }
@@ -416,7 +432,7 @@ export default {
         config.provider['claude-max'] = {
           id: 'claude-max',
           name: 'Claude Max/Pro',
-          api: 'https://api.anthropic.com',
+          api: ANTHROPIC_API_BASE,
           npm: providerPath,
           env: [],
           models: {},
@@ -429,7 +445,7 @@ export default {
           config.provider['claude-max'].models[id] = {
             id,
             name: `${info.name} (Max)`,
-            api: { id, url: 'https://api.anthropic.com', npm: providerPath },
+            api: { id, url: ANTHROPIC_API_BASE, npm: providerPath },
             providerID: 'claude-max',
             reasoning: isAdaptive,
             // modalities — opencode reads THIS (not capabilities.input/output) to decide
@@ -545,7 +561,7 @@ export default {
                   const error = url.searchParams.get('error')
                   if (error) {
                     rejectCode(new Error(`OAuth error: ${error}`))
-                    return new Response('<h1>Login failed</h1>', { status: 400, headers: { 'Content-Type': 'text/html' } })
+                    return new Response('<h1>Login failed</h1>', { status: 400, headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_TEXT_HTML } })
                   }
                   if (!code || st !== state) {
                     rejectCode(new Error('Invalid callback'))
@@ -583,7 +599,7 @@ export default {
                     const code = await codePromise
                     const tokenRes = await fetch(TOKEN_URL, {
                       method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
+                      headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
                       body: JSON.stringify({
                         grant_type: 'authorization_code',
                         code,

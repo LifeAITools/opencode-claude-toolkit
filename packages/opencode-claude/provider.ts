@@ -14,6 +14,10 @@ try { _traceWrite('/tmp/opencode-claude-trace.log', `PROVIDER.TS pid=${process.p
 
 import { ClaudeCodeSDK, resolveMaxTokens, supportsAdaptiveThinking, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 import type { GenerateOptions, StreamEvent } from '@life-ai-tools/claude-code-sdk'
+import { buildSystemBlocks } from './src/system-blocks.js'
+import { chooseTTL, isUsingOverage, getEffectiveTtl } from './src/cache-config.js'
+import { logEvent } from './src/log-event.js'
+import { isCacheScopeGlobalEnabled } from './src/runtime-flags.js'
 
 import { appendFileSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
@@ -35,6 +39,36 @@ function logStats(line: string, structured?: Record<string, unknown>) {
   if (structured) {
     try { appendFileSync(STATS_JSONL, JSON.stringify({ ts: new Date().toISOString(), pid: PID, ses: SESSION, ...structured }) + '\n') } catch {}
   }
+}
+
+/**
+ * Build the `usage` payload for `claude-max-stats.jsonl` from a TokenUsage
+ * object. Always emits `in`/`out`/`cacheRead`/`cacheWrite`. Conditionally
+ * emits Phase 3.B subfields `cacheWrite5m`/`cacheWrite1h`/`cacheDeleted`
+ * — ONLY when the corresponding source field is a number (omit-when-absent
+ * contract per REQ-05 / OQ-02; absent means "Anthropic didn't report it",
+ * not zero). This keeps the historical stats schema stable for entries
+ * that pre-date the 1h-TTL rollout.
+ *
+ * Pure — no IO, no globals. Defensive against partial/null inputs.
+ */
+export function buildStatsUsage(u: any): Record<string, number> {
+  const out: Record<string, number> = {
+    in: u?.inputTokens ?? 0,
+    out: u?.outputTokens ?? 0,
+    cacheRead: u?.cacheReadInputTokens ?? 0,
+    cacheWrite: u?.cacheCreationInputTokens ?? 0,
+  }
+  if (typeof u?.cacheCreation5mInputTokens === 'number') {
+    out.cacheWrite5m = u.cacheCreation5mInputTokens
+  }
+  if (typeof u?.cacheCreation1hInputTokens === 'number') {
+    out.cacheWrite1h = u.cacheCreation1hInputTokens
+  }
+  if (typeof u?.cacheDeletedInputTokens === 'number') {
+    out.cacheDeleted = u.cacheDeletedInputTokens
+  }
+  return out
 }
 
 function dbg(...args: any[]) {
@@ -497,15 +531,17 @@ function truncateMemory(raw: string): { text: string; truncated: boolean } {
 // the large STABLE prefix (CLAUDE.md + opencode-system + tools) stays cached.
 let _stableInjectionFrozen: string | null | undefined = undefined
 let _volatileInjectionFrozen: string | null | undefined = undefined
+let _stablePartsFrozen: string[] | undefined = undefined
 
 interface InjectionParts {
-  stable: string | null     // CLAUDE.md content — goes first in system
+  stable: string | null     // CLAUDE.md content — goes first in system (joined)
   volatile: string | null   // MEMORY.md content — goes last in system
+  stableParts: string[]     // CLAUDE.md content split per-source (global first, then project); needed for split layout per PRP rev 1.4.0
 }
 
 export function buildContextInjectionParts(): InjectionParts {
-  if (_stableInjectionFrozen !== undefined && _volatileInjectionFrozen !== undefined) {
-    return { stable: _stableInjectionFrozen, volatile: _volatileInjectionFrozen }
+  if (_stableInjectionFrozen !== undefined && _volatileInjectionFrozen !== undefined && _stablePartsFrozen !== undefined) {
+    return { stable: _stableInjectionFrozen, volatile: _volatileInjectionFrozen, stableParts: _stablePartsFrozen }
   }
 
   const tInject = Date.now()
@@ -559,7 +595,8 @@ export function buildContextInjectionParts(): InjectionParts {
 
   _stableInjectionFrozen = stable
   _volatileInjectionFrozen = volatile
-  return { stable, volatile }
+  _stablePartsFrozen = stableParts
+  return { stable, volatile, stableParts }
 }
 
 /**
@@ -633,21 +670,50 @@ async function convertPrompt(prompt: any[]): Promise<{ system?: string; messages
       // NOTE: attempted migration to experimental.chat.system.transform hook failed —
       // opencode only dispatches config/auth hooks to external (npm) plugins,
       // not trigger-type hooks. So injection stays in the provider for now.
-      const { stable: stableInj, volatile: volatileInj } = buildContextInjectionParts()
-
-      if (stableInj || volatileInj) {
-        if (typeof system === 'string') {
-          system = [
-            stableInj,
-            system,
-            volatileInj,
-          ].filter(Boolean).join('\n\n') || undefined
-        } else if (Array.isArray(system)) {
-          // Stable goes to the front, volatile to the end.
-          if (stableInj) (system as any[]).unshift({ type: 'text', text: stableInj })
-          if (volatileInj) (system as any[]).push({ type: 'text', text: volatileInj })
-        } else {
-          system = [stableInj, volatileInj].filter(Boolean).join('\n\n') || undefined
+      const { volatile: volatileInj, stableParts } = buildContextInjectionParts()
+      // Layout per PRP rev 1.4.0: split global vs project for cache_control gating.
+      // Behavior controlled by ~/.claude/runtime-flags.json:cache_prefix_split_enabled.
+      const globalRules = stableParts[0] ?? null
+      const projectRules = stableParts.length > 1 ? stableParts.slice(1).join('\n\n') : null
+      // querySource: opencode's V3 request shape does NOT currently surface a
+      // native CC `o85()`-style querySource string. Conservative default per
+      // claude-code-discipline-sdk PRP rev 1.1.0 §CR-13: pass the REPL-thread
+      // identifier which falls in chooseTTL's allowlist (→ 1h tier), matching
+      // pre-PRP cache behaviour. TODO Phase 5+: thread real querySource from
+      // opencode session metadata once it surfaces in the request shape.
+      const querySource = 'repl_main_thread'
+      system = buildSystemBlocks({ opencodeSystem: system, globalRules, projectRules, volatileMemory: volatileInj, querySource }) as any
+      // NFR-07 / CR-11 per-turn observability — structured JSONL event.
+      // Goes to `~/.local/share/opencode/logs/context-ledger/events.jsonl` via
+      // `logEvent` to avoid polluting opencode TUI stderr (red text overlay).
+      // Kill-switch: `LEDGER_TELEMETRY_VERBOSE=0` silences without code change.
+      {
+        const blocks = system as Array<{ text?: string }> | undefined
+        const block1Size = blocks?.[0]?.text?.length ?? 0
+        const block2Size = blocks?.[1]?.text?.length ?? 0
+        // Phase 2.5 — TTL profile coordination with proxy keep-alive (PRP F4).
+        // Provider and proxy MUST agree on cache TTL or empirical tests are
+        // invalid (provider writes 1h cache while proxy fires every 30 min
+        // = cold cache every turn for 5m profile, etc).
+        const chosenTtl = chooseTTL(querySource, isUsingOverage(), getEffectiveTtl())
+        const chosenTtlMs = chosenTtl === '5m' ? 300_000 : 3_600_000
+        const kaConfig = loadKeepaliveConfig()
+        const keepaliveTtlMs = kaConfig.cacheTtlMs
+        logEvent('LEDGER_SYSTEM_BLOCK_LAYOUT', {
+          scope_global: isCacheScopeGlobalEnabled(),
+          block1_size: block1Size,
+          block2_size: block2Size,
+          ttl: chosenTtl,
+          query_source: querySource,
+          keepalive_ttl_ms: keepaliveTtlMs,
+        })
+        if (chosenTtlMs !== keepaliveTtlMs) {
+          logEvent('LEDGER_TTL_PROFILE_MISMATCH', {
+            chosen_ttl: chosenTtl,
+            chosen_ttl_ms: chosenTtlMs,
+            keepalive_ttl_ms: keepaliveTtlMs,
+            severity: 'warning',
+          })
         }
       }
       continue
@@ -1214,7 +1280,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
       const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'} util5h=${rl.utilization5h ?? '?'} util7d=${rl.utilization7d ?? '?'}` : ''
       logStats(`[${new Date().toISOString()}] model=${modelId} type=generate | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${response.stopReason}${rlStr}`, {
         type: 'generate', model: modelId, dur: 0, stop: response.stopReason,
-        usage: { in: u?.inputTokens ?? 0, out: u?.outputTokens ?? 0, cacheRead: u?.cacheReadInputTokens ?? 0, cacheWrite: u?.cacheCreationInputTokens ?? 0 },
+        usage: buildStatsUsage(u),
         rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
       })
       return {
@@ -1384,7 +1450,7 @@ function createLanguageModel(sdk: ClaudeCodeSDK, modelId: string, providerId: st
                   const rlStr = rl.status ? ` | quota=${rl.status} claim=${rl.claim ?? '?'} util5h=${rl.utilization5h ?? '?'} util7d=${rl.utilization7d ?? '?'}` : ''
                   logStats(`[${new Date().toISOString()}] model=${modelId} type=stream dur=${dur}ms | in=${u?.inputTokens ?? 0} out=${u?.outputTokens ?? 0} cacheRead=${u?.cacheReadInputTokens ?? 0} cacheWrite=${u?.cacheCreationInputTokens ?? 0} | stop=${event.stopReason}${rlStr}`, {
                     type: 'stream', model: modelId, dur, stop: event.stopReason,
-                    usage: { in: u?.inputTokens ?? 0, out: u?.outputTokens ?? 0, cacheRead: u?.cacheReadInputTokens ?? 0, cacheWrite: u?.cacheCreationInputTokens ?? 0 },
+                    usage: buildStatsUsage(u),
                     rateLimit: rl.status ? { status: rl.status, claim: rl.claim, resetAt: rl.resetAt, util5h: rl.utilization5h, util7d: rl.utilization7d } : undefined,
                   })
                   dbg(`doStream complete in ${dur}ms`, { modelId, stopReason: event.stopReason })
@@ -1611,7 +1677,7 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
         const rl = stats.rateLimit ? ` | quota=${stats.rateLimit.status ?? '?'} claim=${stats.rateLimit.claim ?? '?'}` : ''
         logStats(`[${new Date().toISOString()}] model=${stats.model} type=keepalive dur=${stats.durationMs}ms | in=${stats.usage.inputTokens} out=${stats.usage.outputTokens} cacheRead=${stats.usage.cacheReadInputTokens ?? 0} cacheWrite=${stats.usage.cacheCreationInputTokens ?? 0} | idle=${Math.round(stats.idleMs / 1000)}s${rl}`, {
           type: 'keepalive', model: stats.model, dur: stats.durationMs, idle: Math.round(stats.idleMs / 1000),
-          usage: { in: stats.usage.inputTokens, out: stats.usage.outputTokens, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0 },
+          usage: buildStatsUsage(stats.usage),
           rateLimit: stats.rateLimit ?? undefined,
         })
         dbg('keepalive FIRED', { model: stats.model, dur: stats.durationMs, cacheRead: stats.usage.cacheReadInputTokens ?? 0, cacheWrite: stats.usage.cacheCreationInputTokens ?? 0, rateLimit: stats.rateLimit })

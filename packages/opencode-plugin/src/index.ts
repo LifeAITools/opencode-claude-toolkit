@@ -22,14 +22,33 @@ import { createHash, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, statSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
+import {
+  ANTHROPIC_PLATFORM_BASE,
+  ANTHROPIC_OAUTH_AUTHORIZE_URL,
+  ANTHROPIC_OAUTH_TOKEN_URL,
+  ANTHROPIC_API_BASE,
+  ANTHROPIC_API_VERSION,
+  HEADER_CONTENT_TYPE,
+  HEADER_AUTHORIZATION,
+  HEADER_ANTHROPIC_VERSION,
+  HEADER_ANTHROPIC_BETA,
+  HEADER_ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS,
+  HEADER_X_APP,
+  HEADER_USER_AGENT,
+  HEADER_X_CLAUDE_CODE_SESSION_ID,
+  CONTENT_TYPE_JSON,
+  CONTENT_TYPE_TEXT_HTML,
+} from '@life-ai-tools/claude-code-sdk'
 
 // ─── OAuth Constants (matching Claude CLI exactly) ─────────
+// Endpoint URLs sourced from SSOT (@life-ai-tools/claude-code-sdk:
+// anthropic-endpoints.ts) per REQ-12 / SSOT-01.
 
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
-const AUTH_BASE = 'https://platform.claude.com'
-const AUTH_URL = 'https://claude.com/cai/oauth/authorize'
-const TOKEN_URL = `${AUTH_BASE}/v1/oauth/token`
-const API_BASE = 'https://api.anthropic.com'
+const AUTH_BASE = ANTHROPIC_PLATFORM_BASE
+const AUTH_URL = ANTHROPIC_OAUTH_AUTHORIZE_URL
+const TOKEN_URL = ANTHROPIC_OAUTH_TOKEN_URL
+const API_BASE = ANTHROPIC_API_BASE
 
 const SCOPES = [
   'user:profile',
@@ -69,31 +88,66 @@ function generateCodeVerifier(): string { return base64url(randomBytes(32)) }
 function generateCodeChallenge(v: string): string { return base64url(createHash('sha256').update(v).digest()) }
 function generateState(): string { return base64url(randomBytes(32)) }
 
+// ─── Credential path resolution ────────────────────────────
+//
+// Standalone, pure helpers — exported for testability (testing seam) and so
+// both the plugin and external callers resolve credential paths identically.
+// All honor CLAUDE_CONFIG_DIR via getClaudeConfigDir so a redirected config
+// dir (e.g. in tests or multi-account setups) is respected everywhere.
+
+/** Global Claude config dir. Respects CLAUDE_CONFIG_DIR, else ~/.claude. */
+export function getClaudeConfigDir(): string {
+  return (process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')).normalize('NFC')
+}
+
+/** Global credential file: <claude-config-dir>/.credentials.json. */
+export function getGlobalCredentialPath(): string {
+  return join(getClaudeConfigDir(), '.credentials.json')
+}
+
+/** CWD-local project credential file: <cwd>/.claude/.credentials.json. */
+export function getLocalCredentialPath(cwd: string): string {
+  return join(cwd, '.claude', '.credentials.json')
+}
+
+/** Prefer CWD-local project credentials; fall back to global. */
+export function resolveCredentialPath(cwd: string): string {
+  const local = getLocalCredentialPath(cwd)
+  return existsSync(local) ? local : getGlobalCredentialPath()
+}
+
 // ─── Per-Instance Credential Manager ───────────────────────
 
-class CredentialManager {
+export class CredentialManager {
   private accessToken: string | null = null
   private refreshToken: string | null = null
   private expiresAt = 0
   private lastMtime = 0
   private refreshing: Promise<void> | null = null
-  readonly credPath: string
+  private _credPath: string
 
-  constructor(cwd: string) {
-    // Resolve credential file: CWD-local first, then global
-    const candidates = [
-      join(cwd, '.claude', '.credentials.json'),
-      join(cwd, '.credentials.json'),
-      join(homedir(), '.claude', '.credentials.json'),
-    ]
-    this.credPath = candidates.find(p => existsSync(p))
-      ?? join(homedir(), '.claude', '.credentials.json')
-
+  constructor(cwd: string, explicitPath?: string) {
+    // Explicit path wins (callers that already know the target file); else
+    // resolve CWD-local → global through the shared helper.
+    this._credPath = explicitPath ?? resolveCredentialPath(cwd)
     this.loadFromDisk()
   }
 
+  get credPath(): string { return this._credPath }
   get token(): string | null { return this.accessToken }
   get hasCredentials(): boolean { return !!this.accessToken }
+
+  /** Switch the backing credential file and reload from it. */
+  setCredentialPath(path: string): void {
+    this._credPath = path
+    // Reset in-memory state so a switch to a file with no/other creds never
+    // leaks the previous file's token; loadFromDisk re-populates on success.
+    this.accessToken = null
+    this.refreshToken = null
+    this.expiresAt = 0
+    this.lastMtime = 0
+    this.loadFromDisk()
+  }
 
   private loadFromDisk(): boolean {
     try {
@@ -160,7 +214,7 @@ class CredentialManager {
 
       const res = await fetch(TOKEN_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
         body: JSON.stringify({
           grant_type: 'refresh_token',
           refresh_token: this.refreshToken,
@@ -281,17 +335,17 @@ export default {
               const token = await creds.ensureValid()
               const headers = new Headers(init?.headers)
               headers.delete('x-api-key')
-              headers.set('Authorization', `Bearer ${token}`)
-              headers.set('anthropic-version', '2023-06-01')
-              headers.set('anthropic-dangerous-direct-browser-access', 'true')
-              headers.set('anthropic-beta', [
+              headers.set(HEADER_AUTHORIZATION, `Bearer ${token}`)
+              headers.set(HEADER_ANTHROPIC_VERSION, ANTHROPIC_API_VERSION)
+              headers.set(HEADER_ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS, 'true')
+              headers.set(HEADER_ANTHROPIC_BETA, [
                 CLAUDE_CODE_BETA, OAUTH_BETA, PROMPT_CACHING_BETA,
                 INTERLEAVED_THINKING_BETA, CONTEXT_1M_BETA,
                 FINE_GRAINED_TOOL_STREAMING_BETA,
               ].join(','))
-              headers.set('x-app', 'cli')
-              headers.set('User-Agent', `claude-cli/${CC_COMPAT_VERSION}`)
-              headers.set('X-Claude-Code-Session-Id', sessionId)
+              headers.set(HEADER_X_APP, 'cli')
+              headers.set(HEADER_USER_AGENT, `claude-cli/${CC_COMPAT_VERSION}`)
+              headers.set(HEADER_X_CLAUDE_CODE_SESSION_ID, sessionId)
 
               // Inject billing header into request body system prompt
               if (init?.body && typeof init.body === 'string') {
@@ -376,7 +430,7 @@ export default {
                   const error = url.searchParams.get('error')
                   if (error) {
                     rejectCode(new Error(`OAuth error: ${error}`))
-                    return new Response('<h1>Login failed</h1>', { status: 400, headers: { 'Content-Type': 'text/html' } })
+                    return new Response('<h1>Login failed</h1>', { status: 400, headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_TEXT_HTML } })
                   }
                   if (!code || st !== state) {
                     rejectCode(new Error('Invalid callback'))
@@ -414,7 +468,7 @@ export default {
                     const code = await codePromise
                     const tokenRes = await fetch(TOKEN_URL, {
                       method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
+                      headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
                       body: JSON.stringify({
                         grant_type: 'authorization_code',
                         code,

@@ -131,6 +131,46 @@ export {
 } from './models.js'
 export type { ModelMetadata } from './models.js'
 
+// ─── SSOT: Anthropic endpoint URLs ──────────────────────────────────
+// REQ-12 / SSOT-01: every production caller imports endpoint URLs from
+// here. NO inline literals allowed in production files (test fixtures
+// exempt). See src/anthropic-endpoints.ts for the full rationale.
+export {
+  ANTHROPIC_API_HOST,
+  ANTHROPIC_API_BASE,
+  ANTHROPIC_API_MESSAGES,
+  ANTHROPIC_API_MESSAGES_COUNT_TOKENS,
+  ANTHROPIC_PLATFORM_BASE,
+  ANTHROPIC_OAUTH_TOKEN_URL,
+  ANTHROPIC_OAUTH_AUTHORIZE_URL,
+  ANTHROPIC_OAUTH_CONSOLE_AUTHORIZE_URL,
+  ANTHROPIC_OAUTH_MANUAL_REDIRECT_URI,
+  ANTHROPIC_ENDPOINTS,
+} from './anthropic-endpoints.js'
+
+// ─── SSOT: Anthropic HTTP header names + API version ────────────────
+// REQ-12 / SSOT-02: every production caller imports header names and
+// the API version from here. NO inline 'anthropic-version' /
+// 'Content-Type' / 'application/json' literals in production files
+// (test fixtures exempt). See src/anthropic-headers.ts for rationale.
+export {
+  ANTHROPIC_API_VERSION,
+  API_VERSION,
+  HEADER_CONTENT_TYPE,
+  HEADER_AUTHORIZATION,
+  HEADER_ACCEPT,
+  HEADER_USER_AGENT,
+  HEADER_ANTHROPIC_VERSION,
+  HEADER_ANTHROPIC_BETA,
+  HEADER_ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS,
+  HEADER_X_APP,
+  HEADER_X_CLAUDE_CODE_SESSION_ID,
+  CONTENT_TYPE_JSON,
+  ACCEPT_JSON_SSE,
+  CONTENT_TYPE_TEXT_HTML,
+  ANTHROPIC_HEADERS,
+} from './anthropic-headers.js'
+
 // Voice STT — Speech-to-Text via Anthropic voice_stream WebSocket
 export {
   connectVoiceStream,

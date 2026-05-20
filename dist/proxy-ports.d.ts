@@ -114,8 +114,11 @@ export interface Session<EngineT = unknown> {
     lastUsage: {
         inputTokens: number;
         outputTokens: number;
-        cacheReadInputTokens: number;
-        cacheCreationInputTokens: number;
+        cacheReadInputTokens?: number;
+        cacheCreationInputTokens?: number;
+        cacheCreation5mInputTokens?: number;
+        cacheCreation1hInputTokens?: number;
+        cacheDeletedInputTokens?: number;
     } | null;
 }
 export interface ISessionStore<EngineT = unknown> {

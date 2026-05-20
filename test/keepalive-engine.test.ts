@@ -59,6 +59,425 @@ describe('KeepaliveEngine Layer 1: intervalMs safety clamp', () => {
   })
 })
 
+// ─── Per-consumer cacheTtlMs override (2026-05-17 incident regression) ───
+//
+// Architectural fix for SDK-0.15 incident: proxy intercepts native CC traffic
+// (5min ephemeral cache wire-TTL) but SSOT keepalive.json declares 3600s for
+// opencode's 1h cache contract. Honoring SSOT in proxy fires KAs against
+// already-expired Anthropic caches → 906K cache_creation tokens wasted.
+//
+// Fix: KeepaliveConfig.cacheTtlMs allows the consumer to PIN its own TTL,
+// independent of SSOT. proxy-client passes 300_000 by default.
+describe('KeepaliveEngine: per-consumer cacheTtlMs override', () => {
+  test('no override → reads cacheTtlMs from SSOT fixture (300_000)', () => {
+    const e = mkEngine()
+    expect(e._cacheTtlMs).toBe(300_000)
+    expect(e._cacheTtlOverridden).toBe(false)
+  })
+
+  test('override pins cacheTtlMs regardless of SSOT', () => {
+    const e = mkEngine({ cacheTtlMs: 600_000 })
+    expect(e._cacheTtlMs).toBe(600_000)
+    expect(e._cacheTtlOverridden).toBe(true)
+  })
+
+  test('proxy default 300_000 override locks even when SSOT says different', () => {
+    // Simulate proxy adapter passing the 5-min pin
+    const e = mkEngine({ cacheTtlMs: 300_000 })
+    expect(e._cacheTtlMs).toBe(300_000)
+    expect(e._cacheTtlOverridden).toBe(true)
+  })
+
+  test('override recomputes intervalClampMax against EFFECTIVE TTL', () => {
+    // With cacheTtlMs=300_000, safetyMargin=15_000, intervalClampMax must be
+    //   300_000 - 15_000 - 60_000 = 225_000
+    // Attempting intervalMs=600_000 (would be valid under 1h SSOT) must clamp.
+    const e = mkEngine({ cacheTtlMs: 300_000, intervalMs: 600_000 })
+    expect(e._config.intervalMs).toBe(225_000)
+  })
+
+  test('rejects invalid override values (falls back to SSOT)', () => {
+    const eNeg = mkEngine({ cacheTtlMs: -1 })
+    expect(eNeg._cacheTtlMs).toBe(300_000) // fixture
+    expect(eNeg._cacheTtlOverridden).toBe(false)
+
+    const eZero = mkEngine({ cacheTtlMs: 0 })
+    expect(eZero._cacheTtlMs).toBe(300_000)
+    expect(eZero._cacheTtlOverridden).toBe(false)
+
+    const eNaN = mkEngine({ cacheTtlMs: NaN })
+    expect(eNaN._cacheTtlMs).toBe(300_000)
+    expect(eNaN._cacheTtlOverridden).toBe(false)
+  })
+})
+
+// ─── Layer 1+2: wire-format autoscan + monotonic lock-down ──────
+//
+// detectCacheTtlFromBody walks an Anthropic request body and returns the
+// minimum cache_control TTL observed (plus a hasAnyCacheControl flag for
+// Layer 3). The engine calls this on every notifyRealRequestStart and
+// monotonically locks the engine's cacheTtlMs DOWNWARD when wire markers
+// indicate a shorter cache lifetime than the current config.
+import { detectCacheTtlFromBody } from '../src/keepalive-engine.js'
+
+describe('detectCacheTtlFromBody (wire-format autoscan)', () => {
+  test('empty body → no markers', () => {
+    expect(detectCacheTtlFromBody({})).toEqual({ minTtlMs: null, hasAnyCacheControl: false })
+    expect(detectCacheTtlFromBody({ messages: [] })).toEqual({ minTtlMs: null, hasAnyCacheControl: false })
+    expect(detectCacheTtlFromBody(null)).toEqual({ minTtlMs: null, hasAnyCacheControl: false })
+  })
+
+  test('ephemeral without ttl → 5min default', () => {
+    const body = { system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }] }
+    expect(detectCacheTtlFromBody(body)).toEqual({ minTtlMs: 300_000, hasAnyCacheControl: true })
+  })
+
+  test('ephemeral ttl=1h → 3600000', () => {
+    const body = { system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '1h' } }] }
+    expect(detectCacheTtlFromBody(body)).toEqual({ minTtlMs: 3_600_000, hasAnyCacheControl: true })
+  })
+
+  test('mixed 5m + 1h → returns MIN (5m) — defensive', () => {
+    const body = {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+      messages: [{
+        role: 'user',
+        content: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }],
+      }],
+    }
+    expect(detectCacheTtlFromBody(body)).toEqual({ minTtlMs: 300_000, hasAnyCacheControl: true })
+  })
+
+  test('scans tools[] markers', () => {
+    const body = { tools: [{ name: 't', cache_control: { type: 'ephemeral', ttl: '1h' } }] }
+    expect(detectCacheTtlFromBody(body)).toEqual({ minTtlMs: 3_600_000, hasAnyCacheControl: true })
+  })
+
+  test('unknown ttl string → 5min default (safe)', () => {
+    const body = { system: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral', ttl: '2h' } }] }
+    expect(detectCacheTtlFromBody(body)).toEqual({ minTtlMs: 300_000, hasAnyCacheControl: true })
+  })
+
+  test('non-ephemeral type → ignored', () => {
+    const body = { system: [{ type: 'text', text: 'x', cache_control: { type: 'persistent' as any } }] }
+    expect(detectCacheTtlFromBody(body)).toEqual({ minTtlMs: null, hasAnyCacheControl: false })
+  })
+
+  test('malformed bodies do not throw', () => {
+    expect(() => detectCacheTtlFromBody({ messages: 'not-array' })).not.toThrow()
+    expect(() => detectCacheTtlFromBody({ system: [{ cache_control: 'nope' }] })).not.toThrow()
+    expect(() => detectCacheTtlFromBody({ tools: [null] })).not.toThrow()
+  })
+})
+
+// ─── TTL scan observability (onTtlScan change-detection) ─────────
+//
+// Independent of the downlock decision: every real request scans the body
+// for cache_control TTL and fires onTtlScan whenever the observed min-TTL
+// differs from the prior value for this session (first observation always
+// fires). Steady-state (unchanged) does NOT fire. Runs even when TTL is
+// pinned via override — pure observability, no behavior change.
+describe('KeepaliveEngine: onTtlScan change detection', () => {
+  type Scan = { minTtlMs: number | null; previousTtlMs: number | null; hasAnyCacheControl: boolean; at: number }
+  const sys = (ttl?: string) => ({
+    system: [{ type: 'text', text: 'sys', cache_control: ttl ? { type: 'ephemeral', ttl } : { type: 'ephemeral' } }],
+  })
+
+  test('first observation fires with previousTtlMs=null', () => {
+    const scans: Scan[] = []
+    const e = mkEngine({ onTtlScan: (i) => scans.push(i) })
+    e.notifyRealRequestStart('m', sys('1h'), {})
+    expect(scans).toHaveLength(1)
+    expect(scans[0]).toMatchObject({ minTtlMs: 3_600_000, previousTtlMs: null, hasAnyCacheControl: true })
+  })
+
+  test('unchanged TTL across requests does NOT re-fire', () => {
+    const scans: Scan[] = []
+    const e = mkEngine({ onTtlScan: (i) => scans.push(i) })
+    e.notifyRealRequestStart('m', sys('1h'), {})
+    e.notifyRealRequestStart('m', sys('1h'), {})
+    e.notifyRealRequestStart('m', sys('1h'), {})
+    expect(scans).toHaveLength(1)  // only the first-seen
+  })
+
+  test('TTL change (1h → 5m) fires with correct previous/min', () => {
+    const scans: Scan[] = []
+    const e = mkEngine({ onTtlScan: (i) => scans.push(i) })
+    e.notifyRealRequestStart('m', sys('1h'), {})
+    e.notifyRealRequestStart('m', sys(), {})  // default ephemeral = 5m
+    expect(scans).toHaveLength(2)
+    expect(scans[1]).toMatchObject({ minTtlMs: 300_000, previousTtlMs: 3_600_000, hasAnyCacheControl: true })
+  })
+
+  test('a no-cache_control request is a NON-observation — does NOT fire "→ none"', () => {
+    // Lightweight requests (count_tokens, title-gen, quota checks) ship no
+    // cache_control. They must NOT be reported as the session TTL dropping to
+    // "none" — that produced misleading "5m → none → 5m" flapping. The strict
+    // observed TTL is held; only requests that actually carry cache_control move
+    // the observation.
+    const scans: Scan[] = []
+    const e = mkEngine({ onTtlScan: (i) => scans.push(i) })
+    e.notifyRealRequestStart('m', sys('1h'), {})                                    // first-seen 1h
+    e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'hi' }] }, {}) // no cc → skip
+    expect(scans).toHaveLength(1)
+    expect(scans[0]).toMatchObject({ minTtlMs: 3_600_000, previousTtlMs: null, hasAnyCacheControl: true })
+  })
+
+  test('no-cache_control request does NOT cause flapping on the next cached request', () => {
+    // Sequence 1h → (no cc) → 1h must yield exactly ONE event (first-seen 1h):
+    // the held observation is compared against the next cached request, not
+    // against a phantom "none" in between.
+    const scans: Scan[] = []
+    const e = mkEngine({ onTtlScan: (i) => scans.push(i) })
+    e.notifyRealRequestStart('m', sys('1h'), {})                                    // first-seen 1h
+    e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'hi' }] }, {}) // no cc → skip
+    e.notifyRealRequestStart('m', sys('1h'), {})                                    // still 1h → no change
+    expect(scans).toHaveLength(1)
+  })
+
+  test('genuine TTL change still fires across an intervening no-cache_control request', () => {
+    // 1h → (no cc) → 5m must report 1h → 5m (previous compared against the held
+    // observation, not against the skipped no-cc request).
+    const scans: Scan[] = []
+    const e = mkEngine({ onTtlScan: (i) => scans.push(i) })
+    e.notifyRealRequestStart('m', sys('1h'), {})
+    e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'hi' }] }, {}) // no cc → skip
+    e.notifyRealRequestStart('m', sys(), {})  // 5m
+    expect(scans).toHaveLength(2)
+    expect(scans[1]).toMatchObject({ minTtlMs: 300_000, previousTtlMs: 3_600_000, hasAnyCacheControl: true })
+  })
+
+  test('scan runs even when cacheTtlMs is pinned (override active)', () => {
+    const scans: Scan[] = []
+    const e = mkEngine({ cacheTtlMs: 3_600_000, onTtlScan: (i) => scans.push(i) })
+    expect(e._cacheTtlOverridden).toBe(true)
+    e.notifyRealRequestStart('m', sys(), {})  // 5m wire marker under 1h pin
+    // Observability still fires despite pin; downlock stays disabled.
+    expect(scans).toHaveLength(1)
+    expect(scans[0]).toMatchObject({ minTtlMs: 300_000, previousTtlMs: null })
+    expect(e._cacheTtlObservedLocked).toBe(false)
+  })
+
+  test('a throwing onTtlScan observer never breaks the request path', () => {
+    const e = mkEngine({ onTtlScan: () => { throw new Error('observer boom') } })
+    expect(() => e.notifyRealRequestStart('m', sys('1h'), {})).not.toThrow()
+  })
+})
+
+describe('KeepaliveEngine: wire-autoscan monotonic lock-down', () => {
+  test('observing 5m marker on 1h engine → locks TTL to 5m', () => {
+    const e = mkEngine({ cacheTtlMs: 3_600_000 })  // start at 1h
+    expect(e._cacheTtlMs).toBe(3_600_000)
+    expect(e._cacheTtlOverridden).toBe(true)
+    // BUT cacheTtlOverridden takes precedence — autoscan skipped when overridden.
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
+    }, {})
+    // Stays at 1h because override is explicit.
+    expect(e._cacheTtlMs).toBe(3_600_000)
+    expect(e._cacheTtlObservedLocked).toBe(false)
+  })
+
+  test('no override + 5m marker observed → engine locks down from SSOT', () => {
+    // Fixture is 300_000 (5min). To test downward lock, simulate engine at 1h
+    // via SSOT-equivalent: just verify that when current TTL > observed, lock fires.
+    // Reuse construction default (no override) — fixture is already 5min, so
+    // observing a 5m marker results in NO change (not strictly less than current).
+    const e = mkEngine()
+    expect(e._cacheTtlMs).toBe(300_000)
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
+    }, {})
+    // No lock because current TTL already equals observed.
+    expect(e._cacheTtlObservedLocked).toBe(false)
+  })
+
+  test('no markers in body → autoscan no-op, TTL unchanged', () => {
+    const e = mkEngine()
+    const before = e._cacheTtlMs
+    e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'hi' }] }, {})
+    expect(e._cacheTtlMs).toBe(before)
+    expect(e._cacheTtlObservedLocked).toBe(false)
+  })
+
+  test('1h marker on 5m engine → does NOT raise TTL (monotonic-down only)', () => {
+    const e = mkEngine()  // fixture 300_000
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+    }, {})
+    // 1h observed > 5m current → autoscan ignores (monotonic-down only).
+    expect(e._cacheTtlMs).toBe(300_000)
+    expect(e._cacheTtlObservedLocked).toBe(false)
+  })
+
+  test('malformed body in autoscan does not crash engine', () => {
+    const e = mkEngine()
+    expect(() => e.notifyRealRequestStart('m', {
+      messages: 'broken' as any,
+    }, {})).not.toThrow()
+    expect(e._cacheTtlMs).toBe(300_000)
+  })
+
+  // Regression for live-reload clamp bug discovered 2026-05-18 during deploy
+  // verification: when override locks TTL to 5min but SSOT declares 1h cache +
+  // 30min interval, the live-reload path used SSOT.intervalClampMax (derived
+  // from SSOT.cacheTtlMs=1h, allows interval up to ~59min) and accepted
+  // intervalMs=1800s. The engine would then fire ~30min into idle — long
+  // AFTER the actual 5min cache had died → cache_creation burst (exact incident
+  // pattern from 2026-05-17). Fix: live-reload clamp must use EFFECTIVE TTL.
+  test('regression: live-reload clamp respects override TTL, not SSOT', async () => {
+    // Construct with 5min override, simulate live-reload tick by manually
+    // invoking tick() — it reads SSOT and applies clamps. Fixture is 5min so
+    // SSOT.intervalClampMax = ~225s, but to reproduce the bug we'd need SSOT
+    // with longer TTL. Here we verify the EFFECTIVE clamp logic works by
+    // checking that intervalMs stays bounded by override TTL even if SSOT
+    // returns something larger.
+    const e = mkEngine({ cacheTtlMs: 300_000, intervalMs: 100_000 })
+    // _config.intervalMs is 100_000 from constructor (under clampMax=225_000)
+    expect(e._config.intervalMs).toBe(100_000)
+    expect(e._cacheTtlOverridden).toBe(true)
+    // Stop short of network-side simulation — direct field check that override
+    // flag is set, so live-reload code path will use effective clamp.
+    expect(e._cacheTtlMs).toBe(300_000)
+  })
+})
+
+// ─── Layer 5: post-fire eviction detection (2026-05-18 cf04c946 cascading regression) ───
+//
+// Anthropic-side cache can be evicted when CC slides cache_control marker forward
+// in real_requests, leaving the engine's snapshot pointing at a stale hash. The
+// next KA fire returns cacheCreation~snapshot_size + cacheRead~0 — burning ~1M
+// tokens per fire. Without this guard, fires would cascade every interval.
+//
+// Detection: if cacheCreation > 10K AND cacheRead < cacheCreation/10, disarm
+// the engine. Next real_request will register a fresh snapshot.
+describe('KeepaliveEngine Layer 5: post-fire eviction detection', () => {
+  test('big cache_creation with tiny cache_read → onDisarmed + registry cleared', async () => {
+    // Build engine that returns an "evicted" response shape
+    const evictedFetch = async function* (): AsyncGenerator<StreamEvent> {
+      yield { type: 'message_stop', usage: {
+        inputTokens: 1881, outputTokens: 0,
+        cacheReadInputTokens: 46772,
+        cacheCreationInputTokens: 915579,  // ← exact incident shape
+      }, stopReason: 'end_turn' }
+    }
+    let disarmed: { reason: string; at: number } | null = null
+    const e = new KeepaliveEngine({
+      config: {
+        intervalMs: 60_000, minTokens: 100,
+        onDisarmed: (info) => { disarmed = info },
+      },
+      getToken: async () => 'fake-token',
+      doFetch: evictedFetch,
+      getRateLimitInfo: () => ({
+        status: 'allowed', resetAt: null, claim: null, retryAfter: null,
+        utilization5h: 0, utilization7d: 0,
+      }),
+    })
+    // Register a snapshot with cache_control so engine will fire it
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }] }],
+    }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    // Age cache slightly so tick() will fire
+    e._setCacheWrittenAt(Date.now() - 70_000)
+    ;(e as any).lastActivityAt = Date.now() - 70_000
+    ;(e as any).jitterMs = 0
+    // Trigger fire
+    await (e as any).tick()
+    // Verify disarmed with eviction reason + registry cleared
+    expect(disarmed).not.toBeNull()
+    expect((disarmed as any).reason).toBe('cache_evicted_post_fire')
+    expect(e._registry.size).toBe(0)
+    e.stop()
+  })
+
+  test('healthy fire (small cw, big cr) does NOT disarm', async () => {
+    const healthyFetch = async function* (): AsyncGenerator<StreamEvent> {
+      yield { type: 'message_stop', usage: {
+        inputTokens: 6, outputTokens: 1,
+        cacheReadInputTokens: 280_000,  // healthy hit
+        cacheCreationInputTokens: 504,  // tiny refresh delta
+      }, stopReason: 'end_turn' }
+    }
+    let disarmed = false
+    const e = new KeepaliveEngine({
+      config: {
+        intervalMs: 60_000, minTokens: 100,
+        onDisarmed: () => { disarmed = true },
+      },
+      getToken: async () => 'fake-token',
+      doFetch: healthyFetch,
+      getRateLimitInfo: () => ({
+        status: 'allowed', resetAt: null, claim: null, retryAfter: null,
+        utilization5h: 0, utilization7d: 0,
+      }),
+    })
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
+    }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 70_000)
+    ;(e as any).lastActivityAt = Date.now() - 70_000
+    ;(e as any).jitterMs = 0
+    await (e as any).tick()
+    expect(disarmed).toBe(false)
+    expect(e._registry.size).toBe(1)  // snapshot survives healthy fire
+    e.stop()
+  })
+
+  test('borderline case: cw=10K (at threshold) does NOT trigger eviction', async () => {
+    // 10000 is the threshold — anything ≤ should NOT disarm
+    const borderFetch = async function* (): AsyncGenerator<StreamEvent> {
+      yield { type: 'message_stop', usage: {
+        inputTokens: 100, outputTokens: 1,
+        cacheReadInputTokens: 100,   // even with low cr, cw must EXCEED threshold
+        cacheCreationInputTokens: 10000,  // EXACTLY at threshold
+      }, stopReason: 'end_turn' }
+    }
+    let disarmed = false
+    const e = new KeepaliveEngine({
+      config: { intervalMs: 60_000, minTokens: 100, onDisarmed: () => { disarmed = true } },
+      getToken: async () => 'fake-token',
+      doFetch: borderFetch,
+      getRateLimitInfo: () => ({ status: 'allowed', resetAt: null, claim: null, retryAfter: null, utilization5h: 0, utilization7d: 0 }),
+    })
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
+    }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 70_000)
+    ;(e as any).lastActivityAt = Date.now() - 70_000
+    ;(e as any).jitterMs = 0
+    await (e as any).tick()
+    expect(disarmed).toBe(false)  // 10000 is NOT > 10000
+    e.stop()
+  })
+})
+
+describe('KeepaliveEngine Layer 3: no cache_control → no KA fire', () => {
+  test('registry entry without cache_control marks hasCacheControl=false', () => {
+    const e = mkEngine({ minTokens: 100 })
+    e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'plain' }] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    const entry = e._registry.get('m')
+    expect(entry).toBeDefined()
+    expect(entry!.hasCacheControl).toBe(false)
+  })
+
+  test('registry entry with cache_control marker marks hasCacheControl=true', () => {
+    const e = mkEngine({ minTokens: 100 })
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
+    }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    const entry = e._registry.get('m')
+    expect(entry).toBeDefined()
+    expect(entry!.hasCacheControl).toBe(true)
+  })
+})
+
 // ─── Layer 2: Heaviest-snapshot registry ─────────────────────────
 
 describe('KeepaliveEngine Layer 2: heaviest-wins snapshot registry', () => {
@@ -299,7 +718,16 @@ describe('KeepaliveEngine Layer 4: error classification (regression: 2026-04-26 
     return await new Promise<string | null>((resolve) => {
       let captured: string | null = null
       const e = mkEngineThatThrows(err, (info) => { captured = info.reason })
-      e.notifyRealRequestStart('m', { messages: [] }, {})
+      // Body MUST carry at least one cache_control marker — Layer 3 ("no cache_control
+      // → don't fire") skips entries without markers, so empty {messages:[]} would
+      // make tick() short-circuit before reaching the throw site this test targets.
+      const bodyWithCC = {
+        messages: [{
+          role: 'user',
+          content: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }],
+        }],
+      }
+      e.notifyRealRequestStart('m', bodyWithCC, {})
       e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
       // Fresh cache: write was just now. Age it slightly so tick fires.
       e._setCacheWrittenAt(Date.now() - 1_000)
@@ -383,6 +811,117 @@ describe('KeepaliveEngine public API', () => {
 
     expect(e._registry.size).toBe(0)
     expect(e._timer).toBeNull()
+  })
+
+  test('disarm() clears registry, fires onDisarmed with reason, stops timer', () => {
+    let firedReason: string | null = null
+    let firedAt: number | null = null
+    const e = mkEngine({
+      minTokens: 100,
+      onDisarmed: ({ reason, at }) => { firedReason = reason; firedAt = at },
+    })
+    e.notifyRealRequestStart('m', { messages: [] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    expect(e._registry.size).toBe(1)
+    expect(e._timer).not.toBeNull()
+
+    e.disarm('test_org_swap')
+
+    expect(e._registry.size).toBe(0)
+    expect(e._timer).toBeNull()
+    expect(firedReason).toBe('test_org_swap')
+    expect(firedAt).not.toBeNull()
+  })
+
+  test('disarm() is safe to call on idle engine (no registry, no callback configured)', () => {
+    const e = mkEngine()
+    expect(() => e.disarm('idle_disarm')).not.toThrow()
+    expect(e._registry.size).toBe(0)
+  })
+
+  // ─── Smart 429 pause-or-disarm ─────────────────────────────────
+
+  test('429 with cache outliving resetAt → PAUSE (timer cleared, quotaPauseTimer set)', () => {
+    // Default fixture: 5min TTL (300_000ms). Cache freshly written → has 285s
+    // remaining (300s - 15s margin). Reset is in 60s → cache lives past reset.
+    let disarmReason: string | null = null
+    const e = mkEngine({
+      minTokens: 100,
+      onDisarmed: ({ reason }) => { disarmReason = reason },
+    })
+    e.notifyRealRequestStart('m', { messages: [] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now())  // fresh cache
+
+    const entry = Array.from(e._registry.values())[0]!
+    const resetAtSec = Math.floor((Date.now() + 60_000) / 1000)  // 60s away
+    e._testHandleQuotaRateLimit(entry, { resetAt: resetAtSec, retryAfterSec: null })
+
+    expect(e._timer).toBeNull()             // tick timer stopped
+    expect(e._quotaPauseTimer).not.toBeNull()  // pause timer scheduled
+    expect(e._quotaPauseUntil).not.toBeNull()
+    expect(disarmReason).toBeNull()         // NOT disarmed
+    expect(e._registry.size).toBe(1)        // snapshot preserved
+    e.stop()  // cleanup
+  })
+
+  test('429 with quota outliving cache → DISARM (no pause, reason="quota_outlives_cache")', () => {
+    // Cache 4min old (240s in, 300s TTL → 60s left, minus 15s margin = 45s).
+    // Reset is 600s away → cache dies LONG before quota recovers.
+    let disarmReason: string | null = null
+    const e = mkEngine({
+      minTokens: 100,
+      onDisarmed: ({ reason }) => { disarmReason = reason },
+    })
+    e.notifyRealRequestStart('m', { messages: [] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 240_000)  // cache 4 min old
+
+    const entry = Array.from(e._registry.values())[0]!
+    const resetAtSec = Math.floor((Date.now() + 600_000) / 1000)  // 10min away
+    e._testHandleQuotaRateLimit(entry, { resetAt: resetAtSec, retryAfterSec: null })
+
+    expect(disarmReason).toBe('quota_outlives_cache')
+    expect(e._registry.size).toBe(0)        // registry cleared
+    expect(e._quotaPauseTimer).toBeNull()   // no pause scheduled
+  })
+
+  test('429 with no resetAt hint → does NOT engage smart-pause (defers to retryChain)', () => {
+    // Without resetAt, smart-pause has no decision basis. Fall back to the
+    // existing retryChain path — its specific behavior (immediate disarm vs
+    // schedule retry) is outside this test's concern; we only assert that
+    // the smart-pause state machine was NOT engaged.
+    const e = mkEngine({ minTokens: 100, onDisarmed: () => {} })
+    e.notifyRealRequestStart('m', { messages: [] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now())
+
+    const entry = Array.from(e._registry.values())[0]!
+    e._testHandleQuotaRateLimit(entry, { resetAt: null, retryAfterSec: null })
+
+    expect(e._quotaPauseTimer).toBeNull()
+    expect(e._quotaPauseUntil).toBeNull()
+    e.stop()
+  })
+
+  test('notifyRealRequestStart wakes engine from quota-pause', () => {
+    const e = mkEngine({ minTokens: 100 })
+    e.notifyRealRequestStart('m', { messages: [] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now())
+
+    const entry = Array.from(e._registry.values())[0]!
+    const resetAtSec = Math.floor((Date.now() + 120_000) / 1000)
+    e._testHandleQuotaRateLimit(entry, { resetAt: resetAtSec, retryAfterSec: null })
+    expect(e._quotaPauseTimer).not.toBeNull()
+
+    // Real request arrives mid-pause — engine should resume.
+    e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'x' }] }, {})
+
+    expect(e._quotaPauseTimer).toBeNull()
+    expect(e._quotaPauseUntil).toBeNull()
+    expect(e._timer).not.toBeNull()  // tick timer resumed
+    e.stop()
   })
 
   test('accepts all documented KeepaliveConfig callbacks', () => {

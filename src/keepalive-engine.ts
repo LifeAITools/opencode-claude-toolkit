@@ -34,6 +34,7 @@ import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFile
 import { createHash } from 'crypto'
 import { homedir } from 'os'
 import { join } from 'path'
+import { ANTHROPIC_API_HOST } from './anthropic-endpoints.js'
 import type {
   KeepaliveConfig,
   KeepaliveStats,
@@ -167,6 +168,104 @@ function classifyError(err: unknown): ErrorCategory {
 }
 
 // ============================================================
+// Wire-format autoscan: detect cache_control TTL from request body
+// ============================================================
+//
+// Anthropic API encodes per-block cache lifetime via:
+//   "cache_control": { "type": "ephemeral" }              ← 5 min default
+//   "cache_control": { "type": "ephemeral", "ttl": "5m" } ← 5 min explicit
+//   "cache_control": { "type": "ephemeral", "ttl": "1h" } ← 1 hour
+//
+// Markers may appear inside: body.system[*].cache_control,
+// body.messages[*].content[*].cache_control, body.tools[*].cache_control.
+//
+// Defensive principle: take the MINIMUM TTL observed across all markers.
+// Reason: KA must refresh BEFORE the shortest-lived block dies. Longer-lived
+// blocks survive incidentally. Choosing max would let short blocks expire and
+// force cache_creation rewrite on next real request.
+
+/** All known cache_control TTL string → milliseconds. Extend if Anthropic adds new tiers. */
+const TTL_STRING_MS: Readonly<Record<string, number>> = {
+  '5m': 5 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+}
+
+const EPHEMERAL_DEFAULT_TTL_MS = 5 * 60 * 1000  // anthropic default when no ttl: field
+
+/**
+ * Extract one cache_control marker's effective TTL in ms, or null if not a recognized
+ * ephemeral marker. Never throws — bad shapes return null.
+ */
+function ttlFromCacheControl(cc: unknown): number | null {
+  if (!cc || typeof cc !== 'object') return null
+  const o = cc as { type?: unknown; ttl?: unknown }
+  if (o.type !== 'ephemeral') return null
+  if (typeof o.ttl === 'string') {
+    const mapped = TTL_STRING_MS[o.ttl]
+    if (mapped !== undefined) return mapped
+    // Unknown ttl string → safest: treat as default 5min, not as "honor unknown".
+    return EPHEMERAL_DEFAULT_TTL_MS
+  }
+  return EPHEMERAL_DEFAULT_TTL_MS
+}
+
+/**
+ * Scan an Anthropic request body for ALL cache_control markers and return
+ * shape info needed for KA decisions:
+ *   - `minTtlMs`: shortest observed marker TTL, or null if no markers found.
+ *     A non-null value is the conservative TTL the engine should use.
+ *   - `hasAnyCacheControl`: true if at least one valid ephemeral marker was found.
+ *     Used by Layer 3 ("no cache_control → don't fire KA, nothing to keep alive").
+ *
+ * Never throws on malformed body. Unknown fields silently skipped.
+ *
+ * @public for testing; used by KeepaliveEngine.notifyRealRequestStart.
+ */
+export function detectCacheTtlFromBody(body: unknown): { minTtlMs: number | null; hasAnyCacheControl: boolean } {
+  if (!body || typeof body !== 'object') return { minTtlMs: null, hasAnyCacheControl: false }
+  const observed: number[] = []
+  const collect = (cc: unknown) => {
+    const t = ttlFromCacheControl(cc)
+    if (t !== null) observed.push(t)
+  }
+
+  const b = body as Record<string, unknown>
+
+  // system can be a string (no cache_control) or array of blocks
+  const sys = b.system
+  if (Array.isArray(sys)) {
+    for (const block of sys) {
+      if (block && typeof block === 'object') collect((block as Record<string, unknown>).cache_control)
+    }
+  }
+
+  // messages[].content[].cache_control — content can be string or array of blocks
+  const msgs = b.messages
+  if (Array.isArray(msgs)) {
+    for (const m of msgs) {
+      if (!m || typeof m !== 'object') continue
+      const content = (m as Record<string, unknown>).content
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block && typeof block === 'object') collect((block as Record<string, unknown>).cache_control)
+        }
+      }
+    }
+  }
+
+  // tools[].cache_control
+  const tools = b.tools
+  if (Array.isArray(tools)) {
+    for (const t of tools) {
+      if (t && typeof t === 'object') collect((t as Record<string, unknown>).cache_control)
+    }
+  }
+
+  if (observed.length === 0) return { minTtlMs: null, hasAnyCacheControl: false }
+  return { minTtlMs: Math.min(...observed), hasAnyCacheControl: true }
+}
+
+// ============================================================
 // KeepaliveEngine
 // ============================================================
 
@@ -189,6 +288,24 @@ export class KeepaliveEngine {
   // `cache_expired_during_sleep` disarms every 5 minutes despite the
   // file being correct. Removed `readonly` and added live-reload below.
   private cacheTtlMs: number
+  /**
+   * When the consumer passes `config.cacheTtlMs` to the constructor, we LOCK
+   * the TTL to that value and stop honoring SSOT live-reload AND wire-autoscan
+   * for it. This is the "admin pinned" escape hatch — explicit caller wins.
+   * See KeepaliveConfig.cacheTtlMs (types.ts) for full rationale.
+   */
+  private readonly cacheTtlOverridden: boolean
+  /**
+   * Set to true when wire-autoscan (detectCacheTtlFromBody, called in
+   * notifyRealRequestStart) observes a `cache_control` marker shorter than
+   * the current cacheTtlMs and locks the engine down to that shorter value.
+   *
+   * Monotonic-down only: subsequent observations may reduce TTL further but
+   * NEVER raise it (defensive — if we ever saw a 5min block, assume server
+   * still has 5min blocks alive until session ends; over-fire is fine, under-
+   * fire wastes tokens). Also blocks SSOT live-reload from raising TTL.
+   */
+  private cacheTtlObservedLocked: boolean = false
   private safetyMarginMs: number
   private readonly retryDelaysMs: readonly number[]
   private readonly healthProbeIntervalsMs: readonly number[]
@@ -207,7 +324,13 @@ export class KeepaliveEngine {
     onDisarmed?: (info: { reason: string; at: number }) => void
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
     onNetworkStateChange?: (info: { from: string; to: string; at: number }) => void
+    onTtlScan?: (info: { minTtlMs: number | null; previousTtlMs: number | null; hasAnyCacheControl: boolean; at: number }) => void
   }
+
+  /** Last observed wire cache_control min-TTL (ms). null = none seen yet / no markers. */
+  private lastObservedTtlMs: number | null = null
+  /** True once the first TTL scan has run — distinguishes "never seen" from "seen null". */
+  private ttlEverObserved = false
 
   // ── Injected deps ──────────────────────────────────────────
   private readonly getToken: () => Promise<string>
@@ -224,8 +347,10 @@ export class KeepaliveEngine {
   private healthProbeTimer: ReturnType<typeof setTimeout> | null = null
   private healthProbeAttempt = 0
 
-  // KA registry — one entry per model, heaviest-wins
-  private registry = new Map<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number }>()
+  // KA registry — one entry per model, heaviest-wins.
+  // hasCacheControl: Layer 3 safety net — when false, fire is pointless because
+  // there are no Anthropic-side cached blocks to refresh. Skip the network call.
+  private registry = new Map<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; hasCacheControl: boolean }>()
 
   // Pending snapshot slot — primed by notifyRealRequestStart, committed by notifyRealRequestComplete
   private _pendingSnapshotModel = ''
@@ -242,7 +367,18 @@ export class KeepaliveEngine {
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private abortController: AbortController | null = null
   private inFlight = false
-  private jitterMs = 0
+  // -1 = uninitialized (will be seeded on first fire-eligible tick).
+  // 0 = explicit "no jitter" (honored — used by tests to make timing deterministic).
+  // >0 = current jitter offset added to fire threshold to spread multi-session bursts.
+  private jitterMs = -1
+
+  // Quota-pause state (set when 429 arrives with resetAt header; engine
+  // suspends fires until resetAt because retrying before quota window
+  // resets would consume cache TTL + tokens for no benefit).
+  // Wake triggers: scheduled timer (resetAt + jitter) OR notifyRealRequestStart
+  // (consumer-side request implies upstream is usable from their side).
+  private quotaPauseTimer: ReturnType<typeof setTimeout> | null = null
+  private quotaPauseUntil: number | null = null
 
   // Debug counter
   private snapshotCallCount = 0
@@ -258,22 +394,42 @@ export class KeepaliveEngine {
 
     // SSOT: read cache+KA parameters from ~/.claude/keepalive.json (with safe defaults).
     const ssot = loadKeepaliveConfig()
-    this.cacheTtlMs = ssot.cacheTtlMs
+    // Per-consumer override: if caller provides cacheTtlMs (e.g. proxy adapter
+    // pins 5min for native CC), use it and lock — SSOT live-reload won't touch it.
+    // Otherwise honor SSOT (opencode-style consumers get 1h cache as configured).
+    if (typeof ka.cacheTtlMs === 'number' && Number.isFinite(ka.cacheTtlMs) && ka.cacheTtlMs > 0) {
+      this.cacheTtlMs = ka.cacheTtlMs
+      this.cacheTtlOverridden = true
+    } else {
+      this.cacheTtlMs = ssot.cacheTtlMs
+      this.cacheTtlOverridden = false
+    }
     this.safetyMarginMs = ssot.safetyMarginMs
     this.retryDelaysMs = ssot.retryDelaysMs
     this.healthProbeIntervalsMs = ssot.healthProbeIntervalsMs
     this.healthProbeTimeoutMs = ssot.healthProbeTimeoutMs
 
-    // Layer 4: Clamp interval to safe bounds derived from current cache TTL.
-    // Caller-provided ka.intervalMs takes priority over SSOT default.
-    let intervalMs = ka.intervalMs ?? ssot.intervalMs
-    if (intervalMs < ssot.intervalClampMin) {
-      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} below safe min (${ssot.intervalClampMin}); clamped`)
-      intervalMs = ssot.intervalClampMin
+    // Layer 4: Clamp interval to safe bounds derived from EFFECTIVE cache TTL.
+    // When cacheTtlMs was overridden, ssot.intervalClampMax (derived from
+    // SSOT.cacheTtlMs) is wrong — recompute against this.cacheTtlMs so that
+    // intervalMs never exceeds our actual cache lifetime.
+    const effectiveClampMin = ssot.intervalClampMin
+    const effectiveClampMax = this.cacheTtlOverridden
+      ? Math.max(effectiveClampMin + 1, this.cacheTtlMs - this.safetyMarginMs - 60_000)
+      : ssot.intervalClampMax
+    // When override is active and SSOT's default interval is sized for a longer
+    // TTL (e.g. 1800s for 1h), fall back to half the override TTL.
+    const effectiveDefaultInterval = this.cacheTtlOverridden
+      ? Math.max(effectiveClampMin, Math.min(this.cacheTtlMs / 2, ssot.intervalMs))
+      : ssot.intervalMs
+    let intervalMs = ka.intervalMs ?? effectiveDefaultInterval
+    if (intervalMs < effectiveClampMin) {
+      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} below safe min (${effectiveClampMin}); clamped`)
+      intervalMs = effectiveClampMin
     }
-    if (intervalMs > ssot.intervalClampMax) {
-      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} above safe max (${ssot.intervalClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s); clamped`)
-      intervalMs = ssot.intervalClampMax
+    if (intervalMs > effectiveClampMax) {
+      console.error(`[claude-sdk] keepalive intervalMs=${intervalMs} above safe max (${effectiveClampMax}, cacheTTL ${this.cacheTtlMs}ms - margin ${this.safetyMarginMs}ms - 60s${this.cacheTtlOverridden ? ', override active' : ''}); clamped`)
+      intervalMs = effectiveClampMax
     }
 
     this.config = {
@@ -290,6 +446,7 @@ export class KeepaliveEngine {
       onDisarmed: ka.onDisarmed,
       onRewriteWarning: ka.onRewriteWarning,
       onNetworkStateChange: ka.onNetworkStateChange,
+      onTtlScan: ka.onTtlScan,
     }
   }
 
@@ -302,10 +459,76 @@ export class KeepaliveEngine {
    * with the body/headers about to be sent, and aborts any in-flight KA.
    */
   notifyRealRequestStart(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
+    // If engine is paused on 429, a real user request implies upstream is
+    // reachable from the consumer's perspective — wake immediately. If their
+    // request also gets 429'd we'll re-enter pause on the next KA attempt.
+    this.wakeFromQuotaPause()
+
     // Snapshot for keepalive registry (deep clone to avoid mutation)
     this._pendingSnapshotModel = model
     this._pendingSnapshotBody = JSON.parse(JSON.stringify(body))
     this._pendingSnapshotHeaders = { ...headers }
+
+    // ── Observability: scan EVERY real request for wire cache_control TTL ──
+    // Runs unconditionally (even when TTL is pinned via constructor override),
+    // so operators always see the actual wire TTL and any change. Decoupled
+    // from the downlock decision below, which stays gated on !cacheTtlOverridden.
+    let scannedMinTtlMs: number | null = null
+    try {
+      const scan = detectCacheTtlFromBody(body)
+      scannedMinTtlMs = scan.minTtlMs
+      // Observability tracks ONLY requests that actually carry cache_control.
+      // Lightweight requests (count_tokens, title-gen, quota checks) ship no
+      // cache_control at all — that is NOT a signal that the session's cache
+      // TTL policy dropped to "none". Treating a no-cache_control request as a
+      // TTL observation caused misleading "5m → none → 5m" flapping in the
+      // CACHE_TTL_CHANGED event. A no-cache_control request is a NON-observation:
+      // skip it entirely and hold the strictest TTL already observed. This keeps
+      // the event aligned with the keepalive decision below, which likewise
+      // ignores null observations (monotonic downlock).
+      if (scan.hasAnyCacheControl) {
+        const changed = !this.ttlEverObserved || scan.minTtlMs !== this.lastObservedTtlMs
+        if (changed) {
+          const previousTtlMs = this.ttlEverObserved ? this.lastObservedTtlMs : null
+          try {
+            this.config.onTtlScan?.({
+              minTtlMs: scan.minTtlMs,
+              previousTtlMs,
+              hasAnyCacheControl: scan.hasAnyCacheControl,
+              at: Date.now(),
+            })
+          } catch { /* observer best-effort */ }
+          try {
+            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+              `[${new Date().toISOString()}] KA_TTL_SCAN pid=${process.pid} minMs=${scan.minTtlMs} prevMs=${previousTtlMs} hasCC=${scan.hasAnyCacheControl} minMin=${scan.minTtlMs === null ? 'na' : Math.round(scan.minTtlMs / 60000)} source=request_scan\n`)
+          } catch { /* logging best-effort */ }
+        }
+        this.lastObservedTtlMs = scan.minTtlMs
+        this.ttlEverObserved = true
+      }
+    } catch { /* scan failure → keep prior observation state, defensive */ }
+
+    // ── Layer 1+2: wire-format TTL autoscan + monotonic lock-down ──
+    // Skip when admin explicitly pinned TTL via constructor config (Layer 0).
+    // Reuses the scan result above — no second body walk.
+    if (!this.cacheTtlOverridden) {
+      try {
+        const minTtlMs = scannedMinTtlMs
+        if (minTtlMs !== null && minTtlMs < this.cacheTtlMs) {
+          const oldTtl = this.cacheTtlMs
+          this.cacheTtlMs = minTtlMs
+          this.cacheTtlObservedLocked = true
+          // Visible audit — operator can see exactly when wire-observed TTL
+          // overrode SSOT (e.g. proxy intercepts native CC traffic, sees
+          // 5min markers, locks down from 1h SSOT default).
+          try {
+            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+              `[${new Date().toISOString()}] KA_TTL_OBSERVED_DOWNLOCK pid=${process.pid} oldMs=${oldTtl} newMs=${minTtlMs} oldMin=${Math.round(oldTtl / 60000)} newMin=${Math.round(minTtlMs / 60000)} source=request_scan\n`)
+          } catch { /* logging best-effort */ }
+        }
+      } catch { /* scan failure → keep current TTL, defensive default */ }
+    }
+
     // Abort any in-flight keepalive before real request
     this.abortController?.abort()
     this.inFlight = false
@@ -340,8 +563,12 @@ export class KeepaliveEngine {
     if (model && body && headers) {
       const totalTokens = (usage.inputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0)
       const existing = this.registry.get(model)
+      // Layer 3 input: record whether this snapshot has any cache_control
+      // markers. If none, KA fire is pointless (nothing to refresh on Anthropic
+      // side) and would only burn input tokens. Skipped in tickFire().
+      const { hasAnyCacheControl } = detectCacheTtlFromBody(body)
       if (totalTokens >= this.config.minTokens && (!existing || totalTokens >= existing.inputTokens)) {
-        this.registry.set(model, { body, headers, model, inputTokens: totalTokens })
+        this.registry.set(model, { body, headers, model, inputTokens: totalTokens, hasCacheControl: hasAnyCacheControl })
       }
       // Track largest observed cache size per model for rewrite cost estimation.
       const prevMax = this.lastKnownCacheTokensByModel.get(model) ?? 0
@@ -408,10 +635,33 @@ export class KeepaliveEngine {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+    if (this.quotaPauseTimer) {
+      clearTimeout(this.quotaPauseTimer)
+      this.quotaPauseTimer = null
+    }
+    this.quotaPauseUntil = null
     this.abortController?.abort()
     this.registry.clear()
     this.inFlight = false
     this.stopHealthProbe()
+  }
+
+  /**
+   * Externally-triggered disarm — clears registry, fires onDisarmed, stops timers.
+   *
+   * Used by admin endpoints (e.g. `claude-max disarm` for safe org-swap) when the
+   * caller wants the engine to drop its current snapshot and stop firing KAs
+   * regardless of TTL/quota state. The next real request from the consumer will
+   * re-prime a fresh snapshot.
+   *
+   * Distinct from `stop()` (which is silent shutdown) because this notifies
+   * `onDisarmed` so observers (TUI, logs) record the cause.
+   */
+  disarm(reason: string): void {
+    this.logClearDiag('external_disarm', { reason })
+    this.registry.clear()
+    try { this.config.onDisarmed?.({ reason, at: Date.now() }) } catch {}
+    this.stop()
   }
 
   // ────────────────────────────────────────────────────────────
@@ -500,7 +750,20 @@ export class KeepaliveEngine {
     // keep using the construction-time TTL. Symptom (observed 2026-04-30):
     // `cache_expired_during_sleep` disarms every 5min despite SSOT now
     // declaring 3600s, because `this.cacheTtlMs` was `readonly` and frozen.
-    if (liveConfig.cacheTtlMs !== this.cacheTtlMs) {
+    //
+    // Override exception: when the consumer pinned cacheTtlMs at construction
+    // (proxy-mode forcing 5min for native CC), SSOT's value reflects a DIFFERENT
+    // consumer's contract (opencode's 1h) — honoring it here is exactly the bug
+    // that burned 906K tokens in the 2026-05-17 SDK-0.15 incident. Skip.
+    //
+    // Observed-lock exception: wire-autoscan has locked us down to a shorter
+    // TTL than SSOT (proxy saw 5min `cache_control` markers in real traffic).
+    // Don't let SSOT raise it back — once we've seen a short-TTL block, we
+    // must keep firing on that cadence until the session ends, even if newer
+    // requests carry only long-TTL markers (the short block may still be alive
+    // on Anthropic side). Reset only happens on engine reconstruction.
+    if (!this.cacheTtlOverridden && !this.cacheTtlObservedLocked
+        && liveConfig.cacheTtlMs !== this.cacheTtlMs) {
       const oldTtl = this.cacheTtlMs
       this.cacheTtlMs = liveConfig.cacheTtlMs
       // Visible audit trail — operators tail claude-max-debug.log to see
@@ -523,9 +786,22 @@ export class KeepaliveEngine {
     }
 
     // Only apply if values actually differ — keeps behavior identical when
-    // file unchanged. Clamp to current intervalClamp range.
+    // file unchanged. Clamp to EFFECTIVE intervalClamp range — when our TTL
+    // is locked (override or wire-observed) to a shorter value than SSOT,
+    // SSOT's intervalClampMax reflects SSOT's longer TTL and would let the
+    // KA interval exceed our actual cache lifetime. That's the exact wire
+    // mismatch from the 2026-05-17 incident — fire after cache is long dead.
+    const ttlLocked = this.cacheTtlOverridden || this.cacheTtlObservedLocked
+    const effectiveClampMax = ttlLocked
+      ? Math.max(liveConfig.intervalClampMin + 1, this.cacheTtlMs - this.safetyMarginMs - 60_000)
+      : liveConfig.intervalClampMax
+    // When SSOT intervalMs is too large for our effective TTL (e.g. SSOT=1800s
+    // but TTL=300s), use TTL/2 as the default instead of accepting SSOT.intervalMs.
+    const effectiveTargetInterval = ttlLocked
+      ? Math.min(liveConfig.intervalMs, Math.max(liveConfig.intervalClampMin, Math.floor(this.cacheTtlMs / 2)))
+      : liveConfig.intervalMs
     const newInterval = Math.max(liveConfig.intervalClampMin,
-      Math.min(liveConfig.intervalMs, liveConfig.intervalClampMax))
+      Math.min(effectiveTargetInterval, effectiveClampMax))
     if (newInterval !== this.config.intervalMs) {
       this.config.intervalMs = newInterval
     }
@@ -545,17 +821,34 @@ export class KeepaliveEngine {
       return
     }
 
-    // Pick heaviest model from registry
-    let best: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number } | null = null
+    // Pick heaviest model from registry — but Layer 3: only consider entries
+    // that have at least one cache_control marker. Entries without markers
+    // would burn input tokens on a fire that refreshes nothing on Anthropic's
+    // side (no cached blocks exist).
+    let best: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; hasCacheControl: boolean } | null = null
+    let skippedNoCacheControl = 0
     for (const entry of this.registry.values()) {
+      if (!entry.hasCacheControl) { skippedNoCacheControl++; continue }
       if (!best || entry.inputTokens > best.inputTokens) best = entry
     }
-    if (!best) return
+    if (!best) {
+      if (skippedNoCacheControl > 0) {
+        // Layer 3 audit — visible reason we didn't fire. Operator sees "engine
+        // had snapshots but none had cache_control" instead of silent no-op.
+        try {
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] KA_FIRE_SKIPPED pid=${process.pid} reason=no_cache_control_in_any_snapshot skippedEntries=${skippedNoCacheControl}\n`)
+        } catch { /* logging best-effort */ }
+      }
+      return
+    }
 
     const idle = Date.now() - this.lastActivityAt
 
-    // Jitter: prevents multi-session burst
-    if (!this.jitterMs) {
+    // Jitter: prevents multi-session burst. Sentinel -1 = uninitialized; seed
+    // a random offset on first eligible tick. Explicit 0 means "no jitter" and
+    // is honored (tests rely on this to make fire-threshold deterministic).
+    if (this.jitterMs < 0) {
       this.jitterMs = Math.floor(Math.random() * 30_000)
     }
     // Always emit onTick — gives provider/consumer a chance to log per-tick
@@ -611,6 +904,37 @@ export class KeepaliveEngine {
           resetAt: rl.resetAt,
         },
       })
+
+      // ── Layer 5: post-fire cache-eviction detection ───────────────────
+      // If the response shows a large cache_creation paired with tiny
+      // cache_read, the snapshot's cache was EVICTED on Anthropic's side
+      // (typically because CC slid its cache_control marker forward in
+      // subsequent real_requests, leaving our snapshot's hash stale).
+      //
+      // Continuing to fire on the stale snapshot would burn the same large
+      // creation tokens every interval. Disarm immediately — the engine will
+      // re-arm and re-snapshot when the next real_request_complete provides
+      // a current snapshot matching live cache state.
+      //
+      // Empirical: 2026-05-18 cf04c946 incident showed identical 915K cw
+      // fires 13 min apart, both with cr~46K. Without this guard, ~4M tokens
+      // would burn per hour on the stale snapshot until next real_request.
+      const cw = usage.cacheCreationInputTokens ?? 0
+      const cr = usage.cacheReadInputTokens ?? 0
+      const EVICTION_CW_THRESHOLD = 10_000
+      const EVICTION_CR_RATIO_MAX = 0.1  // cache_read should be at least 10× cache_write for healthy refresh
+      if (cw > EVICTION_CW_THRESHOLD && cr < cw * EVICTION_CR_RATIO_MAX) {
+        try {
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] KA_FIRE_EVICTION_DETECTED pid=${process.pid} cw=${cw} cr=${cr} ratio=${(cr/cw).toFixed(3)} — disarming to prevent cascade\n`)
+        } catch { /* logging best-effort */ }
+        // Clear registry so we won't re-fire stale snapshot.
+        this.registry.clear()
+        this.stop()
+        // Notify consumer so they can log/alert
+        try { this.config.onDisarmed?.({ reason: 'cache_evicted_post_fire', at: Date.now() }) } catch {}
+        return
+      }
     } catch (err: unknown) {
       const category = classifyError(err)
 
@@ -626,9 +950,17 @@ export class KeepaliveEngine {
         this.onDisarmed('network_error')
         this.startHealthProbe({ reviveMode })
       } else if (category === 'server_transient') {
-        // Anthropic is up but struggling. Classic HTTP-level retry with
-        // backoff — kept identical to previous behavior.
-        this.retryChain(best)
+        const status = (err as any)?.status
+        if (status === 429) {
+          // Quota-exhausted (NOT generic 5xx). retryChain with 30/60s backoff
+          // is futile — quota doesn't return until resetAt (often minutes-hours
+          // away). Use smart-pause: keep snapshot if cache will outlive the
+          // wait, disarm if not. See handleQuotaRateLimit for the decision.
+          this.handleQuotaRateLimit(best, err as any)
+        } else {
+          // 5xx / 503 / 529 / etc — Anthropic struggling, retry with backoff.
+          this.retryChain(best)
+        }
       } else if (category === 'auth') {
         // Token issue — disarm, token refresh is the consumer's responsibility
         // (they should refresh via credentialStore on 401). Engine will resume
@@ -684,6 +1016,135 @@ export class KeepaliveEngine {
   }
 
   /**
+   * Smart quota-exhaustion handler — invoked when upstream returns 429.
+   *
+   * The classic retryChain (with 30/60s backoff) is wrong for 429: quota
+   * doesn't return until `resetAt` (often minutes to hours away). Retrying
+   * before reset burns input tokens AND eats into the cache's remaining
+   * TTL with zero chance of success.
+   *
+   * Decision (foundation: user's "fastest marker" rule):
+   *
+   *   cacheDiesAt = cacheWrittenAt + cacheTtlMs - safetyMargin
+   *   resetAtMs   = err.resetAt × 1000  (Anthropic header is epoch seconds)
+   *
+   *   if cacheDiesAt >= resetAtMs:
+   *     PAUSE — cache will outlive quota wait; replay after reset hits
+   *     cache_read (cheap). Stop the tick timer, schedule wake at
+   *     resetAt + jitter. Real request (notifyRealRequestStart) also wakes.
+   *
+   *   if cacheDiesAt < resetAtMs:
+   *     DISARM — quota wait > cache lifetime; replay after reset would be
+   *     a cold cache_write (~80K-500K tokens, see body-dump analysis).
+   *     Better to drop and let the next real request prime a fresh snapshot.
+   *
+   *   if no resetAt available:
+   *     Fall back to retryChain — preserves existing behavior so any future
+   *     server-side regression doesn't make things strictly worse.
+   */
+  private handleQuotaRateLimit(
+    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number },
+    err: { resetAt?: number | null; retryAfterSec?: number | null },
+  ): void {
+    const now = Date.now()
+
+    // Resolve resetAtMs from either anthropic-ratelimit-unified-reset (epoch sec)
+    // or the standard `retry-after` header (delta-seconds from now).
+    let resetAtMs: number | null = null
+    if (err.resetAt && err.resetAt > 0) {
+      resetAtMs = err.resetAt * 1000
+    } else if (err.retryAfterSec && err.retryAfterSec > 0) {
+      resetAtMs = now + err.retryAfterSec * 1000
+    }
+
+    if (resetAtMs === null) {
+      // No reset hint from upstream — fall back to retry-chain (existing
+      // behaviour). 429 with no headers should be rare; if it becomes common
+      // we'll see retry_exhausted disarms in the wild and revisit.
+      this.logClearDiag('quota_429_no_reset_hint', {
+        retryAfterSec: err.retryAfterSec ?? null,
+        resetAt: err.resetAt ?? null,
+      })
+      this.retryChain(entry)
+      return
+    }
+
+    const cacheDiesAt = this.cacheWrittenAt + this.cacheTtlMs - this.safetyMarginMs
+    const waitMs = resetAtMs - now
+
+    if (cacheDiesAt < resetAtMs) {
+      // Cache won't survive — disarm now, save the cold cache_write that would
+      // happen on next fire after reset.
+      this.logClearDiag('quota_outlives_cache', {
+        cacheDiesInMs: cacheDiesAt - now,
+        quotaResetsInMs: waitMs,
+        gapMs: resetAtMs - cacheDiesAt,
+        cacheTtlMs: this.cacheTtlMs,
+      })
+      this.registry.clear()
+      this.onDisarmed('quota_outlives_cache')
+      return
+    }
+
+    // PAUSE — stop tick timer + abort in-flight, schedule wake at resetAt+jitter.
+    // Jitter: 0-30s to avoid thundering herd across N parallel sessions all
+    // waking at the same resetAt.
+    if (this.timer) { clearInterval(this.timer); this.timer = null }
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+    this.abortController?.abort()
+    this.inFlight = false
+
+    const jitterMs = Math.floor(Math.random() * 30_000)
+    const wakeMs = waitMs + jitterMs
+    this.quotaPauseUntil = resetAtMs + jitterMs
+
+    this.logClearDiag('quota_paused', {
+      cacheDiesInMs: cacheDiesAt - now,
+      quotaResetsInMs: waitMs,
+      wakeInMs: wakeMs,
+      jitterMs,
+      regSize: this.registry.size,
+    })
+
+    this.quotaPauseTimer = setTimeout(() => {
+      this.quotaPauseTimer = null
+      this.quotaPauseUntil = null
+      // Resume timer — next tick will evaluate normally (cache might be near
+      // TTL by now → tick's existing 'cache_expired_during_sleep' branch will
+      // disarm cleanly if so; otherwise next idle threshold triggers a fire
+      // and a successful 200 confirms quota is back).
+      this.logClearDiag('quota_resumed_by_timer', {
+        cacheAgeMs: this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1,
+      })
+      this.startTimer()
+    }, wakeMs)
+    if (this.quotaPauseTimer && typeof this.quotaPauseTimer === 'object' && 'unref' in this.quotaPauseTimer) {
+      (this.quotaPauseTimer as any).unref()
+    }
+  }
+
+  /**
+   * Wake from quota-pause early. Called from notifyRealRequestStart: if a real
+   * user request arrived, upstream is reachable from the consumer side, so
+   * either quota has recovered or the consumer will get a fresh 429 themselves
+   * (and we'll re-enter pause on next KA attempt). Either way: clear the
+   * pause and resume normal cadence.
+   */
+  private wakeFromQuotaPause(): void {
+    if (!this.quotaPauseTimer && this.quotaPauseUntil === null) return
+    if (this.quotaPauseTimer) {
+      clearTimeout(this.quotaPauseTimer)
+      this.quotaPauseTimer = null
+    }
+    const pausedUntil = this.quotaPauseUntil
+    this.quotaPauseUntil = null
+    this.logClearDiag('quota_resumed_by_real_request', {
+      pauseRemainingMs: pausedUntil ? pausedUntil - Date.now() : -1,
+    })
+    this.startTimer()
+  }
+
+  /**
    * Dedicated retry chain for transient keepalive failures.
    * Uses setTimeout with exact delays from cacheWrittenAt — no drift.
    */
@@ -700,7 +1161,7 @@ export class KeepaliveEngine {
 
     const cacheAge = Date.now() - this.cacheWrittenAt
     const ttlRemaining = this.cacheTtlMs - cacheAge
-    const nextDelay = this.retryDelaysMs[attemptIndex]! * 1000
+    const nextDelay = this.retryDelaysMs[attemptIndex]!
 
     // CACHE SAFETY MARGIN: increased from 5s → 15s (2025-04).
     // Rationale: network latency on KA request can add 1-10s unpredictably.
@@ -804,6 +1265,13 @@ export class KeepaliveEngine {
         if (category === 'server_transient') {
           this.inFlight = false
           this.abortController = null
+          const status = (err as any)?.status
+          if (status === 429) {
+            // 429 arriving mid-retry-chain: same smart-pause as in tick().
+            // Don't keep retrying — wait for resetAt or disarm if cache won't survive.
+            this.handleQuotaRateLimit(entry, err as any)
+            return
+          }
           this.retryChain(entry, attemptIndex + 1)
           return
         } else {
@@ -933,7 +1401,7 @@ export class KeepaliveEngine {
       try {
         const { connect } = await import('node:net')
         await new Promise<void>((resolve, reject) => {
-          const sock = connect({ host: 'api.anthropic.com', port: 443 })
+          const sock = connect({ host: ANTHROPIC_API_HOST, port: 443 })
           const t = setTimeout(() => {
             sock.destroy()
             reject(new Error('timeout'))
@@ -1061,7 +1529,7 @@ export class KeepaliveEngine {
   // ────────────────────────────────────────────────────────────
 
   /** @internal — for test inspection */
-  get _registry(): ReadonlyMap<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number }> {
+  get _registry(): ReadonlyMap<string, { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; hasCacheControl: boolean }> {
     return this.registry
   }
 
@@ -1070,6 +1538,11 @@ export class KeepaliveEngine {
 
   /** @internal — for test inspection */
   get _config() { return this.config }
+
+  /** @internal — for test inspection (per-consumer override audit) */
+  get _cacheTtlMs(): number { return this.cacheTtlMs }
+  get _cacheTtlOverridden(): boolean { return this.cacheTtlOverridden }
+  get _cacheTtlObservedLocked(): boolean { return this.cacheTtlObservedLocked }
 
   /** @internal — for test inspection */
   get _lastKnownCacheTokensByModel(): ReadonlyMap<string, number> { return this.lastKnownCacheTokensByModel }
@@ -1082,5 +1555,17 @@ export class KeepaliveEngine {
     this._pendingSnapshotModel = model
     this._pendingSnapshotBody = body
     this._pendingSnapshotHeaders = headers
+  }
+
+  /** @internal — for test inspection (smart-pause state) */
+  get _quotaPauseTimer(): ReturnType<typeof setTimeout> | null { return this.quotaPauseTimer }
+  get _quotaPauseUntil(): number | null { return this.quotaPauseUntil }
+
+  /** @internal — for test invocation of the smart-pause handler */
+  _testHandleQuotaRateLimit(
+    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number },
+    err: { resetAt?: number | null; retryAfterSec?: number | null },
+  ): void {
+    this.handleQuotaRateLimit(entry, err)
   }
 }

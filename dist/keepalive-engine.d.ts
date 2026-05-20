@@ -53,8 +53,42 @@ export interface KeepaliveEngineOptions {
      */
     isOwnerAlive?: () => boolean;
 }
+/**
+ * Scan an Anthropic request body for ALL cache_control markers and return
+ * shape info needed for KA decisions:
+ *   - `minTtlMs`: shortest observed marker TTL, or null if no markers found.
+ *     A non-null value is the conservative TTL the engine should use.
+ *   - `hasAnyCacheControl`: true if at least one valid ephemeral marker was found.
+ *     Used by Layer 3 ("no cache_control → don't fire KA, nothing to keep alive").
+ *
+ * Never throws on malformed body. Unknown fields silently skipped.
+ *
+ * @public for testing; used by KeepaliveEngine.notifyRealRequestStart.
+ */
+export declare function detectCacheTtlFromBody(body: unknown): {
+    minTtlMs: number | null;
+    hasAnyCacheControl: boolean;
+};
 export declare class KeepaliveEngine {
     private cacheTtlMs;
+    /**
+     * When the consumer passes `config.cacheTtlMs` to the constructor, we LOCK
+     * the TTL to that value and stop honoring SSOT live-reload AND wire-autoscan
+     * for it. This is the "admin pinned" escape hatch — explicit caller wins.
+     * See KeepaliveConfig.cacheTtlMs (types.ts) for full rationale.
+     */
+    private readonly cacheTtlOverridden;
+    /**
+     * Set to true when wire-autoscan (detectCacheTtlFromBody, called in
+     * notifyRealRequestStart) observes a `cache_control` marker shorter than
+     * the current cacheTtlMs and locks the engine down to that shorter value.
+     *
+     * Monotonic-down only: subsequent observations may reduce TTL further but
+     * NEVER raise it (defensive — if we ever saw a 5min block, assume server
+     * still has 5min blocks alive until session ends; over-fire is fine, under-
+     * fire wastes tokens). Also blocks SSOT live-reload from raising TTL.
+     */
+    private cacheTtlObservedLocked;
     private safetyMarginMs;
     private readonly retryDelaysMs;
     private readonly healthProbeIntervalsMs;
@@ -62,6 +96,10 @@ export declare class KeepaliveEngine {
     private static readonly SNAPSHOT_TTL_MS;
     private static readonly DUMP_BODY;
     private config;
+    /** Last observed wire cache_control min-TTL (ms). null = none seen yet / no markers. */
+    private lastObservedTtlMs;
+    /** True once the first TTL scan has run — distinguishes "never seen" from "seen null". */
+    private ttlEverObserved;
     private readonly getToken;
     private readonly doFetch;
     private readonly getRateLimitInfo;
@@ -82,6 +120,8 @@ export declare class KeepaliveEngine {
     private abortController;
     private inFlight;
     private jitterMs;
+    private quotaPauseTimer;
+    private quotaPauseUntil;
     private snapshotCallCount;
     constructor(opts: KeepaliveEngineOptions);
     /**
@@ -116,6 +156,18 @@ export declare class KeepaliveEngine {
     checkRewriteGuard(model: string): void;
     /** Full shutdown — clears all timers, aborts in-flight. */
     stop(): void;
+    /**
+     * Externally-triggered disarm — clears registry, fires onDisarmed, stops timers.
+     *
+     * Used by admin endpoints (e.g. `claude-max disarm` for safe org-swap) when the
+     * caller wants the engine to drop its current snapshot and stop firing KAs
+     * regardless of TTL/quota state. The next real request from the consumer will
+     * re-prime a fresh snapshot.
+     *
+     * Distinct from `stop()` (which is silent shutdown) because this notifies
+     * `onDisarmed` so observers (TUI, logs) record the cause.
+     */
+    disarm(reason: string): void;
     private startTimer;
     private tick;
     /**
@@ -127,6 +179,42 @@ export declare class KeepaliveEngine {
      * Includes every variable that gates a clear() decision.
      */
     private logClearDiag;
+    /**
+     * Smart quota-exhaustion handler — invoked when upstream returns 429.
+     *
+     * The classic retryChain (with 30/60s backoff) is wrong for 429: quota
+     * doesn't return until `resetAt` (often minutes to hours away). Retrying
+     * before reset burns input tokens AND eats into the cache's remaining
+     * TTL with zero chance of success.
+     *
+     * Decision (foundation: user's "fastest marker" rule):
+     *
+     *   cacheDiesAt = cacheWrittenAt + cacheTtlMs - safetyMargin
+     *   resetAtMs   = err.resetAt × 1000  (Anthropic header is epoch seconds)
+     *
+     *   if cacheDiesAt >= resetAtMs:
+     *     PAUSE — cache will outlive quota wait; replay after reset hits
+     *     cache_read (cheap). Stop the tick timer, schedule wake at
+     *     resetAt + jitter. Real request (notifyRealRequestStart) also wakes.
+     *
+     *   if cacheDiesAt < resetAtMs:
+     *     DISARM — quota wait > cache lifetime; replay after reset would be
+     *     a cold cache_write (~80K-500K tokens, see body-dump analysis).
+     *     Better to drop and let the next real request prime a fresh snapshot.
+     *
+     *   if no resetAt available:
+     *     Fall back to retryChain — preserves existing behavior so any future
+     *     server-side regression doesn't make things strictly worse.
+     */
+    private handleQuotaRateLimit;
+    /**
+     * Wake from quota-pause early. Called from notifyRealRequestStart: if a real
+     * user request arrived, upstream is reachable from the consumer side, so
+     * either quota has recovered or the consumer will get a fresh 429 themselves
+     * (and we'll re-enter pause on next KA attempt). Either way: clear the
+     * pause and resume normal cadence.
+     */
+    private wakeFromQuotaPause;
     /**
      * Dedicated retry chain for transient keepalive failures.
      * Uses setTimeout with exact delays from cacheWrittenAt — no drift.
@@ -161,6 +249,7 @@ export declare class KeepaliveEngine {
         headers: Record<string, string>;
         model: string;
         inputTokens: number;
+        hasCacheControl: boolean;
     }>;
     /** @internal — for test inspection */
     get _timer(): ReturnType<typeof setInterval> | null;
@@ -183,7 +272,17 @@ export declare class KeepaliveEngine {
             to: string;
             at: number;
         }) => void;
+        onTtlScan?: (info: {
+            minTtlMs: number | null;
+            previousTtlMs: number | null;
+            hasAnyCacheControl: boolean;
+            at: number;
+        }) => void;
     };
+    /** @internal — for test inspection (per-consumer override audit) */
+    get _cacheTtlMs(): number;
+    get _cacheTtlOverridden(): boolean;
+    get _cacheTtlObservedLocked(): boolean;
     /** @internal — for test inspection */
     get _lastKnownCacheTokensByModel(): ReadonlyMap<string, number>;
     /** @internal — mutable internal state getters/setters for test inspection */
@@ -191,5 +290,18 @@ export declare class KeepaliveEngine {
     _setCacheWrittenAt(v: number): void;
     get _cacheWrittenAt(): number;
     _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void;
+    /** @internal — for test inspection (smart-pause state) */
+    get _quotaPauseTimer(): ReturnType<typeof setTimeout> | null;
+    get _quotaPauseUntil(): number | null;
+    /** @internal — for test invocation of the smart-pause handler */
+    _testHandleQuotaRateLimit(entry: {
+        body: Record<string, unknown>;
+        headers: Record<string, string>;
+        model: string;
+        inputTokens: number;
+    }, err: {
+        resetAt?: number | null;
+        retryAfterSec?: number | null;
+    }): void;
 }
 //# sourceMappingURL=keepalive-engine.d.ts.map

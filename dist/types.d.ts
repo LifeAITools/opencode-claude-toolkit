@@ -86,6 +86,26 @@ export interface TokenStatusEvent {
 export interface KeepaliveConfig {
     enabled?: boolean;
     /**
+     * Per-consumer cache TTL override in ms. If set, the engine uses THIS value
+     * instead of `loadKeepaliveConfig().cacheTtlMs` (SSOT ~/.claude/keepalive.json),
+     * AND the engine will NOT live-reload this field on keepalive.json mtime change.
+     *
+     * Why this exists: `~/.claude/keepalive.json` is a SHARED config consumed by
+     * BOTH the SDK (used by opencode → 1h cache contracts) AND the in-proxy
+     * KeepaliveEngine that intercepts native Claude Code traffic (which Anthropic
+     * caches with 5-min ephemeral TTL — CC client sends `cache_control: ephemeral`
+     * without explicit ttl). If proxy honors the SHARED 3600s value, it fires
+     * keepalives against caches that already died at 5 min → each fire pays full
+     * `cache_creation` instead of `cache_read` → token loss.
+     *
+     * Set `cacheTtlMs: 300_000` from the proxy adapter so its engine instance
+     * matches the actual wire TTL of native-CC traffic. opencode-style consumers
+     * leave this undefined → SSOT (1h) is used as before.
+     *
+     * Default: undefined → SSOT.
+     */
+    cacheTtlMs?: number;
+    /**
      * KA interval in ms. If undefined, engine reads from SSOT (~/.claude/keepalive.json).
      * Auto-scaled by cacheTtlMs: legacy 5m TTL → 150s, 1h TTL → 1800s.
      * Clamped to [intervalClampMin, intervalClampMax] where max = cacheTtlMs - safetyMarginMs - 60s.
@@ -124,6 +144,19 @@ export interface KeepaliveConfig {
     onNetworkStateChange?: (info: {
         from: string;
         to: string;
+        at: number;
+    }) => void;
+    /**
+     * Fired on every real request whose observed cache_control TTL differs from
+     * the previously-seen value for this session (first observation always fires).
+     * Lets operators detect when the wire-format cache TTL shifts (e.g. client
+     * switches 1h↔5m, or cache markers appear/disappear) — independent of whether
+     * the engine acts on it. Steady-state (unchanged TTL) does NOT fire.
+     */
+    onTtlScan?: (info: {
+        minTtlMs: number | null;
+        previousTtlMs: number | null;
+        hasAnyCacheControl: boolean;
         at: number;
     }) => void;
 }
@@ -296,6 +329,27 @@ export interface TokenUsage {
     outputTokens: number;
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
+    /**
+     * Split of `cacheCreationInputTokens` for the 5-minute TTL ephemeral
+     * breakpoint. Populated from Anthropic response
+     * `usage.cache_creation.ephemeral_5m_input_tokens` when present. Absent
+     * (undefined) when the response did not include the `cache_creation`
+     * object (single-TTL caches), per Anthropic public docs (OQ-02).
+     */
+    cacheCreation5mInputTokens?: number;
+    /**
+     * Split of `cacheCreationInputTokens` for the 1-hour TTL ephemeral
+     * breakpoint. Populated from Anthropic response
+     * `usage.cache_creation.ephemeral_1h_input_tokens` when present.
+     */
+    cacheCreation1hInputTokens?: number;
+    /**
+     * Count of tokens evicted from cache due to `cache_edits.clear_at` /
+     * `compact_20260112` operations. Populated from Anthropic response
+     * `usage.cache_deleted_input_tokens` when present (Phase 6 telemetry —
+     * captured early so historical data is available without retro-fitting).
+     */
+    cacheDeletedInputTokens?: number;
 }
 export interface RateLimitInfo {
     status: string | null;

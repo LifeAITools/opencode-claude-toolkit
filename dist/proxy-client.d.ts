@@ -60,8 +60,27 @@ export interface ProxyClientConfig {
     /** Anthropic API base URL. Default: https://api.anthropic.com */
     anthropicBaseUrl?: string;
     /**
+     * Per-consumer cache TTL override in SECONDS. When set, this proxy's engine
+     * uses THIS value as its cache lifetime (and never live-reloads it from SSOT).
+     *
+     * Default: 300 (5 min) — matches native Claude Code's `cache_control:ephemeral`
+     * wire behavior. The shared ~/.claude/keepalive.json may declare a longer TTL
+     * (e.g. 3600s for opencode's 1h cache contract), but that value reflects
+     * opencode's traffic — NOT the native CC traffic this proxy intercepts.
+     *
+     * Honoring SSOT's longer TTL here is the architectural bug that caused the
+     * 2026-05-17 SDK-0.15 incident (906K cache_creation tokens wasted on KA fires
+     * against caches Anthropic had already expired at 5 min).
+     *
+     * Set to `null` (or omit and patch the type) only when you knowingly want SSOT
+     * behavior — e.g. when the proxy will exclusively serve opencode-style traffic
+     * with explicit `ttl: '1h'` cache_control markers.
+     */
+    kaCacheTtlSec?: number;
+    /**
      * Keepalive interval in seconds. Engine clamps to [intervalClampMin, intervalClampMax]
-     * derived from the active cacheTtlMs (read from ~/.claude/keepalive.json SSOT).
+     * derived from the active cacheTtlMs (read from ~/.claude/keepalive.json SSOT,
+     * or from kaCacheTtlSec when overridden).
      *
      * If undefined, engine uses SSOT.intervalMs (auto-scales: ~5m TTL → 150s, ~1h TTL → 1800s).
      * Explicit value overrides SSOT.
@@ -138,6 +157,19 @@ export declare class ProxyClient {
     get cacheMetricsSnapshot(): import("./cache-metrics.js").MetricsSummary;
     /** Clean shutdown — stops reaper, metrics collector, and all KA engines in store. */
     stop(): void;
+    /**
+     * Disarm one or all KA engines and invalidate cached credentials.
+     *
+     * Use case: user swapped Anthropic org via `claude login` and wants the
+     * proxy to drop all stale snapshots before next request. Without this,
+     * the next KA fire would replay the previous session's accumulated
+     * snapshot against the NEW org — paying full cold-cache-write cost
+     * (~80K-500K tokens, see body-dump analysis) on the wrong account.
+     *
+     * Pass sessionId to target a single session, omit to disarm all.
+     * Returns the list of sessionIds that were disarmed.
+     */
+    disarmSessions(reason: string, sessionId?: string): string[];
     /**
      * Handle one /v1/messages request end-to-end. Returns a Response whose
      * body streams SSE bytes from Anthropic directly to the caller.

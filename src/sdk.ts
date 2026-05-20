@@ -27,18 +27,37 @@ import { KeepaliveEngine } from './keepalive-engine.js'
 import { tokenHint } from './token-utils.js'
 import { TokenRotationManager } from './token-rotation.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
+import {
+  ANTHROPIC_API_BASE,
+  ANTHROPIC_OAUTH_TOKEN_URL,
+} from './anthropic-endpoints.js'
+import {
+  ANTHROPIC_API_VERSION,
+  HEADER_CONTENT_TYPE,
+  HEADER_AUTHORIZATION,
+  HEADER_ANTHROPIC_VERSION,
+  HEADER_ANTHROPIC_BETA,
+  HEADER_ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS,
+  HEADER_X_APP,
+  HEADER_USER_AGENT,
+  HEADER_X_CLAUDE_CODE_SESSION_ID,
+  CONTENT_TYPE_JSON,
+} from './anthropic-headers.js'
 
 // ============================================================
 // Constants — cherry-picked from Claude Code CLI source
 // ============================================================
 
-// API
-const API_BASE_URL = 'https://api.anthropic.com'
-const API_VERSION = '2023-06-01'
+// API base URL + version now sourced from SSOT (anthropic-endpoints.ts +
+// anthropic-headers.ts). Local aliases retained for readability at the
+// fetch / header-builder call sites below.
+const API_BASE_URL = ANTHROPIC_API_BASE
+const API_VERSION = ANTHROPIC_API_VERSION
 
-// OAuth — from src/constants/oauth.ts:84-104
+// OAuth — token URL now sourced from SSOT (anthropic-endpoints.ts).
+// CLIENT_ID stays local; it's a SDK-identity constant, not an endpoint.
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
-const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
+const TOKEN_URL = ANTHROPIC_OAUTH_TOKEN_URL
 
 // Beta headers — from src/constants/betas.ts + src/constants/oauth.ts:36
 const OAUTH_BETA = 'oauth-2025-04-20'
@@ -57,6 +76,115 @@ const REDACT_THINKING_BETA = 'redact-thinking-2026-02-12'
 const BASE_DELAY_MS = 300
 const MAX_DELAY_MS = 5_000
 const EXPIRY_BUFFER_MS = 300_000 // 5 min before actual expiry
+
+// ── Body-dump retention (auto-rotation) ───────────────────────────
+// Default 48h. Override via env CLAUDE_BODY_DUMP_RETENTION_MS.
+// Bypass auto-rotation by setting to 0 (then files accumulate indefinitely
+// — only enable if you have external rotation, e.g. logrotate cron).
+const BODY_DUMP_RETENTION_MS = (() => {
+  const env = process.env.CLAUDE_BODY_DUMP_RETENTION_MS
+  if (env !== undefined) {
+    const n = Number(env)
+    if (Number.isFinite(n) && n >= 0) return n
+  }
+  return 48 * 60 * 60 * 1000  // 48h
+})()
+// Optional disk cap. When dump dir exceeds this MB after age-based prune,
+// also delete oldest files until under cap. Default 10240 MB (10 GB).
+// Override via env CLAUDE_BODY_DUMP_MAX_MB. 0 = no cap.
+const BODY_DUMP_MAX_BYTES = (() => {
+  const env = process.env.CLAUDE_BODY_DUMP_MAX_MB
+  if (env !== undefined) {
+    const n = Number(env)
+    if (Number.isFinite(n) && n >= 0) return n * 1024 * 1024
+  }
+  return 10 * 1024 * 1024 * 1024  // 10 GB
+})()
+
+/**
+ * Prune old body-dump files. Two passes:
+ *   1. Delete files older than BODY_DUMP_RETENTION_MS (default 48h).
+ *   2. If remaining files exceed BODY_DUMP_MAX_BYTES, delete oldest until under cap.
+ *
+ * Runs out-of-band from the request path — safe to call without awaiting.
+ * Errors are logged but never thrown. Idempotent: safe to call concurrently
+ * from multiple processes (each handles its own deletion, races are benign —
+ * unlink-after-unlink is no-op).
+ *
+ * NOTE: We use mtime, not filename timestamp parsing, because mtime is what
+ * the FS reports without extra work and matches how `find -mtime` works.
+ */
+async function pruneOldBodyDumps(dumpDir: string): Promise<void> {
+  if (BODY_DUMP_RETENTION_MS <= 0) return  // explicitly disabled
+
+  const { readdirSync, statSync, unlinkSync } = require('fs')
+  const { appendFileSync } = require('fs')
+  const path = require('path')
+
+  let entries: string[]
+  try {
+    entries = readdirSync(dumpDir).filter((n: string) => n.endsWith('.json'))
+  } catch (e: any) {
+    appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      `[${new Date().toISOString()}] BODY_DUMP_PRUNE_FAILED pid=${process.pid} err=readdir:${e?.message}\n`)
+    return
+  }
+
+  // Stat all files, collect {name, mtimeMs, size}. Skip ones we can't stat.
+  type FInfo = { name: string; mtimeMs: number; size: number }
+  const files: FInfo[] = []
+  for (const name of entries) {
+    try {
+      const st = statSync(path.join(dumpDir, name))
+      files.push({ name, mtimeMs: st.mtimeMs, size: st.size })
+    } catch { /* race: file deleted between readdir and stat — skip */ }
+  }
+
+  const now = Date.now()
+  const ageThreshold = now - BODY_DUMP_RETENTION_MS
+
+  // Pass 1: age-based prune
+  let deletedAge = 0
+  let bytesAge = 0
+  const surviving: FInfo[] = []
+  for (const f of files) {
+    if (f.mtimeMs < ageThreshold) {
+      try { unlinkSync(path.join(dumpDir, f.name)); deletedAge++; bytesAge += f.size }
+      catch { /* race or perm — skip */ }
+    } else {
+      surviving.push(f)
+    }
+  }
+
+  // Pass 2: size cap (only if configured AND we still over)
+  let deletedCap = 0
+  let bytesCap = 0
+  if (BODY_DUMP_MAX_BYTES > 0) {
+    const totalBytes = surviving.reduce((s, f) => s + f.size, 0)
+    if (totalBytes > BODY_DUMP_MAX_BYTES) {
+      // Sort by mtime ASC — delete oldest first
+      surviving.sort((a, b) => a.mtimeMs - b.mtimeMs)
+      let runningBytes = totalBytes
+      for (const f of surviving) {
+        if (runningBytes <= BODY_DUMP_MAX_BYTES) break
+        try {
+          unlinkSync(path.join(dumpDir, f.name))
+          deletedCap++; bytesCap += f.size; runningBytes -= f.size
+        } catch { /* skip */ }
+      }
+    }
+  }
+
+  if (deletedAge > 0 || deletedCap > 0) {
+    try {
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] BODY_DUMP_PRUNE pid=${process.pid} ` +
+        `scanned=${files.length} deletedAge=${deletedAge} bytesAge=${bytesAge} ` +
+        `deletedCap=${deletedCap} bytesCap=${bytesCap} ` +
+        `retentionMs=${BODY_DUMP_RETENTION_MS} maxBytes=${BODY_DUMP_MAX_BYTES}\n`)
+    } catch { /* logging best-effort */ }
+  }
+}
 
 // ── Proactive token rotation ──────────────────────────────────
 // Refresh at 20% of token lifetime remaining (= 80% of life consumed).
@@ -90,7 +218,9 @@ const REFRESH_COOLDOWN_MAX_MS = 30 * 60 * 1000
 // CC-compatible version for User-Agent and billing header.
 // Must match an actual released Claude Code version.
 // Updated when CC releases new versions. Checked by Anthropic for billing attribution.
-const CC_COMPAT_VERSION = '2.1.90'
+// Verify alignment with installed @anthropic-ai/claude-code via:
+//   bash packages/opencode-claude/scripts/check-cc-compat.sh
+const CC_COMPAT_VERSION = '2.1.112'
 
 // ============================================================
 // Tool name remapping — Anthropic blocks certain third-party tool names
@@ -352,7 +482,7 @@ export class ClaudeCodeSDK {
           // 401 → dedup refresh and retry — mirrors withRetry.ts:232-250
           if (error.status === 401 && attempt <= this.maxRetries) {
             await this.handleAuth401()
-            headers['Authorization'] = `Bearer ${this.accessToken}`
+            headers[HEADER_AUTHORIZATION] = `Bearer ${this.accessToken}`
             continue
           }
 
@@ -448,6 +578,54 @@ export class ClaudeCodeSDK {
         const dumpBody = { ...body, messages: `[${(body.messages as unknown[])?.length ?? 0} messages]`, system: `[${typeof body.system === 'string' ? body.system.length : 'array'}]` }
         appendFileSync(join(homedir(), '.claude', 'claude-max-request-dump.jsonl'),
           JSON.stringify({ ts: new Date().toISOString(), pid: process.pid, headers, body: dumpBody }) + '\n')
+      }
+
+      // 🔴 FULL body dump for byte-diff cache analysis.
+      // Live-read from ~/.claude/runtime-flags.json (key: dump_bodies_full).
+      // Env CLAUDE_DUMP_BODIES_FULL=0/1 overrides if explicitly set.
+      // Default (no file, no env): ON.
+      //
+      // Writes one file per request to ~/.claude/body-dumps/<pid>-<turn>.json so two
+      // consecutive requests can be diffed at byte level to identify exactly what
+      // changed in messages[] between turns (and thus why cache invalidates).
+      //
+      // Cost: disk I/O + ~1-5MB per turn. Auto-rotated: every PRUNE_EVERY_N dumps
+      // we async-scan and delete files older than CLAUDE_BODY_DUMP_RETENTION_MS
+      // (default 48h). Override via env. Prior version explicitly said "not auto-
+      // rotated" and accumulated 50GB / 51K files over a week (cleaned 2026-05-18).
+      let dumpBodies = true;
+      try {
+        const { readFlags } = require('./runtime-flags.js');
+        dumpBodies = readFlags().dump_bodies_full;
+      } catch {
+        // module missing or unparseable — fall back to env
+        dumpBodies = process.env.CLAUDE_DUMP_BODIES_FULL === '1';
+      }
+      if (dumpBodies) {
+        try {
+          const { mkdirSync, writeFileSync } = require('fs')
+          const dumpDir = join(homedir(), '.claude', 'body-dumps')
+          mkdirSync(dumpDir, { recursive: true })
+          // Turn counter is process-local — best-effort sequencing via timestamp.
+          // For 100% sequence accuracy use the timestamp in filename.
+          const turn = (globalThis as any).__claudeMaxBodyTurn = ((globalThis as any).__claudeMaxBodyTurn ?? 0) + 1
+          const fname = `${process.pid}-${turn.toString().padStart(4, '0')}-${Date.now()}.json`
+          writeFileSync(join(dumpDir, fname), bodyStr)
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] BODY_DUMPED pid=${process.pid} turn=${turn} bytes=${bodyStr.length} file=${fname}\n`)
+
+          // ── Rotation: opportunistic, async, every PRUNE_EVERY_N writes ──
+          // Runs out-of-band so it never blocks the real request. Errors logged
+          // but never thrown — a broken prune doesn't break dump writing.
+          const PRUNE_EVERY_N = 100  // ~100 dumps between scans = ~1% overhead
+          if (turn % PRUNE_EVERY_N === 0) {
+            void pruneOldBodyDumps(dumpDir).catch(() => { /* logged inside */ })
+          }
+        } catch (e: any) {
+          // Disk-full / permissions — log but don't break the request
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] BODY_DUMP_FAILED pid=${process.pid} err=${e?.message}\n`)
+        }
       }
     } catch {}
 
@@ -594,6 +772,23 @@ export class ClaudeCodeSDK {
                 cacheCreationInputTokens: u.cache_creation_input_tokens as number | undefined,
                 cacheReadInputTokens: u.cache_read_input_tokens as number | undefined,
               }
+              // Phase 3.B: extract optional TTL-split subfields (REQ-05, OQ-02).
+              // Anthropic emits the `cache_creation` object only when a 1h
+              // cache_control breakpoint was used (or mixed 5m+1h). Single-TTL
+              // responses omit it entirely — forward `undefined` (not 0) so
+              // omit-when-absent propagates to stats writers.
+              const cc = u.cache_creation as Record<string, unknown> | undefined
+              if (cc && typeof cc === 'object') {
+                if (typeof cc.ephemeral_5m_input_tokens === 'number') {
+                  usage.cacheCreation5mInputTokens = cc.ephemeral_5m_input_tokens
+                }
+                if (typeof cc.ephemeral_1h_input_tokens === 'number') {
+                  usage.cacheCreation1hInputTokens = cc.ephemeral_1h_input_tokens
+                }
+              }
+              if (typeof u.cache_deleted_input_tokens === 'number') {
+                usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
+              }
               // Log full raw usage including 1h cache fields for debugging
               try {
                 appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
@@ -712,14 +907,14 @@ export class ClaudeCodeSDK {
     const betas = this.buildBetas(options)
 
     return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.accessToken}`,
-      'anthropic-version': API_VERSION,
-      'anthropic-beta': betas.join(','),
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'x-app': 'cli',
-      'User-Agent': `claude-cli/${CC_COMPAT_VERSION}`,
-      'X-Claude-Code-Session-Id': this.sessionId,
+      [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON,
+      [HEADER_AUTHORIZATION]: `Bearer ${this.accessToken}`,
+      [HEADER_ANTHROPIC_VERSION]: API_VERSION,
+      [HEADER_ANTHROPIC_BETA]: betas.join(','),
+      [HEADER_ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS]: 'true',
+      [HEADER_X_APP]: 'cli',
+      [HEADER_USER_AGENT]: `claude-cli/${CC_COMPAT_VERSION}`,
+      [HEADER_X_CLAUDE_CODE_SESSION_ID]: this.sessionId,
     }
   }
 
@@ -1750,7 +1945,7 @@ export class ClaudeCodeSDK {
 
       const response = await fetch(TOKEN_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
         body: JSON.stringify({
           grant_type: 'refresh_token',
           refresh_token: this.refreshToken,

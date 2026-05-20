@@ -56,7 +56,7 @@ import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateF
 import { ProxyClient, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
 
-const PROXY_VERSION = '0.8.4'
+const PROXY_VERSION = '0.8.6'
 
 // ═══ Mode detection ═══════════════════════════════════════════════
 

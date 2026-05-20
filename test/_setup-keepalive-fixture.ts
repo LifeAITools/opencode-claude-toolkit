@@ -14,5 +14,9 @@ writeFileSync(FIXTURE_PATH, JSON.stringify({
   safetyMarginSec: 15,
   intervalSec: 60,
   idleTimeoutSec: null,
+  // Rewrite guard ON for test/rewrite-guard.test.ts. Harmless to other tests:
+  // the guard only blocks idle>ttl non-first requests, which fast unit tests
+  // never produce (they use the default 300s proxy TTL, not this).
+  rewriteGuard: { enabled: true, minRewriteTokens: 1000, overrideMarker: '[cache-rewrite-ok]' },
 }))
 process.env.CLAUDE_KEEPALIVE_CONFIG_PATH = FIXTURE_PATH

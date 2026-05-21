@@ -272,11 +272,14 @@ export function _resetOverageCache(): void {
  * what we want when we can't observe overage state; a false-positive
  * would needlessly downgrade everyone to 5m TTL on telemetry hiccups.
  *
- * **Overage trigger:** `rateLimit.status` exists AND is anything OTHER
- * than the string `"allowed"`. Observed value as of 2026-05-17: only
- * `"allowed"` appears in production traffic. Per OQ-03 we hypothesize
- * `"overage"` and/or `"limited"` are the non-allowed values; we DO NOT
- * enumerate them — any non-`"allowed"` string flips the helper to `true`.
+ * **Overage trigger:** `rateLimit.status` exists AND does NOT start with
+ * `"allowed"`. The `allowed*` family — `"allowed"` and `"allowed_warning"`
+ * (emitted near a util threshold; the request is still served) — is NOT
+ * overage. Only genuinely rate-limited statuses (`"overage"`, `"limited"`,
+ * `"throttled"`, …) flip the helper `true`. We still DO NOT enumerate the
+ * overage values — the predicate is `!startsWith("allowed")`, schema-agnostic
+ * on the overage side. (A bare `!== "allowed"` previously mis-read
+ * `"allowed_warning"` as overage and forced the 5m tier at high 7d quota.)
  * The first observation of each distinct non-allowed status is announced
  * via `console.warn` with the marker `LEDGER_OVERAGE_OBSERVED` so the
  * operator can grep stderr to discover the actual schema.
@@ -295,8 +298,8 @@ export function _resetOverageCache(): void {
  * underlying error message. The fallback (return false) is the
  * conservative behaviour defined above, not silent swallowing.
  *
- * @returns `true` if rateLimit.status exists and is non-"allowed";
- *          `false` otherwise (including all failure modes).
+ * @returns `true` if rateLimit.status exists and does not start with
+ *          `"allowed"`; `false` otherwise (including all failure modes).
  * @see REQ-02, CN-09, OQ-03 (claude-code-discipline-sdk PRP rev 1.1.0)
  */
 export function isUsingOverage(): boolean {
@@ -336,7 +339,13 @@ export function isUsingOverage(): boolean {
         // Parse only the last; if it fails, fall through to false.
         const entry = JSON.parse(lastLine);
         const status: unknown = entry?.rateLimit?.status;
-        if (typeof status === "string" && status !== "allowed") {
+        // Overage = a status OUTSIDE the `allowed*` family. `"allowed"` and
+        // `"allowed_warning"` (approaching-limit, still served) are NOT
+        // overage — only genuinely rate-limited statuses (`"overage"`,
+        // `"limited"`, `"throttled"`, …) flip this true. A bare `!== "allowed"`
+        // mis-classified `"allowed_warning"` as overage and needlessly forced
+        // the 5m cache tier whenever 7d quota crossed the warning threshold.
+        if (typeof status === "string" && !status.startsWith("allowed")) {
           result = true;
           // First-observation log per distinct status (avoids spam).
           if (!observedNonAllowedStatuses.has(status)) {

@@ -250,7 +250,19 @@ describe("isUsingOverage — overage detection (REQ-02, CN-09)", () => {
     expect(isUsingOverage()).toBe(false);
   });
 
-  it("status='overage' → true (any non-'allowed' string triggers overage)", () => {
+  it("status='allowed_warning' → false (allowed* family is approaching-limit, NOT overage)", () => {
+    // `allowed_warning` is emitted by the quota tracker near a util threshold —
+    // the request is still ALLOWED, just warned. It is NOT rate-limit overage,
+    // so it must take the normal (allowlist) TTL path, not the 5m downgrade.
+    const entry = {
+      ts: Date.now(),
+      rateLimit: { status: "allowed_warning", claim: "seven_day", util7d: 0.92 },
+    };
+    writeFileSync(statsPath, JSON.stringify(entry) + "\n");
+    expect(isUsingOverage()).toBe(false);
+  });
+
+  it("status='overage' → true (a status outside the allowed* family triggers overage)", () => {
     const entry = {
       ts: Date.now(),
       rateLimit: { status: "overage", claim: "five_hour", util5h: 1.05 },
@@ -259,7 +271,7 @@ describe("isUsingOverage — overage detection (REQ-02, CN-09)", () => {
     expect(isUsingOverage()).toBe(true);
   });
 
-  it("status='limited' → true (any non-'allowed' triggers, schema-agnostic)", () => {
+  it("status='limited' → true (outside allowed* family, schema-agnostic)", () => {
     const entry = {
       ts: Date.now(),
       rateLimit: { status: "limited" },

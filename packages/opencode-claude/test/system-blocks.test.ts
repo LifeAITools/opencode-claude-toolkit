@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { buildSystemBlocks } from "../src/system-blocks.ts";
-import { _resetOverageCache } from "../src/cache-config.ts";
+import { _resetOverageCache, _resetEffectiveTtlCache } from "../src/cache-config.ts";
 
 // Phase 2.D — cache_control objects are now constructed per-call (not frozen
 // SSOT refs) because `ttl` is dynamic via chooseTTL. Tests assert SHAPE via
@@ -97,6 +97,43 @@ afterAll(() => {
   flags.cache_scope_global_enabled = ORIGINAL_SCOPE_GLOBAL_VALUE;
   writeFileSync(FLAGS_PATH, JSON.stringify(flags, null, 2));
   void ORIGINAL_KEY_EXISTED; // documented intent only
+});
+
+// ── Hermetic IO isolation ───────────────────────────────────────────────
+// buildSystemBlocks → chooseTTL routes through isUsingOverage() and
+// getEffectiveTtl(), which read ~/.claude-local/claude-max-stats.jsonl and
+// ~/.claude-local/keepalive.json. Without pinning those paths the suite is
+// non-hermetic: a high-quota machine (rateLimit.status "allowed_warning") or
+// a 5m keepalive profile would flip the resolved TTL and fail every `1h`
+// assertion below. Pin both to fixtures so block-assembly tests are
+// deterministic regardless of live machine state — the IO helpers themselves
+// are covered (hermetically) in cache-config.test.ts.
+let _ioTmpDir: string;
+let _origStatsOverride: string | undefined;
+let _origKeepaliveOverride: string | undefined;
+
+beforeAll(() => {
+  _ioTmpDir = mkdtempSync(join(tmpdir(), "system-blocks-io-"));
+  const statsPath = join(_ioTmpDir, "claude-max-stats.jsonl");
+  const keepalivePath = join(_ioTmpDir, "keepalive.json");
+  writeFileSync(statsPath, JSON.stringify({ rateLimit: { status: "allowed" } }) + "\n");
+  writeFileSync(keepalivePath, JSON.stringify({ cacheTtlSec: 3600 }));
+  _origStatsOverride = process.env.CLAUDE_MAX_STATS_PATH_OVERRIDE;
+  _origKeepaliveOverride = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH_OVERRIDE;
+  process.env.CLAUDE_MAX_STATS_PATH_OVERRIDE = statsPath;
+  process.env.CLAUDE_KEEPALIVE_CONFIG_PATH_OVERRIDE = keepalivePath;
+  _resetOverageCache();
+  _resetEffectiveTtlCache();
+});
+
+afterAll(() => {
+  if (_origStatsOverride === undefined) delete process.env.CLAUDE_MAX_STATS_PATH_OVERRIDE;
+  else process.env.CLAUDE_MAX_STATS_PATH_OVERRIDE = _origStatsOverride;
+  if (_origKeepaliveOverride === undefined) delete process.env.CLAUDE_KEEPALIVE_CONFIG_PATH_OVERRIDE;
+  else process.env.CLAUDE_KEEPALIVE_CONFIG_PATH_OVERRIDE = _origKeepaliveOverride;
+  _resetOverageCache();
+  _resetEffectiveTtlCache();
+  try { rmSync(_ioTmpDir, { recursive: true, force: true }); } catch { /* best-effort */ }
 });
 
 describe("buildSystemBlocks — kill-switch ON (default split layout)", () => {

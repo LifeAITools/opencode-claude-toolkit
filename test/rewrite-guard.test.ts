@@ -77,25 +77,29 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
   })
 
   test('idle-past-TTL avoidable rewrite WITHOUT marker → 400 cache_rewrite_guard', async () => {
-    const c = mkClient()
-    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-2' })   // req1: cold-start, passes
-    await Bun.sleep(1200)                                              // idle 1.2s > 1s TTL
+    // Seed a 10-min-idle lineage — past the 5m wire TTL of reqBody()'s
+    // ephemeral markers, so the next request is a genuine avoidable:ttl-expiry.
+    const path = join(TMP, 'rg-sess-2.json')
+    seedIdleFor(path, 'rg-sess-2', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-2' })
     expect(r.status).toBe(400)
     const j = await r.json() as { error?: { type?: string; message?: string } }
     expect(j.error?.type).toBe('cache_rewrite_guard')
     expect(j.error?.message).toContain('[cache-rewrite-ok]')   // tells the user the marker
     c.stop()
+    rmSync(path, { force: true })
   })
 
   test('same idle-past-TTL rewrite WITH the override marker → passes the guard', async () => {
-    const c = mkClient()
-    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-3' })
-    await Bun.sleep(1200)
+    const path = join(TMP, 'rg-sess-3.json')
+    seedIdleFor(path, 'rg-sess-3', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
     // Latest user message carries the marker → guard lets it through.
     const r = await c.handleRequest(reqBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-sess-3' })
     expect(r.status).not.toBe(400)
     c.stop()
+    rmSync(path, { force: true })
   })
 
   test('rapid consecutive requests (within TTL) are NOT blocked', async () => {
@@ -110,9 +114,9 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     // idle>TTL, but the latest user message is a tool_result — an agent
     // continuation, not a fresh user turn. The user has no message to mark,
     // so the guard must let it through rather than strand the loop forever.
-    const c = mkClient()
-    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-5' })
-    await Bun.sleep(1200)
+    const path = join(TMP, 'rg-sess-5.json')
+    seedIdleFor(path, 'rg-sess-5', reqBody(), 10 * 60_000)   // idle past the 5m wire TTL
+    const c = mkClient({ prefixHistoryPath: path })
     const continuation = JSON.stringify({
       model: 'claude-opus-4-7',
       system: [{ type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral' } }],
@@ -126,6 +130,7 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     const r = await c.handleRequest(continuation, {}, { sessionId: 'rg-sess-5' })
     expect(r.status).not.toBe(400)
     c.stop()
+    rmSync(path, { force: true })
   })
 })
 
@@ -237,9 +242,9 @@ describe('rewrite guard — KA-kept-warm lineage is not a false ttl-expiry', () 
 describe('rewrite guard — block dump artifact', () => {
   test('a block writes a dump with the rejected request + prefix diff', async () => {
     const dumpDir = join(TMP, 'dump-out')
-    const c = mkClient({ rewriteBlockDumpDir: dumpDir })
-    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-dump-1' })   // cold-start, passes
-    await Bun.sleep(1200)                                              // idle 1.2s > 1s TTL
+    const path = join(TMP, 'rg-dump-1.json')
+    seedIdleFor(path, 'rg-dump-1', reqBody(), 10 * 60_000)   // idle past the 5m wire TTL
+    const c = mkClient({ rewriteBlockDumpDir: dumpDir, prefixHistoryPath: path })
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-dump-1' })
     expect(r.status).toBe(400)
 
@@ -247,11 +252,103 @@ describe('rewrite guard — block dump artifact', () => {
     expect(files.length).toBe(1)
     const art = JSON.parse(readFileSync(join(dumpDir, files[0]), 'utf8'))
     expect(art.verdict.rewriteClass).toBe('avoidable:ttl-expiry')
-    expect(art.blockedRequest.model).toBe('claude-opus-4-7')   // full request captured
-    expect(art.prefixDiff.summary).toContain('IDENTICAL')      // ttl-expiry: prefix unchanged
+    expect(art.blockedRequest.model).toBe('claude-opus-4-7')      // full request captured
+    expect(art.verdict.signals.idleMs).toBeGreaterThan(300_000)   // idle past the 5m wire TTL
     c.stop()
     rmSync(dumpDir, { recursive: true, force: true })
+    rmSync(path, { force: true })
   })
+})
+
+// ── Wire cache-TTL upgrade — the proxy lifts native CC's 5m markers to 1h ──
+//
+// Native Claude Code marks its cacheable prefix with `cache_control:ephemeral`
+// (a 5-minute Anthropic TTL). A coding turn routinely runs longer than 5 min,
+// so the prefix dies mid-turn and the next turn re-caches ~140K tokens — the
+// guard then (correctly, given a 5m TTL) blocks it as avoidable:ttl-expiry.
+// The proxy upgrades those markers to ttl:'1h' so the prefix outlives the
+// turn; the guard's verdict must then track the REAL (1h) wire TTL.
+import { upgradeCacheControlTtl } from '../src/keepalive-engine.js'
+
+// anthropic-beta value Anthropic requires before it honors ttl:'1h'.
+const BETA_1H = 'claude-code-20250219,prompt-caching-scope-2026-01-05'
+
+// reqBody variant whose cacheable prefix is ALREADY marked ttl:'1h' — used to
+// test the guard's TTL reading in isolation (the proxy's upgrade is a no-op on
+// it, so lineageKey/prefixHashes stay stable and a seeded history matches).
+const reqBody1h = (extra = '') => JSON.stringify({
+  model: 'claude-opus-4-7',
+  system: [{ type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+  tools: [],
+  messages: [{ role: 'user', content: 'do the work ' + FILLER + ' ' + extra }],
+})
+
+// Capturing upstream — records the body actually forwarded to Anthropic.
+function mkCapturingClient(extra: Partial<ProxyClientOptions> = {}) {
+  let forwarded: string | null = null
+  const c = new ProxyClient({
+    config: { kaCacheTtlSec: 1 },
+    credentialsProvider: { getAccessToken: async () => 'fake-token', invalidate() {} },
+    upstreamFetcher: { fetch: async (_url: string, init: any) => { forwarded = init?.body ?? null; return sseResponse() } },
+    prefixHistoryPath: join(TMP, `ph-cap-${phSeq++}.json`),
+    orgIdResolver: { current: () => 'org-default' },
+    rewriteBlockDumpDir: join(TMP, 'dumps-cap'),
+    proxyStartedAt: 0,
+    ...extra,
+  })
+  return { c, getForwarded: () => forwarded }
+}
+
+// Seed a prefix-history entry so the FIRST handleRequest reads as a 2nd request
+// idle `agoMs` ago — same device as the KA-warm suite's seed().
+function seedIdleFor(path: string, sessionId: string, bodyStr: string, agoMs: number) {
+  const body = JSON.parse(bodyStr)
+  const t = Date.now() - agoMs
+  writeFileSync(path, JSON.stringify({
+    [`${sessionId}:${lineageKey(body)}`]: {
+      hashes: prefixHashes(body), lastReqAt: t, orgId: 'org-default', lastKaAt: t,
+    },
+  }))
+}
+
+describe('rewrite guard — proxy upgrades native CC cache_control to ttl:1h', () => {
+  test('beta present → forwarded body has every cache_control lifted to ttl:1h', async () => {
+    const { c, getForwarded } = mkCapturingClient()
+    await c.handleRequest(reqBody(), { 'anthropic-beta': BETA_1H }, { sessionId: 'rg-up-1' })
+    const fwd = JSON.parse(getForwarded()!)
+    expect(fwd.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+    c.stop()
+  })
+
+  test('beta absent → forwarded body cache_control left untouched (5m)', async () => {
+    const { c, getForwarded } = mkCapturingClient()
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-up-2' })
+    const fwd = JSON.parse(getForwarded()!)
+    expect(fwd.system[0].cache_control).toEqual({ type: 'ephemeral' })
+    c.stop()
+  })
+})
+
+describe('rewrite guard — verdict tracks the wire cache TTL, not a static config', () => {
+  // The bug: predictCacheMiss read ttlMs from the static kaCacheTtlSec (5m),
+  // so a 1h-cached lineage idle 19 min false-classified as avoidable:ttl-expiry
+  // and 400-blocked — exactly what stranded session 405d1df5 on 2026-05-21.
+  test('19-min idle on a ttl:1h prefix → NOT blocked (cache still warm at 1h)', async () => {
+    const path = join(TMP, 'wire-19m.json')
+    seedIdleFor(path, 'rg-wire-19m', reqBody1h(), 19 * 60_000)
+    // kaCacheTtlSec:1 proves the verdict ignores the static config and reads
+    // the body's own ttl:'1h' marker — pre-fix this 19-min idle 400-blocked.
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody1h(), {}, { sessionId: 'rg-wire-19m' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  // Control "a genuine expiry still blocks" is covered by the 5m-TTL suite
+  // above ('control: KA fire ALSO stale → genuine ttl-expiry → blocked'): the
+  // guard still trips on a real idle-past-TTL — the fix only lifts the TTL it
+  // measures against to the value actually on the wire.
 })
 
 describe('extractSessionIdFromBody', () => {
@@ -287,24 +384,26 @@ describe('rewrite guard — automated agents are not hard-blocked', () => {
 
   test('SDK-agent ttl-expiry → passes through (CACHE_REWRITE_UNGUARDED), no 400', async () => {
     const events: any[] = []
-    const c = mkClient({ eventEmitter: { emit: (e: any) => events.push(e) } })
-    await c.handleRequest(agentBody(), {}, { sessionId: 'rg-auto-1' })   // cold-start
-    await Bun.sleep(1200)                                                // idle > 1s TTL
+    const path = join(TMP, 'rg-auto-1.json')
+    seedIdleFor(path, 'rg-auto-1', agentBody(), 10 * 60_000)   // idle past the 5m wire TTL
+    const c = mkClient({ eventEmitter: { emit: (e: any) => events.push(e) }, prefixHistoryPath: path })
     const r = await c.handleRequest(agentBody(), {}, { sessionId: 'rg-auto-1' })
     expect(r.status).not.toBe(400)
     expect(events.some((e) => e.kind === 'CACHE_REWRITE_UNGUARDED')).toBe(true)
     expect(events.some((e) => e.kind === 'CACHE_REWRITE_BLOCKED')).toBe(false)
     c.stop()
+    rmSync(path, { force: true })
   })
 
   test('Claude Code sub-agent (x-claude-code-agent-id header) ttl-expiry → passes, no 400', async () => {
-    const c = mkClient()
+    const path = join(TMP, 'rg-auto-2.json')
+    seedIdleFor(path, 'rg-auto-2', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
     const hdr = { 'x-claude-code-agent-id': 'sub-7' }
-    await c.handleRequest(reqBody(), hdr, { sessionId: 'rg-auto-2' })
-    await Bun.sleep(1200)
     const r = await c.handleRequest(reqBody(), hdr, { sessionId: 'rg-auto-2' })
     expect(r.status).not.toBe(400)
     c.stop()
+    rmSync(path, { force: true })
   })
 })
 

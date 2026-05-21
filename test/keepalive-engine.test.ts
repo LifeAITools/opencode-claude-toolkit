@@ -170,6 +170,73 @@ describe('detectCacheTtlFromBody (wire-format autoscan)', () => {
   })
 })
 
+// ─── upgradeCacheControlTtl (wire-format 1h upgrade) ─────────────
+//
+// Symmetric inverse of detectCacheTtlFromBody: instead of OBSERVING the
+// wire cache TTL, it CONTROLS it. The proxy calls this on native Claude
+// Code request bodies (whose cache_control markers default to 5m) to lift
+// every existing ephemeral marker to ttl:'1h', so the stable system+tools+
+// history prefix outlives a multi-minute coding turn. It only ever upgrades
+// existing markers — it never ADDS a marker where the client placed none.
+import { upgradeCacheControlTtl } from '../src/keepalive-engine.js'
+
+describe('upgradeCacheControlTtl (wire-format 1h upgrade)', () => {
+  test('ephemeral without ttl → upgraded to 1h', () => {
+    const body = { system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }] }
+    expect(upgradeCacheControlTtl(body)).toEqual({ upgraded: 1 })
+    expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+  })
+
+  test('ephemeral ttl=5m → upgraded to 1h', () => {
+    const body = { system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '5m' } }] }
+    expect(upgradeCacheControlTtl(body)).toEqual({ upgraded: 1 })
+    expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+  })
+
+  test('ephemeral ttl=1h → left unchanged, upgraded:0', () => {
+    const body = { system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '1h' } }] }
+    expect(upgradeCacheControlTtl(body)).toEqual({ upgraded: 0 })
+    expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+  })
+
+  test('upgrades markers across system + messages + tools', () => {
+    const body = {
+      system: [{ type: 'text', text: 's', cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'm', cache_control: { type: 'ephemeral' } }] }],
+      tools: [{ name: 't', cache_control: { type: 'ephemeral' } }],
+    }
+    expect(upgradeCacheControlTtl(body)).toEqual({ upgraded: 3 })
+    expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+    expect((body.messages[0].content[0] as any).cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+    expect(body.tools[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+  })
+
+  test('preserves sibling cache_control fields (scope)', () => {
+    const body = { system: [{ type: 'text', text: 's', cache_control: { type: 'ephemeral', scope: 'global' } }] }
+    expect(upgradeCacheControlTtl(body)).toEqual({ upgraded: 1 })
+    expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h', scope: 'global' })
+  })
+
+  test('non-ephemeral cache_control left alone', () => {
+    const body = { system: [{ type: 'text', text: 's', cache_control: { type: 'persistent' } }] }
+    expect(upgradeCacheControlTtl(body)).toEqual({ upgraded: 0 })
+    expect(body.system[0].cache_control).toEqual({ type: 'persistent' })
+  })
+
+  test('body with no markers → upgraded:0, no marker invented', () => {
+    const body = { system: 'plain string', messages: [{ role: 'user', content: 'hi' }] }
+    expect(upgradeCacheControlTtl(body)).toEqual({ upgraded: 0 })
+    expect(body.system).toBe('plain string')
+  })
+
+  test('malformed bodies do not throw', () => {
+    expect(() => upgradeCacheControlTtl(null)).not.toThrow()
+    expect(() => upgradeCacheControlTtl({ messages: 'not-array' })).not.toThrow()
+    expect(() => upgradeCacheControlTtl({ system: [{ cache_control: 'nope' }] })).not.toThrow()
+    expect(() => upgradeCacheControlTtl({ tools: [null] })).not.toThrow()
+  })
+})
+
 // ─── TTL scan observability (onTtlScan change-detection) ─────────
 //
 // Independent of the downlock decision: every real request scans the body

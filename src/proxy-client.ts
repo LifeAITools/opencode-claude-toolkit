@@ -55,7 +55,7 @@
  *    }
  */
 
-import { KeepaliveEngine } from './keepalive-engine.js'
+import { KeepaliveEngine, detectCacheTtlFromBody, upgradeCacheControlTtl } from './keepalive-engine.js'
 import { CacheMetricsCollector } from './cache-metrics.js'
 import type {
   ICredentialsProvider,
@@ -106,21 +106,22 @@ export interface ProxyClientConfig {
   anthropicBaseUrl?: string
 
   /**
-   * Per-consumer cache TTL override in SECONDS. When set, this proxy's engine
-   * uses THIS value as its cache lifetime (and never live-reloads it from SSOT).
+   * Per-consumer cache TTL pin in SECONDS — the engine's INITIAL cache-lifetime
+   * belief. The wire autoscan (detectCacheTtlFromBody in notifyRealRequestStart)
+   * monotonically locks it DOWN if it ever observes a shorter cache_control
+   * marker, so this value is a ceiling, not an unconditional override.
    *
-   * Default: 300 (5 min) — matches native Claude Code's `cache_control:ephemeral`
-   * wire behavior. The shared ~/.claude/keepalive.json may declare a longer TTL
-   * (e.g. 3600s for opencode's 1h cache contract), but that value reflects
-   * opencode's traffic — NOT the native CC traffic this proxy intercepts.
+   * Default: 3600 (1 h). `handleRequest` upgrades native Claude Code's
+   * `cache_control:{type:'ephemeral'}` markers to `ttl:'1h'` before forwarding
+   * (gated on the prompt-caching-scope beta), so the cache genuinely lives 1 h
+   * on Anthropic's side — 3600 is the true wire TTL, not an assumption.
    *
-   * Honoring SSOT's longer TTL here is the architectural bug that caused the
-   * 2026-05-17 SDK-0.15 incident (906K cache_creation tokens wasted on KA fires
-   * against caches Anthropic had already expired at 5 min).
-   *
-   * Set to `null` (or omit and patch the type) only when you knowingly want SSOT
-   * behavior — e.g. when the proxy will exclusively serve opencode-style traffic
-   * with explicit `ttl: '1h'` cache_control markers.
+   * The 2026-05-17 SDK-0.15 incident (906K cache_creation tokens wasted) was a
+   * wire/model MISMATCH: the engine believed 1 h while the wire was still 5 m,
+   * so KA fired every 30 min into caches dead for 25. That cannot recur here:
+   * the proxy now CONTROLS the wire to 1 h, and the autoscan downlock still
+   * catches any request that slips through un-upgraded (no beta → wire 5 m →
+   * engine downlocks that session to 300 s).
    */
   kaCacheTtlSec?: number
 
@@ -160,16 +161,16 @@ export interface ProxyClientConfig {
 // When undefined, KeepaliveEngine reads its default from
 // ~/.claude/keepalive.json (SSOT) which auto-scales with cacheTtlMs.
 //
-// kaCacheTtlSec DEFAULTS to 300 (5min) because this proxy intercepts native
-// Claude Code traffic, whose cache_control:ephemeral writes live 5 min on
-// Anthropic's side. The SSOT (~/.claude/keepalive.json) is shared with
-// opencode and may declare 3600s — honoring that value here is a wire-TTL
-// mismatch that wastes tokens (2026-05-17 incident). See ProxyClientConfig.
+// kaCacheTtlSec DEFAULTS to 3600 (1h): handleRequest upgrades native Claude
+// Code's cache_control markers to ttl:'1h' before forwarding, so the wire TTL
+// genuinely IS 1h. The autoscan downlock (notifyRealRequestStart) still pins a
+// session to 5m if it ever observes an un-upgraded marker — so this default is
+// a safe ceiling, not the 2026-05-17 wire-TTL mismatch. See ProxyClientConfig.
 const DEFAULT_CONFIG: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
   kaIntervalSec: number | undefined
 } = {
   anthropicBaseUrl: ANTHROPIC_API_BASE,
-  kaCacheTtlSec: 300,
+  kaCacheTtlSec: 3600,
   kaIntervalSec: undefined,
   kaIdleTimeoutSec: 0,
   kaMinTokens: 2000,
@@ -612,6 +613,24 @@ export class ProxyClient {
       delete upstreamHeaders['Anthropic-Beta']
     }
 
+    // Lift native Claude Code's cache_control markers from the implicit 5-minute
+    // ephemeral TTL to ttl:'1h'. Native CC marks its stable system+tools+history
+    // prefix with `cache_control:{type:'ephemeral'}`; a coding turn routinely
+    // runs longer than 5 minutes, so that prefix dies mid-turn and the next turn
+    // re-caches ~140K tokens (cache_creation ≈ 111× a cache_read). Anthropic
+    // honors ttl:'1h' only under the prompt-caching-scope beta — which native CC
+    // already sends — so gate on it. Done BEFORE notifyRealRequestStart +
+    // predictCacheMiss so the KA engine's wire autoscan and the rewrite guard
+    // both measure against the cache TTL actually forwarded upstream.
+    let forwardBodyStr = rawBodyStr
+    {
+      const beta = upstreamHeaders[HEADER_ANTHROPIC_BETA] ?? upstreamHeaders['Anthropic-Beta'] ?? ''
+      if (beta.includes('prompt-caching-scope-2026-01-05')) {
+        const { upgraded } = upgradeCacheControlTtl(parsedBody)
+        if (upgraded > 0) forwardBodyStr = JSON.stringify(parsedBody)
+      }
+    }
+
     this.events.emit({
       level: 'info',
       kind: 'REAL_REQUEST_START',
@@ -722,7 +741,7 @@ export class ProxyClient {
       upstream = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, {
         method: 'POST',
         headers: upstreamHeaders,
-        body: rawBodyStr,
+        body: forwardBodyStr,
         signal: ctx.signal,
       })
     } catch (fetchErr: any) {
@@ -810,9 +829,9 @@ export class ProxyClient {
     return new KeepaliveEngine({
       config: {
         // Per-consumer TTL pin — see ProxyClientConfig.kaCacheTtlSec docs.
-        // Default 300s matches native CC wire TTL; without this the engine
-        // honored SSOT's 3600s and fired KAs against dead caches (the
-        // 2026-05-17 SDK-0.15 incident root cause).
+        // Default 3600s: handleRequest upgrades native CC's cache_control to
+        // ttl:'1h', so KA fires every ~30 min against a genuinely 1h cache.
+        // The wire autoscan downlocks this per-session if a 5m marker appears.
         cacheTtlMs: cfg.kaCacheTtlSec * 1000,
         // undefined → engine reads from SSOT (~/.claude/keepalive.json)
         intervalMs: cfg.kaIntervalSec !== undefined ? cfg.kaIntervalSec * 1000 : undefined,
@@ -1258,7 +1277,13 @@ export class ProxyClient {
       // guard block requests whose cache was in fact hot).
       const lastWarmAt = prev ? Math.max(prev.lastReqAt, prev.lastKaAt ?? 0) : undefined
       const idleMs = lastWarmAt !== undefined ? now - lastWarmAt : undefined
-      const ttlMs = this.config.kaCacheTtlSec * 1000
+      // TTL the guard measures idle against = the cache lifetime actually on the
+      // wire, read from THIS request's cache_control markers (post-1h-upgrade if
+      // the proxy lifted them). The static kaCacheTtlSec is only a fallback for
+      // a body that carries no cache_control marker at all. Reading the wire —
+      // not a config constant — is what stops a 1h-cached lineage idle 19 min
+      // from false-classifying as avoidable:ttl-expiry (the 405d1df5 block).
+      const ttlMs = detectCacheTtlFromBody(body).minTtlMs ?? this.config.kaCacheTtlSec * 1000
       // The cache's last warm-up predates this proxy process → the TTL gap
       // spans a restart. KA could not have kept it warm (its engine did not
       // exist), so an expiry here is NOT avoidable — see classifyRewrite.

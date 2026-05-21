@@ -61,21 +61,22 @@ export interface ProxyClientConfig {
     /** Anthropic API base URL. Default: https://api.anthropic.com */
     anthropicBaseUrl?: string;
     /**
-     * Per-consumer cache TTL override in SECONDS. When set, this proxy's engine
-     * uses THIS value as its cache lifetime (and never live-reloads it from SSOT).
+     * Per-consumer cache TTL pin in SECONDS — the engine's INITIAL cache-lifetime
+     * belief. The wire autoscan (detectCacheTtlFromBody in notifyRealRequestStart)
+     * monotonically locks it DOWN if it ever observes a shorter cache_control
+     * marker, so this value is a ceiling, not an unconditional override.
      *
-     * Default: 300 (5 min) — matches native Claude Code's `cache_control:ephemeral`
-     * wire behavior. The shared ~/.claude/keepalive.json may declare a longer TTL
-     * (e.g. 3600s for opencode's 1h cache contract), but that value reflects
-     * opencode's traffic — NOT the native CC traffic this proxy intercepts.
+     * Default: 3600 (1 h). `handleRequest` upgrades native Claude Code's
+     * `cache_control:{type:'ephemeral'}` markers to `ttl:'1h'` before forwarding
+     * (gated on the prompt-caching-scope beta), so the cache genuinely lives 1 h
+     * on Anthropic's side — 3600 is the true wire TTL, not an assumption.
      *
-     * Honoring SSOT's longer TTL here is the architectural bug that caused the
-     * 2026-05-17 SDK-0.15 incident (906K cache_creation tokens wasted on KA fires
-     * against caches Anthropic had already expired at 5 min).
-     *
-     * Set to `null` (or omit and patch the type) only when you knowingly want SSOT
-     * behavior — e.g. when the proxy will exclusively serve opencode-style traffic
-     * with explicit `ttl: '1h'` cache_control markers.
+     * The 2026-05-17 SDK-0.15 incident (906K cache_creation tokens wasted) was a
+     * wire/model MISMATCH: the engine believed 1 h while the wire was still 5 m,
+     * so KA fired every 30 min into caches dead for 25. That cannot recur here:
+     * the proxy now CONTROLS the wire to 1 h, and the autoscan downlock still
+     * catches any request that slips through un-upgraded (no beta → wire 5 m →
+     * engine downlocks that session to 300 s).
      */
     kaCacheTtlSec?: number;
     /**

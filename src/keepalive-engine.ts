@@ -308,6 +308,77 @@ export function detectCacheTtlFromBody(body: unknown): { minTtlMs: number | null
   return { minTtlMs: Math.min(...observed), hasAnyCacheControl: true }
 }
 
+/**
+ * Upgrade every EXISTING ephemeral cache_control marker on an Anthropic
+ * request body to `ttl: '1h'`. The inverse of detectCacheTtlFromBody: that
+ * OBSERVES the wire cache TTL, this CONTROLS it.
+ *
+ * Native Claude Code marks its cacheable prefix (system / last tool / last
+ * message) with `cache_control: { type: 'ephemeral' }` — a 5-minute
+ * Anthropic-side TTL. A coding turn routinely runs longer than 5 minutes,
+ * so that prefix dies mid-turn and the next turn must re-create the whole
+ * ~140K-token cache (cache_creation ≈ 111× a cache_read). Lifting the
+ * markers to `ttl: '1h'` lets the (immutable) system+tools+history prefix
+ * outlive any realistic turn; keepalive reads then hold it warm for an hour.
+ *
+ * Only EXISTING markers are upgraded — a marker is never ADDED where the
+ * client placed none (adding one would move a cache breakpoint and fork the
+ * lineage). Markers already at `ttl: '1h'`, and non-ephemeral cache_control,
+ * are left untouched. Sibling fields (e.g. `scope`) are preserved. Mutates
+ * `body` in place. Never throws on a malformed body.
+ *
+ * Anthropic honors `ttl: '1h'` only with the `prompt-caching-scope-2026-01-05`
+ * beta on the request — the caller gates on that header's presence.
+ *
+ * @returns count of markers upgraded.
+ */
+export function upgradeCacheControlTtl(body: unknown): { upgraded: number } {
+  if (!body || typeof body !== 'object') return { upgraded: 0 }
+  let upgraded = 0
+  const lift = (holder: Record<string, unknown>) => {
+    const cc = holder.cache_control
+    if (!cc || typeof cc !== 'object') return
+    const o = cc as { type?: unknown; ttl?: unknown }
+    if (o.type !== 'ephemeral') return
+    if (o.ttl === '1h') return
+    o.ttl = '1h'
+    upgraded++
+  }
+  const b = body as Record<string, unknown>
+
+  // system can be a string (no cache_control) or an array of blocks
+  const sys = b.system
+  if (Array.isArray(sys)) {
+    for (const block of sys) {
+      if (block && typeof block === 'object') lift(block as Record<string, unknown>)
+    }
+  }
+
+  // messages[].content[].cache_control — content can be string or block array
+  const msgs = b.messages
+  if (Array.isArray(msgs)) {
+    for (const m of msgs) {
+      if (!m || typeof m !== 'object') continue
+      const content = (m as Record<string, unknown>).content
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block && typeof block === 'object') lift(block as Record<string, unknown>)
+        }
+      }
+    }
+  }
+
+  // tools[].cache_control
+  const tools = b.tools
+  if (Array.isArray(tools)) {
+    for (const t of tools) {
+      if (t && typeof t === 'object') lift(t as Record<string, unknown>)
+    }
+  }
+
+  return { upgraded }
+}
+
 // ============================================================
 // KeepaliveEngine
 // ============================================================

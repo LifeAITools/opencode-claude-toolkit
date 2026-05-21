@@ -1448,8 +1448,8 @@ export class ClaudeCodeSDK {
       if (!this.tokenRotationTimer) {
         this.tokenRotationTimer = setTimeout(() => {
           this.tokenRotationTimer = null
-          void this.proactiveRefresh()
-        }, emergencyDelay)
+          void this.proactiveRefresh().catch((e: any) => this.emitTokenStatus('warning', `proactiveRefresh rejected: ${e?.message ?? String(e)}`))
+        },emergencyDelay)
         if (this.tokenRotationTimer && typeof this.tokenRotationTimer === 'object' && 'unref' in this.tokenRotationTimer) {
           (this.tokenRotationTimer as any).unref()
         }
@@ -1473,7 +1473,7 @@ export class ClaudeCodeSDK {
 
     this.tokenRotationTimer = setTimeout(() => {
       this.tokenRotationTimer = null
-      void this.proactiveRefresh()
+      void this.proactiveRefresh().catch((e: any) => this.emitTokenStatus('warning', `proactiveRefresh rejected: ${e?.message ?? String(e)}`))
     }, delay)
 
     // Don't keep process alive just for rotation
@@ -1521,8 +1521,8 @@ export class ClaudeCodeSDK {
         const retryIn = Math.max(PROACTIVE_REFRESH_MIN_INTERVAL_MS, 60_000)
         this.tokenRotationTimer = setTimeout(() => {
           this.tokenRotationTimer = null
-          void this.proactiveRefresh()
-        }, retryIn)
+          void this.proactiveRefresh().catch((e: any) => this.emitTokenStatus('warning', `proactiveRefresh rejected: ${e?.message ?? String(e)}`))
+        },retryIn)
         if (this.tokenRotationTimer && typeof this.tokenRotationTimer === 'object' && 'unref' in this.tokenRotationTimer) {
           (this.tokenRotationTimer as any).unref()
         }

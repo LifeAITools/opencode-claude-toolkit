@@ -839,7 +839,10 @@ export class KeepaliveEngine {
   private startTimer(): void {
     if (this.timer) return
     const TICK_MS = Math.min(30_000, Math.max(5_000, Math.floor(this.config.intervalMs / 6)))
-    this.timer = setInterval(() => this.tick(), TICK_MS)
+    // tick() is async; the interval callback drops its promise, so a reject
+    // (e.g. an upstream throw or transient null-deref during a KA fire) would
+    // surface as a global unhandledRejection. Contain it via logAsyncReject.
+    this.timer = setInterval(() => { void this.tick().catch((e) => this.logAsyncReject('tick@interval', e)) }, TICK_MS)
     if (this.timer && typeof this.timer === 'object' && 'unref' in this.timer) {
       (this.timer as any).unref()
     }
@@ -1625,7 +1628,7 @@ export class KeepaliveEngine {
         // Cache still alive with safety margin → fire KA immediately.
         // Note: we check SAFETY_MARGIN (not just >0) because fire itself
         // takes time — if we're within margin, tick() would just disarm anyway.
-        void this.tick()
+        void this.tick().catch((e) => this.logAsyncReject('tick@network-recovered', e))
       }
       // If cache is dead or registry empty — do nothing. Engine stays in
       // post-disarm state, waiting for next real request from user which
@@ -1633,7 +1636,7 @@ export class KeepaliveEngine {
     }
 
     // First probe runs immediately (fastest reaction to network blip).
-    void probe()
+    void probe().catch((e) => this.logAsyncReject('health-probe', e))
   }
 
   private stopHealthProbe(): void {
@@ -1642,6 +1645,23 @@ export class KeepaliveEngine {
       this.healthProbeTimer = null
     }
     this.healthProbeAttempt = 0
+  }
+
+  /**
+   * Sink for fire-and-forget async rejections. A `void this.tick()` /
+   * `void probe()` that rejects (e.g. a transient null-deref or upstream
+   * throw during network recovery) would otherwise surface as a global
+   * `unhandledRejection` with no stack and no context. Route it here so it
+   * is contained + diagnosable instead of polluting the process-level handler.
+   */
+  private logAsyncReject(tag: string, e: unknown): void {
+    try {
+      const err = e as { message?: string; stack?: string } | null
+      const msg = err?.message ?? String(e)
+      const stack = (err?.stack ?? '').split('\n').slice(0, 4).join(' | ')
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] KA_ASYNC_REJECT pid=${process.pid} tag=${tag} msg=${msg} stack=${stack}\n`)
+    } catch { /* logging best-effort */ }
   }
 
   // ────────────────────────────────────────────────────────────

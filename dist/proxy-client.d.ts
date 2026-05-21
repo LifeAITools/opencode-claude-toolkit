@@ -273,7 +273,19 @@ export declare class ProxyClient {
      */
     private reviveKaSnapshots;
     /** Record a dropped KA snapshot: tag its lineages (so the guard surfaces the
-     *  next real request as a real rewrite) and emit KA_REVIVE_DROP. */
+     *  next real request as a real rewrite) and emit KA_REVIVE_DROP.
+     *
+     *  A drop only feeds `kaReviveDropped` (→ the rewrite guard treats the next
+     *  real request as a blockable `avoidable:ttl-expiry`) when the cache death
+     *  was AVOIDABLE — i.e. the cache was still alive at restart and a prompt KA
+     *  could have kept it warm (`cache-dies-before-ka`), or revival hit a bug
+     *  (`revive-error`). When the cache had ALREADY lapsed (`cache-already-dead`)
+     *  or aged out (`too-old`), the gap exceeded the TTL — typically host
+     *  downtime (reboot / power loss) during which no keepalive could possibly
+     *  run. That rewrite is unavoidable, so we must NOT flag it: classifyRewrite
+     *  then yields `expected:proxy-restart` and the guard lets the legitimate
+     *  session-resume request through instead of 400-blocking it. */
+    private static readonly AVOIDABLE_DROP_REASONS;
     private recordReviveDrop;
     private engineDoFetch;
     private parseSSEAndNotify;

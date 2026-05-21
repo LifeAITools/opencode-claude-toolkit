@@ -166,3 +166,48 @@ describe('KA restore — a dropped lineage makes the next request a real rewrite
     b.c.stop()
   })
 })
+
+describe('KA restore — host downtime (reboot/power loss) is NOT an avoidable rewrite', () => {
+  test('cache-already-dead across a real proxy restart → expected:proxy-restart, request passes (no 400)', async () => {
+    // Reproduces the power-loss case: the machine was off long enough that the
+    // cache lapsed; on reboot the proxy revives its snapshot registry, finds
+    // this lineage's cache already dead, and drops it. No keepalive could have
+    // run while the host was off, so the rewrite is UNAVOIDABLE — the guard
+    // must classify it `expected:proxy-restart` and let the resumed session's
+    // first request through, not 400-block it as `avoidable:ttl-expiry`.
+    const kaPath = join(TMP, 'reboot-ka.json')
+    const phPath = join(TMP, 'reboot-ph.json')
+    const now = Date.now()
+    const body = JSON.parse(reqBody())
+    const lk = lineageKey(body)
+
+    seedKaFile(kaPath, {
+      sessionId: 'restore-reboot', ownerPid: process.pid, model: 'claude-opus-4-7',
+      cacheWrittenAt: now - 3_000_000,                     // long-dead (host was off)
+      cacheTtlMs: 300_000, cacheTtlOverridden: true, cacheTtlObservedLocked: false,
+      lastObservedTtlMs: 300_000, ttlEverObserved: true, lastKnownCacheTokensByModel: {},
+      registry: [{
+        body, headers: {}, model: 'claude-opus-4-7',
+        lineageKey: lk, role: 'main', inputTokens: 50_000, hasCacheControl: true,
+      }],
+    })
+    // prior request predates the reboot; same org → only the TTL gap differs.
+    writeFileSync(phPath, JSON.stringify({
+      [`restore-reboot:${lk}`]: {
+        hashes: prefixHashes(body), lastReqAt: now - 3_000_000, orgId: 'org-x',
+      },
+    }))
+
+    // proxyStartedAt = "just rebooted": the warm-up predates this process, so
+    // spansProxyRestart is genuinely true (unlike the proxyStartedAt:0 cases).
+    const b = mkClient({ kaSnapshotPath: kaPath, prefixHistoryPath: phPath, proxyStartedAt: now - 1_000 })
+    const drop = b.events.find((e: any) => e.kind === 'KA_REVIVE_DROP')
+    expect(drop?.reason).toBe('cache-already-dead')
+
+    const r = await b.c.handleRequest(reqBody(), {}, { sessionId: 'restore-reboot', sourcePid: process.pid })
+    expect(r.status).toBe(200)
+    const pred = b.events.find((e: any) => e.kind === 'PREDICTED_CACHE_MISS')
+    expect(pred?.rewriteClass).toBe('expected:proxy-restart')
+    b.c.stop()
+  })
+})

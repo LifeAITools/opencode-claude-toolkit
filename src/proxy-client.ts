@@ -997,11 +997,30 @@ export class ProxyClient {
   }
 
   /** Record a dropped KA snapshot: tag its lineages (so the guard surfaces the
-   *  next real request as a real rewrite) and emit KA_REVIVE_DROP. */
+   *  next real request as a real rewrite) and emit KA_REVIVE_DROP.
+   *
+   *  A drop only feeds `kaReviveDropped` (→ the rewrite guard treats the next
+   *  real request as a blockable `avoidable:ttl-expiry`) when the cache death
+   *  was AVOIDABLE — i.e. the cache was still alive at restart and a prompt KA
+   *  could have kept it warm (`cache-dies-before-ka`), or revival hit a bug
+   *  (`revive-error`). When the cache had ALREADY lapsed (`cache-already-dead`)
+   *  or aged out (`too-old`), the gap exceeded the TTL — typically host
+   *  downtime (reboot / power loss) during which no keepalive could possibly
+   *  run. That rewrite is unavoidable, so we must NOT flag it: classifyRewrite
+   *  then yields `expected:proxy-restart` and the guard lets the legitimate
+   *  session-resume request through instead of 400-blocking it. */
+  private static readonly AVOIDABLE_DROP_REASONS = new Set([
+    'cache-dies-before-ka',
+    'revive-error',
+  ])
+
   private recordReviveDrop(sessionId: string, ps: PersistedSession, reason: string): void {
-    for (const e of ps.registry ?? []) {
-      if (e && typeof e.lineageKey === 'string') {
-        this.kaReviveDropped.add(`${sessionId}:${e.lineageKey}`)
+    const avoidable = ProxyClient.AVOIDABLE_DROP_REASONS.has(reason)
+    if (avoidable) {
+      for (const e of ps.registry ?? []) {
+        if (e && typeof e.lineageKey === 'string') {
+          this.kaReviveDropped.add(`${sessionId}:${e.lineageKey}`)
+        }
       }
     }
     this.events.emit({
@@ -1010,7 +1029,8 @@ export class ProxyClient {
       sessionId,
       reason,
       lineageCount: ps.registry?.length ?? 0,
-      msg: `KA snapshot not revived for session ${sessionId.slice(0, 8)} — ${reason}`,
+      msg: `KA snapshot not revived for session ${sessionId.slice(0, 8)} — ${reason}`
+        + (avoidable ? ' [blockable]' : ' [unavoidable downtime — guard will pass]'),
     })
   }
 

@@ -282,6 +282,14 @@ export declare class KeepaliveEngine {
      */
     private startHealthProbe;
     private stopHealthProbe;
+    /**
+     * Sink for fire-and-forget async rejections. A `void this.tick()` /
+     * `void probe()` that rejects (e.g. a transient null-deref or upstream
+     * throw during network recovery) would otherwise surface as a global
+     * `unhandledRejection` with no stack and no context. Route it here so it
+     * is contained + diagnosable instead of polluting the process-level handler.
+     */
+    private logAsyncReject;
     private writeSnapshotDebug;
     /** @internal — for test inspection */
     get _registry(): ReadonlyMap<string, RegistryEntry>;

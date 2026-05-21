@@ -1673,14 +1673,22 @@ export class KeepaliveEngine {
       const snapshotDir = join(homedir(), '.claude', 'snapshots')
       mkdirSync(snapshotDir, { recursive: true })
 
-      // Rotate: delete files older than configured TTL
+      // Rotate: delete files older than configured TTL. MUST recurse into the
+      // `bodies/` subdir — a non-recursive sweep left full-body dumps there
+      // unpruned (they accumulated to hundreds of MB while the top-level meta
+      // files rotated correctly). Recurse: prune old files at every level,
+      // never unlink the directories themselves.
       try {
         const cutoff = Date.now() - KeepaliveEngine.SNAPSHOT_TTL_MS
-        for (const f of readdirSync(snapshotDir)) {
-          const fpath = join(snapshotDir, f)
-          const st = statSync(fpath)
-          if (st.mtimeMs < cutoff) unlinkSync(fpath)
+        const sweep = (dir: string): void => {
+          for (const f of readdirSync(dir)) {
+            const fpath = join(dir, f)
+            const st = statSync(fpath)
+            if (st.isDirectory()) { sweep(fpath); continue }
+            if (st.mtimeMs < cutoff) unlinkSync(fpath)
+          }
         }
+        sweep(snapshotDir)
       } catch { /* rotation best-effort */ }
 
       this.snapshotCallCount++

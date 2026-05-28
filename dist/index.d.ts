@@ -6,6 +6,7 @@ export { ClaudeCodeSDKError, AuthError, APIError, RateLimitError, CacheRewriteBl
 export type { SessionEntry } from './session.js';
 export { KeepaliveEngine } from './keepalive-engine.js';
 export type { KeepaliveEngineOptions } from './keepalive-engine.js';
+export { upgradeCacheControlTtl, detectCacheTtlFromBody } from './keepalive-engine.js';
 export { loadKeepaliveConfig, reloadKeepaliveConfig, getCacheTtlMs, getSafetyMarginMs, getConfigPath as getKeepaliveConfigPath, RECOMMENDED_1H_CONFIG, } from './keepalive-config.js';
 export type { ResolvedKeepaliveConfig } from './keepalive-config.js';
 export { CacheMetricsCollector } from './cache-metrics.js';

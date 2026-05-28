@@ -38,6 +38,9 @@ export type { SessionEntry } from './session.js'
 // and other consumers needing cache-keepalive without full SDK machinery.
 export { KeepaliveEngine } from './keepalive-engine.js'
 export type { KeepaliveEngineOptions } from './keepalive-engine.js'
+// Pure cache-control transforms used on the live request path (ProxyClient.handleRequest).
+// Exported so post-deploy smoke tests can probe the deployed bundle directly.
+export { upgradeCacheControlTtl, detectCacheTtlFromBody } from './keepalive-engine.js'
 
 // Keepalive SSOT — read/manage cache TTL + KA params from ~/.claude/keepalive.json.
 // Consumers should NOT hardcode TTL or interval values; use this instead.

@@ -91,4 +91,12 @@ for i in $(seq 1 20); do curl -s -m2 http://127.0.0.1:5050/health >/dev/null 2>&
 H=$(curl -s -m3 http://127.0.0.1:5050/health 2>/dev/null || echo '{}')
 log "health: $H"
 echo "$H" | grep -q '"ok":true' || { log "UNHEALTHY — rollback: cp -a $BK/src $INSTALLED/src && restart"; exit 1; }
+
+# 7. Smoke the thinking-block regression against the DEPLOYED artifacts (no upstream
+#    traffic, no impact on the running proxy — pure transform probe). Guards against
+#    the 2026-05-28 flood ever silently shipping again.
+log "smoke: thinking-block survives enrich + ttl-upgrade"
+bun "$SRC_REPO/packages/claude-max-proxy/scripts/smoke-thinking-block.ts" \
+  || { log "SMOKE FAILED — deployed code mutates thinking blocks. rollback: cp -a $BK/src/. $INSTALLED/src/ && cp -a $BK/sdk-dist/. $SDK_DST/dist/ && systemctl --user restart claude-max-proxy"; exit 1; }
+
 log "deploy OK (rollback if needed: cp -a $BK/src/. $INSTALLED/src/ && systemctl --user restart claude-max-proxy)"

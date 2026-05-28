@@ -511,6 +511,16 @@ export class KeepaliveEngine {
   // Per-lineage observed history — feeds classifyRole's hints.
   private lineageStats = new Map<string, LineageStat>()
 
+  // Lineages whose cache was last written under a DIFFERENT org than the one
+  // now billing real requests. While pending, the KA fire replays the snapshot's
+  // OWN (old-org) Authorization to keep the OLD org's cache warm until the user
+  // decides (sends the override marker → re-registers under the new org) or the
+  // old token expires (401 → auth-disarm). Set by ProxyClient on an org-switch
+  // block; cleared on re-registration (notifyRealRequestComplete) and clearRegistry.
+  private orgSwitchPending = new Set<string>()
+  /** Test accessor. */
+  get _orgSwitchPending(): Set<string> { return this.orgSwitchPending }
+
   // Legacy fallback: notifyRealRequestComplete(usage) called WITHOUT a
   // lineageKey (SDK direct use / tests — all sequential) commits the most
   // recently primed lineage. Concurrency-safe callers pass the key explicitly.
@@ -785,6 +795,9 @@ export class KeepaliveEngine {
     // Commit the pending snapshot for this lineage. Keyed by lineageKey so a
     // concurrent sub-agent completion cannot consume the main agent's slot.
     const key = lineageKeyArg ?? this._legacyPendingLineage
+    // A completed real request means the user proceeded (override marker
+    // accepted, or same-org). This lineage's org-switch window is over.
+    if (key) this.orgSwitchPending.delete(key)
     const pending = key ? this.pendingSnapshots.get(key) : undefined
     if (pending) {
       const { model, body, headers, role } = pending
@@ -825,6 +838,13 @@ export class KeepaliveEngine {
 
     if (this.registry.size > 0) this.startTimer()
   }
+
+  /** Flag a lineage as awaiting the user's org-switch decision. While set, the
+   *  KA fire replays the snapshot's own (old-org) Authorization to keep the OLD
+   *  cache warm. Called by ProxyClient when an org-switch rewrite is blocked. */
+  markOrgSwitchPending(lineageKeyArg: string): void { this.orgSwitchPending.add(lineageKeyArg) }
+  /** Clear the org-switch-pending flag for a lineage. */
+  clearOrgSwitchPending(lineageKeyArg: string): void { this.orgSwitchPending.delete(lineageKeyArg) }
 
   /**
    * Layer 3 — Cache rewrite burst protection.
@@ -1953,6 +1973,9 @@ export class KeepaliveEngine {
   /** Clear the registry + notify — the disarm/reload/evict mutation path. */
   private clearRegistry(): void {
     this.registry.clear()
+    // A cleared registry has no snapshot to warm-old; drop any org-switch window
+    // (e.g. the old token 401'd → auth-disarm cleared the registry here).
+    this.orgSwitchPending.clear()
     // Every clear defaults to non-self-heal-eligible (terminal). reload() opts
     // back IN afterwards — it is the only re-primeable clear.
     this.selfHealEligible = false

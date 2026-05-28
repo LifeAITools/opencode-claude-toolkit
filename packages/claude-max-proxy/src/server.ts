@@ -56,6 +56,7 @@ import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateF
 import { ProxyClient, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
 import { startStatsEmitter } from './stats-emitter.js'
+import { checkDeployDrift } from './deploy-drift.js'
 // OpenAI translate imports moved to modules/openai-compat.ts and modules/anthropic.ts
 
 import { readFileSync as _readPkgFs } from 'fs'
@@ -95,6 +96,21 @@ const cfg = loadConfig()
 
 // Start logger FIRST so all subsequent events are captured
 const stopLogger = startLogger(cfg)
+
+// Deploy-drift check (Rule #15): warn loudly if live src was hand-edited since
+// the last deploy-from-source.sh. installDir = parent of this file's dir
+// ($INSTALLED/src/server.ts -> $INSTALLED). Catches the silent-drift failure
+// mode that once killed the quota pipeline for 27h.
+{
+  const drift = checkDeployDrift(_joinPkg(import.meta.dir, '..'))
+  if (drift.manifestMissing) {
+    emit({ level: 'info', kind: 'DEPLOY_DRIFT_CHECK', msg: 'no deploy manifest — deployed by hand? use deploy-from-source.sh so drift is detectable' })
+  } else if (drift.drifted.length > 0) {
+    emit({ level: 'error', kind: 'DEPLOY_DRIFT', msg: `${drift.drifted.length} live src file(s) hand-edited since deploy (source ${drift.sourceCommit}, ${drift.deployedAt}): ${drift.drifted.join(', ')} — re-deploy from source`, drifted: drift.drifted })
+  } else {
+    emit({ level: 'info', kind: 'DEPLOY_CLEAN', msg: `live src matches deploy manifest (source ${drift.sourceCommit}, deployed ${drift.deployedAt})` })
+  }
+}
 
 emit({
   level: 'info',

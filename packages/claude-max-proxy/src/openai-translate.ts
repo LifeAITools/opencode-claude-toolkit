@@ -901,9 +901,20 @@ export function injectCacheMarkers(body: Record<string, unknown>): number {
         injected++
       }
     } else if (Array.isArray(lastMsg.content) && lastMsg.content.length > 0) {
-      const lastBlock = lastMsg.content[lastMsg.content.length - 1]
-      if (lastBlock && typeof lastBlock === 'object' && !lastBlock.cache_control) {
-        lastMsg.content[lastMsg.content.length - 1] = { ...lastBlock, ...CACHE_MARKER }
+      // NEVER add cache_control to a thinking/redacted_thinking block: Anthropic
+      // rejects ANY modification of thinking blocks in the latest assistant
+      // message ("thinking blocks ... cannot be modified"). Inject onto the last
+      // NON-thinking block instead; if the trailing blocks are all thinking,
+      // skip BP3 (BP1 system + BP2 tools already provide the cache anchor).
+      const isThinking = (b: unknown) => {
+        const t = (b as Record<string, unknown> | null)?.type
+        return t === 'thinking' || t === 'redacted_thinking'
+      }
+      let idx = lastMsg.content.length - 1
+      while (idx >= 0 && isThinking(lastMsg.content[idx])) idx--
+      const target = idx >= 0 ? lastMsg.content[idx] : null
+      if (target && typeof target === 'object' && !target.cache_control) {
+        lastMsg.content[idx] = { ...target, ...CACHE_MARKER }
         injected++
       }
     }

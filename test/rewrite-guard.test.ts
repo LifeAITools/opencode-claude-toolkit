@@ -183,6 +183,29 @@ describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
     c.stop()
   })
 
+  test('same-org token rotation does NOT mark org-switch-pending (token≠org)', async () => {
+    const c = mkClient({ orgIdResolver: { current: () => 'org-stable' } })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-rot' })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-rot' })  // rapid, same org
+    expect(r.status).not.toBe(400)
+    const eng = c.listSessions().find(s => s.sessionId === 'rg-rot')!.engine
+    expect(eng._orgSwitchPending.size).toBe(0)
+    c.stop()
+  })
+
+  test('override marker after an org switch clears the pending flag (window ends)', async () => {
+    const resolver = mutableResolver('org-A')
+    const c = mkClient({ orgIdResolver: resolver })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-end' })
+    resolver.org = 'org-B'
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-end' })                  // blocked → pending
+    const r = await c.handleRequest(reqBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-org-end' })  // marker → proceeds + completes
+    expect(r.status).not.toBe(400)
+    const eng = c.listSessions().find(s => s.sessionId === 'rg-org-end')!.engine
+    expect(eng._orgSwitchPending.size).toBe(0)   // cleared on completion
+    c.stop()
+  })
+
   test('unknown org (resolver returns null) → org-switch never trips', async () => {
     // A transient ~/.claude.json read failure degrades to "can't prove a
     // switch" — the request passes rather than getting a false 400.

@@ -46,6 +46,14 @@ export interface ProxyConfig {
 
   // Upstream
   anthropicBaseUrl: string
+
+  // OpenAI compat
+  openaiCompatAuthToken: string | null
+  openaiCompatThinking: 'strip' | 'field'
+
+  // Subscription compat layer (hot-configurable for binary distribution)
+  ccCompatVersion: string
+  extraBetaFlags: string[]
 }
 
 const DEFAULT_ENV_PATH = join(homedir(), '.config', 'claude-max-proxy', '.env')
@@ -136,6 +144,15 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     // ANTHROPIC_UPSTREAM_URL env override stays available for test/dev pointing
     // at a local MITM proxy; default delegates to the SDK SSOT constant.
     anthropicBaseUrl: read('ANTHROPIC_UPSTREAM_URL', ANTHROPIC_API_BASE, fileEnv),
+
+    openaiCompatAuthToken: read('OPENAI_COMPAT_AUTH_TOKEN', '', fileEnv) || null,
+    openaiCompatThinking: (['strip', 'field'].includes(read('OPENAI_COMPAT_THINKING', 'strip', fileEnv))
+      ? read('OPENAI_COMPAT_THINKING', 'strip', fileEnv)
+      : 'strip') as 'strip' | 'field',
+
+    ccCompatVersion: read('CC_COMPAT_VERSION', '2.1.152', fileEnv),
+    extraBetaFlags: read('EXTRA_BETA_FLAGS', '', fileEnv)
+      .split(',').map(s => s.trim()).filter(Boolean),
   }
 
   return _cached

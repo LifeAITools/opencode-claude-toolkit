@@ -55,8 +55,14 @@ import { startHeartbeat } from './heartbeat.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
+// OpenAI translate imports moved to modules/openai-compat.ts and modules/anthropic.ts
 
-const PROXY_VERSION = '0.8.6'
+import { readFileSync as _readPkgFs } from 'fs'
+import { join as _joinPkg } from 'path'
+const PROXY_VERSION: string = (() => {
+  try { return JSON.parse(_readPkgFs(_joinPkg(import.meta.dir, '..', 'package.json'), 'utf8')).version ?? '0.0.0' }
+  catch { return '0.0.0' }
+})()
 
 // ═══ Mode detection ═══════════════════════════════════════════════
 
@@ -185,6 +191,11 @@ emit({
 
 const credentialsAdapter = new ProxyConfigCredentialsAdapter(cfg)
 
+// Managed sessions — early init so ProxyClient liveness checker can reference it
+import { ManagedSessionService } from './managed-sessions.js'
+const managedSessionsSvc = new ManagedSessionService()
+managedSessionsSvc.start((e) => emit(e as any))
+
 const proxyClient = new ProxyClient({
   config: {
     anthropicBaseUrl: cfg.anthropicBaseUrl,
@@ -199,8 +210,13 @@ const proxyClient = new ProxyClient({
   },
   credentialsProvider: credentialsAdapter,
   eventEmitter: new BusEventEmitterAdapter(),
-  // Use SDK defaults for sessionStore (InMemory with POSIX liveness) and
-  // upstream (native fetch). Proxy-specific customizations would go here.
+  // Custom liveness: PID check + Worker managed session override.
+  livenessChecker: {
+    isAlive(pid: number): boolean {
+      try { process.kill(pid, 0); return true } catch {}
+      return managedSessionsSvc.isAliveByPid(pid)
+    },
+  },
 })
 
 // ═══ Credentials watcher ═══════════════════════════════════════════
@@ -239,204 +255,77 @@ const tracker = {
   list: () => proxyClient.listSessions(),
 }
 
+// Stale managed session cleanup now handled by ManagedSessionService.start()
+
 // ═══ Heartbeat ═══════════════════════════════════════════════════════
 // Still uses its own timer; reads rate limit from proxyClient.
 
 const stopHeartbeat = startHeartbeat(cfg, tracker, () => proxyClient.rateLimitSnapshot)
 
-// ═══ Passthrough handler — thin wrapper over ProxyClient ═══════════
+// ═══ Module System ═══════════════════════════════════════════════
 //
-// All the heavy lifting (session tracking, KA engine, header rewriting,
-// SSE teeing, usage parsing, network error translation) happens inside
-// SDK's ProxyClient. This handler just translates Bun Request → plain
-// body/headers/context and returns the Response as-is.
-//
-// The original 280-line handler was reduced to ~20 lines after the
-// Hybrid ports-and-adapters migration (SDK 0.11+).
+// Each endpoint family is a self-contained module with its own routes.
+// server.ts is a thin router that loads modules and dispatches.
 
-async function handleMessages(
-  req: Request,
-  server: { requestIP(r: Request): { address: string; port: number } | null },
-): Promise<Response> {
-  // CC sends X-Claude-Code-Session-Id for per-session KA isolation.
-  const sessionId = req.headers.get('x-claude-code-session-id') ?? 'anon-' + Date.now().toString(36)
+import { loadModules, matchRoute, type ModuleContext } from './module.js'
+import { setCompatVersion } from './openai-translate.js'
+import { createHealthModule } from './modules/health.js'
+import { createAdminModule } from './modules/admin.js'
+import { createAnthropicModule } from './modules/anthropic.js'
+import { createOpenAICompatModule } from './modules/openai-compat.js'
 
-  // Resolve consumer PID from TCP peer port so KA engine can skip fires
-  // when the consumer process has died (JIT liveness check).
-  const peer = server.requestIP(req)
-  const srcPort = peer?.port ?? null
-  const sourcePid = srcPort ? resolvePidFromPeerPort(srcPort) : null
+// Apply config-driven compat version
+if (cfg.ccCompatVersion) setCompatVersion(cfg.ccCompatVersion)
 
-  // Collect headers into a plain object (ProxyClient expects this shape).
-  const headers: Record<string, string> = {}
-  req.headers.forEach((v, k) => { headers[k] = v })
-
-  // Delegate to SDK ProxyClient — it handles everything end-to-end.
-  const rawBody = await req.arrayBuffer()
-
-  // Empirical wire-format research: capture rawBody for native CC vs opencode
-  // shape comparison. Fire-and-forget — must NEVER block or affect throughput.
-  // Default ON; disable via CLAUDE_MAX_PROXY_CAPTURE_BODIES=0.
-  // TTL: 48h rolling cleanup (CLAUDE_MAX_PROXY_CAPTURE_TTL_HOURS).
-  captureBody(rawBody, headers, { sessionId, sourcePid, srcPort })
-
-  return proxyClient.handleRequest(rawBody, headers, {
-    sessionId,
-    sourcePid,
-    signal: req.signal,
-  })
+// Module context — shared across all modules
+const moduleCtx: ModuleContext = {
+  emit: (e) => emit(e as any),
+  config: cfg,
+  proxyClient,
+  managedSessions: managedSessionsSvc,
+  version: PROXY_VERSION,
 }
 
-// ─── PID resolution helper (kept local, proxy-specific) ───────────
-//
-// The old SessionTracker had this logic; we moved session state into SDK
-// but the PID-from-TCP-peer-port resolution is fundamentally OS-specific
-// and proxy-specific (SDK shouldn't care how we figured out the PID).
-// This runs once per session (first request) and is cached in the session.
-//
-// Currently imported from ./session-tracker where it lives alongside
-// processAlive(). Kept for now — may be inlined or removed in Phase 2.
-import { resolvePidFromPort as resolvePidFromPeerPort } from './session-tracker.js'
-
-// ═══ Stats endpoints ═══════════════════════════════════════════
-
-function statsJson() {
-  return {
-    proxy: {
-      version: PROXY_VERSION,
-      pid: process.pid,
-      mode: PROXY_MODE,
-      parentPid: PARENT_PID || null,
-      uptime: Math.floor(process.uptime()),
-      port: RUNTIME_PORT,
-      host: RUNTIME_HOST,
-      endpoint: `http://${RUNTIME_HOST}:${RUNTIME_PORT}`,
-      discoveryFile: PROXY_MODE === 'global' ? getStateFilePath() : null,
-    },
-    sessions: tracker.list().map(s => ({
-      sessionId: s.sessionId,
-      pid: s.pid,
-      firstSeenAt: new Date(s.firstSeenAt).toISOString(),
-      lastRequestAt: new Date(s.lastRequestAt).toISOString(),
-      idleSec: Math.floor((Date.now() - s.lastRequestAt) / 1000),
-      model: s.model,
-      lastUsage: s.lastUsage,
-      ka: {
-        registrySize: (s.engine as any)._registry?.size ?? 0,
-        timerRunning: (s.engine as any)._timer !== null,
-      },
-    })),
-    rateLimit: proxyClient.rateLimitSnapshot,
-    config: {
-      logLevel: cfg.logLevel,
-      kaIntervalSec: cfg.kaIntervalSec,
-      kaRewriteBlockEnabled: cfg.kaRewriteBlockEnabled,
-    },
-    cacheConfig: (() => {
-      try {
-        // Hot-read of ~/.claude/keepalive.json — useful to verify hot-reload took effect.
-        // loadKeepaliveConfig re-reads the file on each call (SDK is ESM-only;
-        // require() of it fails at runtime — use the static import binding).
-        const c = loadKeepaliveConfig()
-        return {
-          cacheTtlMs: c.cacheTtlMs,
-          safetyMarginMs: c.safetyMarginMs,
-          intervalMs: c.intervalMs,
-          intervalClampMin: c.intervalClampMin,
-          intervalClampMax: c.intervalClampMax,
-          retryDelaysMs: c.retryDelaysMs,
-          source: c._source,
-        }
-      } catch (e: any) {
-        return { error: e?.message }
-      }
-    })(),
-    cacheMetrics: (() => {
-      try {
-        return proxyClient.cacheMetricsSnapshot
-      } catch (e: any) {
-        return { error: e?.message }
-      }
-    })(),
-  }
+// Instantiate modules
+const healthModuleOpts = {
+  mode: PROXY_MODE,
+  parentPid: PARENT_PID,
+  port: RUNTIME_PORT,
+  host: RUNTIME_HOST,
+  discoveryFile: PROXY_MODE === 'global' ? getStateFilePath() : null,
+  moduleStatus: { loaded: [] as string[], failed: [] as { name: string; error: string }[] },
 }
 
-// ═══ Bun.serve ═══════════════════════════════════════════════════
+const modules = [
+  createHealthModule(healthModuleOpts),
+  createAdminModule(() => shutdown()),
+  createAnthropicModule(),
+  createOpenAICompatModule(),
+]
+
+// Load all modules (init + collect routes; failed modules' routes skipped)
+const { allRoutes, loaded, failed } = loadModules(modules, moduleCtx, (e) => emit(e as any))
+healthModuleOpts.moduleStatus = { loaded, failed }
+
+emit({
+  level: 'info', kind: 'INFO',
+  msg: `Modules loaded: ${loaded.join(', ')}${failed.length ? ` | FAILED: ${failed.map(f => f.name).join(', ')}` : ''}`,
+  modulesLoaded: loaded.length,
+  modulesFailed: failed.length,
+  totalRoutes: allRoutes.length,
+})
+
+// ═══ Bun.serve — thin router ═══════════════════════════════════
 
 const server = Bun.serve({
   port: RUNTIME_PORT,
   hostname: RUNTIME_HOST,
-  idleTimeout: 255,  // max — CC long streams
+  idleTimeout: 255,
 
   async fetch(req, server) {
     const url = new URL(req.url)
-
-    if (req.method === 'POST' && url.pathname === '/v1/messages') {
-      return handleMessages(req, server)
-    }
-
-    if (req.method === 'GET' && url.pathname === '/health') {
-      return Response.json({ ok: true, uptime: Math.floor(process.uptime()), sessions: tracker.size() })
-    }
-
-    if (req.method === 'GET' && url.pathname === '/version') {
-      return Response.json({ name: '@kiberos/claude-max-proxy', version: PROXY_VERSION, pid: process.pid, uptime: Math.floor(process.uptime()) })
-    }
-
-    if (req.method === 'GET' && url.pathname === '/stats') {
-      return Response.json(statsJson(), { headers: { 'Cache-Control': 'no-store' } })
-    }
-
-    if (req.method === 'GET' && url.pathname === '/admin/sessions') {
-      return Response.json({ sessions: tracker.list().map(s => ({
-        sessionId: s.sessionId, pid: s.pid, model: s.model,
-        firstSeenAt: s.firstSeenAt, lastRequestAt: s.lastRequestAt,
-      })) })
-    }
-
-    if (req.method === 'POST' && url.pathname === '/admin/shutdown') {
-      emit({ level: 'info', kind: 'PROXY_SHUTDOWN', msg: 'Shutdown requested via /admin/shutdown' })
-      setTimeout(() => shutdown(), 100)
-      return Response.json({ ok: true, msg: 'Shutting down' })
-    }
-
-    if (req.method === 'POST' && url.pathname === '/admin/disarm') {
-      // Body: { sessionId?: string, reason?: string }
-      // Without sessionId → disarm ALL sessions (safe org-swap use case).
-      // Always invalidates token cache as a side effect (see proxyClient.disarmSessions).
-      let body: { sessionId?: string; reason?: string } = {}
-      try { body = await req.json() as any } catch { /* empty body = disarm all */ }
-      const reason = body.reason ?? 'admin_disarm'
-      const disarmed = proxyClient.disarmSessions(reason, body.sessionId)
-      return Response.json({
-        ok: true,
-        disarmedCount: disarmed.length,
-        sessionIds: disarmed,
-        reason,
-        tokenCacheInvalidated: true,
-      })
-    }
-
-    if (req.method === 'POST' && url.pathname === '/admin/reload') {
-      // Body: { sessionId?: string, reason?: string }
-      // Like /admin/disarm (drops stale snapshots + invalidates token cache)
-      // but leaves each engine's KA timer running so it auto-resumes on the
-      // next real request. This is the correct org-swap primitive — disarm
-      // killed KA for the rest of the session.
-      let body: { sessionId?: string; reason?: string } = {}
-      try { body = await req.json() as any } catch { /* empty body = reload all */ }
-      const reason = body.reason ?? 'admin_reload'
-      const reloaded = proxyClient.reloadSessions(reason, body.sessionId)
-      return Response.json({
-        ok: true,
-        reloadedCount: reloaded.length,
-        sessionIds: reloaded,
-        reason,
-        tokenCacheInvalidated: true,
-        kaTimerKept: true,
-      })
-    }
-
+    const route = matchRoute(allRoutes, req.method, url.pathname)
+    if (route) return route.handler(req, server)
     return new Response('Not Found', { status: 404 })
   },
 })

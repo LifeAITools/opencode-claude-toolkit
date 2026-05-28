@@ -30,3 +30,6 @@ packages/opencode-proxy/*.sh
 # are INTENTIONALLY tracked. They were previously ignored (with a fragile
 # `!test/<file>` allow-list), which left ~40 core source files invisible to
 # git and let drift accumulate silently. Source belongs in version control.
+
+# proxy runs from src/ via bun; dist is build output, not used at runtime
+packages/claude-max-proxy/dist/

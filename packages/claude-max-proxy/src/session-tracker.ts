@@ -24,6 +24,13 @@ export interface TrackedSession {
     cacheReadInputTokens: number
     cacheCreationInputTokens: number
   } | null
+  /** When set, PID liveness is ignored. Session stays alive as long as
+   *  Worker heartbeat is fresh (lastManagedHeartbeat within managedTtlMs). */
+  managed?: {
+    workerId: string
+    lastHeartbeat: number
+    ttlMs: number  // default 30_000 — reap if no heartbeat for this long
+  }
 }
 
 /** Resolve source PID from TCP ESTABLISHED peer port (localhost:<srcPort>). */
@@ -122,10 +129,31 @@ export class SessionTracker {
     return session
   }
 
-  /** Reap sessions whose owning PID is dead. Called periodically. */
+  /** Reap sessions whose owning PID is dead. Called periodically.
+   *  Worker-managed sessions use heartbeat TTL instead of PID liveness. */
   reapDead(): string[] {
     const killed: string[] = []
+    const now = Date.now()
     for (const [sid, sess] of this.sessions.entries()) {
+      // Worker-managed session: check heartbeat freshness, not PID
+      if (sess.managed) {
+        const age = now - sess.managed.lastHeartbeat
+        if (age > sess.managed.ttlMs) {
+          sess.engine.stop()
+          this.sessions.delete(sid)
+          killed.push(sid)
+          emit({
+            level: 'info',
+            kind: 'SESSION_DEAD',
+            sessionId: sid,
+            reason: 'managed_heartbeat_stale',
+            workerId: sess.managed.workerId,
+            staleSinceMs: age,
+          })
+        }
+        continue
+      }
+      // Normal PID-based liveness
       if (sess.pid !== null && !processAlive(sess.pid)) {
         sess.engine.stop()
         this.sessions.delete(sid)
@@ -173,7 +201,43 @@ export class SessionTracker {
   isOwnerAlive(sessionId: string): boolean {
     const sess = this.sessions.get(sessionId)
     if (!sess) return true           // unknown session — don't falsely kill
+    // Worker-managed: alive if heartbeat is fresh
+    if (sess.managed) {
+      return (Date.now() - sess.managed.lastHeartbeat) < sess.managed.ttlMs
+    }
     if (sess.pid === null) return true // PID never resolved — don't kill
     return processAlive(sess.pid)
+  }
+
+  /** Mark a session as Worker-managed. PID liveness is ignored;
+   *  session stays alive as long as Worker heartbeats arrive. */
+  markManaged(sessionId: string, workerId: string, ttlMs: number = 30_000): boolean {
+    const sess = this.sessions.get(sessionId)
+    if (!sess) return false
+    sess.managed = { workerId, lastHeartbeat: Date.now(), ttlMs }
+    emit({ level: 'info', kind: 'SESSION_MANAGED', sessionId, workerId })
+    return true
+  }
+
+  /** Worker heartbeat — refresh lastHeartbeat for all sessions owned by this Worker. */
+  workerHeartbeat(workerId: string, activeSessionIds: string[]): number {
+    let refreshed = 0
+    const now = Date.now()
+    for (const sid of activeSessionIds) {
+      const sess = this.sessions.get(sid)
+      if (sess?.managed?.workerId === workerId) {
+        sess.managed.lastHeartbeat = now
+        refreshed++
+      }
+    }
+    return refreshed
+  }
+
+  /** Unmark a session as Worker-managed (falls back to PID-based liveness). */
+  unmarkManaged(sessionId: string): boolean {
+    const sess = this.sessions.get(sessionId)
+    if (!sess?.managed) return false
+    delete sess.managed
+    return true
   }
 }

@@ -50,7 +50,12 @@ rsync -a --exclude='.claude' --exclude='*.bak*' --exclude='*.broken' "$PROXY_SRC
 cp "$PROXY_PKG" "$INSTALLED/package.json"
 log "src synced"
 
-# 3. Sync SDK bundle + version
+# 3. Rebuild + sync SDK bundle + version.
+#    ALWAYS rebuild from source first: copying a stale $SDK_DIST is how a
+#    committed-but-unbuilt fix gets "deployed" yet never reaches live (the
+#    2026-05-28 thinking-block flood — fix in source, stale bundle on disk).
+log "building SDK bundle from source"
+( cd "$SRC_REPO" && bun run build >/dev/null 2>&1 ) || { log "SDK BUILD FAILED — aborting deploy"; exit 1; }
 rm -rf "$SDK_DST/dist"; cp -a "$SDK_DIST" "$SDK_DST/dist"
 cp "$SDK_PKG" "$SDK_DST/package.json"
 log "SDK synced ($(grep -o '"version": "[^"]*"' "$SDK_DST/package.json" | head -1))"

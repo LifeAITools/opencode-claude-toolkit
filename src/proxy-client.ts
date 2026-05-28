@@ -56,6 +56,7 @@
  */
 
 import { KeepaliveEngine, detectCacheTtlFromBody, upgradeCacheControlTtl } from './keepalive-engine.js'
+import { EvictionCircuitBreaker } from './eviction-breaker.js'
 import { CacheMetricsCollector } from './cache-metrics.js'
 import type {
   ICredentialsProvider,
@@ -155,6 +156,28 @@ export interface ProxyClientConfig {
 
   /** Enable rewrite-burst hard block. Default: false (warn only) */
   kaRewriteBlockEnabled?: boolean
+
+  /**
+   * Cross-engine eviction-storm window, in seconds. When one session's KA fire
+   * detects a GENUINE server-side cold-write eviction (cold write with no local
+   * cause) it trips a SHARED breaker; for this many seconds every other engine,
+   * at its next fire, DISARMS (drops its stale snapshot and stops) rather than
+   * pay its own cold rewrite into the same storm. Disarmed sessions re-arm
+   * cleanly on their next real request. Collapses an N-session cold-rewrite
+   * cascade (observed 2026-05-28: ~6M tokens across ~8 sessions in 25 min) into
+   * a single rewrite plus lazy re-warm on return. A few minutes is enough for
+   * every armed engine to hit at least one tick. 0 disables the breaker.
+   * Default: 300 (5 min).
+   */
+  kaEvictionHoldSec?: number
+
+  /**
+   * Trips required within the hold window before the breaker engages. 1 = a
+   * single detected eviction holds the fleet (matches "one burns → others back
+   * off"). 2+ requires corroboration, avoiding a hold on a lone per-session
+   * marker-slide. Default: 1.
+   */
+  kaEvictionMinTrips?: number
 }
 
 // Note: kaIntervalSec intentionally NOT defaulted here.
@@ -178,6 +201,8 @@ const DEFAULT_CONFIG: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
   kaRewriteWarnTokens: 50000,
   kaRewriteBlockIdleSec: 0,
   kaRewriteBlockEnabled: false,
+  kaEvictionHoldSec: 300,
+  kaEvictionMinTrips: 1,
 }
 
 export interface ProxyClientOptions {
@@ -337,10 +362,27 @@ export class ProxyClient {
   /** Resolves the current Anthropic org UUID — drives org-switch detection. */
   private readonly orgIdResolver: OrgIdResolver
 
+  /** Shared across every per-session KA engine — fleet-wide eviction-storm hold. */
+  private readonly evictionBreaker: EvictionCircuitBreaker
+
   constructor(opts: ProxyClientOptions) {
     this.config = { ...DEFAULT_CONFIG, ...opts.config }
+    this.evictionBreaker = new EvictionCircuitBreaker({
+      cooldownMs: this.config.kaEvictionHoldSec * 1000,
+      minTripsToEngage: this.config.kaEvictionMinTrips,
+    })
     this.credentials = opts.credentialsProvider
     this.events = opts.eventEmitter ?? new ConsoleEventEmitter()
+    // Startup confirmation: the eviction breaker is otherwise silent until it
+    // trips, so emit one line at boot so operators can verify the fleet-wide
+    // cache-eviction guard is armed (and with what thresholds).
+    this.events.emit({
+      level: 'info',
+      kind: 'EVICTION_BREAKER_ARMED',
+      cooldownSec: this.config.kaEvictionHoldSec,
+      minTrips: this.config.kaEvictionMinTrips,
+      enabled: this.config.kaEvictionHoldSec > 0,
+    })
     this.liveness = opts.livenessChecker ?? new DefaultLivenessChecker()
     this.store = opts.sessionStore ?? new InMemorySessionStore<KeepaliveEngine>(this.liveness)
     this.upstream = opts.upstreamFetcher ?? new NativeFetchUpstream()
@@ -414,6 +456,21 @@ export class ProxyClient {
 
   /** Total session count. */
   sessionCount(): number { return this.store.size() }
+
+  /** Mark a session as Worker-managed (heartbeat-based liveness instead of PID). */
+  markManagedSession(sessionId: string, workerId: string, ttlMs?: number): boolean {
+    return (this.store as any).markManaged?.(sessionId, workerId, ttlMs) ?? false
+  }
+
+  /** Worker heartbeat — refresh liveness for all Worker's sessions. */
+  workerHeartbeat(workerId: string, activeSessionIds: string[]): number {
+    return (this.store as any).workerHeartbeat?.(workerId, activeSessionIds) ?? 0
+  }
+
+  /** Unmark a session as Worker-managed. */
+  unmarkManagedSession(sessionId: string): boolean {
+    return (this.store as any).unmarkManaged?.(sessionId) ?? false
+  }
 
   /** Config used by this client (read-only). */
   get configSnapshot(): Readonly<Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & { kaIntervalSec: number | undefined }> { return this.config }
@@ -827,6 +884,7 @@ export class ProxyClient {
   private createEngine(sessionId: string): KeepaliveEngine {
     const cfg = this.config
     return new KeepaliveEngine({
+      evictionBreaker: this.evictionBreaker,
       config: {
         // Per-consumer TTL pin — see ProxyClientConfig.kaCacheTtlSec docs.
         // Default 3600s: handleRequest upgrades native CC's cache_control to
@@ -1394,6 +1452,7 @@ export class ProxyClient {
 
 const HOP_BY_HOP_OR_AUTH = [
   'host', 'content-length', 'connection', 'authorization',
+  'x-api-key',        // strip consumer API key — proxy injects its own OAuth bearer
   'accept-encoding',  // force uncompressed SSE
 ]
 

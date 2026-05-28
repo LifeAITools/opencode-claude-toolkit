@@ -52,9 +52,20 @@ export interface KeepaliveEngineOptions {
      * If omitted → engine assumes owner is always alive (current behavior).
      */
     isOwnerAlive?: () => boolean;
+    /**
+     * Optional SHARED cross-engine eviction circuit breaker. When this engine's
+     * Layer 5 detects a server-side cold-write eviction it trips the breaker;
+     * before firing, every engine consults it and HOLDS (skips the fire) while it
+     * is tripped — turning an N-session eviction-rewrite cascade into one rewrite
+     * plus a brief fleet-wide hold. Pass the SAME instance to every engine in the
+     * process (the proxy does this via SessionTracker). Omit for single-session
+     * SDK use — then the engine behaves exactly as before.
+     */
+    evictionBreaker?: EvictionCircuitBreaker;
 }
 import { type AgentRole } from './lineage.js';
 import type { PersistedEngineState } from './ka-snapshot-store.js';
+import type { EvictionCircuitBreaker } from './eviction-breaker.js';
 /** One KA registry entry — keyed by cache lineage, not by model. */
 interface RegistryEntry {
     body: Record<string, unknown>;
@@ -143,6 +154,8 @@ export declare class KeepaliveEngine {
     private readonly doFetch;
     private readonly getRateLimitInfo;
     private readonly isOwnerAlive;
+    /** Shared cross-engine eviction breaker (null in single-session SDK use). */
+    private readonly evictionBreaker;
     private lastKnownCacheTokensByModel;
     private networkState;
     private healthProbeTimer;
@@ -320,6 +333,8 @@ export declare class KeepaliveEngine {
     private writeSnapshotDebug;
     /** @internal — for test inspection */
     get _registry(): ReadonlyMap<string, RegistryEntry>;
+    /** @internal — drive one tick directly (tests only). */
+    _tick(): Promise<void>;
     /** @internal — per-lineage idle clocks (for tests). */
     get _lineageStats(): ReadonlyMap<string, {
         lastSeenAt: number;

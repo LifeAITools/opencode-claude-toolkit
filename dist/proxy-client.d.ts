@@ -103,6 +103,26 @@ export interface ProxyClientConfig {
     kaRewriteBlockIdleSec?: number;
     /** Enable rewrite-burst hard block. Default: false (warn only) */
     kaRewriteBlockEnabled?: boolean;
+    /**
+     * Cross-engine eviction-storm window, in seconds. When one session's KA fire
+     * detects a GENUINE server-side cold-write eviction (cold write with no local
+     * cause) it trips a SHARED breaker; for this many seconds every other engine,
+     * at its next fire, DISARMS (drops its stale snapshot and stops) rather than
+     * pay its own cold rewrite into the same storm. Disarmed sessions re-arm
+     * cleanly on their next real request. Collapses an N-session cold-rewrite
+     * cascade (observed 2026-05-28: ~6M tokens across ~8 sessions in 25 min) into
+     * a single rewrite plus lazy re-warm on return. A few minutes is enough for
+     * every armed engine to hit at least one tick. 0 disables the breaker.
+     * Default: 300 (5 min).
+     */
+    kaEvictionHoldSec?: number;
+    /**
+     * Trips required within the hold window before the breaker engages. 1 = a
+     * single detected eviction holds the fleet (matches "one burns → others back
+     * off"). 2+ requires corroboration, avoiding a hold on a lone per-session
+     * marker-slide. Default: 1.
+     */
+    kaEvictionMinTrips?: number;
 }
 export interface ProxyClientOptions {
     /** Config tuning — all fields optional (sensible defaults) */
@@ -208,6 +228,8 @@ export declare class ProxyClient {
     private readonly lineagePrefix;
     /** Resolves the current Anthropic org UUID — drives org-switch detection. */
     private readonly orgIdResolver;
+    /** Shared across every per-session KA engine — fleet-wide eviction-storm hold. */
+    private readonly evictionBreaker;
     constructor(opts: ProxyClientOptions);
     /** Current rate-limit snapshot from last upstream response. */
     get rateLimitSnapshot(): Readonly<RateLimitSnapshot>;
@@ -215,6 +237,12 @@ export declare class ProxyClient {
     listSessions(): Session<KeepaliveEngine>[];
     /** Total session count. */
     sessionCount(): number;
+    /** Mark a session as Worker-managed (heartbeat-based liveness instead of PID). */
+    markManagedSession(sessionId: string, workerId: string, ttlMs?: number): boolean;
+    /** Worker heartbeat — refresh liveness for all Worker's sessions. */
+    workerHeartbeat(workerId: string, activeSessionIds: string[]): number;
+    /** Unmark a session as Worker-managed. */
+    unmarkManagedSession(sessionId: string): boolean;
     /** Config used by this client (read-only). */
     get configSnapshot(): Readonly<Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
         kaIntervalSec: number | undefined;

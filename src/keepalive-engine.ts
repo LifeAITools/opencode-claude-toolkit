@@ -78,6 +78,17 @@ export interface KeepaliveEngineOptions {
    * If omitted → engine assumes owner is always alive (current behavior).
    */
   isOwnerAlive?: () => boolean
+
+  /**
+   * Optional SHARED cross-engine eviction circuit breaker. When this engine's
+   * Layer 5 detects a server-side cold-write eviction it trips the breaker;
+   * before firing, every engine consults it and HOLDS (skips the fire) while it
+   * is tripped — turning an N-session eviction-rewrite cascade into one rewrite
+   * plus a brief fleet-wide hold. Pass the SAME instance to every engine in the
+   * process (the proxy does this via SessionTracker). Omit for single-session
+   * SDK use — then the engine behaves exactly as before.
+   */
+  evictionBreaker?: EvictionCircuitBreaker
 }
 
 // Live-reload config is now centralized in src/keepalive-config.ts (SSOT).
@@ -93,6 +104,8 @@ import { CacheRewriteBlockedError } from './types.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { lineageKey, classifyRole, type AgentRole, type RoleHints } from './lineage.js'
 import type { PersistedEngineState } from './ka-snapshot-store.js'
+import type { EvictionCircuitBreaker } from './eviction-breaker.js'
+import { isServerSideEviction } from './eviction-breaker.js'
 
 // ============================================================
 // Per-lineage KA state shapes
@@ -452,6 +465,8 @@ export class KeepaliveEngine {
   private readonly doFetch: KeepaliveEngineOptions['doFetch']
   private readonly getRateLimitInfo: () => RateLimitInfo
   private readonly isOwnerAlive: () => boolean
+  /** Shared cross-engine eviction breaker (null in single-session SDK use). */
+  private readonly evictionBreaker: EvictionCircuitBreaker | null
 
   // ── State ──────────────────────────────────────────────────
   // Largest observed cache size per model (used for rewrite cost estimation)
@@ -520,6 +535,7 @@ export class KeepaliveEngine {
     this.getRateLimitInfo = opts.getRateLimitInfo
     // Default: always-alive (preserve existing behavior when caller omits).
     this.isOwnerAlive = opts.isOwnerAlive ?? (() => true)
+    this.evictionBreaker = opts.evictionBreaker ?? null
 
     const ka = opts.config ?? {}
 
@@ -976,6 +992,27 @@ export class KeepaliveEngine {
       }
     }
 
+    // ── Layer 0c: cross-engine eviction-storm disarm ───────────────
+    // A sibling engine detected a GENUINE server-side cold-write eviction (no
+    // local cause) and tripped the SHARED breaker. The server is evicting
+    // prefixes unpredictably right now: our snapshot's warmth is no longer
+    // trustworthy (the prefix may already be gone here too), and firing would
+    // just pay a full cold rewrite for an IDLE session the user may not return
+    // to. DISARM — drop the stale snapshot and stop. KA re-arms cleanly when the
+    // next REAL request proves the user is back and hands us a current snapshot,
+    // so idle sessions re-warm lazily on return instead of stampeding into N
+    // cold rewrites mid-storm. (Mirrors Layer 5's self-disarm of the detector.)
+    if (this.evictionBreaker?.isTripped(Date.now())) {
+      try {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] KA_DISARM_EVICTION_BREAKER pid=${process.pid} regSize=${this.registry.size} cooldownRemainingSec=${Math.round(this.evictionBreaker.cooldownRemainingMs(Date.now()) / 1000)} — sibling detected server-side eviction; disarming until next real request\n`)
+      } catch { /* logging best-effort */ }
+      this.clearRegistry()
+      this.stop()
+      try { this.config.onDisarmed?.({ reason: 'eviction_breaker_tripped', at: Date.now() }) } catch {}
+      return
+    }
+
     // Live-reload config from SSOT (~/.claude/keepalive.json via keepalive-config.ts).
     // Cheap: mtime cache inside loadKeepaliveConfig(). Reflects intervalSec /
     // idleTimeoutSec / cacheTtlSec changes without restart.
@@ -1188,6 +1225,23 @@ export class KeepaliveEngine {
           appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
             `[${new Date().toISOString()}] KA_FIRE_EVICTION_DETECTED pid=${process.pid} cw=${cw} cr=${cr} ratio=${(cr/cw).toFixed(3)} — disarming to prevent cascade\n`)
         } catch { /* logging best-effort */ }
+        // Trip the SHARED fleet breaker — but ONLY for a genuine server-side
+        // eviction (cold write on a snapshot with NO local cause). A recent real
+        // request (incl. a user-authorized [%cache-rewrite-ok%] rewrite) slides
+        // the prefix locally and is the detecting session's own concern, not a
+        // fleet signal; lastSeenAt is set by real requests only, so it is the
+        // exact "did the user just move the prefix?" signal. Self-disarm above
+        // still happens regardless; the breaker only governs OTHER sessions.
+        try {
+          const msSinceLastRealRequest = firedStat ? Date.now() - firedStat.lastSeenAt : Infinity
+          if (isServerSideEviction({ cacheWrite: cw, cacheRead: cr, msSinceLastRealRequest, intervalMs: this.config.intervalMs })) {
+            this.evictionBreaker?.trip(Date.now(), {
+              lineageKey: best.lineageKey,
+              cacheWrite: cw,
+              cacheRead: cr,
+            })
+          }
+        } catch { /* breaker is best-effort; never let it break a fire path */ }
         // Clear registry so we won't re-fire stale snapshot.
         this.clearRegistry()
         this.stop()
@@ -1817,6 +1871,11 @@ export class KeepaliveEngine {
   /** @internal — for test inspection */
   get _registry(): ReadonlyMap<string, RegistryEntry> {
     return this.registry
+  }
+
+  /** @internal — drive one tick directly (tests only). */
+  async _tick(): Promise<void> {
+    return this.tick()
   }
 
   /** @internal — per-lineage idle clocks (for tests). */

@@ -161,6 +161,8 @@ export declare class KeepaliveEngine {
     private healthProbeTimer;
     private healthProbeAttempt;
     private registry;
+    private lastSnapshots;
+    private selfHealEligible;
     private pendingSnapshots;
     private lineageStats;
     private _legacyPendingLineage;
@@ -398,6 +400,14 @@ export declare class KeepaliveEngine {
     private notifyRegistryChanged;
     /** Clear the registry + notify — the disarm/reload/evict mutation path. */
     private clearRegistry;
+    /**
+     * Self-heal: re-prime the registry from the last-known snapshots when a LIVE
+     * idle session's snapshot was dropped by a re-primeable clear (reload). Gated
+     * so a dead (PID gone) or expired (cache past TTL) session is never
+     * resurrected. Returns true if it re-primed. Called from tick() when the
+     * registry is empty.
+     */
+    private trySelfHeal;
     /**
      * Reconstruct armed state from a persisted snapshot (ka-snapshot-store.ts).
      * Called ONCE on a fresh engine, before any real request: repopulates the

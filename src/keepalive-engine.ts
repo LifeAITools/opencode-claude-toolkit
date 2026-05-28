@@ -486,6 +486,16 @@ export class KeepaliveEngine {
   // hasCacheControl: Layer 3 — when false, a fire refreshes nothing; skip it.
   private registry = new Map<string, RegistryEntry>()
 
+  // Last-known committed snapshot per lineage — retained even after clearRegistry
+  // so the engine can SELF-HEAL: re-prime a live idle session whose snapshot was
+  // dropped (reload / restart-no-revive) instead of waiting for a real request
+  // that may never come (a main agent idle while sub-agents work other lineages).
+  private lastSnapshots = new Map<string, RegistryEntry>()
+  // Only re-prime after a re-primeable clear (reload). Terminal clears
+  // (owner_dead, cache_expired, eviction, auth/permanent error) set this false
+  // so a dead/evicted session is never resurrected into a cold-rewrite loop.
+  private selfHealEligible = false
+
   // Pending snapshots — keyed by lineageKey so concurrent requests of DIFFERENT
   // lineages (main + sub-agent in flight together) cannot clobber each other.
   // The single-slot version silently dropped registrations under sub-agent
@@ -787,10 +797,12 @@ export class KeepaliveEngine {
       if (role !== 'sub'
           && totalTokens >= this.config.minTokens
           && (!existing || totalTokens >= existing.inputTokens)) {
-        this.registry.set(key, {
+        const entry = {
           body, headers, model, lineageKey: key, role,
           inputTokens: totalTokens, hasCacheControl: hasAnyCacheControl,
-        })
+        }
+        this.registry.set(key, entry)
+        this.lastSnapshots.set(key, entry) // retain for self-heal re-prime
         this.notifyRegistryChanged()
       }
 
@@ -913,9 +925,13 @@ export class KeepaliveEngine {
     // kept — their real request goes to the NEW org, so their completion is a
     // valid fresh registration.
     this.clearRegistry()
-    // Timer intentionally left running — a cheap no-op against the empty
-    // registry, auto-resumes on the next notifyRealRequestComplete. Same
-    // rationale as onDisarmed() ("timer remains... auto-resumes").
+    // Re-primeable clear: reload (org/token swap) is NOT terminal — the cache
+    // prefix is usually still valid for the live session. Mark eligible so the
+    // next tick SELF-HEALS (re-primes from lastSnapshots) for a live idle
+    // session, instead of silently staying cold until a real request arrives.
+    this.selfHealEligible = true
+    // Timer intentionally left running — tick() self-heals or no-ops against the
+    // empty registry, and re-arms on the next notifyRealRequestComplete.
     try { this.config.onDisarmed?.({ reason, at: Date.now() }) } catch {}
   }
 
@@ -950,7 +966,10 @@ export class KeepaliveEngine {
         `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${state} regSize=${this.registry.size} idleSec=${idleSec} nextFireSec=${nextFireSec} cacheAgeSec=${cacheAge < 0 ? 'na' : Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}\n`)
     } catch { /* logging best-effort */ }
 
-    if (this.registry.size === 0 || this.inFlight) return
+    if (this.inFlight) return
+    // Empty registry: try self-heal (re-prime a live idle session whose snapshot
+    // was dropped by reload). If not eligible/possible, nothing to fire.
+    if (this.registry.size === 0 && !this.trySelfHeal()) return
 
     // ── Layer 0a: owner-alive check (JIT PID-death gate) ───────────
     // Call BEFORE anything else — if consumer process is gone, instantly
@@ -1928,7 +1947,32 @@ export class KeepaliveEngine {
   /** Clear the registry + notify — the disarm/reload/evict mutation path. */
   private clearRegistry(): void {
     this.registry.clear()
+    // Every clear defaults to non-self-heal-eligible (terminal). reload() opts
+    // back IN afterwards — it is the only re-primeable clear.
+    this.selfHealEligible = false
     this.notifyRegistryChanged()
+  }
+
+  /**
+   * Self-heal: re-prime the registry from the last-known snapshots when a LIVE
+   * idle session's snapshot was dropped by a re-primeable clear (reload). Gated
+   * so a dead (PID gone) or expired (cache past TTL) session is never
+   * resurrected. Returns true if it re-primed. Called from tick() when the
+   * registry is empty.
+   */
+  private trySelfHeal(): boolean {
+    if (!this.selfHealEligible || this.lastSnapshots.size === 0) return false
+    try { if (!this.isOwnerAlive()) return false } catch { /* assume alive */ }
+    if (this.cacheWrittenAt <= 0) return false
+    const cacheAge = Date.now() - this.cacheWrittenAt
+    if (cacheAge >= this.cacheTtlMs - this.safetyMarginMs) return false // cache too old to keep alive
+    for (const [k, entry] of this.lastSnapshots) this.registry.set(k, entry)
+    this.notifyRegistryChanged()
+    try {
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] KA_SELF_HEAL pid=${process.pid} reprimed=${this.lastSnapshots.size} cacheAgeSec=${Math.round(cacheAge / 1000)} — live idle session re-warmed without a real request\n`)
+    } catch { /* logging best-effort */ }
+    return true
   }
 
   /**

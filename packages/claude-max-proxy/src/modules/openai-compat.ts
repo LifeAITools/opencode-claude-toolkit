@@ -86,9 +86,13 @@ export function createOpenAICompatModule(): ProxyModule {
         const srcPort = peer?.port ?? null
         const sourcePid = srcPort ? resolvePidFromPeerPort(srcPort) : null
 
+        // OpenAI spec: client streams ONLY when stream:true is explicitly set.
+        // Omitted or false → single buffered chat.completion object.
+        const wantStream = body.stream === true
+
         ctx.emit({
           level: 'info', kind: EVENT.OPENAI_COMPAT_REQUEST, sessionId,
-          model: body.model, stream: body.stream !== false,
+          model: body.model, stream: wantStream,
           hasTools: !!body.tools?.length, hasResponseFormat: !!body.response_format,
         })
 
@@ -138,10 +142,10 @@ export function createOpenAICompatModule(): ProxyModule {
 
         ctx.emit({
           level: 'info', kind: EVENT.OPENAI_COMPAT_COMPLETE, sessionId,
-          model: translation.model, stream: body.stream !== false, durationMs: Date.now() - t0,
+          model: translation.model, stream: wantStream, durationMs: Date.now() - t0,
         })
 
-        if (body.stream === false) return bufferToNonStreaming(upstreamResponse, transformOpts)
+        if (!wantStream) return bufferToNonStreaming(upstreamResponse, transformOpts)
         return transformAnthropicSSEToOpenAI(upstreamResponse, transformOpts)
       },
     },

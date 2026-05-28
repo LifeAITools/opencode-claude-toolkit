@@ -1206,13 +1206,16 @@ export class KeepaliveEngine {
     this.inFlightLineageKey = best.lineageKey
 
     try {
-      const token = await this.getToken()
-
       const body = JSON.parse(JSON.stringify(best.body))
       const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
       body.max_tokens = budgetTokens > 0 ? budgetTokens + 1 : 1
 
-      const headers = { ...best.headers, Authorization: `Bearer ${token}` }
+      // While this lineage is org-switch-pending, replay the snapshot's OWN
+      // (old-org) Authorization so the OLD cache stays warm until the user
+      // decides. Otherwise rebuild auth from a fresh getToken() (refresh-safe).
+      const headers = this.orgSwitchPending.has(best.lineageKey) && best.headers.Authorization
+        ? { ...best.headers }
+        : { ...best.headers, Authorization: `Bearer ${await this.getToken()}` }
 
       const controller = new AbortController()
       this.abortController = controller
@@ -1592,11 +1595,12 @@ export class KeepaliveEngine {
 
       this.inFlight = true
       try {
-        const token = await this.getToken()
         const body = JSON.parse(JSON.stringify(entry.body))
         const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
         body.max_tokens = budgetTokens > 0 ? budgetTokens + 1 : 1
-        const headers = { ...entry.headers, Authorization: `Bearer ${token}` }
+        const headers = this.orgSwitchPending.has(entry.lineageKey) && entry.headers.Authorization
+          ? { ...entry.headers }
+          : { ...entry.headers, Authorization: `Bearer ${await this.getToken()}` }
 
         const controller = new AbortController()
         this.abortController = controller

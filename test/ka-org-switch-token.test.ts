@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect, setSystemTime } from 'bun:test'
 import { KeepaliveEngine } from '../src/keepalive-engine.js'
 import type { RateLimitInfo, StreamEvent } from '../src/types.js'
 
@@ -41,5 +41,30 @@ describe('KeepaliveEngine — org-switch-pending lifecycle', () => {
     // a completed real request = user proceeded → flag cleared on re-registration
     e.notifyRealRequestComplete({ inputTokens: 60_000, outputTokens: 5, cacheReadInputTokens: 0 } as any, key)
     expect(e._orgSwitchPending.has(key)).toBe(false)
+  })
+
+  test('pending lineage → KA fire replays the snapshot OLD token (not getToken)', async () => {
+    const t0 = Date.now()
+    setSystemTime(t0)
+    const { e, captured } = mkEngine()
+    const key = arm(e, 'Bearer OLD')
+    e.markOrgSwitchPending(key)
+    setSystemTime(t0 + 120_000)   // past the 60s fire interval, within 5m TTL → fires
+    await e._tick()
+    setSystemTime()               // reset
+    expect(captured.length).toBeGreaterThan(0)
+    expect(captured.at(-1)!.headers.Authorization).toBe('Bearer OLD')  // old token, NOT NEW-token
+  })
+
+  test('non-pending lineage → KA fire uses fresh getToken (current behavior)', async () => {
+    const t0 = Date.now()
+    setSystemTime(t0)
+    const { e, captured } = mkEngine()
+    arm(e, 'Bearer OLD')
+    setSystemTime(t0 + 120_000)
+    await e._tick()
+    setSystemTime()
+    expect(captured.length).toBeGreaterThan(0)
+    expect(captured.at(-1)!.headers.Authorization).toBe('Bearer NEW-token')
   })
 })

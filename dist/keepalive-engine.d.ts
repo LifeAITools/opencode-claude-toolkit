@@ -165,6 +165,9 @@ export declare class KeepaliveEngine {
     private selfHealEligible;
     private pendingSnapshots;
     private lineageStats;
+    private orgSwitchPending;
+    /** Test accessor. */
+    get _orgSwitchPending(): Set<string>;
     private _legacyPendingLineage;
     private lastActivityAt;
     private lastRealActivityAt;
@@ -198,6 +201,12 @@ export declare class KeepaliveEngine {
      * (safe only for sequential callers: SDK direct use, tests).
      */
     notifyRealRequestComplete(usage: TokenUsage, lineageKeyArg?: string): void;
+    /** Flag a lineage as awaiting the user's org-switch decision. While set, the
+     *  KA fire replays the snapshot's own (old-org) Authorization to keep the OLD
+     *  cache warm. Called by ProxyClient when an org-switch rewrite is blocked. */
+    markOrgSwitchPending(lineageKeyArg: string): void;
+    /** Clear the org-switch-pending flag for a lineage. */
+    clearOrgSwitchPending(lineageKeyArg: string): void;
     /**
      * Layer 3 — Cache rewrite burst protection.
      * Call at the top of every real request BEFORE sending.
@@ -391,6 +400,7 @@ export declare class KeepaliveEngine {
         headers: Record<string, string>;
         model: string;
         inputTokens: number;
+        lineageKey: string;
     }, err: {
         resetAt?: number | null;
         retryAfterSec?: number | null;

@@ -318,7 +318,21 @@ export declare class ProxyClient {
     private recordReviveDrop;
     private engineDoFetch;
     private parseSSEAndNotify;
-    private predictCacheMiss;
+    /**
+     * Pure assessment of whether this request incurs a cache rewrite — does NOT
+     * mutate prefix history. Returns a `commit` payload (always, so the PROCEED
+     * path can advance history) and an `assessment` (null on an expected cache
+     * HIT — nothing to surface/block). A blocked request calls this and skips
+     * commit, so an unconsented rewrite never advances state or poisons the
+     * marker-carrying retry's classification.
+     */
+    private assessCacheMiss;
+    /** Persist this lineage's new prefix fingerprint + advance its idle clock.
+     *  Call ONLY when the request PROCEEDS (never when the rewrite guard blocks
+     *  it — a blocked, unconsented request must not advance history or it poisons
+     *  the marker-carrying retry's classification). Also consumes the one-shot
+     *  ka-revival-dropped flag. */
+    private commitPrefixHistory;
     private handleNetworkError;
 }
 /**

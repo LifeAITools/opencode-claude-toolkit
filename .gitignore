@@ -33,3 +33,6 @@ packages/opencode-proxy/*.sh
 
 # proxy runs from src/ via bun; dist is build output, not used at runtime
 packages/claude-max-proxy/dist/
+
+# smart-toc generated sidecars
+*.toc

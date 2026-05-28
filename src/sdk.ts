@@ -1081,8 +1081,20 @@ export class ClaudeCodeSDK {
     if (typeof lastMsg.content === 'string') {
       lastMsg.content = [{ type: 'text', text: lastMsg.content, ...CC }]
     } else if (Array.isArray(lastMsg.content) && lastMsg.content.length > 0) {
-      const lastBlock = lastMsg.content[lastMsg.content.length - 1]
-      lastMsg.content[lastMsg.content.length - 1] = { ...lastBlock, ...CC }
+      // NEVER add cache_control to a thinking/redacted_thinking block: Anthropic
+      // rejects ANY modification of thinking blocks in the latest assistant
+      // message (400 "thinking blocks ... cannot be modified"). Walk back to the
+      // last NON-thinking block; if all trailing blocks are thinking, skip BP3
+      // (BP1 system + BP2 tools still anchor the cache).
+      const isThinking = (b: unknown) => {
+        const t = (b as Record<string, unknown> | null)?.type
+        return t === 'thinking' || t === 'redacted_thinking'
+      }
+      let idx = lastMsg.content.length - 1
+      while (idx >= 0 && isThinking(lastMsg.content[idx])) idx--
+      if (idx >= 0) {
+        lastMsg.content[idx] = { ...lastMsg.content[idx], ...CC }
+      }
     }
   }
 

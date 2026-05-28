@@ -19,11 +19,13 @@ export interface ProxyConfig {
   // its default from SSOT (~/.claude/keepalive.json) which auto-scales with
   // cacheTtlMs (legacy 5m → 150s, 1h → 1800s).
   kaIntervalSec: number | undefined
-  // Per-consumer cache TTL pin in seconds. DEFAULT 300 (5min) — matches native
-  // Claude Code wire-TTL (`cache_control:ephemeral` without `ttl`). Honoring
-  // SSOT's longer value here would burn tokens on KA fires against caches
-  // Anthropic already expired. See ProxyClientConfig.kaCacheTtlSec docs.
-  // Override via KA_CACHE_TTL_SEC env (rarely needed — wire autoscan adapts).
+  // Per-consumer cache TTL pin in seconds. DEFAULT 3600 (1h): the SDK upgrades
+  // native CC's `cache_control:ephemeral` markers to ttl:'1h' on the wire, so the
+  // real cache lives 1h and KA fires every ~30min against a genuinely-1h cache.
+  // The KeepaliveEngine wire-autoscan still downlocks any session to 300s if it
+  // observes an un-upgraded marker. (Must match the deployed/live default — a
+  // 300 default makes the engine over-fire a warm 1h cache ~12×.) See
+  // ProxyClientConfig.kaCacheTtlSec docs. Override via KA_CACHE_TTL_SEC env.
   kaCacheTtlSec: number
   kaIdleTimeoutSec: number  // 0 = never stop
   kaMinTokens: number
@@ -124,7 +126,7 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
       : undefined,
     // 5min default = native CC wire TTL. Wire-autoscan in KeepaliveEngine
     // will further lock down per-session if it observes shorter markers.
-    kaCacheTtlSec: readInt('KA_CACHE_TTL_SEC', 300, fileEnv),
+    kaCacheTtlSec: readInt('KA_CACHE_TTL_SEC', 3600, fileEnv),
     kaIdleTimeoutSec: readInt('KA_IDLE_TIMEOUT_SEC', 0, fileEnv),
     kaMinTokens: readInt('KA_MIN_TOKENS', 2000, fileEnv),
 

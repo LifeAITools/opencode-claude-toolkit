@@ -349,6 +349,12 @@ export function upgradeCacheControlTtl(body: unknown): { upgraded: number } {
   if (!body || typeof body !== 'object') return { upgraded: 0 }
   let upgraded = 0
   const lift = (holder: Record<string, unknown>) => {
+    // NEVER touch thinking/redacted_thinking blocks: Anthropic rejects ANY
+    // modification of thinking blocks in the latest assistant message (400
+    // "thinking blocks ... cannot be modified"). A client may carry a
+    // cache_control marker on a thinking block; bumping its ttl = modification.
+    const t = (holder as { type?: unknown }).type
+    if (t === 'thinking' || t === 'redacted_thinking') return
     const cc = holder.cache_control
     if (!cc || typeof cc !== 'object') return
     const o = cc as { type?: unknown; ttl?: unknown }

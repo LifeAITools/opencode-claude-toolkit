@@ -74,7 +74,7 @@ import {
 } from './proxy-adapters.js'
 import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
-import { prefixHashes, classifyRewrite, type PrefixHashes } from './lineage.js'
+import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { FileOrgIdResolver, type OrgIdResolver } from './org-identity.js'
 import {
@@ -688,24 +688,15 @@ export class ProxyClient {
       }
     }
 
-    this.events.emit({
-      level: 'info',
-      kind: 'REAL_REQUEST_START',
-      sessionId,
-      model,
-      bodyBytes,
-    })
+    // Compute the lineage key WITHOUT priming — lineageKey(body) is pure, so the
+    // rewrite guard can decide BEFORE any keepalive mutation. (Matches the value
+    // notifyRealRequestStart returns on the proceed path below.)
+    const reqLineageKey = lineageKey(parsedBody)
 
-    // Prime engine — aborts any in-flight KA, records pending snapshot.
-    // Capture the returned lineageKey so the (async, background) completion can
-    // be matched to THIS request concurrency-safely — sub-agent fan-out keeps
-    // many requests in flight at once, and a shared slot would clobber.
-    const reqLineageKey = session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
-
-    // Predict whether this request incurs a cache rewrite + classify the cause.
-    // (Task 4 reorders this before the prime; for now keep assess+commit here.)
+    // Assess (PURE — no history writes) so a blocked request never advances
+    // state. The commit (prefix-history write + KA prime) happens only if the
+    // request proceeds past the guard.
     const assessed = this.assessCacheMiss(sessionId, reqLineageKey, parsedBody, bodyBytes)
-    if (assessed) this.commitPrefixHistory(assessed.commit)
     const rewriteAssessment = assessed?.assessment ?? null
 
     // Rewrite guard — opt-in, default OFF. When enabled, an avoidable/anomalous
@@ -756,6 +747,11 @@ export class ProxyClient {
               + (dumpPath ? ` — dump: ${dumpPath}` : ''),
           })
         } else {
+          // org-switch block: keep warming the OLD org's cache for this lineage
+          // until the user proceeds (override marker) or the old token expires.
+          // Non-org blocks (ttl-expiry, system/tools change) have no prior-org
+          // cache to preserve, so they do not arm warm-old.
+          if (rewriteAssessment.signals.orgChanged) session.engine.markOrgSwitchPending(reqLineageKey)
           this.events.emit({
             level: 'error',
             kind: 'CACHE_REWRITE_BLOCKED',
@@ -780,6 +776,14 @@ export class ProxyClient {
         }
       }
     }
+
+    // PROCEED path — the request will be forwarded. ONLY NOW mutate keepalive:
+    // prime the engine (aborts any in-flight KA, records the pending snapshot)
+    // and advance prefix history. A blocked request returned above without
+    // reaching here, so it never disturbs keepalive's warming of the OLD cache.
+    this.events.emit({ level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes })
+    session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
+    if (assessed) this.commitPrefixHistory(assessed.commit)
 
     // Pre-request rewrite-burst guard
     try {

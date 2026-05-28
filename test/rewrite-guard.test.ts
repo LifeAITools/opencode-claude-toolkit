@@ -150,6 +150,19 @@ describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
     c.stop()
   })
 
+  test('org-switch block marks the session engine org-switch-pending', async () => {
+    const resolver = mutableResolver('org-A')
+    const c = mkClient({ orgIdResolver: resolver })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-pending' })   // cache under org-A
+    resolver.org = 'org-B'                                                  // claude login → org-B
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-pending' })
+    expect(r.status).toBe(400)                                             // blocked, awaiting decision
+    const eng = c.listSessions().find(s => s.sessionId === 'rg-org-pending')!.engine
+    const key = lineageKey(JSON.parse(reqBody()))
+    expect(eng._orgSwitchPending.has(key)).toBe(true)
+    c.stop()
+  })
+
   test('org switch WITH the override marker → passes the guard', async () => {
     const resolver = mutableResolver('org-A')
     const c = mkClient({ orgIdResolver: resolver })

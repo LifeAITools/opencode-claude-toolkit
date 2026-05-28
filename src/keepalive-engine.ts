@@ -1406,7 +1406,7 @@ export class KeepaliveEngine {
    *     server-side regression doesn't make things strictly worse.
    */
   private handleQuotaRateLimit(
-    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number },
+    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
     err: { resetAt?: number | null; retryAfterSec?: number | null },
   ): void {
     const now = Date.now()
@@ -1512,7 +1512,7 @@ export class KeepaliveEngine {
    * Uses setTimeout with exact delays from cacheWrittenAt — no drift.
    */
   private retryChain(
-    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number },
+    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
     attemptIndex = 0,
   ): void {
     if (attemptIndex >= this.retryDelaysMs.length) {
@@ -1962,7 +1962,7 @@ export class KeepaliveEngine {
 
   /** @internal — for test invocation of the smart-pause handler */
   _testHandleQuotaRateLimit(
-    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number },
+    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
     err: { resetAt?: number | null; retryAfterSec?: number | null },
   ): void {
     this.handleQuotaRateLimit(entry, err)

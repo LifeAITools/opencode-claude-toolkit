@@ -463,3 +463,27 @@ describe('rewrite guard — a TTL expiry spanning a proxy restart is NOT blocked
     rmSync(path, { force: true })
   })
 })
+
+describe('assessCacheMiss is pure (does not advance prefix history)', () => {
+  test('two assess calls in a row see identical prev state; no history write', () => {
+    const c = mkClient({ orgIdResolver: { current: () => 'org-A' } })
+    const body = JSON.parse(reqBody())
+    const a1 = (c as any).assessCacheMiss('rg-pure-1', 'lin', body, 6000)
+    const a2 = (c as any).assessCacheMiss('rg-pure-1', 'lin', body, 6000)
+    // assess must NOT persist → second call still sees no prev (identical verdict).
+    expect(a1.assessment.rewriteClass).toBe(a2.assessment.rewriteClass)
+    expect((c as any).prefixHistory.get('rg-pure-1:lin')).toBeUndefined()
+    // commit payload is always present so the proceed path can advance history.
+    expect(a1.commit.key).toBe('rg-pure-1:lin')
+    c.stop()
+  })
+
+  test('commitPrefixHistory advances prefixHistory; a later assess sees the prev', () => {
+    const c = mkClient({ orgIdResolver: { current: () => 'org-A' } })
+    const body = JSON.parse(reqBody())
+    const a1 = (c as any).assessCacheMiss('rg-pure-2', 'lin', body, 6000)
+    ;(c as any).commitPrefixHistory(a1.commit)
+    expect((c as any).prefixHistory.get('rg-pure-2:lin')).toBeDefined()
+    c.stop()
+  })
+})

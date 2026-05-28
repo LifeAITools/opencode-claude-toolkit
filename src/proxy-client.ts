@@ -703,7 +703,10 @@ export class ProxyClient {
     const reqLineageKey = session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
 
     // Predict whether this request incurs a cache rewrite + classify the cause.
-    const rewriteAssessment = this.predictCacheMiss(sessionId, reqLineageKey, parsedBody, bodyBytes)
+    // (Task 4 reorders this before the prime; for now keep assess+commit here.)
+    const assessed = this.assessCacheMiss(sessionId, reqLineageKey, parsedBody, bodyBytes)
+    if (assessed) this.commitPrefixHistory(assessed.commit)
+    const rewriteAssessment = assessed?.assessment ?? null
 
     // Rewrite guard — opt-in, default OFF. When enabled, an avoidable/anomalous
     // rewrite above the configured token threshold that the user has NOT
@@ -1298,18 +1301,29 @@ export class ProxyClient {
   // user's "первичный запуск = норм") logs at info; avoidable:* / anomalous:*
   // log at error. Never throws — observability must not affect throughput.
 
-  private predictCacheMiss(
+  /**
+   * Pure assessment of whether this request incurs a cache rewrite — does NOT
+   * mutate prefix history. Returns a `commit` payload (always, so the PROCEED
+   * path can advance history) and an `assessment` (null on an expected cache
+   * HIT — nothing to surface/block). A blocked request calls this and skips
+   * commit, so an unconsented rewrite never advances state or poisons the
+   * marker-carrying retry's classification.
+   */
+  private assessCacheMiss(
     sessionId: string,
     lineageKey: string,
     body: Record<string, unknown>,
     bodyBytes: number,
   ): {
-    rewriteClass: string
-    expected: boolean
-    predictedTokens: number
-    signals: { systemChanged: boolean; toolsChanged: boolean; orgChanged: boolean; idleMs: number | null; ttlMs: number }
-    /** Previous cacheable prefix of this lineage (for a guard-block dump). */
-    prevPrefix: CachePrefix | null
+    commit: { key: string; ph: ReturnType<typeof prefixHashes>; now: number; orgId: string | null; prevLastKaAt: number | undefined; system: unknown; tools: unknown }
+    assessment: {
+      rewriteClass: string
+      expected: boolean
+      predictedTokens: number
+      signals: { systemChanged: boolean; toolsChanged: boolean; orgChanged: boolean; idleMs: number | null; ttlMs: number }
+      /** Previous cacheable prefix of this lineage (for a guard-block dump). */
+      prevPrefix: CachePrefix | null
+    } | null
   } | null {
     try {
       const key = `${sessionId}:${lineageKey}`
@@ -1317,13 +1331,12 @@ export class ProxyClient {
       const ph = prefixHashes(body)
       const prev = this.prefixHistory.get(key)
       const orgId = this.orgIdResolver.current()
-      // Capture the previous cacheable prefix BEFORE overwriting it, so a
-      // guard-block dump can diff old vs new system/tools.
+      // Capture the previous cacheable prefix (read-only) so a guard-block dump
+      // can diff old vs new system/tools. The actual history WRITE is deferred
+      // to commitPrefixHistory (proceed path only).
       const prevPrefix = this.lineagePrefix.get(key) ?? null
-      this.lineagePrefix.set(key, { system: body.system, tools: body.tools })
-      // Carry prev.lastKaAt forward — a real request resets lastReqAt, but the
-      // KA-fire timeline is independent and must survive this overwrite.
-      this.prefixHistory.set(key, { hashes: ph, lastReqAt: now, orgId, lastKaAt: prev?.lastKaAt })
+      // commit payload — caller persists this ONLY when the request proceeds.
+      const commit = { key, ph, now, orgId, prevLastKaAt: prev?.lastKaAt, system: body.system, tools: body.tools }
 
       const isFirstRequest = !prev
       const systemChanged = !!prev && prev.hashes.system !== ph.system
@@ -1349,8 +1362,10 @@ export class ProxyClient {
       // ...UNLESS KA-persistence had a snapshot for this lineage and dropped it
       // as already-dead at startup — then the rewrite IS blockable. One-shot:
       // consume the flag so only the first post-restart request is surfaced.
+      // Read-only here; the one-shot consume (delete) is deferred to
+      // commitPrefixHistory so a blocked request does not consume it — the
+      // marker-carrying retry must still see the dropped-snapshot signal.
       const kaRevivalDropped = this.kaReviveDropped.has(key)
-      if (kaRevivalDropped) this.kaReviveDropped.delete(key)
       // org-switch: this lineage's prefix was last cached under a different
       // org than the one billing the current request. Tripped ONLY when both
       // org-ids are known and differ — an unknown org (`null`) never trips it.
@@ -1361,10 +1376,12 @@ export class ProxyClient {
       const prevOrgId = prev?.orgId ?? null
       const orgChanged = !!prev && orgId !== null && prevOrgId !== null && orgId !== prevOrgId
 
-      // Prefix unchanged + within TTL + same org → a cache HIT is expected; stay quiet.
+      // Prefix unchanged + within TTL + same org → a cache HIT is expected; stay
+      // quiet. Still return the commit payload so the proceed path advances
+      // lastReqAt (a normal hit must refresh the idle clock).
       if (!isFirstRequest && !systemChanged && !toolsChanged && !orgChanged
           && (idleMs === undefined || idleMs <= ttlMs)) {
-        return null
+        return { commit, assessment: null }
       }
 
       const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart, kaRevivalDropped })
@@ -1395,16 +1412,35 @@ export class ProxyClient {
               ? ` [idle ${Math.round(idleMs / 1000)}s > ttl ${Math.round(ttlMs / 1000)}s]` : ''),
       })
       return {
-        rewriteClass: verdict.class,
-        expected: verdict.expected,
-        predictedTokens,
-        signals: { systemChanged, toolsChanged, orgChanged, idleMs: idleMs ?? null, ttlMs },
-        prevPrefix,
+        commit,
+        assessment: {
+          rewriteClass: verdict.class,
+          expected: verdict.expected,
+          predictedTokens,
+          signals: { systemChanged, toolsChanged, orgChanged, idleMs: idleMs ?? null, ttlMs },
+          prevPrefix,
+        },
       }
     } catch {
       // Predictor is observability-only — never affect the request path.
       return null
     }
+  }
+
+  /** Persist this lineage's new prefix fingerprint + advance its idle clock.
+   *  Call ONLY when the request PROCEEDS (never when the rewrite guard blocks
+   *  it — a blocked, unconsented request must not advance history or it poisons
+   *  the marker-carrying retry's classification). Also consumes the one-shot
+   *  ka-revival-dropped flag. */
+  private commitPrefixHistory(c: {
+    key: string; ph: ReturnType<typeof prefixHashes>; now: number
+    orgId: string | null; prevLastKaAt: number | undefined; system: unknown; tools: unknown
+  }): void {
+    this.lineagePrefix.set(c.key, { system: c.system, tools: c.tools })
+    // Carry prevLastKaAt forward — a real request resets lastReqAt, but the
+    // KA-fire timeline is independent and must survive this overwrite.
+    this.prefixHistory.set(c.key, { hashes: c.ph, lastReqAt: c.now, orgId: c.orgId, lastKaAt: c.prevLastKaAt })
+    this.kaReviveDropped.delete(c.key)
   }
 
   // ─── Internal: network error handler ───────────────────────────

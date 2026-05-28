@@ -55,6 +55,7 @@ import { startHeartbeat } from './heartbeat.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
+import { startStatsEmitter } from './stats-emitter.js'
 // OpenAI translate imports moved to modules/openai-compat.ts and modules/anthropic.ts
 
 import { readFileSync as _readPkgFs } from 'fs'
@@ -171,6 +172,14 @@ emit({
 // Files land in CAPTURE_INFO.dir (default ~/.claude-local/proxy-body-dumps/).
 // Sweep timer runs in background; safe to ignore the returned stop fn here.
 startCaptureCleanup()
+
+// ═══ Quota pipeline Stage 1: stats emitter ══════════════════════════
+// Subscribes to the bus (REAL_REQUEST_COMPLETE / KA_FIRE_COMPLETE) and writes
+// the narrow versioned contract to ~/.claude-local/claude-max-stats.jsonl, which
+// claude-max-quota-watcher.service (Stage 2) tails. MUST be started here — a
+// prior server.ts dropped this call, silently killing the quota pipeline.
+const stopStatsEmitter = startStatsEmitter()
+
 emit({
   level: 'info',
   kind: 'BODY_CAPTURE',
@@ -443,6 +452,7 @@ if (PROXY_MODE === 'embedded' && PARENT_PID > 0) {
 
 function shutdown(): void {
   if (parentWatcher) clearInterval(parentWatcher)
+  stopStatsEmitter()
   stopHeartbeat()
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.
   proxyClient.stop()

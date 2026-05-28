@@ -1,19 +1,30 @@
 /**
- * Quota Watcher — single-writer SSOT for cross-process quota state.
+ * Quota Watcher — Stage 2 of the quota pipeline (the PROCESSOR).
+ *
+ * Pipeline:  stats-emitter.ts (Stage 1, in-proxy)  →  THIS (Stage 2)  →
+ *            signal-wire-hook.sh (Stage 3, injector).
+ *
+ * Runs as its OWN process (claude-max-quota-watcher.service), not inside the
+ * proxy — see the `import.meta.main` block at the bottom. The decoupling is
+ * deliberate: this compute logic can be hot-restarted without cooling the
+ * proxy's warmed KA sessions. Stages communicate only via on-disk files whose
+ * paths + wire-schema version are the SSOT in quota-paths.ts.
  *
  * ─── Responsibilities ────────────────────────────────────────────────
  *
  * 1. Tail ~/.claude-local/claude-max-stats.jsonl in real time.
- *    Each line is a JSON record written by the SDK (via opencode-claude
- *    provider.ts:logStats) for every Anthropic API response. Format:
+ *    Each line is a versioned record written by the proxy's stats-emitter.ts
+ *    for every upstream response carrying rate-limit utilisation. Shape:
  *
- *      { ts, pid, ses, type, model, dur, stop,
+ *      { v, ts, pid, type:"stream", model,
  *        usage: { in, out, cacheRead, cacheWrite },
- *        rateLimit: { status, claim, resetAt, util5h, util7d } }
+ *        rateLimit: { status, resetAt?, util5h, util7d } }
  *
  *    Kernel-side O_APPEND atomicity guarantees lines land intact even
  *    with N parallel writers (max line size << PIPE_BUF=4096). So tailing
- *    is contention-free.
+ *    is contention-free. Every line is validated (JSON + schema `v` + shape);
+ *    a bad line is skipped + counted + logged, never crashing the loop, and
+ *    the last-good aggregate is retained.
  *
  * 2. Aggregate per-pid + per-accountHint quota state.
  *    accountHint is inferred from observed util5h/util7d clustering: pids
@@ -70,12 +81,12 @@
  *     { ts, kind: "TOKEN_FILE_CHANGED" | "TOKEN_REFRESHED" | "PROXY_BOOT",
  *       prevExpiresAt, newExpiresAt, prevHint, newHint, ... }
  *
- * ─── No SDK changes required for Phase 1 ─────────────────────────────
+ * ─── Hot-restart contract ────────────────────────────────────────────
  *
- * This module reads stats.jsonl which the SDK has been writing for
- * months. We add observation, not new SDK behavior. Phase 2 (SDK reads
- * quota-status.json and injects warnings) is a separate, restart-gated
- * deploy.
+ * This process can be stopped/restarted freely. On boot it tails the stats
+ * stream from the CURRENT end (no history replay) and rebuilds aggregate
+ * state from live traffic. quota-status.json is written atomically
+ * (tmp+rename) so a reader (the injector) never observes a torn file.
  */
 
 import {
@@ -92,15 +103,19 @@ import {
 } from 'fs'
 import { createHash } from 'crypto'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
-import { emit } from './event-bus.js'
+import { join } from 'path'
+import { emit, bus } from './event-bus.js'
+import {
+  CLAUDE_LOCAL,
+  STATS_JSONL,
+  QUOTA_STATUS_JSON,
+  TOKEN_EVENTS_JSONL,
+  STATS_SCHEMA_VERSION,
+} from './quota-paths.js'
 
-// ─── Paths (SSOT) ────────────────────────────────────────────────────
-
-const CLAUDE_LOCAL = join(homedir(), '.claude-local')
-const STATS_JSONL = join(CLAUDE_LOCAL, 'claude-max-stats.jsonl')
-const QUOTA_STATUS_JSON = join(CLAUDE_LOCAL, 'quota-status.json')
-const TOKEN_EVENTS_JSONL = join(CLAUDE_LOCAL, 'token-events.jsonl')
+// ─── Paths ────────────────────────────────────────────────────────────
+// Path SSOT lives in quota-paths.ts (shared with stats-emitter.ts, a
+// separate process). Do NOT redefine paths here — import them.
 
 // ─── Tunables ────────────────────────────────────────────────────────
 
@@ -116,6 +131,7 @@ const TOKEN_REFRESH_DELTA_MS = 60_000          // expiresAt jump > 60s = real ch
 // ─── Types ───────────────────────────────────────────────────────────
 
 interface StatsLine {
+  v?: number               // wire-schema version stamped by stats-emitter; absent = legacy
   ts?: string
   pid?: number
   ses?: string
@@ -195,6 +211,31 @@ let credsWatcher: FSWatcher | null = null
 let statsTailTimer: ReturnType<typeof setInterval> | null = null
 let statsFileOffset = 0  // byte offset into stats.jsonl for tail-from-end
 let statsBuffer = ''     // residual line fragment between polls
+
+// ─── Corruption accounting ───────────────────────────────────────────
+// A bad input line must NEVER crash the tail loop or poison the aggregate.
+// We count rejections by reason and surface them on a throttled bus warning
+// so the failure is observable without firehosing the log on a persistently
+// malformed stream.
+const CORRUPTION_REPORT_THROTTLE_MS = 60_000
+const rejected = { badJson: 0, badSchema: 0, badShape: 0 }
+let lastCorruptionReportAt = 0
+
+function reportCorruption(reason: string, sample: string): void {
+  if (reason === 'badJson') rejected.badJson++
+  else if (reason === 'badSchema') rejected.badSchema++
+  else rejected.badShape++
+
+  const now = Date.now()
+  if (now - lastCorruptionReportAt < CORRUPTION_REPORT_THROTTLE_MS) return
+  lastCorruptionReportAt = now
+  emit({
+    level: 'error',
+    kind: 'QUOTA_WATCHER_LINE_REJECTED',
+    msg: `rejected stats lines (kept last-good aggregate): badJson=${rejected.badJson} badSchema=${rejected.badSchema} badShape=${rejected.badShape}; last reason=${reason}`,
+    sample: sample.slice(0, 160),
+  })
+}
 
 // ─── Public API ──────────────────────────────────────────────────────
 
@@ -372,12 +413,27 @@ function pollStatsTail(): void {
     statsBuffer = lines.pop() ?? ''  // residual
     for (const line of lines) {
       if (!line.trim()) continue
+      let parsed: StatsLine
       try {
-        const parsed = JSON.parse(line) as StatsLine
-        ingestStatsLine(parsed)
+        parsed = JSON.parse(line) as StatsLine
       } catch {
-        // Malformed line — skip silently; partial-write race shouldn't
-        // happen with O_APPEND but tolerate weirdness.
+        // Malformed JSON — skip + count. Partial-write race shouldn't happen
+        // with O_APPEND but tolerate weirdness; aggregate stays last-good.
+        reportCorruption('badJson', line)
+        continue
+      }
+      // Schema gate: a future emitter format must never silently corrupt a
+      // running processor. Accept our known version, and legacy lines with no
+      // `v` (best-effort). Any other version → reject + log.
+      if (parsed.v !== undefined && parsed.v !== STATS_SCHEMA_VERSION) {
+        reportCorruption('badSchema', line)
+        continue
+      }
+      try {
+        ingestStatsLine(parsed)
+      } catch (e: any) {
+        // A bad shape that slipped past JSON.parse must not kill the loop.
+        reportCorruption('badShape', line)
       }
     }
     maybeWriteQuotaStatus()
@@ -601,4 +657,64 @@ function ensureDir(d: string): void {
   if (!existsSync(d)) {
     try { mkdirSync(d, { recursive: true }) } catch { /* ignore */ }
   }
+}
+
+// ─── Standalone entry (the PROCESSOR runs as its own service) ─────────
+//
+// Run via `bun run src/quota-watcher.ts` under its own systemd unit
+// (claude-max-quota-watcher.service). Decoupling the processor from the
+// proxy is deliberate: its compute logic can be hot-restarted with
+// `systemctl --user restart claude-max-quota-watcher` WITHOUT cooling the
+// proxy's warmed KA sessions. The proxy only runs the stats EMITTER; this
+// process owns the compute → quota-status.json stage; the hook owns inject.
+if (import.meta.main) {
+  // Observability: standalone we are NOT inside the proxy, so logger.ts (which
+  // subscribes the bus → file) is not running. Attach a minimal bus→stdout
+  // sink here so this process's events — crucially QUOTA_WATCHER_LINE_REJECTED
+  // corruption reports — land in claude-max-quota-watcher.log via systemd.
+  bus.onEvent((e: any) => {
+    const ts = (e.ts ?? new Date().toISOString()).slice(11, 23)
+    const extras = Object.entries(e)
+      .filter(([k]) => !['ts', 'level', 'kind', 'msg'].includes(k))
+      .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+      .join(' ')
+    process.stdout.write(
+      `${ts} ${String(e.level ?? 'info').toUpperCase().padEnd(5)} ${String(e.kind ?? '').padEnd(26)} ${e.msg ?? ''}${extras ? ' ' + extras : ''}\n`,
+    )
+  })
+
+  const credentialsPath =
+    process.env.CLAUDE_CREDENTIALS_PATH
+      ? process.env.CLAUDE_CREDENTIALS_PATH.replace(/^~/, homedir())
+      : join(homedir(), '.claude', '.credentials.json')
+
+  const stop = startQuotaWatcher({ credentialsPath })
+
+  // startQuotaWatcher().unref()s its timers so it never keeps the *proxy*
+  // process alive when embedded. Standalone we DO want to stay alive — a
+  // ref'd no-op timer holds the event loop open until a signal arrives.
+  const keepAlive = setInterval(() => {}, 1 << 30)
+
+  const shutdown = () => {
+    clearInterval(keepAlive)
+    try { stop() } catch { /* best effort */ }
+    process.exit(0)
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
+
+  // Never crash the processor on an unexpected error — log and keep tailing.
+  process.on('uncaughtException', (err: any) => {
+    emit({
+      level: 'error',
+      kind: 'QUOTA_WATCHER_UNCAUGHT',
+      msg: `uncaughtException: ${err?.message ?? String(err)}`,
+    })
+  })
+
+  emit({
+    level: 'info',
+    kind: 'QUOTA_WATCHER_STANDALONE',
+    msg: `quota-watcher running standalone (creds=${credentialsPath})`,
+  })
 }

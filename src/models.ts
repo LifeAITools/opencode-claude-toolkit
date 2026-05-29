@@ -64,6 +64,14 @@ export interface ModelMetadata {
  * Max/Pro subscription.
  */
 export const MAX_MODELS: Record<string, ModelMetadata> = {
+  'claude-opus-4-8': {
+    name: 'Claude Opus 4.8',
+    context: 1_000_000,
+    defaultOutput: 64_000,   // native CLI wa() default (mirrors 4.7 flagship)
+    maxOutput: 128_000,      // native CLI wa() upperLimit
+    adaptiveThinking: true,
+    cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 },
+  },
   'claude-opus-4-7': {
     name: 'Claude Opus 4.7',
     context: 1_000_000,
@@ -170,6 +178,7 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
   // Legacy fuzzy checks for models not in the table (e.g. preview variants)
   const lower = modelId.toLowerCase()
   return (
+    lower.includes('opus-4-8') ||
     lower.includes('opus-4-7') ||
     lower.includes('opus-4-6') ||
     lower.includes('sonnet-4-6') ||

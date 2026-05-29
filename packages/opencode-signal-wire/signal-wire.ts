@@ -45,6 +45,7 @@ import type { WakeEvent } from './wake-types'
  */
 const MODEL_CONTEXT_WINDOW: Record<string, number> = {
   // Opus 4.x — 1M context (beta)
+  'claude-opus-4-8': 1_000_000,
   'claude-opus-4-7': 1_000_000,
   'claude-opus-4-6': 1_000_000,
   // Sonnet 4.6 — 1M context

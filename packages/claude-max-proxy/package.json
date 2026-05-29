@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@life-ai-tools/claude-code-sdk": "^0.15.6",
+    "@life-ai-tools/claude-code-sdk": "^0.20.9",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0"
   },

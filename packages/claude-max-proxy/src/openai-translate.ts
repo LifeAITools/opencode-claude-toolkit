@@ -95,11 +95,11 @@ const GPT_TO_CLAUDE: Record<string, string> = {
   'gpt-3.5-turbo': 'claude-haiku-4-5-20251001',
   'gpt-3.5-turbo-0125': 'claude-haiku-4-5-20251001',
   'gpt-3.5-turbo-16k': 'claude-haiku-4-5-20251001',
-  // o-series reasoning → Opus (deepest reasoning)
-  'o1': 'claude-opus-4-7',
-  'o1-preview': 'claude-opus-4-7',
+  // o-series reasoning → Opus (deepest reasoning → newest flagship)
+  'o1': 'claude-opus-4-8',
+  'o1-preview': 'claude-opus-4-8',
   'o1-mini': 'claude-sonnet-4-6',
-  'o3': 'claude-opus-4-7',
+  'o3': 'claude-opus-4-8',
   'o3-mini': 'claude-sonnet-4-6',
   'o4-mini': 'claude-sonnet-4-6',
 }
@@ -108,6 +108,7 @@ const PROXY_MODEL_MAP: Record<string, string> = {
   'claude-v4.6-sonnet': 'claude-sonnet-4-6',
   'claude-v4.6-opus': 'claude-opus-4-6',
   'claude-v4.7-opus': 'claude-opus-4-7',
+  'claude-v4.8-opus': 'claude-opus-4-8',
   'claude-v4.5-haiku': 'claude-haiku-4-5-20251001',
 }
 
@@ -115,6 +116,7 @@ const DIRECT_MODEL_MAP: Record<string, string> = {
   'claude-sonnet-4-6': 'claude-sonnet-4-6',
   'claude-opus-4-6': 'claude-opus-4-6',
   'claude-opus-4-7': 'claude-opus-4-7',
+  'claude-opus-4-8': 'claude-opus-4-8',
   'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
   'claude-haiku-4-5-20251001': 'claude-haiku-4-5-20251001',
   'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514',
@@ -127,6 +129,7 @@ export function resolveModel(model: string): string {
 
 export const SUPPORTED_MODELS = [
   // Claude native names
+  { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
   { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
   { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
@@ -135,6 +138,7 @@ export const SUPPORTED_MODELS = [
   { id: 'claude-v4.6-sonnet', name: 'Claude V4.6 Sonnet' },
   { id: 'claude-v4.6-opus', name: 'Claude V4.6 Opus' },
   { id: 'claude-v4.7-opus', name: 'Claude V4.7 Opus' },
+  { id: 'claude-v4.8-opus', name: 'Claude V4.8 Opus' },
   { id: 'claude-v4.5-haiku', name: 'Claude V4.5 Haiku' },
   // GPT aliases (for OpenAI agents that hardcode GPT model names)
   { id: 'gpt-4o', name: 'GPT-4o → Claude Sonnet 4.6' },

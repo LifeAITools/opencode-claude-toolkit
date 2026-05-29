@@ -989,6 +989,7 @@ export class ClaudeCodeSDK {
     const model = options.model.toLowerCase()
     const isAdaptiveModel = model.includes('opus-4-6') || model.includes('sonnet-4-6')
       || model.includes('opus-4-7') || model.includes('sonnet-4-7')
+      || model.includes('opus-4-8')
     const thinkingDisabled = options.thinking?.type === 'disabled'
 
     if (!thinkingDisabled && isAdaptiveModel) {

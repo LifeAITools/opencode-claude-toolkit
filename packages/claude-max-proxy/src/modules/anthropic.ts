@@ -46,6 +46,10 @@ export function createAnthropicModule(): ProxyModule {
           sessionId,
           sourcePid,
           signal: req.signal,
+          // Native Claude Code = interactive human (can see a 400 + re-send with
+          // marker). Any other Anthropic-API consumer is programmatic → the
+          // rewrite guard's interactive-only mode lets it through.
+          interactive: isNativeCC,
         })
       },
     },

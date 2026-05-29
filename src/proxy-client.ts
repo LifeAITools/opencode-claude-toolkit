@@ -291,6 +291,17 @@ export interface HandleRequestContext {
 
   /** Abort signal for the upstream fetch. */
   signal?: AbortSignal
+
+  /**
+   * Whether this request comes from an INTERACTIVE human (native Claude Code),
+   * as opposed to a programmatic endpoint client (OpenAI-compat /v1/chat/
+   * completions, or an external Anthropic-API consumer). The rewrite guard is a
+   * human consent checkpoint — when `rewriteGuard.interactiveOnly` is true
+   * (default), guard blocking applies ONLY to interactive requests; programmatic
+   * clients (interactive=false) are let through (logged) since they cannot
+   * re-send with an override marker. Default true (preserves native-CC behavior).
+   */
+  interactive?: boolean
 }
 
 // ═══ Rate limit snapshot (exposed for introspection) ═══════════════
@@ -728,11 +739,19 @@ export class ProxyClient {
           })
         }
         // The guard is an INTERACTIVE consent checkpoint: a human sees the 400
-        // and re-sends with the override marker. An automated agent — an
-        // Agent-SDK-spawned cognitive worker, or a Claude Code sub-agent —
-        // cannot consent; a hard 400 just strands its work. For those, log +
-        // dump for visibility but LET THE REQUEST THROUGH.
-        if (isAutomatedAgent(parsedBody, headers)) {
+        // and re-sends with the override marker. Two classes of consumer CANNOT
+        // consent and must be let through (log + dump, no 400):
+        //   1. An automated agent — Agent-SDK cognitive worker or CC sub-agent
+        //      (detected by header / metadata).
+        //   2. A programmatic endpoint client — OpenAI-compat or external
+        //      Anthropic-API consumer (interactive=false), when the guard is in
+        //      its default interactive-only mode. Set rewriteGuard.interactiveOnly
+        //      =false to enforce on these too.
+        const programmaticEndpoint = guard.interactiveOnly && ctx.interactive === false
+        const bypassReason = isAutomatedAgent(parsedBody, headers)
+          ? 'an automated agent'
+          : (programmaticEndpoint ? 'a programmatic endpoint client' : null)
+        if (bypassReason) {
           this.events.emit({
             level: 'info',
             kind: 'CACHE_REWRITE_UNGUARDED',
@@ -742,8 +761,8 @@ export class ProxyClient {
             predictedTokens: rewriteAssessment.predictedTokens,
             dumpPath,
             msg: `rewrite guard would block ${rewriteAssessment.rewriteClass} `
-              + `(~${rewriteAssessment.predictedTokens} tok) — consumer is an automated `
-              + `agent (cannot consent); passed through`
+              + `(~${rewriteAssessment.predictedTokens} tok) — consumer is ${bypassReason} `
+              + `(cannot consent); passed through`
               + (dumpPath ? ` — dump: ${dumpPath}` : ''),
           })
         } else {

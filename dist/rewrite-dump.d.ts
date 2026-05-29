@@ -85,4 +85,20 @@ export interface RewriteBlockDumpInput {
  *   <dir>/<ISO-compact ts>-<sid8>-<rewriteClass>.json
  */
 export declare function writeRewriteBlockDump(dir: string, input: RewriteBlockDumpInput): string | null;
+/**
+ * One rotation pass over the rewrite-dump dir: delete files older than ttlMs,
+ * then if the survivors still exceed maxMb, delete oldest-first until under it.
+ * Best-effort, never throws. Returns counts for logging.
+ */
+export declare function sweepRewriteDumps(dir: string, ttlMs: number, maxBytes: number): {
+    ttlDeleted: number;
+    capDeleted: number;
+    kept: number;
+};
+/**
+ * Start periodic rewrite-dump rotation (every 30min, plus once on boot).
+ * Mirrors body-capture's sweep discipline so guard dumps cannot grow unbounded.
+ * Returns a stop() handle. Defaults: TTL 7d, cap 200MB (env-overridable).
+ */
+export declare function startRewriteDumpCleanup(dir?: string): () => void;
 //# sourceMappingURL=rewrite-dump.d.ts.map

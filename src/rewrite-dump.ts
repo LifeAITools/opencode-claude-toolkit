@@ -29,12 +29,16 @@
  */
 
 import { createHash } from 'crypto'
-import { mkdirSync, writeFileSync } from 'fs'
+import { mkdirSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
 /** Default location for guard-block dumps. */
 export const DEFAULT_REWRITE_DUMP_DIR = join(homedir(), '.claude-local', 'rewrite-guard-blocks')
+
+/** Dump-rotation defaults (env-overridable). Dumps accumulated unbounded before this. */
+const REWRITE_DUMP_TTL_HOURS = Number(process.env.CLAUDE_MAX_PROXY_REWRITE_DUMP_TTL_HOURS ?? '168') // 7d
+const REWRITE_DUMP_MAX_MB = Number(process.env.CLAUDE_MAX_PROXY_REWRITE_DUMP_MAX_MB ?? '200')       // 0 = TTL only
 
 function md5(s: string, len = 12): string {
   return createHash('md5').update(s).digest('hex').slice(0, len)
@@ -204,4 +208,64 @@ export function writeRewriteBlockDump(
   } catch {
     return null
   }
+}
+
+/**
+ * One rotation pass over the rewrite-dump dir: delete files older than ttlMs,
+ * then if the survivors still exceed maxMb, delete oldest-first until under it.
+ * Best-effort, never throws. Returns counts for logging.
+ */
+export function sweepRewriteDumps(
+  dir: string,
+  ttlMs: number,
+  maxBytes: number,
+): { ttlDeleted: number; capDeleted: number; kept: number } {
+  let ttlDeleted = 0, capDeleted = 0
+  const survivors: { full: string; size: number; mtimeMs: number }[] = []
+  try {
+    const cutoff = Date.now() - ttlMs
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name)
+      try {
+        const st = statSync(full)
+        if (ttlMs > 0 && st.mtimeMs < cutoff) { unlinkSync(full); ttlDeleted++ }
+        else survivors.push({ full, size: st.size, mtimeMs: st.mtimeMs })
+      } catch { /* skip */ }
+    }
+    if (maxBytes > 0) {
+      let total = 0
+      for (const f of survivors) total += f.size
+      if (total > maxBytes) {
+        survivors.sort((a, b) => a.mtimeMs - b.mtimeMs) // oldest first
+        for (const f of survivors) {
+          if (total <= maxBytes) break
+          try { unlinkSync(f.full); total -= f.size; capDeleted++ } catch { /* skip */ }
+        }
+      }
+    }
+  } catch { /* dir missing or unreadable — nothing to sweep */ }
+  return { ttlDeleted, capDeleted, kept: survivors.length - capDeleted }
+}
+
+/**
+ * Start periodic rewrite-dump rotation (every 30min, plus once on boot).
+ * Mirrors body-capture's sweep discipline so guard dumps cannot grow unbounded.
+ * Returns a stop() handle. Defaults: TTL 7d, cap 200MB (env-overridable).
+ */
+export function startRewriteDumpCleanup(dir: string = DEFAULT_REWRITE_DUMP_DIR): () => void {
+  const ttlMs = REWRITE_DUMP_TTL_HOURS * 60 * 60 * 1000
+  const maxBytes = REWRITE_DUMP_MAX_MB > 0 ? REWRITE_DUMP_MAX_MB * 1024 * 1024 : 0
+  const sweepIntervalMs = 30 * 60 * 1000
+  const run = (): void => {
+    const r = sweepRewriteDumps(dir, ttlMs, maxBytes)
+    if (r.ttlDeleted > 0 || r.capDeleted > 0) {
+      console.log(`[rewrite-dump] sweep: ttlDeleted=${r.ttlDeleted} capDeleted=${r.capDeleted} `
+        + `kept=${r.kept} ttl=${REWRITE_DUMP_TTL_HOURS}h cap=${REWRITE_DUMP_MAX_MB}MB dir=${dir}`)
+    }
+  }
+  run()
+  const timer = setInterval(run, sweepIntervalMs)
+  // Don't keep the event loop alive solely for the sweep timer.
+  if (typeof (timer as { unref?: () => void }).unref === 'function') (timer as { unref: () => void }).unref()
+  return () => clearInterval(timer)
 }

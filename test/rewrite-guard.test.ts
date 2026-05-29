@@ -132,6 +132,31 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     c.stop()
     rmSync(path, { force: true })
   })
+
+  test('programmatic endpoint client (interactive:false) is NOT blocked — no human to consent', async () => {
+    // Same avoidable idle-past-TTL rewrite that 400s for an interactive client,
+    // but the consumer is an OpenAI-compat / external-API client. It cannot see
+    // a 400 and re-send with a marker, so interactiveOnly (default) lets it pass.
+    const path = join(TMP, 'rg-sess-prog.json')
+    seedIdleFor(path, 'rg-sess-prog', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-prog', interactive: false })
+    expect(r.status).not.toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('interactive client (interactive:true) is still blocked — guard unchanged for humans', async () => {
+    // Regression pin: the endpoint-bypass must NOT weaken the guard for the
+    // interactive native-CC path it was built for.
+    const path = join(TMP, 'rg-sess-inter.json')
+    seedIdleFor(path, 'rg-sess-inter', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-inter', interactive: true })
+    expect(r.status).toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
+  })
 })
 
 describe('rewrite guard — org-switch (anomalous:org-switch)', () => {

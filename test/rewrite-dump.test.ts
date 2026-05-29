@@ -7,10 +7,10 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'fs'
+import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { diffPrefix, writeRewriteBlockDump } from '../src/rewrite-dump.js'
+import { diffPrefix, writeRewriteBlockDump, sweepRewriteDumps } from '../src/rewrite-dump.js'
 
 const sys = (t: string) => [{ type: 'text', text: t, cache_control: { type: 'ephemeral' } }]
 const tool = (name: string, desc = 'd') => ({ name, description: desc, input_schema: {} })
@@ -94,5 +94,44 @@ describe('writeRewriteBlockDump', () => {
       blockedRequest: {}, previousPrefix: null,
     })
     expect(path).toBeNull()
+  })
+})
+
+describe('sweepRewriteDumps (rotation)', () => {
+  // helper: write a file of `bytes` and back-date its mtime by `ageMs`.
+  function mk(dir: string, name: string, bytes: number, ageMs: number): void {
+    const full = join(dir, name)
+    writeFileSync(full, Buffer.alloc(bytes, 'x'))
+    const when = (Date.now() - ageMs) / 1000
+    utimesSync(full, when, when)
+  }
+
+  test('TTL pass deletes files older than ttl, keeps recent', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rwsweep-ttl-'))
+    mk(dir, 'old.json', 100, 3 * 60 * 60 * 1000)   // 3h old
+    mk(dir, 'fresh.json', 100, 5 * 60 * 1000)       // 5min old
+    const r = sweepRewriteDumps(dir, 60 * 60 * 1000, 0)  // ttl 1h, no size cap
+    expect(r.ttlDeleted).toBe(1)
+    expect(readdirSync(dir)).toEqual(['fresh.json'])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('size-cap pass deletes oldest-first until under cap, keeps newest', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rwsweep-cap-'))
+    mk(dir, 'a-oldest.json', 600_000, 30_000)
+    mk(dir, 'b-mid.json', 600_000, 20_000)
+    mk(dir, 'c-newest.json', 600_000, 10_000)
+    // 1.8MB total, cap 1MB (bytes), no TTL deletion → drop 2 oldest, keep newest.
+    const r = sweepRewriteDumps(dir, 24 * 60 * 60 * 1000, 1_000_000)
+    expect(r.ttlDeleted).toBe(0)
+    expect(r.capDeleted).toBe(2)
+    expect(readdirSync(dir)).toEqual(['c-newest.json'])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('never throws on a missing directory', () => {
+    const r = sweepRewriteDumps('/proc/nonexistent/nope', 1000, 1000)
+    expect(r.ttlDeleted).toBe(0)
+    expect(r.capDeleted).toBe(0)
   })
 })

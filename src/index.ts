@@ -130,6 +130,8 @@ export {
   writeRewriteBlockDump,
   diffPrefix,
   DEFAULT_REWRITE_DUMP_DIR,
+  sweepRewriteDumps,
+  startRewriteDumpCleanup,
 } from './rewrite-dump.js'
 export type {
   CachePrefix,

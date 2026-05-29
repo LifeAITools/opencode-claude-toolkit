@@ -204,6 +204,15 @@ export interface RewriteGuardConfig {
   /** On a block, write the rejected request + prefix diff to a JSON artifact
    *  (rewrite-guard-blocks/) so it can be analysed offline. Default true. */
   readonly dumpBlocked: boolean
+  /**
+   * Apply guard blocking ONLY to interactive (native Claude Code) requests.
+   * Programmatic endpoint clients — OpenAI-compat /v1/chat/completions and
+   * external Anthropic-API consumers — cannot re-send with an override marker,
+   * so a hard 400 just strands them; when true they are let through (logged).
+   * Set false to enforce the guard on ALL traffic regardless of client kind.
+   * Default true.
+   */
+  readonly interactiveOnly: boolean
 }
 
 const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
@@ -211,6 +220,7 @@ const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
   minRewriteTokens: 50_000,
   overrideMarker: '[%cache-rewrite-ok%]',
   dumpBlocked: true,
+  interactiveOnly: true,
 }
 
 const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampMax'> = {
@@ -453,6 +463,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
       ? rg.overrideMarker
       : DEFAULT_REWRITE_GUARD.overrideMarker,
     dumpBlocked: bool(rg.dumpBlocked, DEFAULT_REWRITE_GUARD.dumpBlocked),
+    interactiveOnly: bool(rg.interactiveOnly, DEFAULT_REWRITE_GUARD.interactiveOnly),
   }
 
   const config: ResolvedKeepaliveConfig = {

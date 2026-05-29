@@ -53,7 +53,7 @@ import { processAlive } from './session-tracker.js'
 import { ProxyConfigCredentialsAdapter } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
-import { ProxyClient, loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
+import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
 import { startStatsEmitter } from './stats-emitter.js'
 import { checkDeployDrift } from './deploy-drift.js'
@@ -188,6 +188,12 @@ emit({
 // Files land in CAPTURE_INFO.dir (default ~/.claude-local/proxy-body-dumps/).
 // Sweep timer runs in background; safe to ignore the returned stop fn here.
 startCaptureCleanup()
+
+// ═══ Rewrite-guard dump rotation ════════════════════════════════════
+// Guard-block/let-through dumps (~660KB each) accumulated unbounded before
+// this. TTL 7d + 200MB cap (env: CLAUDE_MAX_PROXY_REWRITE_DUMP_TTL_HOURS /
+// _MAX_MB). Sweep every 30min + once on boot.
+startRewriteDumpCleanup()
 
 // ═══ Quota pipeline Stage 1: stats emitter ══════════════════════════
 // Subscribes to the bus (REAL_REQUEST_COMPLETE / KA_FIRE_COMPLETE) and writes

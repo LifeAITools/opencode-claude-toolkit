@@ -107,9 +107,12 @@ export function createOpenAICompatModule(): ProxyModule {
           'anthropic-version': '2023-06-01',
         }, sessionId)
 
-        // Forward to ProxyClient
+        // Forward to ProxyClient. OpenAI-compat is always a programmatic client —
+        // no human to see a 400 and re-send with the override marker, so
+        // interactive:false lets the rewrite guard (interactive-only mode) pass
+        // it through instead of stranding it.
         const upstreamResponse = await ctx.proxyClient.handleRequest(
-          enriched.body, enriched.headers, { sessionId, sourcePid, signal: req.signal },
+          enriched.body, enriched.headers, { sessionId, sourcePid, signal: req.signal, interactive: false },
         )
 
         // Error handling

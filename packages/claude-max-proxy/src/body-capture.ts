@@ -20,6 +20,7 @@
  *
  * Disable: set CLAUDE_MAX_PROXY_CAPTURE_BODIES=0 (default: ON).
  * TTL override: CLAUDE_MAX_PROXY_CAPTURE_TTL_HOURS (default: 48).
+ * Size cap:  CLAUDE_MAX_PROXY_CAPTURE_MAX_MB (default: 500; 0 = TTL only).
  * Dir override: CLAUDE_MAX_PROXY_CAPTURE_DIR (default: ~/.claude-local/proxy-body-dumps).
  */
 
@@ -29,6 +30,11 @@ import { homedir } from 'node:os'
 
 const CAPTURE_ENABLED = process.env.CLAUDE_MAX_PROXY_CAPTURE_BODIES !== '0'
 const CAPTURE_TTL_HOURS = Number(process.env.CLAUDE_MAX_PROXY_CAPTURE_TTL_HOURS ?? '48')
+// Hard disk cap (MB). After the TTL pass, if the dir still exceeds this, oldest
+// files are deleted until it fits. Guards against full-body 1M-context traffic
+// blowing past the 48h TTL window (observed 2.1GB/8h → ~10GB before TTL kicks).
+// 0 = no size cap (TTL only). Default: 500 MB.
+const CAPTURE_MAX_MB = Number(process.env.CLAUDE_MAX_PROXY_CAPTURE_MAX_MB ?? '500')
 const CAPTURE_DIR = process.env.CLAUDE_MAX_PROXY_CAPTURE_DIR
   ?? join(homedir(), '.claude-local', 'proxy-body-dumps')
 
@@ -96,27 +102,48 @@ export function startCaptureCleanup(): () => void {
   const sweepIntervalMs = 30 * 60 * 1000
   const ttlMs = CAPTURE_TTL_HOURS * 60 * 60 * 1000
 
+  const capBytes = CAPTURE_MAX_MB > 0 ? CAPTURE_MAX_MB * 1024 * 1024 : 0
+
   const sweep = (): void => {
     try {
       const cutoff = Date.now() - ttlMs
       const entries = readdirSync(CAPTURE_DIR)
-      let deleted = 0
-      let kept = 0
+      let ttlDeleted = 0
+      // Survivors after the TTL pass, with size+age for a possible size-cap pass.
+      const survivors: { full: string; size: number; mtimeMs: number }[] = []
       for (const name of entries) {
         const full = join(CAPTURE_DIR, name)
         try {
           const st = statSync(full)
           if (st.mtimeMs < cutoff) {
             unlinkSync(full)
-            deleted++
+            ttlDeleted++
           } else {
-            kept++
+            survivors.push({ full, size: st.size, mtimeMs: st.mtimeMs })
           }
         } catch { /* skip */ }
       }
+
+      // Size-cap pass: if survivors still exceed the cap, delete oldest-first
+      // until under it. Body + its .meta.json share a timestamp prefix so they
+      // rotate together naturally (oldest mtime wins regardless of suffix).
+      let capDeleted = 0
+      if (capBytes > 0) {
+        let total = 0
+        for (const f of survivors) total += f.size
+        if (total > capBytes) {
+          survivors.sort((a, b) => a.mtimeMs - b.mtimeMs) // oldest first
+          for (const f of survivors) {
+            if (total <= capBytes) break
+            try { unlinkSync(f.full); total -= f.size; capDeleted++ } catch { /* skip */ }
+          }
+        }
+      }
+
       // Logging via console for now — proxy emit() lives elsewhere.
-      if (deleted > 0) {
-        console.log(`[body-capture] TTL sweep: deleted=${deleted} kept=${kept} ttl=${CAPTURE_TTL_HOURS}h dir=${CAPTURE_DIR}`)
+      if (ttlDeleted > 0 || capDeleted > 0) {
+        console.log(`[body-capture] sweep: ttlDeleted=${ttlDeleted} capDeleted=${capDeleted} `
+          + `kept=${survivors.length - capDeleted} ttl=${CAPTURE_TTL_HOURS}h cap=${CAPTURE_MAX_MB}MB dir=${CAPTURE_DIR}`)
       }
     } catch { /* swallow */ }
   }
@@ -130,5 +157,6 @@ export function startCaptureCleanup(): () => void {
 export const CAPTURE_INFO = {
   enabled: CAPTURE_ENABLED,
   ttlHours: CAPTURE_TTL_HOURS,
+  maxMb: CAPTURE_MAX_MB,
   dir: CAPTURE_DIR,
 }

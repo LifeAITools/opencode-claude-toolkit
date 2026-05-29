@@ -178,6 +178,16 @@ export interface HandleRequestContext {
     sourcePid?: number | null;
     /** Abort signal for the upstream fetch. */
     signal?: AbortSignal;
+    /**
+     * Whether this request comes from an INTERACTIVE human (native Claude Code),
+     * as opposed to a programmatic endpoint client (OpenAI-compat /v1/chat/
+     * completions, or an external Anthropic-API consumer). The rewrite guard is a
+     * human consent checkpoint — when `rewriteGuard.interactiveOnly` is true
+     * (default), guard blocking applies ONLY to interactive requests; programmatic
+     * clients (interactive=false) are let through (logged) since they cannot
+     * re-send with an override marker. Default true (preserves native-CC behavior).
+     */
+    interactive?: boolean;
 }
 export interface RateLimitSnapshot {
     status: string | null;

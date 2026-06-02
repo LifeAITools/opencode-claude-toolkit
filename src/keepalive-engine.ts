@@ -795,9 +795,12 @@ export class KeepaliveEngine {
     // Commit the pending snapshot for this lineage. Keyed by lineageKey so a
     // concurrent sub-agent completion cannot consume the main agent's slot.
     const key = lineageKeyArg ?? this._legacyPendingLineage
-    // A completed real request means the user proceeded (override marker
-    // accepted, or same-org). This lineage's org-switch window is over.
-    if (key) this.orgSwitchPending.delete(key)
+    // org-switch-pending is NOT cleared here. In the per-session pin model a
+    // real request can COMPLETE while the session is still HOLDING its old org
+    // (held traffic runs on the old token), so a completion must not end the
+    // warm-old window. The pin owner (ProxyClient.handleRequest) sets/clears the
+    // flag every request from the hold state (mark while held, clear on rebind /
+    // same-org), which is the single source of truth.
     const pending = key ? this.pendingSnapshots.get(key) : undefined
     if (pending) {
       const { model, body, headers, role } = pending

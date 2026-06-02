@@ -160,42 +160,45 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
 })
 
 describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
-  test('org switch (prefix cached under a different org) WITHOUT marker → 400', async () => {
+  test('org switch (prefix cached under a different org) → HOLDS old org, NOT 400', async () => {
     // req1 caches the prefix under org-A; the user then `claude login`s to
-    // org-B; req2 (same prefix, same session, no idle gap) would cold-write
-    // the full context against org-B's quota → guard blocks it.
+    // org-B; req2 (same prefix, same session) must NOT be blocked — the
+    // per-session pin HOLDS the old org+token and keeps serving. org no longer
+    // trips the guard (it holds; only non-org rewrites still block).
     const resolver = mutableResolver('org-A')
     const c = mkClient({ orgIdResolver: resolver })
     await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-1' })
     resolver.org = 'org-B'
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-1' })
-    expect(r.status).toBe(400)
-    const j = await r.json() as { error?: { type?: string } }
-    expect(j.error?.type).toBe('cache_rewrite_guard')
+    expect(r.status).not.toBe(400)
     c.stop()
   })
 
-  test('org-switch block marks the session engine org-switch-pending', async () => {
+  test('org switch marks the engine org-switch-pending (KA warms old cache) without blocking', async () => {
     const resolver = mutableResolver('org-A')
     const c = mkClient({ orgIdResolver: resolver })
     await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-pending' })   // cache under org-A
     resolver.org = 'org-B'                                                  // claude login → org-B
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-pending' })
-    expect(r.status).toBe(400)                                             // blocked, awaiting decision
+    expect(r.status).not.toBe(400)                                          // held, not blocked
     const eng = c.listSessions().find(s => s.sessionId === 'rg-org-pending')!.engine
     const key = lineageKey(JSON.parse(reqBody()))
-    expect(eng._orgSwitchPending.has(key)).toBe(true)
+    expect(eng._orgSwitchPending.has(key)).toBe(true)                       // KA still warms the old cache
     c.stop()
   })
 
-  test('org switch WITH the override marker → passes the guard', async () => {
-    const resolver = mutableResolver('org-A')
-    const c = mkClient({ orgIdResolver: resolver })
-    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-2' })
-    resolver.org = 'org-B'
-    const r = await c.handleRequest(reqBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-org-2' })
-    expect(r.status).not.toBe(400)
+  test('non-org expensive rewrite still blocks (guard intact for non-org)', async () => {
+    // org unchanged but the cached prefix is idle past its TTL → a genuine
+    // avoidable rewrite. This is the path the guard still protects.
+    const path = join(TMP, 'rg-nonorg.json')
+    seedIdleFor(path, 'rg-nonorg', reqBody(), 10 * 60_000)
+    // Same org as the seed (org-default) → orgChanged=false → a pure ttl-expiry
+    // rewrite, the path the guard still protects.
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-nonorg' })
+    expect(r.status).toBe(400)
     c.stop()
+    rmSync(path, { force: true })
   })
 
   test('same org across requests → NOT blocked (a routine token refresh must not false-trip)', async () => {
@@ -218,16 +221,16 @@ describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
     c.stop()
   })
 
-  test('override marker after an org switch clears the pending flag (window ends)', async () => {
+  test('[%reload-ok%] after an org switch rebinds + clears the pending flag (window ends)', async () => {
     const resolver = mutableResolver('org-A')
     const c = mkClient({ orgIdResolver: resolver })
     await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-end' })
     resolver.org = 'org-B'
-    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-end' })                  // blocked → pending
-    const r = await c.handleRequest(reqBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-org-end' })  // marker → proceeds + completes
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-org-end' })                  // held → pending set
+    const r = await c.handleRequest(reqBody('[%reload-ok%]'), {}, { sessionId: 'rg-org-end' })  // reload → rebind to org-B
     expect(r.status).not.toBe(400)
     const eng = c.listSessions().find(s => s.sessionId === 'rg-org-end')!.engine
-    expect(eng._orgSwitchPending.size).toBe(0)   // cleared on completion
+    expect(eng._orgSwitchPending.size).toBe(0)   // cleared on rebind (no longer held)
     c.stop()
   })
 
@@ -243,22 +246,21 @@ describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
     c.stop()
   })
 
-  test('prefix history survives a proxy restart — org-switch caught post-restart', async () => {
-    // Persistence (REQ-1) + org-awareness (REQ-2) together: without the
-    // on-disk history a post-restart request looks like a cold-start and the
-    // guard is blind. With it, the loaded prefix still carries org-A, so a
-    // switch to org-B is caught by the fresh ProxyClient instance.
+  test('proxy restart rebinds the session to the CURRENT org (pins are in-memory)', async () => {
+    // Pins are in-memory by design: a restart binds every session to whatever
+    // org is current at the first post-restart request (the user's "перезапуск
+    // подхватывает текущий"). prefixHistory persists, so the cross-org rewrite
+    // is still observable in logs, but it does NOT block — the fresh process has
+    // no pin to hold the old org, so it adopts the current one.
     const path = join(TMP, 'persist-restart.json')
 
     const before = mkClient({ orgIdResolver: mutableResolver('org-A'), prefixHistoryPath: path })
     await before.handleRequest(reqBody(), {}, { sessionId: 'rg-persist-1' })
-    before.stop()   // persists prefixHistory to `path`
+    before.stop()   // persists prefixHistory to `path`; in-memory pin is gone
 
     const after = mkClient({ orgIdResolver: mutableResolver('org-B'), prefixHistoryPath: path })
     const r = await after.handleRequest(reqBody(), {}, { sessionId: 'rg-persist-1' })
-    expect(r.status).toBe(400)
-    const j = await r.json() as { error?: { type?: string } }
-    expect(j.error?.type).toBe('cache_rewrite_guard')
+    expect(r.status).not.toBe(400)   // no pin post-restart → auto-pins org-B, no block
     after.stop()
     rmSync(path, { force: true })
   })

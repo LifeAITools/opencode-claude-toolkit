@@ -26,7 +26,7 @@ function arm(e: KeepaliveEngine, auth: string): string {
 }
 
 describe('KeepaliveEngine — org-switch-pending lifecycle', () => {
-  test('mark sets the flag; clear and complete remove it', () => {
+  test('mark sets the flag; only clearOrgSwitchPending removes it (complete does NOT)', () => {
     const { e } = mkEngine()
     const key = arm(e, 'Bearer OLD')
     expect(e._orgSwitchPending.has(key)).toBe(false)
@@ -38,9 +38,13 @@ describe('KeepaliveEngine — org-switch-pending lifecycle', () => {
     expect(e._orgSwitchPending.has(key)).toBe(false)
 
     e.markOrgSwitchPending(key)
-    // a completed real request = user proceeded → flag cleared on re-registration
+    // Per-session pin model: a real request can COMPLETE while the session is
+    // still HOLDING the old org, so completion must NOT clear the flag — the pin
+    // owner (ProxyClient) clears it explicitly on rebind / same-org.
     e.notifyRealRequestComplete({ inputTokens: 60_000, outputTokens: 5, cacheReadInputTokens: 0 } as any, key)
-    expect(e._orgSwitchPending.has(key)).toBe(false)
+    expect(e._orgSwitchPending.has(key)).toBe(true)    // still held — completion does not clear
+    e.clearOrgSwitchPending(key)
+    expect(e._orgSwitchPending.has(key)).toBe(false)   // cleared explicitly
   })
 
   test('pending lineage → KA fire replays the snapshot OLD token (not getToken)', async () => {

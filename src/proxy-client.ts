@@ -317,6 +317,19 @@ export interface RateLimitSnapshot {
 
 // ═══ ProxyClient ═══════════════════════════════════════════════════
 
+/**
+ * Per-session pinned account: the org + token a session is bound to. Captured at
+ * bind time (first request, or a rebind via `[%reload-ok%]` / cli reload).
+ * In-memory only — a proxy restart rebinds every session to the current account.
+ * `expiresAt` is the pinned token's expiry (null = unknown ⇒ treat as alive,
+ * the upstream-401 path is the stop condition).
+ */
+interface SessionPin {
+  orgId: string | null
+  token: string
+  expiresAt: number | null
+}
+
 export class ProxyClient {
   private readonly config: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & { kaIntervalSec: number | undefined }
   private readonly metrics: CacheMetricsCollector
@@ -369,6 +382,11 @@ export class ProxyClient {
    *  In-memory only (never persisted — bodies are large) — feeds the prefix
    *  diff written into a guard-block dump. Reaped with prefixHistory. */
   private readonly lineagePrefix: Map<string, CachePrefix> = new Map()
+
+  /** Per-session pinned account (org+token). Keyed by sessionId. In-memory only;
+   *  reaped with the session. Drives forward token selection (hold cross-org /
+   *  adopt same-org / rebind on marker+reload / 401 on cross-org expiry). */
+  private readonly sessionPins: Map<string, SessionPin> = new Map()
 
   /** Resolves the current Anthropic org UUID — drives org-switch detection. */
   private readonly orgIdResolver: OrgIdResolver
@@ -437,6 +455,7 @@ export class ProxyClient {
         for (const k of this.kaReviveDropped) {
           if (k.startsWith(sid + ':')) this.kaReviveDropped.delete(k)
         }
+        this.sessionPins.delete(sid)  // drop the per-session org/token pin
         this.kaSnapshotDirty = true   // a reaped session must leave the KA file
       }
       // Persist prefix history each reaper tick so it survives a proxy restart.
@@ -598,6 +617,43 @@ export class ProxyClient {
     this.events.emit({ level: 'info', kind: 'CREDENTIALS_CHANGED', reason })
   }
 
+  /**
+   * Decide which token a session's request uses, given the live account snapshot
+   * and the session's existing pin. The whole per-session model lives here:
+   *
+   *  - no pin OR explicit reload (`[%reload-ok%]`) → (re)bind to the current
+   *    account and use its token (new session / deliberate switch);
+   *  - same org (incl. a safe same-org refresh, or an unknown/null org on either
+   *    side) → adopt the fresh token, keep the pin on this org;
+   *  - cross-org, old token still alive → HOLD: keep posting to the OLD org+token
+   *    (no block, no migration);
+   *  - cross-org, old token expired → force-stop (401) — never silently migrate
+   *    onto the new org's quota.
+   *
+   * Mutates `sessionPins`. Pure w.r.t. I/O (no awaits) so it is unit-testable.
+   */
+  private selectSessionToken(
+    sessionId: string,
+    account: { orgId: string | null; token: string; expiresAt: number | null },
+    reloadAsked: boolean,
+    now: number,
+  ): { token: string; stop: boolean; held: boolean } {
+    const pin = this.sessionPins.get(sessionId)
+    if (!pin || reloadAsked) {
+      this.sessionPins.set(sessionId, { ...account })
+      return { token: account.token, stop: false, held: false }
+    }
+    if (pin.orgId === null || account.orgId === null || pin.orgId === account.orgId) {
+      pin.token = account.token            // same org → adopt the fresh token
+      pin.expiresAt = account.expiresAt
+      return { token: account.token, stop: false, held: false }
+    }
+    if (pin.expiresAt === null || now < pin.expiresAt) {
+      return { token: pin.token, stop: false, held: true }   // cross-org, alive → HOLD
+    }
+    return { token: pin.token, stop: true, held: false }      // cross-org, expired → force-stop
+  }
+
   // ─── Main entry point ──────────────────────────────────────────
 
   /**
@@ -676,10 +732,48 @@ export class ProxyClient {
     }
     upstreamHeaders['accept-encoding'] = 'identity'
 
-    // Inject OAuth bearer
+    // Inject OAuth bearer — per-session org/token pin selection (Layer 2).
+    // A cross-org login does NOT migrate a live session: it HOLDS the old
+    // org+token until an explicit switch (`[%reload-ok%]` / cli reload) or a
+    // force condition (old token expired). Same-org refresh adopts the fresh
+    // token seamlessly.
+    let orgHeld = false   // this session is holding a previous org (KA must warm the OLD cache)
     try {
-      const token = await this.credentials.getAccessToken()
-      upstreamHeaders[HEADER_AUTHORIZATION] = `Bearer ${token}`
+      const account = {
+        orgId: this.orgIdResolver.current(),
+        token: await this.credentials.getAccessToken(),
+        expiresAt: this.credentials.currentExpiresAt?.() ?? null,
+      }
+      const reloadAsked = inspectLastUserMessage(
+        parsedBody, loadKeepaliveConfig().rewriteGuard.reloadMarker,
+      ).hasMarker
+      const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now())
+      if (sel.stop) {
+        this.events.emit({
+          level: 'error',
+          kind: 'ORG_PIN_EXPIRED',
+          sessionId,
+          msg: 'pinned previous-org token expired — reload required to continue on the current org',
+        })
+        return jsonResponse(401, {
+          error: {
+            type: 'authentication_error',
+            message: 'This session was pinned to a previous organization whose access token has now '
+              + 'expired. Re-send your message with [%reload-ok%] (or run a proxy reload) to continue '
+              + 'on the current organization — expect a one-time large cache rewrite.',
+          },
+        })
+      }
+      if (sel.held) {
+        orgHeld = true
+        this.events.emit({
+          level: 'info',
+          kind: 'ORG_PIN_HELD',
+          sessionId,
+          msg: 'cross-org login detected — holding this session on its previous org+token (no migration)',
+        })
+      }
+      upstreamHeaders[HEADER_AUTHORIZATION] = `Bearer ${sel.token}`
     } catch (credErr: any) {
       this.events.emit({
         level: 'error',
@@ -740,6 +834,7 @@ export class ProxyClient {
       const guard = loadKeepaliveConfig().rewriteGuard
       const lastMsg = inspectLastUserMessage(parsedBody, guard.overrideMarker)
       if (guard.enabled && rewriteAssessment && !rewriteAssessment.expected
+          && !rewriteAssessment.signals.orgChanged   // org no longer BLOCKS — it HOLDS (per-session pin, Layer 2)
           && rewriteAssessment.predictedTokens >= guard.minRewriteTokens
           && !lastMsg.isContinuation        // never block an agent tool-loop continuation
           && !lastMsg.hasMarker) {
@@ -785,11 +880,6 @@ export class ProxyClient {
               + (dumpPath ? ` — dump: ${dumpPath}` : ''),
           })
         } else {
-          // org-switch block: keep warming the OLD org's cache for this lineage
-          // until the user proceeds (override marker) or the old token expires.
-          // Non-org blocks (ttl-expiry, system/tools change) have no prior-org
-          // cache to preserve, so they do not arm warm-old.
-          if (rewriteAssessment.signals.orgChanged) session.engine.markOrgSwitchPending(reqLineageKey)
           this.events.emit({
             level: 'error',
             kind: 'CACHE_REWRITE_BLOCKED',
@@ -814,6 +904,14 @@ export class ProxyClient {
         }
       }
     }
+
+    // Cross-org login → this session HOLDS its old org+token for real traffic
+    // (Layer 2 forward selection above). Keep the OLD org's cache warm during
+    // the hold: while held, KA replays the snapshot's old token. The flag tracks
+    // the PIN state (source of truth), not the assess-time orgChanged: set while
+    // held, cleared on rebind / same-org so KA resumes fresh-token warming.
+    if (orgHeld) session.engine.markOrgSwitchPending(reqLineageKey)
+    else session.engine.clearOrgSwitchPending(reqLineageKey)
 
     // PROCEED path — the request will be forwarded. ONLY NOW mutate keepalive:
     // prime the engine (aborts any in-flight KA, records the pending snapshot)

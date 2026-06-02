@@ -170,4 +170,13 @@ describe('keepalive-config: rewriteGuard', () => {
     expect(c.rewriteGuard.overrideMarker).toBe('[%cache-rewrite-ok%]')  // empty → default
     expect(c.rewriteGuard.enabled).toBe(false)
   })
+
+  test('reloadMarker defaults to [%reload-ok%]', () => {
+    expect(_resolve(null).rewriteGuard.reloadMarker).toBe('[%reload-ok%]')
+  })
+
+  test('reloadMarker is file-overridable; empty falls back to default', () => {
+    expect(_resolve({ rewriteGuard: { reloadMarker: '[%switch-org%]' } }).rewriteGuard.reloadMarker).toBe('[%switch-org%]')
+    expect(_resolve({ rewriteGuard: { reloadMarker: '' } }).rewriteGuard.reloadMarker).toBe('[%reload-ok%]')
+  })
 })

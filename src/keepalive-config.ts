@@ -201,6 +201,11 @@ export interface RewriteGuardConfig {
   /** Substring in the LATEST user message that overrides the block (fresh-consent:
    *  only the current turn's message is scanned, not history). Default below. */
   readonly overrideMarker: string
+  /** Substring in the LATEST user message that switches THIS session to the
+   *  current org+token (per-session rebind). Distinct from overrideMarker: this
+   *  ends an org HOLD, overrideMarker only consents to a non-org rewrite.
+   *  Default below. */
+  readonly reloadMarker: string
   /** On a block, write the rejected request + prefix diff to a JSON artifact
    *  (rewrite-guard-blocks/) so it can be analysed offline. Default true. */
   readonly dumpBlocked: boolean
@@ -219,6 +224,7 @@ const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
   enabled: false,
   minRewriteTokens: 50_000,
   overrideMarker: '[%cache-rewrite-ok%]',
+  reloadMarker: '[%reload-ok%]',
   dumpBlocked: true,
   interactiveOnly: true,
 }
@@ -462,6 +468,9 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     overrideMarker: (typeof rg.overrideMarker === 'string' && rg.overrideMarker.length > 0)
       ? rg.overrideMarker
       : DEFAULT_REWRITE_GUARD.overrideMarker,
+    reloadMarker: (typeof rg.reloadMarker === 'string' && rg.reloadMarker.length > 0)
+      ? rg.reloadMarker
+      : DEFAULT_REWRITE_GUARD.reloadMarker,
     dumpBlocked: bool(rg.dumpBlocked, DEFAULT_REWRITE_GUARD.dumpBlocked),
     interactiveOnly: bool(rg.interactiveOnly, DEFAULT_REWRITE_GUARD.interactiveOnly),
   }

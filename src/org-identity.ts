@@ -77,6 +77,11 @@ export function readOrgIdFromConfig(configPath: string): string | null {
 export interface OrgIdResolver {
   /** Current org UUID, or `null` if unknown. Never throws. */
   current(): string | null
+
+  /** Drop any cached org-id so the next current() re-reads from disk. Used to
+   *  keep the org-id cache in lock-step with the token cache when the
+   *  credentials file changes (no independent 5-min TTL window). */
+  invalidate(): void
 }
 
 /**
@@ -105,6 +110,10 @@ export class FileOrgIdResolver implements OrgIdResolver {
     const orgId = readOrgIdFromConfig(this.configPath)
     this.cache = { orgId, readAt: now }
     return orgId
+  }
+
+  invalidate(): void {
+    this.cache = null
   }
 
   private ssotTtlMs(): number {

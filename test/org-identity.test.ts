@@ -89,4 +89,15 @@ describe('FileOrgIdResolver', () => {
     expect(() => r.current()).not.toThrow()
     expect(r.current()).toBeNull()
   })
+
+  test('invalidate() forces a re-read before the TTL elapses', () => {
+    const p = tmpConfig(JSON.stringify({ oauthAccount: { organizationUuid: 'org-A' } }))
+    const r = new FileOrgIdResolver(p, 300_000)           // 5-min TTL
+    expect(r.current()).toBe('org-A')
+    writeFileSync(p, JSON.stringify({ oauthAccount: { organizationUuid: 'org-B' } }))
+    expect(r.current()).toBe('org-A')                     // still cached (TTL not elapsed)
+    r.invalidate()
+    expect(r.current()).toBe('org-B')                     // re-read after invalidate
+    rmSync(p, { force: true })
+  })
 })

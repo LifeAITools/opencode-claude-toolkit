@@ -579,6 +579,25 @@ export class ProxyClient {
     return reloaded
   }
 
+  /**
+   * Credentials file changed on disk (the daemon's fs.watch on
+   * `~/.claude/.credentials.json`). Invalidate the token cache AND the org-id
+   * cache **in lock-step**, so the pin/rewrite logic never sees a fresh token
+   * paired with a stale org-id — the 2026-06-02 incident, where the org-id's
+   * independent 5-min TTL let real traffic slip onto a new org silently while
+   * the guard still believed it was the old org.
+   *
+   * Does NOT touch session pins: a same-org refresh must stay seamless, and a
+   * cross-org switch must HOLD each session on its old org until an explicit
+   * reload (`reloadSessions` / `[%reload-ok%]`). Layer 1 only re-syncs the two
+   * caches; Layer 2 (pins) decides what each session does with the result.
+   */
+  notifyCredentialsChanged(reason: string): void {
+    this.credentials.invalidate()
+    this.orgIdResolver.invalidate()
+    this.events.emit({ level: 'info', kind: 'CREDENTIALS_CHANGED', reason })
+  }
+
   // ─── Main entry point ──────────────────────────────────────────
 
   /**

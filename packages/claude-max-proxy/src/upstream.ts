@@ -25,6 +25,11 @@ export class ProxyConfigCredentialsAdapter implements ICredentialsProvider {
   invalidate(): void {
     invalidateTokenCache()
   }
+  /** Expiry (ms) of the currently-cached token, or null if none cached. Lets
+   *  ProxyClient's per-session pin detect a truly-expired held cross-org token. */
+  currentExpiresAt(): number | null {
+    return _cachedToken?.expiresAt ?? null
+  }
 }
 
 // ═══ Credential reader ═══════════════════════════════════════════

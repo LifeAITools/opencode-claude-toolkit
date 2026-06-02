@@ -263,11 +263,17 @@ try {
   fsWatch(cfg.credentialsPath, { persistent: false }, () => {
     if (_credsDebounce) clearTimeout(_credsDebounce)
     _credsDebounce = setTimeout(() => {
-      credentialsAdapter.invalidate()
+      // Invalidate the token cache AND the org-id cache in lock-step (Layer 1):
+      // a cross-org `claude login` flips both files, and resolving them on two
+      // independent clocks let real traffic slip onto a new org silently for up
+      // to ~5min (the 2026-06-02 incident). notifyCredentialsChanged re-syncs
+      // both; pins are untouched so each session HOLDS its old org until an
+      // explicit reload.
+      proxyClient.notifyCredentialsChanged('fs.watch')
       emit({
         level: 'info',
         kind: 'TOKEN_FILE_CHANGED',
-        msg: `Credentials file changed at ${cfg.credentialsPath} — token cache invalidated`,
+        msg: `Credentials file changed at ${cfg.credentialsPath} — token + org-id caches invalidated`,
       })
     }, 200)
   })

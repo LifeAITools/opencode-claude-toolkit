@@ -144,6 +144,11 @@ export interface RewriteGuardConfig {
     /** Substring in the LATEST user message that overrides the block (fresh-consent:
      *  only the current turn's message is scanned, not history). Default below. */
     readonly overrideMarker: string;
+    /** Substring in the LATEST user message that switches THIS session to the
+     *  current org+token (per-session rebind). Distinct from overrideMarker: this
+     *  ends an org HOLD, overrideMarker only consents to a non-org rewrite.
+     *  Default below. */
+    readonly reloadMarker: string;
     /** On a block, write the rejected request + prefix diff to a JSON artifact
      *  (rewrite-guard-blocks/) so it can be analysed offline. Default true. */
     readonly dumpBlocked: boolean;

@@ -66,6 +66,13 @@ export interface ICredentialsProvider {
     getAccessToken(): Promise<string>;
     /** Invalidate any cached token. Next call re-loads/refreshes. */
     invalidate(): void;
+    /**
+     * Expiry (ms epoch) of the currently-cached token, or null if unknown /
+     * nothing cached. OPTIONAL — providers that cannot report expiry omit it,
+     * and the per-session pin then treats the token as "alive" and relies on the
+     * upstream-401 path as the stop condition. Additive: keeps the port stable.
+     */
+    currentExpiresAt?(): number | null;
 }
 /**
  * Structured event sink. ProxyClient emits events for every observable

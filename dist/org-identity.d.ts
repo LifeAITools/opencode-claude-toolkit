@@ -56,6 +56,10 @@ export declare function readOrgIdFromConfig(configPath: string): string | null;
 export interface OrgIdResolver {
     /** Current org UUID, or `null` if unknown. Never throws. */
     current(): string | null;
+    /** Drop any cached org-id so the next current() re-reads from disk. Used to
+     *  keep the org-id cache in lock-step with the token cache when the
+     *  credentials file changes (no independent 5-min TTL window). */
+    invalidate(): void;
 }
 /**
  * Default resolver — reads `~/.claude.json` → `oauthAccount.organizationUuid`
@@ -78,6 +82,7 @@ export declare class FileOrgIdResolver implements OrgIdResolver {
     /** TTL override in ms. When omitted, read from the keepalive SSOT. */
     ttlMsOverride?: number | undefined);
     current(): string | null;
+    invalidate(): void;
     private ssotTtlMs;
 }
 //# sourceMappingURL=org-identity.d.ts.map

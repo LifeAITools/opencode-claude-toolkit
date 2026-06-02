@@ -30,6 +30,9 @@ export declare class FileCredentialsProvider implements ICredentialsProvider {
     constructor(opts?: FileCredentialsProviderOptions);
     getAccessToken(): Promise<string>;
     invalidate(): void;
+    /** Expiry (ms epoch) of the currently-cached token, or null if none cached.
+     *  Feeds the per-session pin's "is the held cross-org token still alive?" check. */
+    currentExpiresAt(): number | null;
     private readFromDisk;
     private mtimeChanged;
     private getMtime;

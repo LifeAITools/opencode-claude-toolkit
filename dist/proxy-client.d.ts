@@ -236,6 +236,10 @@ export declare class ProxyClient {
      *  In-memory only (never persisted — bodies are large) — feeds the prefix
      *  diff written into a guard-block dump. Reaped with prefixHistory. */
     private readonly lineagePrefix;
+    /** Per-session pinned account (org+token). Keyed by sessionId. In-memory only;
+     *  reaped with the session. Drives forward token selection (hold cross-org /
+     *  adopt same-org / rebind on marker+reload / 401 on cross-org expiry). */
+    private readonly sessionPins;
     /** Resolves the current Anthropic org UUID — drives org-switch detection. */
     private readonly orgIdResolver;
     /** Shared across every per-session KA engine — fleet-wide eviction-storm hold. */
@@ -290,6 +294,36 @@ export declare class ProxyClient {
      * Pass sessionId to target one session, omit to reload all.
      */
     reloadSessions(reason: string, sessionId?: string): string[];
+    /**
+     * Credentials file changed on disk (the daemon's fs.watch on
+     * `~/.claude/.credentials.json`). Invalidate the token cache AND the org-id
+     * cache **in lock-step**, so the pin/rewrite logic never sees a fresh token
+     * paired with a stale org-id — the 2026-06-02 incident, where the org-id's
+     * independent 5-min TTL let real traffic slip onto a new org silently while
+     * the guard still believed it was the old org.
+     *
+     * Does NOT touch session pins: a same-org refresh must stay seamless, and a
+     * cross-org switch must HOLD each session on its old org until an explicit
+     * reload (`reloadSessions` / `[%reload-ok%]`). Layer 1 only re-syncs the two
+     * caches; Layer 2 (pins) decides what each session does with the result.
+     */
+    notifyCredentialsChanged(reason: string): void;
+    /**
+     * Decide which token a session's request uses, given the live account snapshot
+     * and the session's existing pin. The whole per-session model lives here:
+     *
+     *  - no pin OR explicit reload (`[%reload-ok%]`) → (re)bind to the current
+     *    account and use its token (new session / deliberate switch);
+     *  - same org (incl. a safe same-org refresh, or an unknown/null org on either
+     *    side) → adopt the fresh token, keep the pin on this org;
+     *  - cross-org, old token still alive → HOLD: keep posting to the OLD org+token
+     *    (no block, no migration);
+     *  - cross-org, old token expired → force-stop (401) — never silently migrate
+     *    onto the new org's quota.
+     *
+     * Mutates `sessionPins`. Pure w.r.t. I/O (no awaits) so it is unit-testable.
+     */
+    private selectSessionToken;
     /**
      * Handle one /v1/messages request end-to-end. Returns a Response whose
      * body streams SSE bytes from Anthropic directly to the caller.

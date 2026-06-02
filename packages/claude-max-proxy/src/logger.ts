@@ -5,7 +5,9 @@
  * JSON format:  full event object per line
  */
 
-import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from 'fs'
+import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync, createReadStream, createWriteStream } from 'fs'
+import { createGzip } from 'zlib'
+import { pipeline } from 'stream/promises'
 import { dirname } from 'path'
 import type { ProxyEvent, UsageEventPayload } from './event-bus.js'
 import { bus } from './event-bus.js'
@@ -144,39 +146,68 @@ function ensureDir(path: string): void {
 // Design choices (match body-capture.ts's simple, non-blocking idiom):
 //   • renameSync is an atomic metadata op — instant even for a 196 MB file,
 //     unlike gzipping it inline which would stall the event loop serving
-//     live sessions. (Compression is left as a future opt-in.)
+//     live sessions. When logGzip is on, compression runs AFTER the rename, in
+//     the background via a node:zlib stream — it never blocks request handling.
 //   • An in-memory byte counter (seeded once from statSync at startup) avoids
 //     a statSync syscall on every single event in the hot path.
-//   • Disk is bounded at ~(keep + 1) × maxMb per stream. maxMb = 0 disables.
+//   • Disk is bounded at ~(keep + 1) × maxMb per stream (uncompressed).
+//     maxMb = 0 disables rotation. logGzip shrinks backups ~10×.
+//   • Backups are named .N when plain, .N.gz when gzip is on — the two schemes
+//     are kept distinct so a rename-shift never collides a plain .1 against a
+//     compressed .1.gz.
 
 interface RotatingSink {
   path: string
   bytes: number      // running size of the active file (bytes)
   maxBytes: number   // rotate threshold; 0 = never rotate
-  keep: number       // number of .N backups retained
+  keep: number       // number of backups retained
+  gzip: boolean      // compress rotated backups → .N.gz
+  lastCompress?: Promise<void>  // exposed for tests to await the background gzip
 }
 
 /** Build a sink, seeding the byte counter from the existing file (if any). */
-function makeSink(path: string, maxMb: number, keep: number): RotatingSink {
+function makeSink(path: string, maxMb: number, keep: number, gzip: boolean): RotatingSink {
   let bytes = 0
   try { bytes = statSync(path).size } catch { /* fresh file → 0 */ }
-  return { path, bytes, maxBytes: maxMb > 0 ? maxMb * 1024 * 1024 : 0, keep }
+  return { path, bytes, maxBytes: maxMb > 0 ? maxMb * 1024 * 1024 : 0, keep, gzip }
+}
+
+/** Background-compress a rotated file to `${src}.gz` via a stream (chunked, no
+ *  event-loop stall). Publishes atomically through a .partial temp so a
+ *  concurrent shift never sees a half-written .gz. Best-effort: on any failure
+ *  the plain source is left in place rather than lost. */
+async function compressFile(src: string): Promise<void> {
+  const gz = `${src}.gz`
+  const tmp = `${gz}.partial`
+  try {
+    await pipeline(createReadStream(src), createGzip(), createWriteStream(tmp))
+    renameSync(tmp, gz)
+    unlinkSync(src)
+  } catch {
+    try { unlinkSync(tmp) } catch { /* nothing to clean */ }
+  }
 }
 
 /**
- * Shift backups and move the active file aside: drop .<keep>, then
+ * Shift backups and move the active file aside: drop the oldest, then
  * .<keep-1>→.<keep>, …, .1→.2, active→.1. Every rename is best-effort — a
- * missing intermediate (e.g. keep was raised between runs, or a stream that
- * never reached .N yet) is skipped, not fatal. The active path is left absent;
- * the next appendFileSync recreates it.
+ * missing intermediate (keep raised between runs, or a stream that never
+ * reached .N) is skipped, not fatal. The active path is left absent; the next
+ * appendFileSync recreates it. With gzip on, backups carry a .gz suffix and the
+ * freshly-rotated .1 is compressed in the background.
  */
 function rotateSink(sink: RotatingSink): void {
-  const { path, keep } = sink
-  try { unlinkSync(`${path}.${keep}`) } catch { /* may not exist */ }
+  const { path, keep, gzip } = sink
+  const ext = gzip ? '.gz' : ''
+  try { unlinkSync(`${path}.${keep}${ext}`) } catch { /* may not exist */ }
   for (let i = keep - 1; i >= 1; i--) {
-    try { renameSync(`${path}.${i}`, `${path}.${i + 1}`) } catch { /* gap — skip */ }
+    try { renameSync(`${path}.${i}${ext}`, `${path}.${i + 1}${ext}`) } catch { /* gap — skip */ }
   }
-  try { renameSync(path, `${path}.1`) } catch { /* active not created yet */ }
+  try {
+    renameSync(path, `${path}.1`)
+    // .1 is plain for an instant; compress it to .1.gz in the background.
+    if (gzip) sink.lastCompress = compressFile(`${path}.1`)
+  } catch { /* active not created yet */ }
   sink.bytes = 0
 }
 
@@ -206,8 +237,8 @@ export function startLogger(cfg: ProxyConfig): () => void {
   ensureDir(cfg.logFile)
   ensureDir(cfg.logJsonl)
 
-  const humanSink = makeSink(cfg.logFile, cfg.logMaxMb, cfg.logKeep)
-  const jsonlSink = makeSink(cfg.logJsonl, cfg.logMaxMb, cfg.logKeep)
+  const humanSink = makeSink(cfg.logFile, cfg.logMaxMb, cfg.logKeep, cfg.logGzip)
+  const jsonlSink = makeSink(cfg.logJsonl, cfg.logMaxMb, cfg.logKeep, cfg.logGzip)
 
   const unsub = bus.onEvent((e) => {
     const rank = LEVEL_RANK[e.level] ?? 1

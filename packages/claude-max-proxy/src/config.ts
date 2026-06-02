@@ -17,9 +17,12 @@ export interface ProxyConfig {
   // Size-based rotation for the append-only human + JSONL streams.
   // logMaxMb = per-stream byte cap before rotating (0 = unbounded, never rotate).
   // logKeep  = number of rotated backups to retain (.1 … .<logKeep>).
-  // Disk per stream is bounded at ~(logKeep + 1) × logMaxMb.
+  // logGzip  = gzip rotated backups (.N.gz) asynchronously after rotation.
+  // Disk per stream is bounded at ~(logKeep + 1) × logMaxMb (uncompressed);
+  // with logGzip the backups shrink ~10× (these logs are highly repetitive).
   logMaxMb: number
   logKeep: number
+  logGzip: boolean
 
   // KA tuning. kaIntervalSec is OPTIONAL — when unset, KeepaliveEngine reads
   // its default from SSOT (~/.claude/keepalive.json) which auto-scales with
@@ -128,6 +131,10 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     // which was observed unbounded at ~196 MB). 0 disables rotation.
     logMaxMb: readInt('LOG_MAX_MB', 100, fileEnv),
     logKeep: readInt('LOG_KEEP', 5, fileEnv),
+    // Default ON — parity with the prior system logrotate (compress) it replaced;
+    // these streams compress ~10×. Async (node:zlib stream), never blocks the
+    // request path. Set LOG_GZIP=false for plain .N backups.
+    logGzip: readBool('LOG_GZIP', true, fileEnv),
 
     // KA_INTERVAL_SEC unset → defer to SSOT (~/.claude/keepalive.json).
     // Set explicitly only to override the SSOT-resolved interval for this proxy instance.

@@ -13,6 +13,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, statSync } from 'fs'
+import { gunzipSync } from 'zlib'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { __rotationInternals } from '../src/logger.js'
@@ -37,7 +38,7 @@ const LINE = 'x'.repeat(99) + '\n'
 describe('log rotation: threshold + backup shift', () => {
   test('rotates active → .1 when the next write would breach the cap', () => {
     // cap = 250 bytes → after 2 lines (200B) the 3rd would breach → rotate.
-    const sink = makeSink(logPath, 0, 3)
+    const sink = makeSink(logPath, 0, 3, false)
     sink.maxBytes = 250
     writeRotating(sink, LINE) // 100
     writeRotating(sink, LINE) // 200
@@ -52,7 +53,7 @@ describe('log rotation: threshold + backup shift', () => {
 
   test('cascading rotations shift .1→.2→…  and drop beyond keep', () => {
     const keep = 3
-    const sink = makeSink(logPath, 0, keep)
+    const sink = makeSink(logPath, 0, keep, false)
     sink.maxBytes = 150 // each 100B line after the first triggers a rotation
     // 100-byte lines tagged with their index so ordering is verifiable.
     const mkline = (i: number) => String(i).padEnd(99, 'x') + '\n'
@@ -72,7 +73,7 @@ describe('log rotation: edge cases', () => {
   test('oversized pre-existing file self-heals on first write', () => {
     // Simulate the live 196 MB file: seed an over-cap file, then a tiny cap.
     writeFileSync(logPath, 'o'.repeat(500))
-    const sink = makeSink(logPath, 0, 2)
+    const sink = makeSink(logPath, 0, 2, false)
     sink.maxBytes = 200 // existing 500B already over cap
     expect(sink.bytes).toBe(500) // seeded from statSync
     writeRotating(sink, LINE)
@@ -83,7 +84,7 @@ describe('log rotation: edge cases', () => {
   })
 
   test('maxMb=0 disables rotation (file grows unbounded)', () => {
-    const sink = makeSink(logPath, 0, 5) // maxBytes resolves to 0
+    const sink = makeSink(logPath, 0, 5, false) // maxBytes resolves to 0
     expect(sink.maxBytes).toBe(0)
     for (let i = 0; i < 50; i++) writeRotating(sink, LINE)
     expect(existsSync(`${logPath}.1`)).toBe(false)
@@ -91,7 +92,7 @@ describe('log rotation: edge cases', () => {
   })
 
   test('a single line larger than the cap still lands (no infinite rotation)', () => {
-    const sink = makeSink(logPath, 0, 2)
+    const sink = makeSink(logPath, 0, 2, false)
     sink.maxBytes = 50
     const huge = 'h'.repeat(500) + '\n'
     writeRotating(sink, huge) // empty active → must NOT rotate, must write
@@ -105,7 +106,43 @@ describe('log rotation: edge cases', () => {
   })
 
   test('maxMb → maxBytes conversion uses MB (1024×1024)', () => {
-    const sink = makeSink(logPath, 100, 5)
+    const sink = makeSink(logPath, 100, 5, false)
     expect(sink.maxBytes).toBe(100 * 1024 * 1024)
+  })
+})
+
+describe('log rotation: gzip backups', () => {
+  test('rotated backup is compressed to .1.gz and decompresses to original', async () => {
+    const sink = makeSink(logPath, 0, 3, true)
+    sink.maxBytes = 150
+    const a = 'a'.repeat(99) + '\n'
+    const b = 'b'.repeat(99) + '\n'
+    writeRotating(sink, a)            // active = [a]
+    writeRotating(sink, b)            // 200 > 150 → rotate: a→.1 (gzip bg), active = [b]
+    await sink.lastCompress           // wait for background compression
+    // No plain .1 left; a .1.gz exists and round-trips to the pre-rotation content.
+    expect(existsSync(`${logPath}.1`)).toBe(false)
+    expect(existsSync(`${logPath}.1.gz`)).toBe(true)
+    expect(gunzipSync(readFileSync(`${logPath}.1.gz`)).toString()).toBe(a)
+    expect(readFileSync(logPath, 'utf8')).toBe(b)
+    // No .partial residue.
+    expect(existsSync(`${logPath}.1.gz.partial`)).toBe(false)
+  })
+
+  test('gzip scheme shifts .N.gz and drops beyond keep', async () => {
+    const keep = 2
+    const sink = makeSink(logPath, 0, keep, true)
+    sink.maxBytes = 150
+    const mkline = (i: number) => String(i).padEnd(99, 'x') + '\n'
+    for (let i = 0; i < 6; i++) {
+      writeRotating(sink, mkline(i))
+      if (sink.lastCompress) await sink.lastCompress
+    }
+    expect(existsSync(`${logPath}.1.gz`)).toBe(true)
+    expect(existsSync(`${logPath}.2.gz`)).toBe(true)
+    expect(existsSync(`${logPath}.3.gz`)).toBe(false) // dropped beyond keep
+    // .1.gz is newer than .2.gz (higher index content).
+    const idx = (p: string) => parseInt(gunzipSync(readFileSync(p)).toString(), 10)
+    expect(idx(`${logPath}.1.gz`)).toBeGreaterThan(idx(`${logPath}.2.gz`))
   })
 })

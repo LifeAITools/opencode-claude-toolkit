@@ -156,3 +156,33 @@ describe('Layer 2 — per-session org/token pin', () => {
     c.stop()
   })
 })
+
+describe('Layer 2 — cli reload rebinds the pin', () => {
+  test('global reloadSessions() rebinds ALL sessions to the current org', async () => {
+    const auth: string[] = []
+    const m = mutableAccount({ orgId: 'org-A', token: 'tok-A', expiresAt: Date.now() + 3_600_000 })
+    const c = mkClient({ credentialsProvider: m.credentialsProvider, orgIdResolver: m.orgIdResolver, upstreamFetcher: recordingUpstream({ auth }) })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'g1' })       // pin org-A
+    m.state.orgId = 'org-B'; m.state.token = 'tok-B'
+    c.reloadSessions('cli')                                         // global rebind
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'g1' })
+    expect(r.status).toBe(200)
+    expect(auth.at(-1)).toBe('Bearer tok-B')                        // re-pinned to org-B
+    c.stop()
+  })
+
+  test('targeted reloadSessions(_, sid) rebinds ONLY that session; others stay held', async () => {
+    const auth: string[] = []
+    const m = mutableAccount({ orgId: 'org-A', token: 'tok-A', expiresAt: Date.now() + 3_600_000 })
+    const c = mkClient({ credentialsProvider: m.credentialsProvider, orgIdResolver: m.orgIdResolver, upstreamFetcher: recordingUpstream({ auth }) })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'keep' })     // pin org-A
+    await c.handleRequest(reqBody(), {}, { sessionId: 'move' })     // pin org-A
+    m.state.orgId = 'org-B'; m.state.token = 'tok-B'
+    c.reloadSessions('cli', 'move')                                 // rebind only 'move'
+    const rMove = await c.handleRequest(reqBody(), {}, { sessionId: 'move' })
+    const rKeep = await c.handleRequest(reqBody(), {}, { sessionId: 'keep' })
+    expect(rMove.status).toBe(200); expect(rKeep.status).toBe(200)
+    expect(auth.slice(-2)).toEqual(['Bearer tok-B', 'Bearer tok-A'])  // move→B (rebound), keep→A (held)
+    c.stop()
+  })
+})

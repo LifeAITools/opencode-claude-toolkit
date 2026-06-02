@@ -584,9 +584,14 @@ export class ProxyClient {
     } else {
       for (const s of this.store.list()) { s.engine.reload(reason); reloaded.push(s.sessionId) }
     }
-    // Same credential-cache invalidation as disarmSessions — the canonical
-    // caller just rotated credentials (org swap).
+    // Drop the per-session pin(s) → the next request REBINDS to the current
+    // org+token. cli reload is the explicit "switch to current org" trigger:
+    // global (no sessionId) rebinds all; targeted rebinds one.
+    if (sessionId) this.sessionPins.delete(sessionId)
+    else this.sessionPins.clear()
+    // Re-sync BOTH caches in lock-step — a reload follows a credential/org swap.
     this.credentials.invalidate()
+    this.orgIdResolver.invalidate()
     this.events.emit({
       level: 'info',
       kind: 'ADMIN_RELOAD',

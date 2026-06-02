@@ -5,7 +5,7 @@
  * JSON format:  full event object per line
  */
 
-import { appendFileSync, mkdirSync } from 'fs'
+import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from 'fs'
 import { dirname } from 'path'
 import type { ProxyEvent, UsageEventPayload } from './event-bus.js'
 import { bus } from './event-bus.js'
@@ -134,11 +134,80 @@ function ensureDir(path: string): void {
   try { mkdirSync(dirname(path), { recursive: true }) } catch {}
 }
 
+// ═══ Size-based log rotation ══════════════════════════════════════════
+//
+// The human + JSONL streams are append-only and were otherwise unbounded —
+// the JSONL alone was observed at ~196 MB (every KA tick across ~13 live
+// sessions, every 30s, adds up fast). We rotate per-stream on a byte
+// threshold: active → .1 → .2 → … → .<keep>, dropping the oldest.
+//
+// Design choices (match body-capture.ts's simple, non-blocking idiom):
+//   • renameSync is an atomic metadata op — instant even for a 196 MB file,
+//     unlike gzipping it inline which would stall the event loop serving
+//     live sessions. (Compression is left as a future opt-in.)
+//   • An in-memory byte counter (seeded once from statSync at startup) avoids
+//     a statSync syscall on every single event in the hot path.
+//   • Disk is bounded at ~(keep + 1) × maxMb per stream. maxMb = 0 disables.
+
+interface RotatingSink {
+  path: string
+  bytes: number      // running size of the active file (bytes)
+  maxBytes: number   // rotate threshold; 0 = never rotate
+  keep: number       // number of .N backups retained
+}
+
+/** Build a sink, seeding the byte counter from the existing file (if any). */
+function makeSink(path: string, maxMb: number, keep: number): RotatingSink {
+  let bytes = 0
+  try { bytes = statSync(path).size } catch { /* fresh file → 0 */ }
+  return { path, bytes, maxBytes: maxMb > 0 ? maxMb * 1024 * 1024 : 0, keep }
+}
+
+/**
+ * Shift backups and move the active file aside: drop .<keep>, then
+ * .<keep-1>→.<keep>, …, .1→.2, active→.1. Every rename is best-effort — a
+ * missing intermediate (e.g. keep was raised between runs, or a stream that
+ * never reached .N yet) is skipped, not fatal. The active path is left absent;
+ * the next appendFileSync recreates it.
+ */
+function rotateSink(sink: RotatingSink): void {
+  const { path, keep } = sink
+  try { unlinkSync(`${path}.${keep}`) } catch { /* may not exist */ }
+  for (let i = keep - 1; i >= 1; i--) {
+    try { renameSync(`${path}.${i}`, `${path}.${i + 1}`) } catch { /* gap — skip */ }
+  }
+  try { renameSync(path, `${path}.1`) } catch { /* active not created yet */ }
+  sink.bytes = 0
+}
+
+/** Append a line (must already include its trailing newline), rotating first
+ *  if the write would breach the cap. Never throws into the hot path. */
+function writeRotating(sink: RotatingSink, line: string): void {
+  const len = Buffer.byteLength(line)
+  // Rotate BEFORE the breaching write — but never rotate an empty active file:
+  // a single line larger than maxBytes must still land, else we'd rotate
+  // forever while writing nothing.
+  if (sink.maxBytes > 0 && sink.bytes > 0 && sink.bytes + len > sink.maxBytes) {
+    rotateSink(sink)
+  }
+  try {
+    appendFileSync(sink.path, line)
+    sink.bytes += len
+  } catch { /* swallow — logging must never break request handling */ }
+}
+
+// Exported for unit tests (test/logger-rotation.test.ts). Not part of the
+// public logger API — startLogger is the only intended runtime entry point.
+export const __rotationInternals = { makeSink, rotateSink, writeRotating }
+
 export function startLogger(cfg: ProxyConfig): () => void {
   const minRank = LEVEL_RANK[cfg.logLevel] ?? 1
 
   ensureDir(cfg.logFile)
   ensureDir(cfg.logJsonl)
+
+  const humanSink = makeSink(cfg.logFile, cfg.logMaxMb, cfg.logKeep)
+  const jsonlSink = makeSink(cfg.logJsonl, cfg.logMaxMb, cfg.logKeep)
 
   const unsub = bus.onEvent((e) => {
     const rank = LEVEL_RANK[e.level] ?? 1
@@ -147,13 +216,13 @@ export function startLogger(cfg: ProxyConfig): () => void {
     // Human stdout (colored)
     if (cfg.logFormat === 'human' || cfg.logFormat === 'both') {
       process.stdout.write(formatHuman(e, true) + '\n')
-      // File (no color)
-      try { appendFileSync(cfg.logFile, formatHuman(e, false) + '\n') } catch {}
+      // File (no color) — rotated
+      writeRotating(humanSink, formatHuman(e, false) + '\n')
     }
 
-    // Structured JSONL
+    // Structured JSONL — rotated
     if (cfg.logFormat === 'json' || cfg.logFormat === 'both') {
-      try { appendFileSync(cfg.logJsonl, JSON.stringify(e) + '\n') } catch {}
+      writeRotating(jsonlSink, JSON.stringify(e) + '\n')
     }
   })
 

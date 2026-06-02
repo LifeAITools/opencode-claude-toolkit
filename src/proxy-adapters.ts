@@ -79,6 +79,12 @@ export class FileCredentialsProvider implements ICredentialsProvider {
     this.lastMtimeMs = 0
   }
 
+  /** Expiry (ms epoch) of the currently-cached token, or null if none cached.
+   *  Feeds the per-session pin's "is the held cross-org token still alive?" check. */
+  currentExpiresAt(): number | null {
+    return this.cached?.expiresAt ?? null
+  }
+
   private readFromDisk(): StoredCredentials | null {
     try {
       const raw = readFileSync(this.path, 'utf8')

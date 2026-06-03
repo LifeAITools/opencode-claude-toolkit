@@ -262,6 +262,16 @@ export declare class KeepaliveEngine {
     private startTimer;
     private tick;
     /**
+     * Fire ONE keepalive for a single registered lineage. Returns 'ok' on a
+     * healthy refresh (the tick loop may proceed to the next lineage) or 'stop'
+     * when the engine disarmed or hit an engine-wide error (eviction, 429/quota,
+     * 5xx/overload, network, auth, permanent) — the caller stops the tick.
+     *
+     * Invariant: KA fire NEVER writes cache (max_tokens=1, identical prefix
+     * replay) — pinned by test/keepalive-regression.test.ts.
+     */
+    private fireLineage;
+    /**
      * Diagnostic logger — call BEFORE registry.clear() to capture exact
      * state at the moment of disarm. Enables post-mortem analysis without
      * needing to reproduce the incident.
@@ -354,7 +364,7 @@ export declare class KeepaliveEngine {
     /** @internal — for test inspection */
     get _timer(): ReturnType<typeof setInterval> | null;
     /** @internal — for test inspection */
-    get _config(): Required<Pick<KeepaliveConfig, "enabled" | "intervalMs" | "rewriteWarnIdleMs" | "rewriteWarnTokens" | "idleTimeoutMs" | "minTokens" | "rewriteBlockEnabled" | "rewriteBlockIdleMs">> & {
+    get _config(): Required<Pick<KeepaliveConfig, "enabled" | "intervalMs" | "rewriteWarnIdleMs" | "rewriteWarnTokens" | "idleTimeoutMs" | "minTokens" | "maxFiresPerTick" | "rewriteBlockEnabled" | "rewriteBlockIdleMs">> & {
         onHeartbeat?: (stats: KeepaliveStats) => void;
         onTick?: (tick: KeepaliveTick) => void;
         onDisarmed?: (info: {

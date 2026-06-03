@@ -95,6 +95,9 @@ export interface ResolvedKeepaliveConfig {
     readonly idleTimeoutMs: number;
     /** Minimum input tokens for a request to register a snapshot. Default: 2000. */
     readonly minTokens: number;
+    /** Max cache lineages warmed per KA tick (multi-lineage keepalive cap).
+     *  Default: 8. Overflow is warmed on subsequent ticks (≤30s apart). */
+    readonly maxFiresPerTick: number;
     /** Block real requests with too-aggressive cache rewrites (rare safety net). Default: false. */
     readonly rewriteBlockEnabled: boolean;
     /** Body-dump policy with rotation. See DumpConfig docs. */

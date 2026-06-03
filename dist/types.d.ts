@@ -113,6 +113,12 @@ export interface KeepaliveConfig {
     intervalMs?: number;
     idleTimeoutMs?: number;
     minTokens?: number;
+    /** Max cache lineages warmed per KA tick. Each registered (main/unknown)
+     *  lineage is an independent cache that TTL-expires on its own clock, so a
+     *  multi-lineage session needs every due lineage warmed — not just the
+     *  heaviest. Capped per tick to bound quota burst on fat sessions; overflow
+     *  is warmed on the next ticks (which run every ≤30s). Default: 8. */
+    maxFiresPerTick?: number;
     /** ── Rewrite burst protection ──────────────────────────────────────
      * When a real stream() fires after long idle, the cache may be dead.
      * The first call will silently cost `cacheWrite` (can be 100k+ tokens).

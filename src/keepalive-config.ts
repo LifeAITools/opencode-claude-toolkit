@@ -118,6 +118,10 @@ export interface ResolvedKeepaliveConfig {
   /** Minimum input tokens for a request to register a snapshot. Default: 2000. */
   readonly minTokens: number
 
+  /** Max cache lineages warmed per KA tick (multi-lineage keepalive cap).
+   *  Default: 8. Overflow is warmed on subsequent ticks (≤30s apart). */
+  readonly maxFiresPerTick: number
+
   /** Block real requests with too-aggressive cache rewrites (rare safety net). Default: false. */
   readonly rewriteBlockEnabled: boolean
 
@@ -242,6 +246,7 @@ const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampM
   enabled:                   true,
   idleTimeoutMs:             Infinity,
   minTokens:                 2000,
+  maxFiresPerTick:           8,
   rewriteBlockEnabled:       false,
   dump:                      DEFAULT_DUMP,
   roleDetector:              DEFAULT_ROLE_WEIGHTS,
@@ -512,6 +517,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
           'idleTimeoutMs', LEGACY_DEFAULTS.idleTimeoutMs === Infinity ? 86_400_000 : LEGACY_DEFAULTS.idleTimeoutMs,
           0, 86_400_000),
     minTokens: num(raw?.minTokens, 'minTokens', LEGACY_DEFAULTS.minTokens, 1, 1_000_000),
+    maxFiresPerTick: num(raw?.maxFiresPerTick, 'maxFiresPerTick', LEGACY_DEFAULTS.maxFiresPerTick, 1, 1_000),
     rewriteBlockEnabled: bool(raw?.rewriteBlockEnabled, LEGACY_DEFAULTS.rewriteBlockEnabled),
     // Body-dump policy. NOTE: parsing of raw?.dump.* fields not yet implemented;
     // for now we emit DEFAULT_DUMP. Full parsing is the in-flight work that

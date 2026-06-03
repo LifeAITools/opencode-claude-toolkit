@@ -451,7 +451,7 @@ export class KeepaliveEngine {
   private static readonly DUMP_BODY = process.env.CLAUDE_SDK_DUMP_BODY === '1'
 
   // ── Config ──────────────────────────────────────────────────
-  private config: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens' | 'rewriteWarnIdleMs' | 'rewriteWarnTokens' | 'rewriteBlockIdleMs' | 'rewriteBlockEnabled'>> & {
+  private config: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens' | 'maxFiresPerTick' | 'rewriteWarnIdleMs' | 'rewriteWarnTokens' | 'rewriteBlockIdleMs' | 'rewriteBlockEnabled'>> & {
     onHeartbeat?: (stats: KeepaliveStats) => void
     onTick?: (tick: KeepaliveTick) => void
     onDisarmed?: (info: { reason: string; at: number }) => void
@@ -610,6 +610,7 @@ export class KeepaliveEngine {
       intervalMs,
       idleTimeoutMs: ka.idleTimeoutMs ?? ssot.idleTimeoutMs,
       minTokens: ka.minTokens ?? ssot.minTokens,
+      maxFiresPerTick: ka.maxFiresPerTick ?? ssot.maxFiresPerTick,
       rewriteWarnIdleMs: ka.rewriteWarnIdleMs ?? ssot.rewriteWarnIdleMs,
       rewriteWarnTokens: ka.rewriteWarnTokens ?? ssot.rewriteWarnTokens,
       rewriteBlockIdleMs: ka.rewriteBlockIdleMs ?? Infinity,
@@ -1138,6 +1139,9 @@ export class KeepaliveEngine {
     if (liveConfig.minTokens !== this.config.minTokens) {
       this.config.minTokens = liveConfig.minTokens
     }
+    if (liveConfig.maxFiresPerTick !== this.config.maxFiresPerTick) {
+      this.config.maxFiresPerTick = liveConfig.maxFiresPerTick
+    }
 
     // Idle timeout
     const realIdle = Date.now() - this.lastRealActivityAt
@@ -1148,23 +1152,46 @@ export class KeepaliveEngine {
       return
     }
 
-    // Pick heaviest model from registry — but Layer 3: only consider entries
-    // that have at least one cache_control marker. Entries without markers
-    // would burn input tokens on a fire that refreshes nothing on Anthropic's
-    // side (no cached blocks exist).
-    let best: RegistryEntry | null = null
+    // ── Layer 6: warm EVERY due cache lineage, not just the heaviest ──────
+    // Each registered (main/unknown) lineage is an independent Anthropic cache
+    // that TTL-expires on its own clock. Firing only the single heaviest `best`
+    // let every other registered lineage die silently → the next real request
+    // paid an avoidable cache rewrite (the `avoidable:ttl-expiry` rewrite-guard
+    // blocks; 2026-06-03 incident — sessions dc01c882 ~534k / b775cbc5 ~82k,
+    // observed across 5 sessions in one day). Pinned by test/keepalive-engine.test.ts.
+
+    // Jitter: prevents multi-session burst. Sentinel -1 = uninitialized; seed a
+    // random offset on first eligible tick. Explicit 0 = "no jitter" (honored;
+    // tests rely on it to make the fire threshold deterministic).
+    if (this.jitterMs < 0) {
+      this.jitterMs = Math.floor(Math.random() * 30_000)
+    }
+    const fireThresholdMs = this.config.intervalMs * 0.9 + this.jitterMs
+
+    // PER-LINEAGE idle: time since a lineage's cache was last warmed (real
+    // request OR KA fire) — NOT the global `lastActivityAt`. The global clock is
+    // reset by EVERY real request of EVERY lineage, so busy sub-agent traffic
+    // masks an idle main lineage; the per-lineage clock sees it go idle, and an
+    // active lineage self-warmed by real traffic is correctly skipped.
+    const lineageIdle = (e: RegistryEntry): number => {
+      const st = this.lineageStats.get(e.lineageKey)
+      return Date.now() - (st ? st.lastWarmedAt : this.lastActivityAt)
+    }
+
+    // Primary = heaviest cache_control entry (confirmed `main` beats `unknown`;
+    // within a tier, heaviest context wins). Drives the per-tick onTick
+    // countdown and the Layer 3 "nothing fireable" audit — semantics unchanged.
+    let primary: RegistryEntry | null = null
     let skippedNoCacheControl = 0
     for (const entry of this.registry.values()) {
       if (!entry.hasCacheControl) { skippedNoCacheControl++; continue }
-      if (!best) { best = entry; continue }
-      // Prefer a confirmed `main` lineage over an `unknown` candidate; within
-      // the same role tier, the heaviest context wins.
+      if (!primary) { primary = entry; continue }
       const entryMain = entry.role === 'main'
-      const bestMain = best.role === 'main'
-      if (entryMain && !bestMain) { best = entry; continue }
-      if (entryMain === bestMain && entry.inputTokens > best.inputTokens) best = entry
+      const primaryMain = primary.role === 'main'
+      if (entryMain && !primaryMain) { primary = entry; continue }
+      if (entryMain === primaryMain && entry.inputTokens > primary.inputTokens) primary = entry
     }
-    if (!best) {
+    if (!primary) {
       if (skippedNoCacheControl > 0) {
         // Layer 3 audit — visible reason we didn't fire. Operator sees "engine
         // had snapshots but none had cache_control" instead of silent no-op.
@@ -1176,35 +1203,64 @@ export class KeepaliveEngine {
       return
     }
 
-    // PER-LINEAGE idle: time since the lineage we are about to keep alive
-    // (`best`) was last warmed — NOT the global `lastActivityAt`. The global
-    // clock is reset by EVERY real request of EVERY lineage, so busy
-    // sub-agent traffic masked the main agent's idleness and the fire below
-    // never triggered. The per-lineage clock sees the main agent go idle.
-    const bestStat = this.lineageStats.get(best.lineageKey)
-    const idle = Date.now() - (bestStat ? bestStat.lastWarmedAt : this.lastActivityAt)
-
-    // Jitter: prevents multi-session burst. Sentinel -1 = uninitialized; seed
-    // a random offset on first eligible tick. Explicit 0 means "no jitter" and
-    // is honored (tests rely on this to make fire-threshold deterministic).
-    if (this.jitterMs < 0) {
-      this.jitterMs = Math.floor(Math.random() * 30_000)
-    }
-    // Always emit onTick — gives provider/consumer a chance to log per-tick
-    // visibility. The "should we fire now?" decision is made AFTER this hook.
+    // Always emit onTick — per-tick visibility/countdown for the PRIMARY
+    // lineage. The "fire now?" decision is made AFTER this hook.
+    const primaryIdle = lineageIdle(primary)
     this.config.onTick?.({
-      idleMs: idle,
-      nextFireMs: Math.max(0, this.config.intervalMs - idle),
-      model: best.model,
-      tokens: best.inputTokens,
+      idleMs: primaryIdle,
+      nextFireMs: Math.max(0, this.config.intervalMs - primaryIdle),
+      model: primary.model,
+      tokens: primary.inputTokens,
     })
 
-    if (idle < this.config.intervalMs * 0.9 + this.jitterMs) {
-      // Not yet time to fire — return after onTick so consumers see the tick.
-      return
+    // Eligible = every cache_control lineage whose per-lineage idle crossed the
+    // fire threshold. Ordered main→heaviest→most-stale so the most valuable
+    // caches are warmed first when the per-tick cap bites.
+    const eligible = Array.from(this.registry.values())
+      .filter((e) => e.hasCacheControl)
+      .map((e) => ({ entry: e, idle: lineageIdle(e) }))
+      .filter((x) => x.idle >= fireThresholdMs)
+      .sort((a, b) => {
+        const am = a.entry.role === 'main' ? 1 : 0
+        const bm = b.entry.role === 'main' ? 1 : 0
+        if (am !== bm) return bm - am
+        if (a.entry.inputTokens !== b.entry.inputTokens) return b.entry.inputTokens - a.entry.inputTokens
+        return b.idle - a.idle
+      })
+    if (eligible.length === 0) return  // nothing due yet — onTick already emitted
+
+    // Cap fires per tick — protects quota on fat multi-lineage sessions. Ticks
+    // run every ≤30s while the threshold is ~interval*0.9 (~27m for a 30m
+    // interval), so any overflow is warmed on the next few ticks, long before
+    // TTL. Log the deferral so a silent cap never reads as "covered everything".
+    const cap = Math.max(1, this.config.maxFiresPerTick)
+    const toFire = eligible.slice(0, cap)
+    if (eligible.length > toFire.length) {
+      try {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] KA_FIRE_CAPPED pid=${process.pid} eligible=${eligible.length} fired=${toFire.length} deferred=${eligible.length - toFire.length} cap=${cap}\n`)
+      } catch { /* logging best-effort */ }
     }
 
-    // Fire keepalive for heaviest model
+    // Fire each eligible lineage sequentially (NOT a burst). A disarm or any
+    // engine-wide error (eviction, 429/quota, 5xx/overload, network, auth,
+    // permanent) stops the tick — the next real request re-arms.
+    for (const { entry, idle } of toFire) {
+      const outcome = await this.fireLineage(entry, idle)
+      if (outcome === 'stop') break
+    }
+  }
+
+  /**
+   * Fire ONE keepalive for a single registered lineage. Returns 'ok' on a
+   * healthy refresh (the tick loop may proceed to the next lineage) or 'stop'
+   * when the engine disarmed or hit an engine-wide error (eviction, 429/quota,
+   * 5xx/overload, network, auth, permanent) — the caller stops the tick.
+   *
+   * Invariant: KA fire NEVER writes cache (max_tokens=1, identical prefix
+   * replay) — pinned by test/keepalive-regression.test.ts.
+   */
+  private async fireLineage(best: RegistryEntry, idle: number): Promise<'ok' | 'stop'> {
     this.inFlight = true
     this.inFlightLineageKey = best.lineageKey
 
@@ -1298,8 +1354,10 @@ export class KeepaliveEngine {
         this.stop()
         // Notify consumer so they can log/alert
         try { this.config.onDisarmed?.({ reason: 'cache_evicted_post_fire', at: Date.now() }) } catch {}
-        return
+        return 'stop'
       }
+      // Healthy refresh — the tick loop may proceed to the next eligible lineage.
+      return 'ok'
     } catch (err: unknown) {
       const category = classifyError(err)
 
@@ -1339,6 +1397,9 @@ export class KeepaliveEngine {
         this.clearRegistry()
         this.onDisarmed('permanent_error')
       }
+      // Every caught category above is engine-wide (disarm / quota-pause /
+      // retry-scheduled) — stop the tick; do not fire further lineages now.
+      return 'stop'
     } finally {
       this.inFlight = false
       this.abortController = null

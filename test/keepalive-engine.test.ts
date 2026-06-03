@@ -1201,3 +1201,93 @@ describe('KeepaliveEngine: serialize / revive for cross-restart persistence', ()
     e.stop()
   })
 })
+
+// ─── Multi-lineage keepalive: warm ALL eligible lineages, not just `best` ───
+//
+// Root cause (2026-06-03, sessions dc01c882 ~534k / b775cbc5 ~82k): tick()
+// picked ONE `best` lineage (main-role / heaviest) and fired only it. A session
+// with several registered (main/unknown) cache lineages left every non-best
+// lineage to TTL-expire silently → the next real request paid an avoidable
+// cache rewrite (the `avoidable:ttl-expiry` rewrite-guard blocks observed
+// across 5 sessions in one day). Fix: each tick fires EVERY eligible lineage
+// (per-lineage idle ≥ fire threshold AND hasCacheControl), capped per tick.
+describe('KeepaliveEngine: multi-lineage keepalive', () => {
+  // Healthy refresh shape — tiny cache_creation, real cache_read → no eviction.
+  const healthyFetch = async function* (): AsyncGenerator<StreamEvent> {
+    yield { type: 'message_stop', usage: {
+      inputTokens: 6, outputTokens: 1,
+      cacheReadInputTokens: 50_000, cacheCreationInputTokens: 100,
+    }, stopReason: 'end_turn' }
+  }
+  const allowed: RateLimitInfo = {
+    status: 'allowed', resetAt: null, claim: null, retryAfter: null,
+    utilization5h: 0, utilization7d: 0,
+  }
+
+  function mkMultiEngine(onFire: (lk: string) => void) {
+    return new KeepaliveEngine({
+      config: {
+        intervalMs: 60_000, minTokens: 100,
+        onHeartbeat: (h) => onFire(h.lineageKey),
+      },
+      getToken: async () => 'fake-token',
+      doFetch: healthyFetch,
+      getRateLimitInfo: () => allowed,
+    })
+  }
+
+  // Register N distinct cache lineages (different system text → different
+  // systemHash), each idle past the fire threshold. Returns their keys.
+  function registerIdleLineages(e: KeepaliveEngine, specs: Array<{ text: string; tokens: number }>): string[] {
+    const keys: string[] = []
+    for (const s of specs) {
+      const lk = e.notifyRealRequestStart('m', {
+        system: [{ type: 'text', text: s.text, cache_control: { type: 'ephemeral' } }],
+      }, {})
+      e.notifyRealRequestComplete({ inputTokens: s.tokens, outputTokens: 1 }, lk)
+      keys.push(lk)
+    }
+    // Age every lineage's per-lineage warm clock past interval*0.9 (54s).
+    for (const lk of keys) {
+      const st = e._lineageStats.get(lk) as any
+      if (st) st.lastWarmedAt = Date.now() - 70_000
+    }
+    ;(e as any).jitterMs = 0
+    e._setCacheWrittenAt(Date.now() - 70_000)
+    ;(e as any).lastActivityAt = Date.now() - 70_000
+    return keys
+  }
+
+  test('warms ALL eligible idle lineages in one tick, not just the heaviest', async () => {
+    const fired: string[] = []
+    const e = mkMultiEngine((lk) => fired.push(lk))
+    const [lkA, lkB] = registerIdleLineages(e, [
+      { text: 'lineage-A system prompt', tokens: 5000 },
+      { text: 'lineage-B a different system prompt', tokens: 8000 },
+    ])
+    expect(e._registry.size).toBe(2)  // both main/unknown lineages registered
+
+    await (e as any).tick()
+
+    // BUG (pre-fix): only `best` (lkB, heavier) fires → fired === [lkB].
+    expect(new Set(fired)).toEqual(new Set([lkA, lkB]))
+    e.stop()
+  })
+
+  test('an active (recently-warmed) lineage is NOT fired — only idle ones', async () => {
+    const fired: string[] = []
+    const e = mkMultiEngine((lk) => fired.push(lk))
+    const [lkIdle, lkActive] = registerIdleLineages(e, [
+      { text: 'idle lineage', tokens: 5000 },
+      { text: 'active lineage self-warmed by real traffic', tokens: 9000 },
+    ])
+    // The "active" lineage was just warmed by real traffic → below threshold.
+    const st = e._lineageStats.get(lkActive) as any
+    if (st) st.lastWarmedAt = Date.now() - 1_000
+
+    await (e as any).tick()
+
+    expect(fired).toEqual([lkIdle])   // active lineage skipped, idle one fired
+    e.stop()
+  })
+})

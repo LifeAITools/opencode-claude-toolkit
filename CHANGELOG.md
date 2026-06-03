@@ -2,6 +2,31 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.11] / claude-max-proxy [1.0.2] - 2026-06-03
+
+### Added
+- **Per-session org/token pinning in the proxy.** A cross-org `claude login` no
+  longer blocks or silently migrates live sessions — each session HOLDS its old
+  org+token and keeps serving until an explicit switch: the new `[%reload-ok%]`
+  marker (per-session), or a cli `reload` (global / per-session). Same-org token
+  refresh adopts the fresh token seamlessly. Forced switch only when the held
+  token truly expires (→ 401 with reload instructions) or a non-org expensive
+  rewrite hits the existing `[%cache-rewrite-ok%]` guard. Pins are in-memory
+  (proxy restart → rebind to current org).
+- **`OrgIdResolver.invalidate()`** + **`ProxyClient.notifyCredentialsChanged()`**,
+  called from the daemon credentials `fs.watch`, so the token cache and the
+  org-id cache invalidate in lock-step — closes the ~5-min stale-org detection
+  window that let real traffic slip onto a new org silently.
+- **`reloadMarker`** config (`[%reload-ok%]`, SSOT + hot-reload), distinct from
+  `overrideMarker`. **`ICredentialsProvider.currentExpiresAt()`** (optional) so
+  the pin can detect a truly-expired held cross-org token.
+
+### Changed
+- Cross-org no longer routes through the rewrite-guard 400 path for real traffic
+  (it HOLDS instead). The guard's 400 remains for non-org expensive rewrites.
+- `orgSwitchPending` lifecycle is now pin-driven (set while held, cleared on
+  rebind); `notifyRealRequestComplete` no longer auto-clears it.
+
 ## [0.12.0] / opencode-claude [1.3.0] / claude-max-proxy [0.6.0] - 2026-04-30
 
 ### Added

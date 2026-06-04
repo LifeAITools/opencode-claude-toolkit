@@ -163,9 +163,21 @@ describe('SignalWire adapter — legacy API', () => {
     // First call kicks off async — returns null (no cached result yet)
     const r1 = sw.evaluate(ctx)
     expect(r1).toBeNull()
-    // Allow microtasks to resolve (MemoryBackend is effectively sync)
-    await new Promise(resolve => setImmediate(resolve))
-    // Second call returns cached result from the first async resolution
+    // The first evaluate() kicks an async pipeline that, on a cold engine, does
+    // real first-call work (rules JSON parse + token stats-file read) and
+    // resolves in ~hundreds of ms — far longer than the single `setImmediate`
+    // this used to wait, which made the assertion flaky/failing. Poll the
+    // internal cache directly until it settles. (We must NOT poll by calling
+    // evaluate() again: the matched rule is cooldown-gated and fires at most
+    // once per window, so a second eval resolves to null and would overwrite
+    // the cached result mid-wait.)
+    let cached: any = null
+    for (let i = 0; i < 300 && cached === null; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+      cached = (sw as any).lastAsyncResult
+    }
+    expect(cached).not.toBeNull()
+    // The legacy sync evaluate() now surfaces that cached result.
     const r2 = sw.evaluate(ctx)
     expect(r2).not.toBeNull()
   })

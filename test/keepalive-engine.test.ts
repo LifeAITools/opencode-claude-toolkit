@@ -956,6 +956,47 @@ describe('KeepaliveEngine: auth (401/403) is a transient fault that recovers', (
     expect(calls).toBeGreaterThanOrEqual(2)          // retry actually re-fired
     expect(registrySizeAfterRecovery).toBeGreaterThan(0)  // still armed (snapshot kept)
   })
+
+  test('genuine revoke (persistent 401) → disarms after the AUTH cap (5), not the full 13-step budget', async () => {
+    let calls = 0
+    const fakeFetch = async function* (): AsyncGenerator<StreamEvent> {
+      calls++
+      throw Object.assign(new Error('Unauthorized'), { status: 401 })  // token truly revoked
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const fakeRateLimit: RateLimitInfo = {
+      status: 'allowed', resetAt: null, claim: null, retryAfter: null,
+      utilization5h: 0, utilization7d: 0,
+    }
+    let disarmReason: string | null = null
+    const e = new KeepaliveEngine({
+      config: { intervalMs: 60_000, minTokens: 100, onDisarmed: (i) => { disarmReason = i.reason } },
+      getToken: async () => 'tok',
+      doFetch: fakeFetch,
+      getRateLimitInfo: () => fakeRateLimit,
+    })
+    // 13 tiny delays so the chain runs fast; the AUTH cap (5) must stop it well short.
+    ;(e as any).retryDelaysMs = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+
+    const bodyWithCC = {
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }] }],
+    }
+    const lk = e.notifyRealRequestStart('m', bodyWithCC, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 1_000)
+    ;(e as any).lastActivityAt = Date.now() - 200_000
+    ;(e as any).lastRealActivityAt = Date.now() - 200_000
+    { const st = e._lineageStats.get(lk); if (st) (st as any).lastWarmedAt = Date.now() - 200_000 }
+    ;(e as any).jitterMs = 0
+
+    await (e as any).tick()                          // fire #1 (401) → auth retryChain capped at 5
+    await new Promise((r) => setTimeout(r, 120))     // let the capped chain run to exhaustion
+
+    expect(disarmReason).toBe('retry_exhausted')     // genuine revoke gives up (TTL-safe)
+    expect(calls).toBe(6)                            // 1 initial + 5 capped retries (NOT 1 + 13)
+    e.stop()
+  })
 })
 
 // ─── Public API surface ──────────────────────────────────────────

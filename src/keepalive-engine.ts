@@ -168,6 +168,15 @@ interface LineageStat {
  */
 type ErrorCategory = 'network' | 'server_transient' | 'auth' | 'permanent'
 
+/**
+ * Max KA retry attempts for an AUTH (401/403) fault — intentionally shorter than
+ * the full transient (5xx/network) retry budget. An OAuth token rotation clears
+ * within a few seconds, so a handful of fresh-getToken() retries recovers it; a
+ * genuine revoke keeps 401ing and should give up fast (retry_exhausted) rather
+ * than burn the whole 13-step budget on doomed pings.
+ */
+const KA_AUTH_MAX_RETRIES = 5
+
 function classifyError(err: unknown): ErrorCategory {
   const e = err as {
     status?: number
@@ -1402,8 +1411,10 @@ export class KeepaliveEngine {
         // every attempt (line ~1667), so a rotated token is picked up and the
         // cache is saved. A GENUINE revoke keeps 401ing and exhausts the budget
         // → retry_exhausted disarm (still TTL-safe). Matches this category's
-        // documented intent ("refresh token, retry").
-        this.retryChain(best)
+        // documented intent ("refresh token, retry"). Capped at KA_AUTH_MAX_RETRIES
+        // (< the full 5xx budget): a token rotation recovers within a few attempts,
+        // a genuine revoke gives up fast instead of spamming doomed 401s.
+        this.retryChain(best, 0, KA_AUTH_MAX_RETRIES)
       } else {
         // Permanent (400, malformed request, etc). Don't retry.
         this.logClearDiag('permanent_error', { category, errStatus: (err as any)?.status, errMessage: (err as any)?.message?.slice(0, 200) })
@@ -1591,9 +1602,15 @@ export class KeepaliveEngine {
   private retryChain(
     entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
     attemptIndex = 0,
+    // Max attempts for THIS chain. Defaults to the full retry budget (5xx/network
+    // transients). Auth (401/403) passes KA_AUTH_MAX_RETRIES — a token rotation
+    // clears in <~10s so a handful of retries recovers it, while a genuine revoke
+    // gives up fast instead of burning the whole 13-step budget on doomed 401s.
+    maxAttempts = this.retryDelaysMs.length,
   ): void {
-    if (attemptIndex >= this.retryDelaysMs.length) {
-      this.logClearDiag('retry_exhausted', { attemptIndex, retryDelaysMsLen: this.retryDelaysMs.length })
+    const budget = Math.min(maxAttempts, this.retryDelaysMs.length)
+    if (attemptIndex >= budget) {
+      this.logClearDiag('retry_exhausted', { attemptIndex, budget, retryDelaysMsLen: this.retryDelaysMs.length })
       this.clearRegistry()
       this.onDisarmed('retry_exhausted')
       return
@@ -1713,16 +1730,17 @@ export class KeepaliveEngine {
             this.handleQuotaRateLimit(entry, err as any)
             return
           }
-          this.retryChain(entry, attemptIndex + 1)
+          this.retryChain(entry, attemptIndex + 1, maxAttempts)
           return
         } else if (category === 'auth') {
           // A repeat 401/403 mid-retry: the rotation is still settling (or this
           // is a genuine revoke). Keep retrying with a fresh getToken() each
-          // attempt — same TTL-aware budget as a 5xx. A real revoke never clears
-          // and falls out as retry_exhausted (TTL-safe), never an unbounded loop.
+          // attempt; the chain's maxAttempts cap (KA_AUTH_MAX_RETRIES for an
+          // auth-originated chain) bounds it — a real revoke never clears and
+          // falls out as retry_exhausted (TTL-safe), never an unbounded loop.
           this.inFlight = false
           this.abortController = null
-          this.retryChain(entry, attemptIndex + 1)
+          this.retryChain(entry, attemptIndex + 1, maxAttempts)
           return
         } else {
           this.logClearDiag('permanent_error_mid_retry', {

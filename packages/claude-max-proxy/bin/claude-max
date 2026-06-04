@@ -798,6 +798,11 @@ async function cmdRun(args: string[]): Promise<never> {
     ...process.env,
     ANTHROPIC_BASE_URL: activeUrl,
     ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ?? 'claude-max-proxy-placeholder',
+    // Default-enable Claude Code Agent Teams (experimental) for every claude-max
+    // launch so local agent teams are observable out of the box. Respects an
+    // explicit override: unset it (=0) in the environment to opt out.
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:
+      process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS ?? '1',
   }
 
   const p = spawn({ cmd: [claudeBin, ...args], stdio: ['inherit', 'inherit', 'inherit'], env })

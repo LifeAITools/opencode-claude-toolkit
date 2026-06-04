@@ -1,0 +1,21 @@
+{
+  "name": "@life-ai-tools/agent-bridge",
+  "version": "0.1.0",
+  "description": "Reusable socket control plane for Claude Code agents — built ON the official @anthropic-ai/claude-agent-sdk (query/Query/Transport + session APIs). Spawn, address-by-session-id, control (send/interrupt/permission/model) and stream agents over a WebSocket or unix socket. NO reimplementation of the stream-json control protocol — the SDK owns it.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/bridge-server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.162",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
+  },
+  "license": "MIT"
+}

@@ -879,6 +879,83 @@ describe('KeepaliveEngine Layer 4: error classification (regression: 2026-04-26 
     const reason = await captureDisarmReasonAfterTickWith(wrapped)
     expect(reason).toBe('network_error')
   })
+
+  // Regression (2026-06-04): a transient 401 during an in-flight KA ping — an
+  // OAuth token rotating under us — used to TERMINALLY disarm the engine
+  // (clearRegistry + onDisarmed('auth_error')), silently abandoning keepalive
+  // for the rest of the session. The cache then aged out at TTL and the next
+  // real user turn hit the rewrite-guard. 104 such disarms in one day's log,
+  // clustered at token-rotation windows. Fix: auth is TRANSIENT — route it to
+  // retryChain (fresh getToken() per retry), exactly like a 5xx. On a warm
+  // cache retryChain SCHEDULES (does not disarm), so captured stays null.
+  test('401 (auth) on warm cache → schedules retry, NOT terminal disarm', async () => {
+    const authErr = Object.assign(new Error('Unauthorized'), { status: 401 })
+    const reason = await captureDisarmReasonAfterTickWith(authErr)
+    expect(reason).toBeNull()
+  })
+
+  test('403 (auth) on warm cache → schedules retry, NOT terminal disarm', async () => {
+    const authErr = Object.assign(new Error('Forbidden'), { status: 403 })
+    const reason = await captureDisarmReasonAfterTickWith(authErr)
+    expect(reason).toBeNull()
+  })
+})
+
+// ─── Auth recovery (transient 401 → retry, not terminal) ─────────
+
+describe('KeepaliveEngine: auth (401/403) is a transient fault that recovers', () => {
+  test('401 then success → engine re-fires with fresh token, stays armed, never disarms', async () => {
+    let calls = 0
+    const tokens: string[] = []
+    const fakeFetch = async function* (): AsyncGenerator<StreamEvent> {
+      calls++
+      if (calls === 1) {
+        // First KA ping lands mid token-rotation → 401.
+        throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      }
+      // Retry with rotated creds succeeds (healthy cache_read, zero cache_write).
+      yield {
+        type: 'message_stop',
+        usage: { inputTokens: 5, outputTokens: 1, cacheReadInputTokens: 5000, cacheCreationInputTokens: 0 },
+        stopReason: 'end_turn',
+      } as StreamEvent
+    }
+    const fakeRateLimit: RateLimitInfo = {
+      status: 'allowed', resetAt: null, claim: null, retryAfter: null,
+      utilization5h: 0, utilization7d: 0,
+    }
+    let disarmReason: string | null = null
+    const e = new KeepaliveEngine({
+      config: { intervalMs: 60_000, minTokens: 100, onDisarmed: (i) => { disarmReason = i.reason } },
+      getToken: async () => { const t = `tok-${calls}`; tokens.push(t); return t },
+      doFetch: fakeFetch,
+      getRateLimitInfo: () => fakeRateLimit,
+    })
+    // Fast retry so the test doesn't wait the default 2s first delay.
+    ;(e as any).retryDelaysMs = [20]
+
+    const bodyWithCC = {
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }] }],
+    }
+    const lk = e.notifyRealRequestStart('m', bodyWithCC, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 1_000)
+    // Age the activity clocks so tick() fires AND the retry's "did a real
+    // request happen since?" guard (lastRealActivityAt > cacheWrittenAt) passes.
+    ;(e as any).lastActivityAt = Date.now() - 200_000
+    ;(e as any).lastRealActivityAt = Date.now() - 200_000
+    { const st = e._lineageStats.get(lk); if (st) (st as any).lastWarmedAt = Date.now() - 200_000 }
+    ;(e as any).jitterMs = 0
+
+    await (e as any).tick()                          // fire #1 → 401 → schedules retryChain(20ms)
+    await new Promise((r) => setTimeout(r, 120))     // let the retry fire
+    const registrySizeAfterRecovery = e._registry.size  // capture BEFORE stop() (stop clears it)
+    e.stop()
+
+    expect(disarmReason).toBeNull()                  // NEVER terminally disarmed
+    expect(calls).toBeGreaterThanOrEqual(2)          // retry actually re-fired
+    expect(registrySizeAfterRecovery).toBeGreaterThan(0)  // still armed (snapshot kept)
+  })
 })
 
 // ─── Public API surface ──────────────────────────────────────────

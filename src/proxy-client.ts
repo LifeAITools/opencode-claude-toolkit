@@ -339,6 +339,13 @@ export class ProxyClient {
   private readonly upstream: IUpstreamFetcher
   private readonly liveness: ILivenessChecker
 
+  // Bounded, abortable backoff for TRANSIENT upstream faults (5xx / 529) on the
+  // REAL request path — smooths seconds-long Anthropic capacity blips so they
+  // don't surface to Claude Code as a hard error requiring a manual re-resume.
+  // Short by design; not a substitute for surviving a multi-minute outage.
+  // Overridable in tests via (client as any).realRetryDelaysMs.
+  private readonly realRetryDelaysMs: readonly number[] = [1_000, 2_000, 4_000]
+
   private readonly reaperTimer: ReturnType<typeof setInterval>
   private lastRateLimit: RateLimitSnapshot = {
     status: null, resetAt: null, claim: null, retryAfter: null,
@@ -940,21 +947,67 @@ export class ProxyClient {
 
     const t0 = Date.now()
 
-    // Forward upstream
+    // Forward upstream — with bounded, abortable server-side retry for TRANSIENT
+    // upstream faults (Anthropic 5xx / 529 Overloaded). A brief capacity blip
+    // otherwise surfaces to Claude Code as a hard error the user must manually
+    // re-`resume` through (incident 2026-06-04: session df081b12 saw ~3 min of
+    // repeated 529s). A 5xx/529 is a PRE-STREAM rejection (error JSON, no partial
+    // content), so re-sending the same body is safe + idempotent. NOT retried
+    // here: 429 (quota — has resetAt-aware handling below; retrying worsens it)
+    // and other 4xx (client errors). Budget is intentionally short.
+    const TRANSIENT_UPSTREAM_STATUSES = new Set([500, 502, 503, 529])
     let upstream: Response
-    try {
-      upstream = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, {
-        method: 'POST',
-        headers: upstreamHeaders,
-        body: forwardBodyStr,
-        signal: ctx.signal,
-      })
-    } catch (fetchErr: any) {
-      return this.handleNetworkError(sessionId, fetchErr)
-    }
+    let realAttempt = 0
+    for (;;) {
+      try {
+        upstream = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, {
+          method: 'POST',
+          headers: upstreamHeaders,
+          body: forwardBodyStr,
+          signal: ctx.signal,
+        })
+      } catch (fetchErr: any) {
+        return this.handleNetworkError(sessionId, fetchErr)
+      }
 
-    // Parse rate-limit headers into snapshot
-    this.lastRateLimit = parseRateLimitHeaders(upstream.headers)
+      // Parse rate-limit headers into snapshot
+      this.lastRateLimit = parseRateLimitHeaders(upstream.headers)
+
+      if (upstream.ok
+          || !TRANSIENT_UPSTREAM_STATUSES.has(upstream.status)
+          || realAttempt >= this.realRetryDelaysMs.length) {
+        break  // success, non-retryable, or budget exhausted → fall through below
+      }
+
+      // Transient upstream fault → back off and retry. Honor a sane retry-after.
+      const retryAfterHeader = upstream.headers.get('retry-after')
+      const retryAfterParsed = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN
+      const delayMs = Number.isFinite(retryAfterParsed)
+        ? Math.min(Math.max(retryAfterParsed * 1_000, 0), 10_000)
+        : this.realRetryDelaysMs[realAttempt]!
+      // Release the error-response body so the connection can be reused.
+      try { await upstream.body?.cancel() } catch { /* best-effort */ }
+      this.events.emit({
+        level: 'info',
+        kind: 'REAL_REQUEST_RETRY',
+        sessionId,
+        status: upstream.status,
+        attempt: realAttempt + 1,
+        maxAttempts: this.realRetryDelaysMs.length,
+        delayMs,
+      })
+      realAttempt++
+      try {
+        await new Promise<void>((resolve, reject) => {
+          if (ctx.signal?.aborted) { reject(new Error('aborted')); return }
+          const timer = setTimeout(resolve, delayMs)
+          ctx.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')) }, { once: true })
+        })
+      } catch {
+        // Client disconnected while we were backing off — stop retrying.
+        return new Response('client disconnected during upstream retry', { status: 499 })
+      }
+    }
 
     if (!upstream.ok) {
       const errText = await upstream.text().catch(() => '')

@@ -158,8 +158,10 @@ interface LineageStat {
  *   'server_transient' — Anthropic returned 5xx/429/529/503. Server is up
  *               but overloaded. Action: retryChain with backoff.
  *
- *   'auth' — 401/403. Token expired or revoked.
- *               Action: refresh token, retry once.
+ *   'auth' — 401/403. Token rotating (transient) or revoked. Almost always
+ *               transient on a KA ping (a fresh getToken() per retry picks up
+ *               the rotated token). Action: retryChain with TTL-aware backoff,
+ *               same as a 5xx; a genuine revoke exhausts the budget → disarm.
  *
  *   'permanent' — 400, other 4xx. Something wrong with the request itself.
  *               Action: disarm, surface to user.
@@ -1385,12 +1387,23 @@ export class KeepaliveEngine {
           this.retryChain(best)
         }
       } else if (category === 'auth') {
-        // Token issue — disarm, token refresh is the consumer's responsibility
-        // (they should refresh via credentialStore on 401). Engine will resume
-        // on next real request with fresh creds.
-        this.logClearDiag('auth_error', { category, errStatus: (err as any)?.status })
-        this.clearRegistry()
-        this.onDisarmed('auth_error')
+        // Token issue (401/403) — almost always TRANSIENT: an OAuth token
+        // rotating under us, where a single in-flight KA ping lands mid-rotation
+        // and 401s while getToken() rebuilds fresh creds on the very next fire.
+        //
+        // Terminally disarming on the first 401 (the old behaviour) silently
+        // abandoned keepalive for the rest of the session → the cache aged out
+        // at TTL → the next real user turn hit the rewrite-guard. Incident
+        // 2026-06-04: 104 auth-disarms in one day, clustered at token-rotation
+        // windows; each one a session that lost its warm cache.
+        //
+        // Treat auth exactly like a server_transient 5xx: retry with TTL-aware
+        // backoff. retryChain rebuilds Authorization from a fresh getToken() on
+        // every attempt (line ~1667), so a rotated token is picked up and the
+        // cache is saved. A GENUINE revoke keeps 401ing and exhausts the budget
+        // → retry_exhausted disarm (still TTL-safe). Matches this category's
+        // documented intent ("refresh token, retry").
+        this.retryChain(best)
       } else {
         // Permanent (400, malformed request, etc). Don't retry.
         this.logClearDiag('permanent_error', { category, errStatus: (err as any)?.status, errMessage: (err as any)?.message?.slice(0, 200) })
@@ -1700,6 +1713,15 @@ export class KeepaliveEngine {
             this.handleQuotaRateLimit(entry, err as any)
             return
           }
+          this.retryChain(entry, attemptIndex + 1)
+          return
+        } else if (category === 'auth') {
+          // A repeat 401/403 mid-retry: the rotation is still settling (or this
+          // is a genuine revoke). Keep retrying with a fresh getToken() each
+          // attempt — same TTL-aware budget as a 5xx. A real revoke never clears
+          // and falls out as retry_exhausted (TTL-safe), never an unbounded loop.
+          this.inFlight = false
+          this.abortController = null
           this.retryChain(entry, attemptIndex + 1)
           return
         } else {

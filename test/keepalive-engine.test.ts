@@ -10,6 +10,7 @@
 
 import { describe, test, expect } from 'bun:test'
 import { KeepaliveEngine } from '../src/keepalive-engine.js'
+import { EvictionCircuitBreaker } from '../src/eviction-breaker.js'
 import { CacheRewriteBlockedError } from '../src/types.js'
 import type { RateLimitInfo, StreamEvent } from '../src/types.js'
 
@@ -995,6 +996,106 @@ describe('KeepaliveEngine: auth (401/403) is a transient fault that recovers', (
 
     expect(disarmReason).toBe('retry_exhausted')     // genuine revoke gives up (TTL-safe)
     expect(calls).toBe(6)                            // 1 initial + 5 capped retries (NOT 1 + 13)
+    e.stop()
+  })
+})
+
+// ─── Per-lineage eviction retirement + transient re-arm (2026-06-05 eb9b8fcd) ───
+//
+// A secondary/stale lineage cold-write must NOT kill keepalive for the session's
+// healthy primary cache (old whole-session clearRegistry → primary expired
+// overnight → morning 400), and must NOT trip the fleet breaker (cascade-disarmed
+// 16 sessions). A transient 5xx/network exhausting the retry budget must keep the
+// warm snapshot so the probe re-arms — not permanently disarm.
+describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', () => {
+  const rl = () => ({ status: 'allowed' as const, resetAt: null, claim: null, retryAfter: null, utilization5h: 0, utilization7d: 0 })
+  function mkEng(fetch: any, onDisarmed: (i: any) => void, evictionBreaker?: any) {
+    return new KeepaliveEngine({
+      config: { intervalMs: 60_000, minTokens: 100, onDisarmed },
+      getToken: async () => 'tok', doFetch: fetch, getRateLimitInfo: rl,
+      ...(evictionBreaker ? { evictionBreaker } : {}),
+    })
+  }
+  const coldFetch = async function* (): AsyncGenerator<StreamEvent> {
+    yield { type: 'message_stop', usage: { inputTokens: 504, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 182781 }, stopReason: 'end_turn' } as StreamEvent
+  }
+  const bodyA = { system: [{ type: 'text', text: 'sysA', cache_control: { type: 'ephemeral' } }], tools: [{ name: 't1' }], messages: [{ role: 'user', content: [{ type: 'text', text: 'a', cache_control: { type: 'ephemeral' } }] }] }
+  const bodyB = { system: [{ type: 'text', text: 'sysB', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: [{ type: 'text', text: 'b', cache_control: { type: 'ephemeral' } }] }] }
+
+  test('Fix1: secondary cold-write drops ONLY that lineage; healthy primary survives, no disarm', async () => {
+    let disarmed: any = null
+    const e = mkEng(coldFetch, (i) => { disarmed = i })
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    const b = e.notifyRealRequestStart('m', bodyB, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    expect(e._registry.size).toBe(2)
+    const bEntry = e._registry.get(b)!; (bEntry as any).role = 'sub'
+    await (e as any).fireLineage(bEntry, 70_000)   // secondary cold-writes
+    expect(disarmed).toBeNull()                    // session NOT disarmed
+    expect(e._registry.has(a)).toBe(true)          // healthy primary survives
+    expect(e._registry.has(b)).toBe(false)         // stale secondary retired
+    e.stop()
+  })
+
+  test('Fix1: last lineage cold-write (none healthy left) → full disarm (single-lineage behavior preserved)', async () => {
+    let disarmed: any = null
+    const e = mkEng(coldFetch, (i) => { disarmed = i })
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    expect(disarmed?.reason).toBe('cache_evicted_post_fire')
+    expect(e._registry.size).toBe(0)
+    e.stop()
+  })
+
+  test('Fix2: stale SECONDARY cold-write does NOT trip the fleet breaker', async () => {
+    const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
+    const e = mkEng(coldFetch, () => {}, breaker)
+    const b = e.notifyRealRequestStart('m', bodyB, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    const bEntry = e._registry.get(b)!; (bEntry as any).role = 'sub'
+    const st = e._lineageStats.get(b); if (st) (st as any).lastSeenAt = Date.now() - 200_000
+    await (e as any).fireLineage(bEntry, 70_000)
+    expect(breaker.isTripped(Date.now())).toBe(false)
+    e.stop()
+  })
+
+  test('Fix2: PRIMARY cold-write (genuine server eviction) DOES trip the fleet breaker', async () => {
+    const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
+    const e = mkEng(coldFetch, () => {}, breaker)
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    const aEntry = e._registry.get(a)!; (aEntry as any).role = 'main'
+    const st = e._lineageStats.get(a); if (st) (st as any).lastSeenAt = Date.now() - 200_000
+    await (e as any).fireLineage(aEntry, 70_000)
+    expect(breaker.isTripped(Date.now())).toBe(true)
+    e.stop()
+  })
+
+  test('Fix3: transient retry_exhausted with WARM cache keeps the snapshot (probe re-arms), not permanent disarm', async () => {
+    let calls = 0
+    const fail500 = async function* (): AsyncGenerator<StreamEvent> {
+      calls++
+      throw Object.assign(new Error('overloaded'), { status: 500 })
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    let disarmReason: string | null = null
+    const e = mkEng(fail500, (i) => { disarmReason = i.reason })
+    ;(e as any).retryDelaysMs = [3, 3]   // exhaust fast
+    ;(e as any).safetyMarginMs = 1       // don't let TTL-margin bail the short retry
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 1_000)   // cache warm (last KA fire 1s ago)
+    // Mirror an IDLE session: last REAL request is old; only KA has been warming
+    // it. Otherwise retryChain's "real request since?" guard bails before retrying.
+    ;(e as any).lastRealActivityAt = Date.now() - 200_000
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    await new Promise((r) => setTimeout(r, 120))
+    expect(calls).toBeGreaterThanOrEqual(2)       // retryChain actually retried
+    expect(disarmReason).toBe('retry_exhausted')
+    expect(e._registry.size).toBeGreaterThan(0)   // snapshot KEPT for probe re-fire (Fix 3)
     e.stop()
   })
 })

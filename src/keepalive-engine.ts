@@ -1344,15 +1344,17 @@ export class KeepaliveEngine {
             `[${new Date().toISOString()}] KA_FIRE_EVICTION_DETECTED pid=${process.pid} cw=${cw} cr=${cr} ratio=${(cr/cw).toFixed(3)} — disarming to prevent cascade\n`)
         } catch { /* logging best-effort */ }
         // Trip the SHARED fleet breaker — but ONLY for a genuine server-side
-        // eviction (cold write on a snapshot with NO local cause). A recent real
-        // request (incl. a user-authorized [%cache-rewrite-ok%] rewrite) slides
-        // the prefix locally and is the detecting session's own concern, not a
-        // fleet signal; lastSeenAt is set by real requests only, so it is the
-        // exact "did the user just move the prefix?" signal. Self-disarm above
-        // still happens regardless; the breaker only governs OTHER sessions.
+        // eviction of the PRIMARY lineage. A stale SECONDARY prefix (an old
+        // sub-agent / superseded prefix) cold-writing is routine per-session
+        // cleanup, NOT a fleet signal — and it ALWAYS satisfies the
+        // "msSinceLastRealRequest > interval" test (that's what makes it stale),
+        // so without the role gate a lone stale lineage would trip the breaker
+        // and cascade-disarm healthy sibling sessions (2026-06-04: 56 trips / 16
+        // sessions overnight). Also: a recent real request on the primary slides
+        // the prefix locally (user-authorized rewrite) → also not a fleet signal.
         try {
           const msSinceLastRealRequest = firedStat ? Date.now() - firedStat.lastSeenAt : Infinity
-          if (isServerSideEviction({ cacheWrite: cw, cacheRead: cr, msSinceLastRealRequest, intervalMs: this.config.intervalMs })) {
+          if (best.role === 'main' && isServerSideEviction({ cacheWrite: cw, cacheRead: cr, msSinceLastRealRequest, intervalMs: this.config.intervalMs })) {
             this.evictionBreaker?.trip(Date.now(), {
               lineageKey: best.lineageKey,
               cacheWrite: cw,
@@ -1360,11 +1362,20 @@ export class KeepaliveEngine {
             })
           }
         } catch { /* breaker is best-effort; never let it break a fire path */ }
-        // Clear registry so we won't re-fire stale snapshot.
-        this.clearRegistry()
-        this.stop()
-        // Notify consumer so they can log/alert
-        try { this.config.onDisarmed?.({ reason: 'cache_evicted_post_fire', at: Date.now() }) } catch {}
+        // Retire ONLY the evicted lineage — a stale/secondary prefix going cold
+        // must NOT kill keepalive for the session's healthy primary cache. The
+        // old whole-session clearRegistry() caused the 2026-06-04 eb9b8fcd
+        // incident: a secondary stale lineage cold-wrote, the disarm killed the
+        // warm 476k primary, which then expired overnight → morning 400. Dropping
+        // the one lineage also structurally retires abandoned prefixes instead of
+        // re-cold-writing them every interval.
+        this.registry.delete(best.lineageKey)
+        this.lastSnapshots.delete(best.lineageKey)  // don't let self-heal re-prime the stale snapshot
+        if (this.registry.size === 0) {
+          // No healthy lineages remain → fully disarm; re-arms on next real request.
+          this.stop()
+          try { this.config.onDisarmed?.({ reason: 'cache_evicted_post_fire', at: Date.now() }) } catch {}
+        }
         return 'stop'
       }
       // Healthy refresh — the tick loop may proceed to the next eligible lineage.
@@ -1414,7 +1425,7 @@ export class KeepaliveEngine {
         // documented intent ("refresh token, retry"). Capped at KA_AUTH_MAX_RETRIES
         // (< the full 5xx budget): a token rotation recovers within a few attempts,
         // a genuine revoke gives up fast instead of spamming doomed 401s.
-        this.retryChain(best, 0, KA_AUTH_MAX_RETRIES)
+        this.retryChain(best, 0, KA_AUTH_MAX_RETRIES, /* probeOnExhaust */ false)
       } else {
         // Permanent (400, malformed request, etc). Don't retry.
         this.logClearDiag('permanent_error', { category, errStatus: (err as any)?.status, errMessage: (err as any)?.message?.slice(0, 200) })
@@ -1607,11 +1618,22 @@ export class KeepaliveEngine {
     // clears in <~10s so a handful of retries recovers it, while a genuine revoke
     // gives up fast instead of burning the whole 13-step budget on doomed 401s.
     maxAttempts = this.retryDelaysMs.length,
+    // Transient (5xx/network) chains pass true: on exhaustion, if the cache is
+    // still warm, keep the snapshot so the health probe can re-fire when upstream
+    // recovers. Auth (revoke) chains pass false: a probe would only re-fire doomed
+    // 401s, so give up fast and re-arm on the next real request (fresh creds).
+    probeOnExhaust = true,
   ): void {
     const budget = Math.min(maxAttempts, this.retryDelaysMs.length)
     if (attemptIndex >= budget) {
       this.logClearDiag('retry_exhausted', { attemptIndex, budget, retryDelaysMsLen: this.retryDelaysMs.length })
-      this.clearRegistry()
+      // Transient + cache still warm: keep the snapshot so onDisarmed
+      // ('retry_exhausted' is a networkReason) starts a health probe that re-fires
+      // KA once upstream recovers — instead of permanently killing keepalive on a
+      // passing 529/network blip (→ cache expiry → morning rewrite-guard 400).
+      // Otherwise (auth revoke, or cache past TTL) clear so the probe no-ops.
+      const ttlRemaining = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt)
+      if (!probeOnExhaust || ttlRemaining <= this.safetyMarginMs) this.clearRegistry()
       this.onDisarmed('retry_exhausted')
       return
     }
@@ -1730,7 +1752,7 @@ export class KeepaliveEngine {
             this.handleQuotaRateLimit(entry, err as any)
             return
           }
-          this.retryChain(entry, attemptIndex + 1, maxAttempts)
+          this.retryChain(entry, attemptIndex + 1, maxAttempts, probeOnExhaust)
           return
         } else if (category === 'auth') {
           // A repeat 401/403 mid-retry: the rotation is still settling (or this
@@ -1740,7 +1762,7 @@ export class KeepaliveEngine {
           // falls out as retry_exhausted (TTL-safe), never an unbounded loop.
           this.inFlight = false
           this.abortController = null
-          this.retryChain(entry, attemptIndex + 1, maxAttempts)
+          this.retryChain(entry, attemptIndex + 1, maxAttempts, probeOnExhaust)
           return
         } else {
           this.logClearDiag('permanent_error_mid_retry', {

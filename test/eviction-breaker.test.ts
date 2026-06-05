@@ -35,6 +35,17 @@ describe('EvictionCircuitBreaker: trip / isTripped', () => {
     expect(b.lastTrippedAt).toBe(1_000)
   })
 
+  test('minTripsToEngage=2 (proxy default): a LONE trip does not hold the fleet; two corroborate', () => {
+    // The proxy now passes kaEvictionMinTrips=2 — a single session's cold-write
+    // must not stampede-disarm the fleet (Layer-0c disarms siblings → idle caches
+    // die). Requires a second genuine eviction within the window to engage.
+    const b = new EvictionCircuitBreaker({ cooldownMs: 300_000, minTripsToEngage: 2 })
+    b.trip(1_000, meta())
+    expect(b.isTripped(1_000)).toBe(false)        // lone trip — no fleet hold
+    b.trip(2_000, meta())
+    expect(b.isTripped(2_000)).toBe(true)         // corroborated — engage
+  })
+
   test('breaker auto-clears after cooldown elapses', () => {
     const b = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
     b.trip(1_000, meta())

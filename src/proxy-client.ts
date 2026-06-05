@@ -202,7 +202,12 @@ const DEFAULT_CONFIG: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
   kaRewriteBlockIdleSec: 0,
   kaRewriteBlockEnabled: false,
   kaEvictionHoldSec: 300,
-  kaEvictionMinTrips: 1,
+  // Require TWO distinct genuine evictions within the window before holding the
+  // fleet (was 1). Layer-0c DISARMS siblings on a trip — for idle sessions that
+  // means cache death, so a lone trip should not stampede the fleet. Combined
+  // with the primary-lineage role gate (keepalive-engine eviction block), this
+  // makes a fleet hold require real corroboration, not one session's cold-write.
+  kaEvictionMinTrips: 2,
 }
 
 export interface ProxyClientOptions {

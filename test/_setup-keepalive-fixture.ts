@@ -17,6 +17,14 @@ writeFileSync(FIXTURE_PATH, JSON.stringify({
   // Rewrite guard ON for test/rewrite-guard.test.ts. Harmless to other tests:
   // the guard only blocks idle>ttl non-first requests, which fast unit tests
   // never produce (they use the default 300s proxy TTL, not this).
-  rewriteGuard: { enabled: true, minRewriteTokens: 1000, overrideMarker: '[cache-rewrite-ok]' },
+  rewriteGuard: {
+    enabled: true,
+    minRewriteTokens: 1000,
+    overrideMarker: '[cache-rewrite-ok]',
+    // Hermetic consent-grant store — never touch the host's
+    // ~/.claude-local/cache-rewrite-grants.json from a test.
+    consentGrantPath: '/tmp/__test_cache_rewrite_grants.json',
+    consentGrantTtlSec: 180,
+  },
 }))
 process.env.CLAUDE_KEEPALIVE_CONFIG_PATH = FIXTURE_PATH

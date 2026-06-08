@@ -214,14 +214,23 @@ export interface RewriteGuardConfig {
    *  (rewrite-guard-blocks/) so it can be analysed offline. Default true. */
   readonly dumpBlocked: boolean
   /**
-   * Apply guard blocking ONLY to interactive (native Claude Code) requests.
-   * Programmatic endpoint clients — OpenAI-compat /v1/chat/completions and
-   * external Anthropic-API consumers — cannot re-send with an override marker,
-   * so a hard 400 just strands them; when true they are let through (logged).
-   * Set false to enforce the guard on ALL traffic regardless of client kind.
-   * Default true.
+   * @deprecated NO LONGER GATES BLOCKING. The guard now blocks an unconsented
+   * avoidable/anomalous rewrite for EVERY consumer (interactive human, automated
+   * agent, programmatic endpoint, tool-loop continuation) — silent expensive
+   * re-caches are never allowed through. Non-interactive consumers that cannot
+   * add the in-message `overrideMarker` consent via the session-scoped grant
+   * channel instead (see `consentGrantPath` + `context cache-rewrite-ok`).
+   * Field retained for back-compat config parsing only; its value is ignored.
    */
   readonly interactiveOnly: boolean
+  /** TTL (seconds) of a session-scoped consent grant written to
+   *  `consentGrantPath`. A grant is single-use (consumed on the next proceeding
+   *  rewrite) AND expires after this window. Default 180. */
+  readonly consentGrantTtlSec: number
+  /** Where session-scoped consent grants live — the actionable consent channel
+   *  for consumers that cannot carry `overrideMarker` in a message (agents,
+   *  continuations, programmatic clients). Default ~/.claude-local/cache-rewrite-grants.json. */
+  readonly consentGrantPath: string
 }
 
 const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
@@ -231,6 +240,8 @@ const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
   reloadMarker: '[%reload-ok%]',
   dumpBlocked: true,
   interactiveOnly: true,
+  consentGrantTtlSec: 180,
+  consentGrantPath: join(homedir(), '.claude-local', 'cache-rewrite-grants.json'),
 }
 
 const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampMax'> = {
@@ -478,6 +489,11 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
       : DEFAULT_REWRITE_GUARD.reloadMarker,
     dumpBlocked: bool(rg.dumpBlocked, DEFAULT_REWRITE_GUARD.dumpBlocked),
     interactiveOnly: bool(rg.interactiveOnly, DEFAULT_REWRITE_GUARD.interactiveOnly),
+    consentGrantTtlSec: num(rg.consentGrantTtlSec, 'rewriteGuard.consentGrantTtlSec',
+      DEFAULT_REWRITE_GUARD.consentGrantTtlSec, 5, 3_600),
+    consentGrantPath: (typeof rg.consentGrantPath === 'string' && rg.consentGrantPath.length > 0)
+      ? rg.consentGrantPath
+      : DEFAULT_REWRITE_GUARD.consentGrantPath,
   }
 
   const config: ResolvedKeepaliveConfig = {

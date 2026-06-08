@@ -76,6 +76,7 @@ import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
+import { consumeConsent } from './rewrite-consent.js'
 import { FileOrgIdResolver, type OrgIdResolver } from './org-identity.js'
 import {
   writeRewriteBlockDump,
@@ -840,63 +841,46 @@ export class ProxyClient {
     const assessed = this.assessCacheMiss(sessionId, reqLineageKey, parsedBody, bodyBytes)
     const rewriteAssessment = assessed?.assessment ?? null
 
-    // Rewrite guard — opt-in, default OFF. When enabled, an avoidable/anomalous
-    // rewrite above the configured token threshold that the user has NOT
-    // confirmed (via the override marker in their latest message) is rejected
-    // with 400 instead of silently spending quota. `expected:*` rewrites
-    // (cold-start / compact / tools-changed) are never blocked. This does NOT
-    // save the cost — the re-sent request re-caches the same — it converts a
-    // silent quota spend into an explicit, consented one.
+    // Rewrite guard — when enabled, an avoidable/anomalous rewrite above the
+    // configured token threshold that has NOT been consented is rejected with
+    // 400 for EVERY consumer: interactive human, automated agent, programmatic
+    // endpoint, AND tool-loop continuation. No silent expensive re-cache ever
+    // slips through. `expected:*` rewrites (cold-start / compact / tools-changed)
+    // are never blocked. This does NOT save the cost — the re-sent request
+    // re-caches the same — it converts a silent quota spend into an explicit,
+    // consented one. Consent has TWO channels:
+    //   1. `overrideMarker` in the latest user message — for an interactive
+    //      human or an LLM agent that controls its next message text; OR
+    //   2. a single-use, short-TTL session-scoped GRANT file (consumeConsent) —
+    //      the actionable channel for consumers that cannot inject a message
+    //      marker at block time (tool_result continuations, programmatic
+    //      clients, an out-of-band orchestrator deciding for a sub-agent):
+    //      `context cache-rewrite-ok <sessionId>`.
     {
       const guard = loadKeepaliveConfig().rewriteGuard
-      const lastMsg = inspectLastUserMessage(parsedBody, guard.overrideMarker)
       if (guard.enabled && rewriteAssessment && !rewriteAssessment.expected
           && !rewriteAssessment.signals.orgChanged   // org no longer BLOCKS — it HOLDS (per-session pin, Layer 2)
-          && rewriteAssessment.predictedTokens >= guard.minRewriteTokens
-          && !lastMsg.isContinuation        // never block an agent tool-loop continuation
-          && !lastMsg.hasMarker) {
-        // Dump the request + prefix diff for offline analysis — both the
-        // blocked and the let-through (automated) path.
-        let dumpPath: string | null = null
-        if (guard.dumpBlocked) {
-          dumpPath = writeRewriteBlockDump(this.rewriteBlockDumpDir, {
-            sessionId,
-            lineageKey: reqLineageKey,
-            rewriteClass: rewriteAssessment.rewriteClass,
-            predictedTokens: rewriteAssessment.predictedTokens,
-            signals: rewriteAssessment.signals,
-            blockedRequest: parsedBody,
-            previousPrefix: rewriteAssessment.prevPrefix,
-          })
-        }
-        // The guard is an INTERACTIVE consent checkpoint: a human sees the 400
-        // and re-sends with the override marker. Two classes of consumer CANNOT
-        // consent and must be let through (log + dump, no 400):
-        //   1. An automated agent — Agent-SDK cognitive worker or CC sub-agent
-        //      (detected by header / metadata).
-        //   2. A programmatic endpoint client — OpenAI-compat or external
-        //      Anthropic-API consumer (interactive=false), when the guard is in
-        //      its default interactive-only mode. Set rewriteGuard.interactiveOnly
-        //      =false to enforce on these too.
-        const programmaticEndpoint = guard.interactiveOnly && ctx.interactive === false
-        const bypassReason = isAutomatedAgent(parsedBody, headers)
-          ? 'an automated agent'
-          : (programmaticEndpoint ? 'a programmatic endpoint client' : null)
-        if (bypassReason) {
-          this.events.emit({
-            level: 'info',
-            kind: 'CACHE_REWRITE_UNGUARDED',
-            sessionId,
-            lineageKey: reqLineageKey,
-            rewriteClass: rewriteAssessment.rewriteClass,
-            predictedTokens: rewriteAssessment.predictedTokens,
-            dumpPath,
-            msg: `rewrite guard would block ${rewriteAssessment.rewriteClass} `
-              + `(~${rewriteAssessment.predictedTokens} tok) — consumer is ${bypassReason} `
-              + `(cannot consent); passed through`
-              + (dumpPath ? ` — dump: ${dumpPath}` : ''),
-          })
-        } else {
+          && rewriteAssessment.predictedTokens >= guard.minRewriteTokens) {
+        // Consent check. Inspect the in-message marker first (no side effect);
+        // only when it is ABSENT consume a session grant (single-use). The
+        // short-circuit OR guarantees a marker'd turn never burns a grant.
+        const lastMsg = inspectLastUserMessage(parsedBody, guard.overrideMarker)
+        const consented = lastMsg.hasMarker
+          || consumeConsent(guard.consentGrantPath, sessionId)
+        if (!consented) {
+          // Dump the blocked request + prefix diff for offline analysis.
+          let dumpPath: string | null = null
+          if (guard.dumpBlocked) {
+            dumpPath = writeRewriteBlockDump(this.rewriteBlockDumpDir, {
+              sessionId,
+              lineageKey: reqLineageKey,
+              rewriteClass: rewriteAssessment.rewriteClass,
+              predictedTokens: rewriteAssessment.predictedTokens,
+              signals: rewriteAssessment.signals,
+              blockedRequest: parsedBody,
+              previousPrefix: rewriteAssessment.prevPrefix,
+            })
+          }
           this.events.emit({
             level: 'error',
             kind: 'CACHE_REWRITE_BLOCKED',
@@ -904,17 +888,32 @@ export class ProxyClient {
             lineageKey: reqLineageKey,
             rewriteClass: rewriteAssessment.rewriteClass,
             predictedTokens: rewriteAssessment.predictedTokens,
+            continuation: lastMsg.isContinuation,
             dumpPath,
             msg: `rewrite guard blocked ${rewriteAssessment.rewriteClass} `
-              + `(~${rewriteAssessment.predictedTokens} tok) — awaiting user override marker`
+              + `(~${rewriteAssessment.predictedTokens} tok) — awaiting consent `
+              + `(${guard.overrideMarker} or: context cache-rewrite-ok ${sessionId})`
               + (dumpPath ? ` — dump: ${dumpPath}` : ''),
           })
           return jsonResponse(400, {
             error: {
               type: 'cache_rewrite_guard',
-              message: `Cache-rewrite guard: this turn would re-cache ~${rewriteAssessment.predictedTokens} `
-                + `tokens (${rewriteAssessment.rewriteClass}) — an unconfirmed quota spend. To proceed, `
-                + `re-send your message with ${guard.overrideMarker} in it. `
+              rewriteClass: rewriteAssessment.rewriteClass,
+              predictedTokens: rewriteAssessment.predictedTokens,
+              minRewriteTokens: guard.minRewriteTokens,
+              // Machine-parseable consent affordances so a programmatic client
+              // or agent harness can act on the block without scraping prose.
+              consent: {
+                marker: guard.overrideMarker,
+                command: '/cache-rewrite-ok',
+                cli: `context cache-rewrite-ok ${sessionId}`,
+                disable: 'keepalive.json → rewriteGuard.enabled=false',
+              },
+              message: `Cache-rewrite guard: this turn would re-cache `
+                + `~${rewriteAssessment.predictedTokens} tokens (${rewriteAssessment.rewriteClass}) — `
+                + `an unconfirmed quota spend, blocked for all consumers. To proceed, either include `
+                + `${guard.overrideMarker} in your next message (/cache-rewrite-ok), or grant out-of-band: `
+                + `context cache-rewrite-ok ${sessionId}. Consent is single-use. `
                 + `(Disable: keepalive.json → rewriteGuard.enabled=false.)`,
             },
           })
@@ -1813,33 +1812,6 @@ export function extractSessionIdFromBody(
     return m ? m[1].toLowerCase() : null
   } catch {
     return null
-  }
-}
-
-/**
- * Is this request from an AUTOMATED agent (vs an interactive human)?
- *
- * The rewrite guard is an interactive consent checkpoint — a 400 the human
- * answers by re-sending with the override marker. An automated agent cannot
- * do that, so the guard must not hard-block it. Two automated cases:
- *   - a Claude Code sub-agent — carries the `x-claude-code-agent-id` header;
- *   - an Agent-SDK-spawned agent (every CWE/CWA cognitive worker) — its
- *     `metadata.user_id` is the underscore form `user_..._session_<uuid>`,
- *     whereas interactive Claude Code writes `user_id` as a JSON object.
- * Never throws.
- */
-function isAutomatedAgent(body: unknown, headers: Record<string, string>): boolean {
-  try {
-    for (const [k, v] of Object.entries(headers)) {
-      if (k.toLowerCase() === 'x-claude-code-agent-id' && typeof v === 'string' && v) return true
-    }
-    const uid = (body as { metadata?: { user_id?: unknown } })?.metadata?.user_id
-    if (typeof uid === 'string' && !uid.trimStart().startsWith('{') && uid.includes('_session_')) {
-      return true
-    }
-    return false
-  } catch {
-    return false
   }
 }
 

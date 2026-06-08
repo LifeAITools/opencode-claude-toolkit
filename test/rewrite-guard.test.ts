@@ -16,6 +16,11 @@ import { join } from 'path'
 import { ProxyClient, extractSessionIdFromBody, type ProxyClientOptions } from '../src/proxy-client.js'
 import type { OrgIdResolver } from '../src/org-identity.js'
 import { lineageKey, prefixHashes } from '../src/lineage.js'
+import { grantConsent } from '../src/rewrite-consent.js'
+
+// Hermetic consent-grant store — MUST match consentGrantPath in
+// _setup-keepalive-fixture.ts so the guard reads what these tests write.
+const GRANT_PATH = '/tmp/__test_cache_rewrite_grants.json'
 
 // Minimal upstream mock — a tiny SSE body so handleRequest's tee()/parse path
 // works for requests that PASS the guard. Blocked requests never reach it.
@@ -110,45 +115,54 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     c.stop()
   })
 
-  test('tool-loop continuation (last user msg is a tool_result) is NOT blocked', async () => {
-    // idle>TTL, but the latest user message is a tool_result — an agent
-    // continuation, not a fresh user turn. The user has no message to mark,
-    // so the guard must let it through rather than strand the loop forever.
+  const continuationBody = () => JSON.stringify({
+    model: 'claude-opus-4-7',
+    system: [{ type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral' } }],
+    tools: [],
+    messages: [
+      { role: 'user', content: 'do the work ' + FILLER },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'result' }] },
+    ],
+  })
+
+  test('tool-loop continuation (last user msg is a tool_result) IS blocked (no message to mark)', async () => {
+    // idle>TTL on a continuation — it has no user text to carry a marker, so the
+    // ONLY consent path is a session grant. Without one it must block (no silent
+    // expensive re-cache), not slip through as the old code did.
     const path = join(TMP, 'rg-sess-5.json')
     seedIdleFor(path, 'rg-sess-5', reqBody(), 10 * 60_000)   // idle past the 5m wire TTL
     const c = mkClient({ prefixHistoryPath: path })
-    const continuation = JSON.stringify({
-      model: 'claude-opus-4-7',
-      system: [{ type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral' } }],
-      tools: [],
-      messages: [
-        { role: 'user', content: 'do the work ' + FILLER },
-        { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
-        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'result' }] },
-      ],
-    })
-    const r = await c.handleRequest(continuation, {}, { sessionId: 'rg-sess-5' })
+    const r = await c.handleRequest(continuationBody(), {}, { sessionId: 'rg-sess-5' })
+    expect(r.status).toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('tool-loop continuation PASSES with a session grant (the actionable channel)', async () => {
+    const path = join(TMP, 'rg-sess-5b.json')
+    seedIdleFor(path, 'rg-sess-5b', reqBody(), 10 * 60_000)
+    grantConsent(GRANT_PATH, 'rg-sess-5b', 180_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(continuationBody(), {}, { sessionId: 'rg-sess-5b' })
     expect(r.status).not.toBe(400)
     c.stop()
     rmSync(path, { force: true })
   })
 
-  test('programmatic endpoint client (interactive:false) is NOT blocked — no human to consent', async () => {
-    // Same avoidable idle-past-TTL rewrite that 400s for an interactive client,
-    // but the consumer is an OpenAI-compat / external-API client. It cannot see
-    // a 400 and re-send with a marker, so interactiveOnly (default) lets it pass.
+  test('programmatic endpoint client (interactive:false) IS blocked — block applies to all', async () => {
+    // Was bypassed under interactiveOnly; now every consumer is blocked unless
+    // consented (the programmatic client consents via the session-grant CLI).
     const path = join(TMP, 'rg-sess-prog.json')
     seedIdleFor(path, 'rg-sess-prog', reqBody(), 10 * 60_000)
     const c = mkClient({ prefixHistoryPath: path })
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-prog', interactive: false })
-    expect(r.status).not.toBe(400)
+    expect(r.status).toBe(400)
     c.stop()
     rmSync(path, { force: true })
   })
 
-  test('interactive client (interactive:true) is still blocked — guard unchanged for humans', async () => {
-    // Regression pin: the endpoint-bypass must NOT weaken the guard for the
-    // interactive native-CC path it was built for.
+  test('interactive client (interactive:true) is still blocked', async () => {
     const path = join(TMP, 'rg-sess-inter.json')
     seedIdleFor(path, 'rg-sess-inter', reqBody(), 10 * 60_000)
     const c = mkClient({ prefixHistoryPath: path })
@@ -435,7 +449,7 @@ describe('extractSessionIdFromBody', () => {
   })
 })
 
-describe('rewrite guard — automated agents are not hard-blocked', () => {
+describe('rewrite guard — automated agents ARE blocked (consent via session grant)', () => {
   // SDK-agent body: metadata.user_id is the underscore form (not JSON).
   const agentBody = () => JSON.stringify({
     model: 'claude-opus-4-7',
@@ -445,26 +459,74 @@ describe('rewrite guard — automated agents are not hard-blocked', () => {
     metadata: { user_id: 'user_devhash_account__session_a1b2c3d4-0000-5111-8222-333344445555' },
   })
 
-  test('SDK-agent ttl-expiry → passes through (CACHE_REWRITE_UNGUARDED), no 400', async () => {
+  test('SDK-agent ttl-expiry → BLOCKED 400 + CACHE_REWRITE_BLOCKED (no UNGUARDED bypass)', async () => {
     const events: any[] = []
     const path = join(TMP, 'rg-auto-1.json')
     seedIdleFor(path, 'rg-auto-1', agentBody(), 10 * 60_000)   // idle past the 5m wire TTL
     const c = mkClient({ eventEmitter: { emit: (e: any) => events.push(e) }, prefixHistoryPath: path })
     const r = await c.handleRequest(agentBody(), {}, { sessionId: 'rg-auto-1' })
-    expect(r.status).not.toBe(400)
-    expect(events.some((e) => e.kind === 'CACHE_REWRITE_UNGUARDED')).toBe(true)
-    expect(events.some((e) => e.kind === 'CACHE_REWRITE_BLOCKED')).toBe(false)
+    expect(r.status).toBe(400)
+    expect(events.some((e) => e.kind === 'CACHE_REWRITE_BLOCKED')).toBe(true)
+    expect(events.some((e) => e.kind === 'CACHE_REWRITE_UNGUARDED')).toBe(false)
     c.stop()
     rmSync(path, { force: true })
   })
 
-  test('Claude Code sub-agent (x-claude-code-agent-id header) ttl-expiry → passes, no 400', async () => {
+  test('Claude Code sub-agent (x-claude-code-agent-id header) ttl-expiry → BLOCKED 400', async () => {
     const path = join(TMP, 'rg-auto-2.json')
     seedIdleFor(path, 'rg-auto-2', reqBody(), 10 * 60_000)
     const c = mkClient({ prefixHistoryPath: path })
     const hdr = { 'x-claude-code-agent-id': 'sub-7' }
     const r = await c.handleRequest(reqBody(), hdr, { sessionId: 'rg-auto-2' })
-    expect(r.status).not.toBe(400)
+    expect(r.status).toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('agent PASSES with a session grant, and the grant is SINGLE-USE', async () => {
+    const hdr = { 'x-claude-code-agent-id': 'sub-9' }
+    grantConsent(GRANT_PATH, 'rg-auto-3', 180_000)
+    // 1st request consumes the grant → passes.
+    const path1 = join(TMP, 'rg-auto-3a.json')
+    seedIdleFor(path1, 'rg-auto-3', agentBody(), 10 * 60_000)
+    const c1 = mkClient({ prefixHistoryPath: path1 })
+    const r1 = await c1.handleRequest(agentBody(), hdr, { sessionId: 'rg-auto-3' })
+    expect(r1.status).not.toBe(400)
+    c1.stop()
+    // 2nd request (fresh client + freshly-seeded idle): grant already consumed
+    // by r1 → blocked. A fresh client avoids r1's in-memory prefix-history warming.
+    const path2 = join(TMP, 'rg-auto-3b.json')
+    seedIdleFor(path2, 'rg-auto-3', agentBody(), 10 * 60_000)
+    const c2 = mkClient({ prefixHistoryPath: path2 })
+    const r2 = await c2.handleRequest(agentBody(), hdr, { sessionId: 'rg-auto-3' })
+    expect(r2.status).toBe(400)
+    c2.stop()
+    rmSync(path1, { force: true })
+    rmSync(path2, { force: true })
+  })
+
+  test('an EXPIRED session grant does NOT pass (TTL respected)', async () => {
+    const path = join(TMP, 'rg-auto-4.json')
+    seedIdleFor(path, 'rg-auto-4', agentBody(), 10 * 60_000)
+    grantConsent(GRANT_PATH, 'rg-auto-4', 1, Date.now() - 10_000)  // granted 10s ago, ttl 1ms → expired
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(agentBody(), {}, { sessionId: 'rg-auto-4' })
+    expect(r.status).toBe(400)
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('the 400 body is structured + actionable (type, rewriteClass, consent.cli)', async () => {
+    const path = join(TMP, 'rg-auto-5.json')
+    seedIdleFor(path, 'rg-auto-5', agentBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(agentBody(), {}, { sessionId: 'rg-auto-5' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { type?: string; rewriteClass?: string; consent?: { cli?: string; marker?: string } } }
+    expect(j.error?.type).toBe('cache_rewrite_guard')
+    expect(j.error?.rewriteClass).toBe('avoidable:ttl-expiry')
+    expect(j.error?.consent?.cli).toContain('context cache-rewrite-ok rg-auto-5')
+    expect(j.error?.consent?.marker).toBe('[cache-rewrite-ok]')
     c.stop()
     rmSync(path, { force: true })
   })

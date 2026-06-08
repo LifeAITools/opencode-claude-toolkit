@@ -756,13 +756,19 @@ export class ProxyClient {
     // force condition (old token expired). Same-org refresh adopts the fresh
     // token seamlessly.
     let orgHeld = false   // this session is holding a previous org (KA must warm the OLD cache)
+    // Hoisted to the guard's scope below: an explicit `[%reload-ok%]` is the
+    // user consenting to migrate THIS session to the current org, so it must
+    // exempt the org-switch from the rewrite guard exactly like an active HOLD
+    // does — otherwise the documented org-swap path would demand a second,
+    // different marker. (Defaults false on any credentials read failure.)
+    let reloadAsked = false
     try {
       const account = {
         orgId: this.orgIdResolver.current(),
         token: await this.credentials.getAccessToken(),
         expiresAt: this.credentials.currentExpiresAt?.() ?? null,
       }
-      const reloadAsked = inspectLastUserMessage(
+      reloadAsked = inspectLastUserMessage(
         parsedBody, loadKeepaliveConfig().rewriteGuard.reloadMarker,
       ).hasMarker
       const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now())
@@ -859,7 +865,16 @@ export class ProxyClient {
     {
       const guard = loadKeepaliveConfig().rewriteGuard
       if (guard.enabled && rewriteAssessment && !rewriteAssessment.expected
-          && !rewriteAssessment.signals.orgChanged   // org no longer BLOCKS — it HOLDS (per-session pin, Layer 2)
+          // org-switch stands down ONLY when Layer 2 actually absorbs the cost:
+          // either this session HOLDS its old org+token (no cross-org burn), or
+          // the user EXPLICITLY reloaded into the current org ([%reload-ok%] =
+          // consent to migrate). When neither holds — a pin lost to a proxy
+          // restart or a global `claude-max reload` — an org-switch is a real
+          // silent cross-org cold rewrite; the guard MUST surface it (block +
+          // consent), not delegate to a Layer 2 that isn't there. (2026-06-08:
+          // a global reload cleared all pins 2s before a switch → ~526K tok
+          // burned on the new org with no block and no signal.)
+          && !(rewriteAssessment.signals.orgChanged && (orgHeld || reloadAsked))
           && rewriteAssessment.predictedTokens >= guard.minRewriteTokens) {
         // Consent check. Inspect the in-message marker first (no side effect);
         // only when it is ABSENT consume a session grant (single-use). The

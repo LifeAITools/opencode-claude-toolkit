@@ -164,8 +164,12 @@ describe('Layer 2 — cli reload rebinds the pin', () => {
     const c = mkClient({ credentialsProvider: m.credentialsProvider, orgIdResolver: m.orgIdResolver, upstreamFetcher: recordingUpstream({ auth }) })
     await c.handleRequest(reqBody(), {}, { sessionId: 'g1' })       // pin org-A
     m.state.orgId = 'org-B'; m.state.token = 'tok-B'
-    c.reloadSessions('cli')                                         // global rebind
-    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'g1' })
+    c.reloadSessions('cli')                                         // global rebind (drops pins)
+    // Post-reload the pin is gone, so the next turn is a cross-org cold rewrite.
+    // The rewrite guard now requires explicit consent for that migration; the
+    // session signals it with [%reload-ok%] (= rebind to the current org). This
+    // exercises the SAME pin-rebind mechanic (→ tok-B) while honoring the guard.
+    const r = await c.handleRequest(reqBody('[%reload-ok%]'), {}, { sessionId: 'g1' })
     expect(r.status).toBe(200)
     expect(auth.at(-1)).toBe('Bearer tok-B')                        // re-pinned to org-B
     c.stop()
@@ -178,8 +182,11 @@ describe('Layer 2 — cli reload rebinds the pin', () => {
     await c.handleRequest(reqBody(), {}, { sessionId: 'keep' })     // pin org-A
     await c.handleRequest(reqBody(), {}, { sessionId: 'move' })     // pin org-A
     m.state.orgId = 'org-B'; m.state.token = 'tok-B'
-    c.reloadSessions('cli', 'move')                                 // rebind only 'move'
-    const rMove = await c.handleRequest(reqBody(), {}, { sessionId: 'move' })
+    c.reloadSessions('cli', 'move')                                 // rebind only 'move' (drops its pin)
+    // 'move' lost its pin → cross-org migration → consent via [%reload-ok%].
+    // 'keep' still holds org-A (pin intact, token alive) → guard stands down on
+    // the HOLD, no marker needed.
+    const rMove = await c.handleRequest(reqBody('[%reload-ok%]'), {}, { sessionId: 'move' })
     const rKeep = await c.handleRequest(reqBody(), {}, { sessionId: 'keep' })
     expect(rMove.status).toBe(200); expect(rKeep.status).toBe(200)
     expect(auth.slice(-2)).toEqual(['Bearer tok-B', 'Bearer tok-A'])  // move→B (rebound), keep→A (held)

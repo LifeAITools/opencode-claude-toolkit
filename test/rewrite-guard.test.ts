@@ -260,12 +260,14 @@ describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
     c.stop()
   })
 
-  test('proxy restart rebinds the session to the CURRENT org (pins are in-memory)', async () => {
-    // Pins are in-memory by design: a restart binds every session to whatever
-    // org is current at the first post-restart request (the user's "перезапуск
-    // подхватывает текущий"). prefixHistory persists, so the cross-org rewrite
-    // is still observable in logs, but it does NOT block — the fresh process has
-    // no pin to hold the old org, so it adopts the current one.
+  test('cross-org rebind after pin loss (restart/reload) WITHOUT [%reload-ok%] → 400 (no silent burn)', async () => {
+    // The pin is in-memory; a proxy restart OR a global `claude-max reload`
+    // (sessionPins.clear()) drops it. prefixHistory persists, so the next
+    // request on a prefix cached under the OLD org is a real cross-org cold
+    // rewrite (~full context) billed to the NEW org. The Layer-2 HOLD cannot
+    // engage (no pin to hold), so the rewrite guard MUST surface it: block +
+    // consent, never the old silent rebind. (2026-06-08 incident: a global
+    // reload wiped pins 2s before an org switch → ~526K tok burned silently.)
     const path = join(TMP, 'persist-restart.json')
 
     const before = mkClient({ orgIdResolver: mutableResolver('org-A'), prefixHistoryPath: path })
@@ -274,7 +276,28 @@ describe('rewrite guard — org-switch (anomalous:org-switch)', () => {
 
     const after = mkClient({ orgIdResolver: mutableResolver('org-B'), prefixHistoryPath: path })
     const r = await after.handleRequest(reqBody(), {}, { sessionId: 'rg-persist-1' })
-    expect(r.status).not.toBe(400)   // no pin post-restart → auto-pins org-B, no block
+    expect(r.status).toBe(400)   // no pin + org changed + not reloaded → blocked for consent
+    const j = await r.json() as { error?: { type?: string; rewriteClass?: string } }
+    expect(j.error?.type).toBe('cache_rewrite_guard')
+    expect(j.error?.rewriteClass).toBe('anomalous:org-switch')
+    after.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('cross-org rebind after pin loss WITH [%reload-ok%] → NOT blocked (explicit switch consented)', async () => {
+    // Same pin-loss + org-switch shape, but the user explicitly opts into the
+    // migration via the reload marker. That IS consent to pay the one-time
+    // cross-org rewrite, so the guard must NOT block — otherwise the documented
+    // org-swap path would demand a second, different marker.
+    const path = join(TMP, 'persist-reloadok.json')
+
+    const before = mkClient({ orgIdResolver: mutableResolver('org-A'), prefixHistoryPath: path })
+    await before.handleRequest(reqBody(), {}, { sessionId: 'rg-persist-2' })
+    before.stop()
+
+    const after = mkClient({ orgIdResolver: mutableResolver('org-B'), prefixHistoryPath: path })
+    const r = await after.handleRequest(reqBody('[%reload-ok%]'), {}, { sessionId: 'rg-persist-2' })
+    expect(r.status).not.toBe(400)   // explicit reload → rebind to org-B, no block
     after.stop()
     rmSync(path, { force: true })
   })

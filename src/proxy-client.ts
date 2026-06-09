@@ -74,7 +74,7 @@ import {
 } from './proxy-adapters.js'
 import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
-import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
+import { prefixHashes, classifyRewrite, lineageKey, cacheablePrefixFingerprint, cacheablePrefixHash, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { consumeConsent } from './rewrite-consent.js'
 import { FileOrgIdResolver, type OrgIdResolver } from './org-identity.js'
@@ -284,6 +284,16 @@ interface PrefixHistoryEntry {
    *  FALSE `avoidable:ttl-expiry` (the predictor saw only real-request idle)
    *  and the rewrite guard blocks a request whose cache is actually hot. */
   lastKaAt?: number
+  /** Content hash of the cacheable prefix (system+tools+messages up to the last
+   *  cache_control breakpoint, markers stripped) of the last real request for
+   *  this lineage — the bytes KA is keeping warm. A later request's prefix hash
+   *  AT `breakpointMsgIndex` is compared against this to detect a mid-session
+   *  prefix divergence (`avoidable:lineage-shift`). Absent in pre-upgrade
+   *  entries → the divergence check is skipped for them (graceful). */
+  prefixHash?: string
+  /** Message index of the warm cache boundary (the last cache_control message);
+   *  -1 when only system/tools were cached. Pairs with `prefixHash`. */
+  breakpointMsgIndex?: number
 }
 
 // ═══ Request context (per handleRequest call) ══════════════════════
@@ -1532,7 +1542,7 @@ export class ProxyClient {
     body: Record<string, unknown>,
     bodyBytes: number,
   ): {
-    commit: { key: string; ph: ReturnType<typeof prefixHashes>; now: number; orgId: string | null; prevLastKaAt: number | undefined; system: unknown; tools: unknown }
+    commit: { key: string; ph: ReturnType<typeof prefixHashes>; now: number; orgId: string | null; prevLastKaAt: number | undefined; system: unknown; tools: unknown; prefixHash: string; breakpointMsgIndex: number }
     assessment: {
       rewriteClass: string
       expected: boolean
@@ -1552,8 +1562,13 @@ export class ProxyClient {
       // can diff old vs new system/tools. The actual history WRITE is deferred
       // to commitPrefixHistory (proceed path only).
       const prevPrefix = this.lineagePrefix.get(key) ?? null
+      // Byte-precise cacheable-prefix fingerprint of THIS body (system+tools+
+      // messages up to the last cache_control breakpoint, markers stripped) —
+      // stored with the snapshot so a later request can be tested for prefix
+      // preservation, and used below to detect a mid-session divergence.
+      const fp = cacheablePrefixFingerprint(body)
       // commit payload — caller persists this ONLY when the request proceeds.
-      const commit = { key, ph, now, orgId, prevLastKaAt: prev?.lastKaAt, system: body.system, tools: body.tools }
+      const commit = { key, ph, now, orgId, prevLastKaAt: prev?.lastKaAt, system: body.system, tools: body.tools, prefixHash: fp.prefixHash, breakpointMsgIndex: fp.breakpointMsgIndex }
 
       const isFirstRequest = !prev
       const systemChanged = !!prev && prev.hashes.system !== ph.system
@@ -1593,15 +1608,40 @@ export class ProxyClient {
       const prevOrgId = prev?.orgId ?? null
       const orgChanged = !!prev && orgId !== null && prevOrgId !== null && orgId !== prevOrgId
 
-      // Prefix unchanged + within TTL + same org → a cache HIT is expected; stay
-      // quiet. Still return the commit payload so the proceed path advances
-      // lastReqAt (a normal hit must refresh the idle clock).
-      if (!isFirstRequest && !systemChanged && !toolsChanged && !orgChanged
+      // Prefix divergence: a still-warm snapshot of the SAME agent identity
+      // (same system-hash) exists for this session, but THIS body does not
+      // reproduce its cacheable prefix (system+tools+messages up to the warm
+      // breakpoint). The warm reference is `prev` when the lineageKey is
+      // unchanged (a message-level edit, e.g. thinking-strip), OR the newest
+      // warm SIBLING (same session + same system-hash, different tool-hash) when
+      // the lineageKey changed (a transient MCP tool flick — the proven case).
+      // Body-only + consumer-agnostic; read-only over prefixHistory (purity).
+      const sysHash = lineageKey.slice(0, lineageKey.indexOf(':'))
+      let warmRef: PrefixHistoryEntry | undefined
+      if (prev && prev.prefixHash !== undefined && lastWarmAt !== undefined && now - lastWarmAt <= ttlMs) {
+        warmRef = prev
+      } else if (isFirstRequest) {
+        const siblingPrefix = `${sessionId}:${sysHash}:`
+        let bestWarm = -1
+        for (const [k, e] of this.prefixHistory) {
+          if (k === key || !k.startsWith(siblingPrefix) || e.prefixHash === undefined) continue
+          const warmAt = Math.max(e.lastReqAt, e.lastKaAt ?? 0)
+          if (now - warmAt <= ttlMs && warmAt > bestWarm) { bestWarm = warmAt; warmRef = e }
+        }
+      }
+      const prefixDiverged = !!warmRef && warmRef.prefixHash !== undefined
+        && warmRef.breakpointMsgIndex !== undefined
+        && cacheablePrefixHash(body, warmRef.breakpointMsgIndex) !== warmRef.prefixHash
+
+      // Prefix unchanged + within TTL + same org + no mid-prefix divergence → a
+      // cache HIT is expected; stay quiet. Still return the commit payload so the
+      // proceed path advances lastReqAt (a normal hit must refresh the idle clock).
+      if (!isFirstRequest && !systemChanged && !toolsChanged && !orgChanged && !prefixDiverged
           && (idleMs === undefined || idleMs <= ttlMs)) {
         return { commit, assessment: null }
       }
 
-      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart, kaRevivalDropped })
+      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart, kaRevivalDropped, prefixDiverged })
       // When the cacheable prefix diverges or expires, ~the whole context
       // re-caches. bodyBytes/4 is a rough token estimate — adequate for a
       // threshold check (the guard) and a human-readable log figure.
@@ -1623,6 +1663,7 @@ export class ProxyClient {
           + (systemChanged ? ' [system changed]' : '')
           + (toolsChanged ? ' [tools changed]' : '')
           + (orgChanged ? ' [org switched]' : '')
+          + (prefixDiverged ? ' [prefix diverged from warm snapshot]' : '')
           + (spansProxyRestart ? ' [spans proxy restart]' : '')
           + (kaRevivalDropped ? ' [ka snapshot dropped — unrevivable]' : '')
           + (idleMs !== undefined && idleMs > ttlMs
@@ -1652,11 +1693,15 @@ export class ProxyClient {
   private commitPrefixHistory(c: {
     key: string; ph: ReturnType<typeof prefixHashes>; now: number
     orgId: string | null; prevLastKaAt: number | undefined; system: unknown; tools: unknown
+    prefixHash: string; breakpointMsgIndex: number
   }): void {
     this.lineagePrefix.set(c.key, { system: c.system, tools: c.tools })
     // Carry prevLastKaAt forward — a real request resets lastReqAt, but the
     // KA-fire timeline is independent and must survive this overwrite.
-    this.prefixHistory.set(c.key, { hashes: c.ph, lastReqAt: c.now, orgId: c.orgId, lastKaAt: c.prevLastKaAt })
+    this.prefixHistory.set(c.key, {
+      hashes: c.ph, lastReqAt: c.now, orgId: c.orgId, lastKaAt: c.prevLastKaAt,
+      prefixHash: c.prefixHash, breakpointMsgIndex: c.breakpointMsgIndex,
+    })
     this.kaReviveDropped.delete(c.key)
   }
 
@@ -1752,6 +1797,8 @@ function loadPrefixHistory(path: string): Map<string, PrefixHistoryEntry> {
           lastReqAt: v.lastReqAt,
           orgId: typeof v.orgId === 'string' ? v.orgId : null,
           lastKaAt: typeof v.lastKaAt === 'number' ? v.lastKaAt : undefined,
+          prefixHash: typeof v.prefixHash === 'string' ? v.prefixHash : undefined,
+          breakpointMsgIndex: typeof v.breakpointMsgIndex === 'number' ? v.breakpointMsgIndex : undefined,
         })
       }
     }

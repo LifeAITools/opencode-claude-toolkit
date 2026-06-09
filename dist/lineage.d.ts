@@ -50,6 +50,31 @@ export interface PrefixHashes {
  * Never throws.
  */
 export declare function prefixHashes(body: unknown): PrefixHashes;
+/** Index of the LAST message bearing a cache_control marker — the warm cache
+ *  boundary `b`. Everything after it is the volatile tail (the newest turn(s)),
+ *  which legitimately changes/trims and must be excluded from the comparison.
+ *  Returns -1 when no message is a breakpoint (only system/tools are cached). */
+export declare function lastBreakpointMsgIndex(body: unknown): number;
+/** Content hash of the cacheable prefix `system + tools + messages[0..upTo]`
+ *  (inclusive), cache_control markers stripped. This is the byte-precise
+ *  fingerprint of what Anthropic caches up to message `upTo`. Comparing two
+ *  bodies' hashes AT THE SAME `upTo` answers "does the new request still
+ *  reproduce the warm prefix?" — equal → cache HIT, differ → rewrite. Never
+ *  throws. */
+export declare function cacheablePrefixHash(body: unknown, upTo: number): string;
+export interface CacheablePrefix {
+    /** Identity of the agent family (same as the first lineageKey segment). */
+    sysHash: string;
+    /** Content hash of system+tools+messages[0..breakpointMsgIndex]. */
+    prefixHash: string;
+    /** Index of the last cache_control message (the warm boundary); -1 if none. */
+    breakpointMsgIndex: number;
+}
+/** Fingerprint the cacheable prefix of a request body: its identity (`sysHash`),
+ *  the warm boundary (`breakpointMsgIndex`), and the content hash up to that
+ *  boundary (`prefixHash`). Stored with a committed snapshot so a later request
+ *  can be tested for prefix preservation. Pure, never throws. */
+export declare function cacheablePrefixFingerprint(body: unknown): CacheablePrefix;
 export type AgentRole = 'main' | 'sub' | 'aux' | 'unknown';
 export interface RoleClassification {
     role: AgentRole;
@@ -111,7 +136,7 @@ export declare const DEFAULT_ROLE_WEIGHTS: RoleWeights;
  * candidate (cost asymmetry: under-KA is expensive, over-KA is cheap).
  */
 export declare function classifyRole(body: unknown, headers: unknown, hints?: RoleHints, weights?: RoleWeights): RoleClassification;
-export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'expected:proxy-restart' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
+export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'expected:proxy-restart' | 'avoidable:lineage-shift' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
 export interface RewriteContext {
     /** This is the first request observed for the lineage. */
     isFirstRequest?: boolean;
@@ -141,6 +166,15 @@ export interface RewriteContext {
      *  context against — and bill — the NEW org. The predictor sets this only
      *  when BOTH org-ids are known and differ (an unknown org never trips it). */
     orgChanged?: boolean;
+    /** A still-warm snapshot of the SAME agent identity (same system-hash, warmed
+     *  within TTL) exists for this session, but THIS request does NOT reproduce
+     *  its cacheable prefix (system+tools+messages up to the warm breakpoint) —
+     *  the divergence is somewhere in the stable prefix, NOT just the volatile
+     *  tail. The predictor sets it by byte-comparing the body's prefix content
+     *  hash (cache_control-stripped) against the warm snapshot's. A genuine cold
+     *  start (no warm same-identity snapshot) never sets it, so it cleanly
+     *  separates an avoidable mid-session shift from an unavoidable first cache. */
+    prefixDiverged?: boolean;
 }
 export interface RewriteVerdict {
     class: RewriteClass;

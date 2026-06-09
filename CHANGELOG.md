@@ -2,6 +2,27 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.17] - 2026-06-09
+
+### Fixed
+- **Rewrite guard now catches a mid-session cache-prefix divergence
+  (`avoidable:lineage-shift`).** A transient MCP-lifecycle tool drop
+  (`WaitForMcpServers` on `/login`/resume) flipped the `toolNames` segment of the
+  `lineageKey`, so `assessCacheMiss` saw a brand-new key → `isFirstRequest=true` →
+  classified `expected:cold-start` → the guard let a ~116K-token cold re-cache
+  through silently, abandoning a snapshot KA had kept warm all night. The guard
+  now compares the request's **byte-precise cacheable-prefix content hash**
+  (system + tools + messages up to the last `cache_control` breakpoint, markers
+  stripped) against the warm same-identity snapshot; any divergence before the
+  volatile tail → `avoidable:lineage-shift` (blocked + consent marker). Catches
+  the proven tool flick AND earlier-message edits (thinking-strip) AND system
+  changes, while normal turn-growth (prefix preserved, tail appended) is never
+  blocked. Fully body-based + consumer-agnostic (no header dependency); the old
+  snapshot keeps being warmed while blocked (proceed-only commit). Orthogonal to
+  the org/token axis (`anomalous:org-switch` still outranks). New pure helpers
+  `cacheablePrefixFingerprint`/`cacheablePrefixHash`/`lastBreakpointMsgIndex` in
+  `lineage.ts`; `prefixHistory` entries now persist `prefixHash`+`breakpointMsgIndex`.
+
 ## [0.20.11] / claude-max-proxy [1.0.2] - 2026-06-03
 
 ### Added

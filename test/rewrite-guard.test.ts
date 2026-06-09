@@ -15,7 +15,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { ProxyClient, extractSessionIdFromBody, type ProxyClientOptions } from '../src/proxy-client.js'
 import type { OrgIdResolver } from '../src/org-identity.js'
-import { lineageKey, prefixHashes } from '../src/lineage.js'
+import { lineageKey, prefixHashes, cacheablePrefixFingerprint } from '../src/lineage.js'
 import { grantConsent } from '../src/rewrite-consent.js'
 
 // Hermetic consent-grant store — MUST match consentGrantPath in
@@ -401,6 +401,129 @@ function mkCapturingClient(extra: Partial<ProxyClientOptions> = {}) {
 
 // Seed a prefix-history entry so the FIRST handleRequest reads as a 2nd request
 // idle `agoMs` ago — same device as the KA-warm suite's seed().
+// Seed a WARM same-identity snapshot (recent lastReqAt/lastKaAt) carrying the
+// body's cacheable-prefix fingerprint, so a later request can be tested for
+// prefix preservation vs divergence.
+function seedWarm(path: string, sessionId: string, bodyStr: string) {
+  const body = JSON.parse(bodyStr)
+  const fp = cacheablePrefixFingerprint(body)
+  const t = Date.now()
+  writeFileSync(path, JSON.stringify({
+    [`${sessionId}:${lineageKey(body)}`]: {
+      hashes: prefixHashes(body), lastReqAt: t, orgId: 'org-default', lastKaAt: t,
+      prefixHash: fp.prefixHash, breakpointMsgIndex: fp.breakpointMsgIndex,
+    },
+  }))
+}
+
+describe('rewrite guard — mid-session prefix divergence (avoidable:lineage-shift)', () => {
+  const SYS = [{ type: 'text', text: 'main agent system', cache_control: { type: 'ephemeral' } }]
+  // System+tools body (no message breakpoint): identity = system, divergence = tools.
+  const toolBody = (tools: { name: string }[]) => JSON.stringify({
+    model: 'claude-opus-4-7', system: SYS, tools,
+    messages: [{ role: 'user', content: 'work ' + FILLER }],
+  })
+  // Body with a message-level cache breakpoint at index 2; an earlier assistant
+  // message optionally carries a thinking block (the resume-time strip target).
+  const msgBody = (withThinking: boolean) => JSON.stringify({
+    model: 'claude-opus-4-7', system: SYS, tools: [{ name: 'Bash' }],
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: 'q1 ' + FILLER }] },
+      { role: 'assistant', content: withThinking
+          ? [{ type: 'thinking', thinking: 'private reasoning' }, { type: 'text', text: 'a1' }]
+          : [{ type: 'text', text: 'a1' }] },
+      { role: 'user', content: [{ type: 'text', text: 'q2', cache_control: { type: 'ephemeral' } }] },
+      { role: 'user', content: [{ type: 'text', text: 'latest turn' }] },
+    ],
+  })
+
+  test('same identity, tool dropped (prefix diverges) → 400 avoidable:lineage-shift', async () => {
+    const path = join(TMP, 'ls-tool.json')
+    seedWarm(path, 'ls-tool', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-tool' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { type?: string; rewriteClass?: string } }
+    expect(j.error?.type).toBe('cache_rewrite_guard')
+    expect(j.error?.rewriteClass).toBe('avoidable:lineage-shift')
+    c.stop(); rmSync(path, { force: true })
+  })
+
+  test('same identity, earlier message thinking-stripped → 400 avoidable:lineage-shift', async () => {
+    const path = join(TMP, 'ls-think.json')
+    seedWarm(path, 'ls-think', msgBody(true))
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(msgBody(false), {}, { sessionId: 'ls-think' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { rewriteClass?: string } }
+    expect(j.error?.rewriteClass).toBe('avoidable:lineage-shift')
+    c.stop(); rmSync(path, { force: true })
+  })
+
+  test('normal turn growth (prefix preserved, tail appended) → NOT blocked', async () => {
+    const path = join(TMP, 'ls-grow.json')
+    seedWarm(path, 'ls-grow', msgBody(true))
+    const grown = JSON.parse(msgBody(true))
+    grown.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'a2 brand new turn' }] })
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(JSON.stringify(grown), {}, { sessionId: 'ls-grow' })
+    expect(r.status).not.toBe(400)
+    c.stop(); rmSync(path, { force: true })
+  })
+
+  test('consent marker retry on a prefix divergence proceeds', async () => {
+    const path = join(TMP, 'ls-marker.json')
+    seedWarm(path, 'ls-marker', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
+    const c = mkClient({ prefixHistoryPath: path })
+    // tool dropped + marker in a trailing user message → passes.
+    const marked = JSON.stringify({
+      model: 'claude-opus-4-7', system: SYS, tools: [{ name: 'Bash' }],
+      messages: [{ role: 'user', content: 'work ' + FILLER + ' [cache-rewrite-ok]' }],
+    })
+    const r = await c.handleRequest(marked, {}, { sessionId: 'ls-marker' })
+    expect(r.status).not.toBe(400)
+    c.stop(); rmSync(path, { force: true })
+  })
+
+  test('session grant consents a divergence (single-use)', async () => {
+    const path = join(TMP, 'ls-grant.json')
+    seedWarm(path, 'ls-grant', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
+    grantConsent(GRANT_PATH, 'ls-grant', 180_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r1 = await c.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-grant' })
+    expect(r1.status).not.toBe(400)   // grant consumed
+    // Re-seed warm (the proceed re-registered the new lineage; reseed the old
+    // warm sibling) and shift again → grant is single-use → blocked.
+    seedWarm(path, 'ls-grant', toolBody([{ name: 'Bash' }, { name: 'Read' }]))
+    const c2 = mkClient({ prefixHistoryPath: path })
+    const r2 = await c2.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-grant' })
+    expect(r2.status).toBe(400)
+    c.stop(); c2.stop(); rmSync(path, { force: true })
+  })
+
+  test('genuine first-ever request (no warm same-identity snapshot) is NOT blocked', async () => {
+    const c = mkClient()
+    const r = await c.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-cold' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+
+  test('different system hash (sub-agent) NOT blocked though a main snapshot is warm', async () => {
+    const path = join(TMP, 'ls-sub.json')
+    seedWarm(path, 'ls-sub', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
+    const subBody = JSON.stringify({
+      model: 'claude-opus-4-7',
+      system: [{ type: 'text', text: 'SUB agent system — different prompt', cache_control: { type: 'ephemeral' } }],
+      tools: [{ name: 'Bash' }],
+      messages: [{ role: 'user', content: 'sub work ' + FILLER }],
+    })
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(subBody, { 'x-claude-code-agent-id': 'sub-1' }, { sessionId: 'ls-sub' })
+    expect(r.status).not.toBe(400)
+    c.stop(); rmSync(path, { force: true })
+  })
+})
+
 function seedIdleFor(path: string, sessionId: string, bodyStr: string, agoMs: number) {
   const body = JSON.parse(bodyStr)
   const t = Date.now() - agoMs

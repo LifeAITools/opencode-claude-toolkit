@@ -1604,13 +1604,28 @@ export class ProxyClient {
       // message tail, so normal turn-growth + injected notifications/reminders
       // (which keep the same lineageKey) never trip it. Read-only (purity).
       let warmSiblingExists = false
+      let siblingKey: string | undefined
       if (isFirstRequest) {
         const sysHash = lineageKey.slice(0, lineageKey.indexOf(':'))
         const siblingPrefix = `${sessionId}:${sysHash}:`
+        let bestWarm = -1
         for (const [k, e] of this.prefixHistory) {
           if (k === key || !k.startsWith(siblingPrefix)) continue
-          if (now - Math.max(e.lastReqAt, e.lastKaAt ?? 0) <= ttlMs) { warmSiblingExists = true; break }
+          const warmAt = Math.max(e.lastReqAt, e.lastKaAt ?? 0)
+          if (now - warmAt <= ttlMs && warmAt > bestWarm) { warmSiblingExists = true; siblingKey = k; bestWarm = warmAt }
         }
+      }
+      // Observability (NOT enforcement): when the tool set changed vs a still-warm
+      // sibling, compute the exact tool diff so the user sees WHAT changed and
+      // ~how much re-caches — once per flick (isFirstRequest), no per-request storm.
+      let toolDrift = ''
+      if (warmSiblingExists && siblingKey) {
+        const sib = toolNameSet(this.lineagePrefix.get(siblingKey)?.tools)
+        const now2 = toolNameSet(body.tools)
+        const removed = [...sib].filter((t) => !now2.has(t))
+        const added = [...now2].filter((t) => !sib.has(t))
+        toolDrift = ` [tool-set drift${removed.length ? ' −[' + removed.join(',') + ']' : ''}`
+          + `${added.length ? ' +[' + added.join(',') + ']' : ''} → ~${Math.round(bodyBytes / 4)} tok re-cache]`
       }
 
       // Prefix unchanged + within TTL + same org → a cache HIT is expected; stay
@@ -1643,7 +1658,7 @@ export class ProxyClient {
           + (systemChanged ? ' [system changed]' : '')
           + (toolsChanged ? ' [tools changed]' : '')
           + (orgChanged ? ' [org switched]' : '')
-          + (warmSiblingExists ? ' [warm sibling — tool-set flick]' : '')
+          + toolDrift
           + (spansProxyRestart ? ' [spans proxy restart]' : '')
           + (kaRevivalDropped ? ' [ka snapshot dropped — unrevivable]' : '')
           + (idleMs !== undefined && idleMs > ttlMs
@@ -1784,6 +1799,19 @@ function savePrefixHistory(m: Map<string, PrefixHistoryEntry>, path: string): vo
   try {
     writeFileSync(path, JSON.stringify(Object.fromEntries(m)))
   } catch { /* best-effort — never break the request path */ }
+}
+
+/** Sorted unique tool-name set of a request body's `tools` array — for the
+ *  observability tool-set-drift diff. Never throws. */
+function toolNameSet(tools: unknown): Set<string> {
+  const out = new Set<string>()
+  if (Array.isArray(tools)) {
+    for (const t of tools) {
+      const n = (t && typeof t === 'object') ? (t as { name?: unknown }).name : undefined
+      if (typeof n === 'string') out.add(n)
+    }
+  }
+  return out
 }
 
 function jsonResponse(status: number, body: unknown): Response {

@@ -2,6 +2,22 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.20] - 2026-06-09
+
+### Changed
+- **Tool-set flick is now OBSERVABILITY, not a block.** Real Anthropic usage proved
+  a `WaitForMcpServers` tool drop costs a genuine ~99K prefix re-cache
+  (`cacheCreationInputTokens=98974` measured) — but it is the CLIENT's tool set that
+  changed (MCP finished connecting → the lifecycle tool is dropped), so it is
+  UNAVOIDABLE: blocking just forces consent on a cost the user cannot avoid, and
+  fires on every routine MCP reconnect. So `avoidable:lineage-shift` is removed; a
+  tool-set change vs a still-warm same-system sibling now classifies as
+  `expected:tools-changed` (NEVER blocked) and the proxy emits a concise, once-per-flick
+  diagnostic in `PREDICTED_CACHE_MISS`: `[tool-set drift −[WaitForMcpServers] → ~N tok
+  re-cache]` — showing exactly which tools changed and the approximate re-cache cost so
+  the user can see it without a block or a per-request storm. Net: zero friction, full
+  visibility. (Supersedes the blocking 0.20.17–0.20.19, all withdrawn.)
+
 ## [0.20.19] - 2026-06-09
 
 ### Changed

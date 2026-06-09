@@ -208,24 +208,25 @@ describe('classifyRewrite', () => {
       .toBe('anomalous:stale-ka-snapshot')
   })
 
-  test('isFirstRequest + warmSiblingExists → avoidable:lineage-shift (tool-set flick)', () => {
+  test('isFirstRequest + warmSiblingExists → expected:tools-changed (NON-blocking, observability only)', () => {
+    // A tool-set flick (e.g. WaitForMcpServers) costs a real re-cache but is the
+    // client's unavoidable change → EXPECTED, never blocked. The proxy surfaces a
+    // diff diagnostic instead.
     const v = classifyRewrite({ isFirstRequest: true, warmSiblingExists: true })
-    expect(v.class).toBe('avoidable:lineage-shift')
-    expect(v.expected).toBe(false)
+    expect(v.class).toBe('expected:tools-changed')
+    expect(v.expected).toBe(true)
   })
 
   test('isFirstRequest WITHOUT a warm sibling stays expected:cold-start', () => {
     expect(classifyRewrite({ isFirstRequest: true }).class).toBe('expected:cold-start')
   })
 
-  test('warmSiblingExists is IGNORED when NOT a first request (same lineage — never a false block)', () => {
-    // A continuing request keeps the same lineageKey; message-tail changes
-    // (injected notifications/reminders) must NEVER trip lineage-shift.
+  test('warmSiblingExists is IGNORED when NOT a first request (same lineage)', () => {
     const v = classifyRewrite({ isFirstRequest: false, warmSiblingExists: true })
-    expect(v.class).not.toBe('avoidable:lineage-shift')
+    expect(v.expected).toBe(true)  // never a problem-class from a sibling on a continuing request
   })
 
-  test('org-switch still outranks a warm-sibling lineage-shift (cross-org is the bigger hazard)', () => {
+  test('org-switch still outranks a warm-sibling tools-change (cross-org is the hazard)', () => {
     expect(classifyRewrite({ isFirstRequest: true, orgChanged: true, warmSiblingExists: true }).class)
       .toBe('anomalous:org-switch')
   })

@@ -428,26 +428,25 @@ describe('rewrite guard — mid-session tool-set flick (avoidable:lineage-shift)
     messages: [{ role: 'user', content: 'q1 ' + FILLER }, ...tailMsgs],
   })
 
-  test('same identity, tool dropped → 400 avoidable:lineage-shift', async () => {
+  test('tool-set flick (WaitForMcpServers dropped) is NOT blocked — observability only', async () => {
+    // The proven incident: a tool drops vs a warm sibling. It costs a real
+    // re-cache, but the client changed its tools (unavoidable) → expected:tools-
+    // changed, NEVER blocked. The proxy logs a drift diagnostic; the request flows.
     const path = join(TMP, 'ls-tool.json')
     seedWarm(path, 'ls-tool', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
     const c = mkClient({ prefixHistoryPath: path })
     const r = await c.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-tool' })
-    expect(r.status).toBe(400)
-    const j = await r.json() as { error?: { type?: string; rewriteClass?: string } }
-    expect(j.error?.type).toBe('cache_rewrite_guard')
-    expect(j.error?.rewriteClass).toBe('avoidable:lineage-shift')
+    expect(r.status).not.toBe(400)
     c.stop(); rmSync(path, { force: true })
   })
 
   test('same lineageKey, message tail grows/changes (injected notification) → NOT blocked', async () => {
     // The 0.20.17/0.20.18 regression: a task-notification/system-reminder appended
-    // to a recent message changed the cacheable prefix and false-blocked. The
-    // sibling approach keys on system⊕tools only, so this is a clean HIT.
+    // to a recent message must never block. The sibling approach keys on system⊕
+    // tools only, so this never even computes a drift.
     const path = join(TMP, 'ls-grow.json')
     seedWarm(path, 'ls-grow', sameLineageBody([{ role: 'assistant', content: [{ type: 'text', text: 'a1' }] }]))
     const c = mkClient({ prefixHistoryPath: path })
-    // Same system+tools (same lineageKey), but the tail changed + grew.
     const grown = sameLineageBody([
       { role: 'assistant', content: [{ type: 'text', text: 'a1' }, { type: 'text', text: '<task-notification>injected</task-notification>' }] },
       { role: 'user', content: 'next turn' },
@@ -457,44 +456,14 @@ describe('rewrite guard — mid-session tool-set flick (avoidable:lineage-shift)
     c.stop(); rmSync(path, { force: true })
   })
 
-  test('consent marker retry on a prefix divergence proceeds', async () => {
-    const path = join(TMP, 'ls-marker.json')
-    seedWarm(path, 'ls-marker', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
-    const c = mkClient({ prefixHistoryPath: path })
-    // tool dropped + marker in a trailing user message → passes.
-    const marked = JSON.stringify({
-      model: 'claude-opus-4-7', system: SYS, tools: [{ name: 'Bash' }],
-      messages: [{ role: 'user', content: 'work ' + FILLER + ' [cache-rewrite-ok]' }],
-    })
-    const r = await c.handleRequest(marked, {}, { sessionId: 'ls-marker' })
-    expect(r.status).not.toBe(400)
-    c.stop(); rmSync(path, { force: true })
-  })
-
-  test('session grant consents a divergence (single-use)', async () => {
-    const path = join(TMP, 'ls-grant.json')
-    seedWarm(path, 'ls-grant', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
-    grantConsent(GRANT_PATH, 'ls-grant', 180_000)
-    const c = mkClient({ prefixHistoryPath: path })
-    const r1 = await c.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-grant' })
-    expect(r1.status).not.toBe(400)   // grant consumed
-    // Re-seed warm (the proceed re-registered the new lineage; reseed the old
-    // warm sibling) and shift again → grant is single-use → blocked.
-    seedWarm(path, 'ls-grant', toolBody([{ name: 'Bash' }, { name: 'Read' }]))
-    const c2 = mkClient({ prefixHistoryPath: path })
-    const r2 = await c2.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-grant' })
-    expect(r2.status).toBe(400)
-    c.stop(); c2.stop(); rmSync(path, { force: true })
-  })
-
-  test('genuine first-ever request (no warm same-identity snapshot) is NOT blocked', async () => {
+  test('genuine first-ever request (no warm sibling) is NOT blocked', async () => {
     const c = mkClient()
     const r = await c.handleRequest(toolBody([{ name: 'Bash' }]), {}, { sessionId: 'ls-cold' })
     expect(r.status).not.toBe(400)
     c.stop()
   })
 
-  test('different system hash (sub-agent) NOT blocked though a main snapshot is warm', async () => {
+  test('sub-agent (different system hash) is NOT blocked though a main snapshot is warm', async () => {
     const path = join(TMP, 'ls-sub.json')
     seedWarm(path, 'ls-sub', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
     const subBody = JSON.stringify({

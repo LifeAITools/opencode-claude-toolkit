@@ -111,7 +111,7 @@ export declare const DEFAULT_ROLE_WEIGHTS: RoleWeights;
  * candidate (cost asymmetry: under-KA is expensive, over-KA is cheap).
  */
 export declare function classifyRole(body: unknown, headers: unknown, hints?: RoleHints, weights?: RoleWeights): RoleClassification;
-export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'expected:proxy-restart' | 'avoidable:lineage-shift' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
+export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'expected:proxy-restart' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
 export interface RewriteContext {
     /** This is the first request observed for the lineage. */
     isFirstRequest?: boolean;
@@ -143,12 +143,13 @@ export interface RewriteContext {
     orgChanged?: boolean;
     /** This is a FIRST request for its lineageKey (system⊕tools), but a still-warm
      *  SIBLING lineage of the SAME session and SAME system-hash (a different
-     *  tool-set) was warmed within TTL. So the new lineageKey is not a genuine
-     *  cold start — it is a mid-session tool-set flick (e.g. a transient MCP tool
-     *  drop) that abandons a cache KA was keeping warm. Detected purely from the
-     *  stable head (system+tools via the lineageKey), never from the volatile
-     *  message tail — so normal turn-growth and injected notifications/reminders
-     *  never trip it. Only meaningful together with `isFirstRequest`. */
+     *  tool-set) was warmed within TTL. So the new lineageKey is a mid-session
+     *  TOOL-SET change (e.g. a transient MCP tool drop like WaitForMcpServers),
+     *  not a genuine cold start. It DOES cost a real prefix re-cache, but the
+     *  change is the client's and UNAVOIDABLE, so it is classified `expected`
+     *  (NEVER blocked) — the proxy surfaces a diff + cost diagnostic instead.
+     *  Detected purely from the stable head (system+tools via the lineageKey),
+     *  never the volatile message tail. Only meaningful with `isFirstRequest`. */
     warmSiblingExists?: boolean;
 }
 export interface RewriteVerdict {

@@ -2,6 +2,27 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.19] - 2026-06-09
+
+### Changed
+- **`avoidable:lineage-shift` reworked to a warm-SIBLING signal (system⊕tools
+  only) — message-prefix comparison removed.** 0.20.17/0.20.18 compared the
+  cacheable MESSAGE prefix up to the last `cache_control` breakpoint, but that
+  breakpoint sits on a recent message into which Claude Code injects content
+  mid-turn (task-notifications, system-reminders, hook output). So a long live
+  session false-blocked on EVERY such injection (a ~400K "rewrite" storm),
+  while shorter sessions without injections were spared — which is exactly what
+  was observed. Root: the volatile zone is wider than "the last 1–2 messages".
+  New detection: a FIRST request for a new `lineageKey` is `avoidable:lineage-shift`
+  ONLY when a still-warm SIBLING of the same session + same system-hash (a
+  different tool-set) exists within TTL — i.e. the lineage changed because the
+  TOOL SET flicked (the proven `WaitForMcpServers` case), detected purely from
+  the stable head (system⊕tools), never the message tail. Verified on the real
+  incident dumps: the WaitForMcpServers flick flags; a same-lineage request with
+  an injected task-notification does NOT. Removed `cacheablePrefixFingerprint`/
+  `cacheablePrefixHash`/`lastBreakpointMsgIndex` and the persisted
+  `prefixHash`/`breakpointMsgIndex` fields (0.20.17/0.20.18 withdrawn).
+
 ## [0.20.18] - 2026-06-09
 
 ### Fixed

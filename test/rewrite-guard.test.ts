@@ -15,7 +15,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { ProxyClient, extractSessionIdFromBody, type ProxyClientOptions } from '../src/proxy-client.js'
 import type { OrgIdResolver } from '../src/org-identity.js'
-import { lineageKey, prefixHashes, cacheablePrefixFingerprint } from '../src/lineage.js'
+import { lineageKey, prefixHashes } from '../src/lineage.js'
 import { grantConsent } from '../src/rewrite-consent.js'
 
 // Hermetic consent-grant store — MUST match consentGrantPath in
@@ -401,43 +401,34 @@ function mkCapturingClient(extra: Partial<ProxyClientOptions> = {}) {
 
 // Seed a prefix-history entry so the FIRST handleRequest reads as a 2nd request
 // idle `agoMs` ago — same device as the KA-warm suite's seed().
-// Seed a WARM same-identity snapshot (recent lastReqAt/lastKaAt) carrying the
-// body's cacheable-prefix fingerprint, so a later request can be tested for
-// prefix preservation vs divergence.
+// Seed a WARM same-identity snapshot (recent lastReqAt/lastKaAt) for a given
+// body's lineage, so a NEW lineage (different tool-set, same system) reads as a
+// warm-sibling lineage-shift.
 function seedWarm(path: string, sessionId: string, bodyStr: string) {
   const body = JSON.parse(bodyStr)
-  const fp = cacheablePrefixFingerprint(body)
   const t = Date.now()
   writeFileSync(path, JSON.stringify({
     [`${sessionId}:${lineageKey(body)}`]: {
       hashes: prefixHashes(body), lastReqAt: t, orgId: 'org-default', lastKaAt: t,
-      prefixHash: fp.prefixHash, breakpointMsgIndex: fp.breakpointMsgIndex,
     },
   }))
 }
 
-describe('rewrite guard — mid-session prefix divergence (avoidable:lineage-shift)', () => {
+describe('rewrite guard — mid-session tool-set flick (avoidable:lineage-shift)', () => {
   const SYS = [{ type: 'text', text: 'main agent system', cache_control: { type: 'ephemeral' } }]
-  // System+tools body (no message breakpoint): identity = system, divergence = tools.
+  // Same system, varying tool-set → same system-hash, different lineageKey.
   const toolBody = (tools: { name: string }[]) => JSON.stringify({
     model: 'claude-opus-4-7', system: SYS, tools,
     messages: [{ role: 'user', content: 'work ' + FILLER }],
   })
-  // Body with a message-level cache breakpoint at index 2; an earlier assistant
-  // message optionally carries a thinking block (the resume-time strip target).
-  const msgBody = (withThinking: boolean) => JSON.stringify({
+  // Same lineageKey (same system+tools) but a growing/changing MESSAGE tail —
+  // must NEVER be blocked (this is what caused the 0.20.17/0.20.18 false storm).
+  const sameLineageBody = (tailMsgs: any[]) => JSON.stringify({
     model: 'claude-opus-4-7', system: SYS, tools: [{ name: 'Bash' }],
-    messages: [
-      { role: 'user', content: [{ type: 'text', text: 'q1 ' + FILLER }] },
-      { role: 'assistant', content: withThinking
-          ? [{ type: 'thinking', thinking: 'private reasoning' }, { type: 'text', text: 'a1' }]
-          : [{ type: 'text', text: 'a1' }] },
-      { role: 'user', content: [{ type: 'text', text: 'q2', cache_control: { type: 'ephemeral' } }] },
-      { role: 'user', content: [{ type: 'text', text: 'latest turn' }] },
-    ],
+    messages: [{ role: 'user', content: 'q1 ' + FILLER }, ...tailMsgs],
   })
 
-  test('same identity, tool dropped (prefix diverges) → 400 avoidable:lineage-shift', async () => {
+  test('same identity, tool dropped → 400 avoidable:lineage-shift', async () => {
     const path = join(TMP, 'ls-tool.json')
     seedWarm(path, 'ls-tool', toolBody([{ name: 'Bash' }, { name: 'WaitForMcpServers' }]))
     const c = mkClient({ prefixHistoryPath: path })
@@ -449,24 +440,19 @@ describe('rewrite guard — mid-session prefix divergence (avoidable:lineage-shi
     c.stop(); rmSync(path, { force: true })
   })
 
-  test('same identity, earlier message thinking-stripped → 400 avoidable:lineage-shift', async () => {
-    const path = join(TMP, 'ls-think.json')
-    seedWarm(path, 'ls-think', msgBody(true))
-    const c = mkClient({ prefixHistoryPath: path })
-    const r = await c.handleRequest(msgBody(false), {}, { sessionId: 'ls-think' })
-    expect(r.status).toBe(400)
-    const j = await r.json() as { error?: { rewriteClass?: string } }
-    expect(j.error?.rewriteClass).toBe('avoidable:lineage-shift')
-    c.stop(); rmSync(path, { force: true })
-  })
-
-  test('normal turn growth (prefix preserved, tail appended) → NOT blocked', async () => {
+  test('same lineageKey, message tail grows/changes (injected notification) → NOT blocked', async () => {
+    // The 0.20.17/0.20.18 regression: a task-notification/system-reminder appended
+    // to a recent message changed the cacheable prefix and false-blocked. The
+    // sibling approach keys on system⊕tools only, so this is a clean HIT.
     const path = join(TMP, 'ls-grow.json')
-    seedWarm(path, 'ls-grow', msgBody(true))
-    const grown = JSON.parse(msgBody(true))
-    grown.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'a2 brand new turn' }] })
+    seedWarm(path, 'ls-grow', sameLineageBody([{ role: 'assistant', content: [{ type: 'text', text: 'a1' }] }]))
     const c = mkClient({ prefixHistoryPath: path })
-    const r = await c.handleRequest(JSON.stringify(grown), {}, { sessionId: 'ls-grow' })
+    // Same system+tools (same lineageKey), but the tail changed + grew.
+    const grown = sameLineageBody([
+      { role: 'assistant', content: [{ type: 'text', text: 'a1' }, { type: 'text', text: '<task-notification>injected</task-notification>' }] },
+      { role: 'user', content: 'next turn' },
+    ])
+    const r = await c.handleRequest(grown, {}, { sessionId: 'ls-grow' })
     expect(r.status).not.toBe(400)
     c.stop(); rmSync(path, { force: true })
   })

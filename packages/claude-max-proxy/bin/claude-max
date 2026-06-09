@@ -803,6 +803,14 @@ async function cmdRun(args: string[]): Promise<never> {
     // explicit override: unset it (=0) in the environment to opt out.
     CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:
       process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS ?? '1',
+    // Force Claude Code to persist the full session transcript to
+    // ~/.claude/projects/<proj>/<sid>.jsonl. In cli + agent-teams mode CC 2.1.169
+    // otherwise SKIPS local persistence (shouldSkipPersistence → HkH()), leaving
+    // only a metadata stub — which blanks the lat-dev-kit context-monitor /
+    // signal-wire <ctx> banner (they parse that transcript). HkH() short-circuits
+    // to "don't skip" when this is set. Respects an explicit override.
+    CLAUDE_CODE_FORCE_SESSION_PERSISTENCE:
+      process.env.CLAUDE_CODE_FORCE_SESSION_PERSISTENCE ?? '1',
   }
 
   const p = spawn({ cmd: [claudeBin, ...args], stdio: ['inherit', 'inherit', 'inherit'], env })

@@ -332,7 +332,23 @@ class RulesStore {
    */
   writeRulesFile(updatedRawRules: unknown[]): void {
     const tmp = `${this.path}.tmp.${process.pid}`
-    const payload = JSON.stringify({ rules: updatedRawRules }, null, 2) + '\n'
+    // Preserve ALL file-level siblings (_meta.hint_wrapper, _minCoreVersion, …)
+    // — only the `rules` array is being updated here. Serializing just
+    // `{ rules }` was the RECURRING-LOSS bug: every toggleRule() persist dropped
+    // the _meta SSOT block (see rules-ssot-integrity.test.ts + schema-gate-ssot
+    // .test.ts and the _meta.hint_wrapper_doc warning in the rules file). Read
+    // the current envelope and swap only `rules`, keeping key order intact.
+    let envelope: Record<string, unknown> = {}
+    try {
+      const existing = JSON.parse(readFileSync(this.path, 'utf8'))
+      if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+        envelope = existing as Record<string, unknown>
+      }
+    } catch {
+      // file missing/corrupt — fall back to a rules-only envelope
+    }
+    envelope.rules = updatedRawRules
+    const payload = JSON.stringify(envelope, null, 2) + '\n'
     writeFileSync(tmp, payload, 'utf8')
     renameSync(tmp, this.path)
     swLog(`RULES_FILE_REWRITTEN rules=${updatedRawRules.length} path=${this.path}`)

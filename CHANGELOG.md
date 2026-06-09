@@ -2,6 +2,22 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.18] - 2026-06-09
+
+### Fixed
+- **Hotfix for 0.20.17 false-positive storm.** `cacheablePrefixHash` hashed the
+  system blocks via `stripCacheControl`, which KEEPS the volatile, non-cached
+  `x-anthropic-billing-header` block (its per-request `cch=` token churns every
+  request). So a still-warm session's EVERY continuation read as
+  `avoidable:lineage-shift` and got blocked — a guard storm across all live
+  sessions right after the 0.20.17 deploy. Fix: hash the system component via
+  `systemToString` (the same cache_control-only filter `lineageKey` uses), so the
+  billing block is excluded and only the genuinely-cached prefix is fingerprinted.
+  Verified on real consecutive request bodies: normal turn-growth preserves the
+  prefix (no block); a real tool-drop still diverges (protection intact). Added a
+  regression test with a realistic billing-header system block. (0.20.17 is
+  withdrawn — do not deploy it.)
+
 ## [0.20.17] - 2026-06-09
 
 ### Fixed

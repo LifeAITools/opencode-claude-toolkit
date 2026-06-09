@@ -138,6 +138,26 @@ describe('cacheablePrefixFingerprint', () => {
     expect(cacheablePrefixHash(withThinking, bp)).not.toBe(cacheablePrefixHash(stripped, bp))
   })
 
+  test('STABLE across the volatile per-request billing header (cch= token churn)', () => {
+    // Real Claude Code prepends a `x-anthropic-billing-header` system block with
+    // NO cache_control carrying a per-request `cch=` token. It is NOT part of
+    // the cached prefix — the fingerprint must ignore it, else EVERY request
+    // reads as a (false) divergence and the guard storms. (Regression: 0.20.17.)
+    const realBody = (cch: string) => ({
+      system: [
+        { type: 'text', text: `x-anthropic-billing-header: cc_version=2.1.168; cch=${cch};` },
+        { type: 'text', text: 'You are Claude Code', cache_control: cc },
+      ],
+      tools: [{ name: 'Bash' }],
+      messages: [msg('user', 'q1'), { role: 'assistant', content: [{ type: 'text', text: 'a1', cache_control: cc }] }, msg('user', 'tail')],
+    })
+    const a = realBody('aaaaa')
+    const b = realBody('zzzzz')
+    const bp = cacheablePrefixFingerprint(a).breakpointMsgIndex
+    expect(cacheablePrefixHash(a, bp)).toBe(cacheablePrefixHash(b, bp))
+    expect(cacheablePrefixFingerprint(a).prefixHash).toBe(cacheablePrefixFingerprint(b).prefixHash)
+  })
+
   test('changes when the TOOL SET changes (the proven WaitForMcpServers flick)', () => {
     const withTool = { system: [{ type: 'text', text: 's', cache_control: cc }], tools: [{ name: 'Bash' }, { name: 'WaitForMcpServers' }], messages: [msg('user', 'a')] }
     const without = { system: [{ type: 'text', text: 's', cache_control: cc }], tools: [{ name: 'Bash' }], messages: [msg('user', 'a')] }

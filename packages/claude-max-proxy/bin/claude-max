@@ -40,6 +40,9 @@ const TUI_PATH = join(PKG_ROOT, 'src', 'tui.ts')
 const INSTALL_DIR = join(HOME, '.local', 'share', 'claude-max-proxy')
 const INSTALL_SERVER = join(INSTALL_DIR, 'src', 'server.ts')
 const INSTALL_TUI = join(INSTALL_DIR, 'src', 'tui.ts')
+// Compiled server binary (deploy-from-source.sh installs it). When present it is
+// the preferred runtime — self-contained, zero node_modules dependency at runtime.
+const INSTALL_SERVER_BIN = join(INSTALL_DIR, 'bin', 'claude-max-proxy')
 const BIN_DIR = join(HOME, '.local', 'bin')
 const BIN_LINK = join(BIN_DIR, 'claude-max')
 
@@ -516,14 +519,21 @@ function installSystemdUnit(bunBin: string): void {
   step('Installing systemd user service')
   mkdirSync(dirname(SYSTEMD_UNIT), { recursive: true })
 
+  // Prefer the compiled binary when deploy-from-source.sh has installed it;
+  // fall back to src-mode for fresh npm installs that never ran a local build.
+  const execStart = existsSync(INSTALL_SERVER_BIN) ? INSTALL_SERVER_BIN : `${bunBin} run ${INSTALL_SERVER}`
+  // OnFailure alert only when the alert unit exists (written by deploy-from-source.sh).
+  const alertUnit = join(HOME, '.config', 'systemd', 'user', 'claude-max-proxy-alert@.service')
+  const onFailure = existsSync(alertUnit) ? 'OnFailure=claude-max-proxy-alert@%n.service\n' : ''
+
   const unit = `[Unit]
 Description=claude-max-proxy — cache keepalive proxy for Claude Code CLI
 After=network-online.target
 Wants=network-online.target
-
+${onFailure}
 [Service]
 Type=simple
-ExecStart=${bunBin} run ${INSTALL_SERVER}
+ExecStart=${execStart}
 Restart=on-failure
 RestartSec=2
 StandardOutput=append:${LOG_FILE}
@@ -663,7 +673,12 @@ async function startProxyFallback(bunBin: string): Promise<boolean> {
   // Precondition: port is free. Caller must verify.
   info('Starting proxy as background process (no OS service configured)')
 
-  const child = Bun.spawn([bunBin, 'run', existsSync(INSTALL_SERVER) ? INSTALL_SERVER : SERVER_PATH], {
+  // Prefer the compiled binary (self-contained — survives broken node_modules);
+  // fall back to src-mode for installs without a local build.
+  const cmd = existsSync(INSTALL_SERVER_BIN)
+    ? [INSTALL_SERVER_BIN]
+    : [bunBin, 'run', existsSync(INSTALL_SERVER) ? INSTALL_SERVER : SERVER_PATH]
+  const child = Bun.spawn(cmd, {
     stdout: Bun.file(LOG_FILE),
     stderr: Bun.file(LOG_FILE),
     stdin: 'ignore',

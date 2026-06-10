@@ -62,6 +62,9 @@ import { checkDeployDrift } from './deploy-drift.js'
 import { readFileSync as _readPkgFs } from 'fs'
 import { join as _joinPkg } from 'path'
 const PROXY_VERSION: string = (() => {
+  // Compiled binaries can't read package.json next to import.meta.dir — the
+  // build inlines the version via `--define process.env.CLAUDE_MAX_PROXY_BUILD_VERSION`.
+  if (process.env.CLAUDE_MAX_PROXY_BUILD_VERSION) return process.env.CLAUDE_MAX_PROXY_BUILD_VERSION
   try { return JSON.parse(_readPkgFs(_joinPkg(import.meta.dir, '..', 'package.json'), 'utf8')).version ?? '0.0.0' }
   catch { return '0.0.0' }
 })()

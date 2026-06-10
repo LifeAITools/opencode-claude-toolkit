@@ -167,6 +167,11 @@ interface AccountState {
   util5h: number | null
   util7d: number | null
   resetAt: number | null
+  /** 'observed' = resetAt came from the upstream rate-limit header on this
+   *  aggregate; 'carried' = upstream omitted it, value is the remembered
+   *  expectation from an earlier observation of the SAME account (re-tuned on
+   *  every fresh observation, dropped once it expires). */
+  resetAtSource?: 'observed' | 'carried'
   level: 'ok' | 'warning' | 'critical'
   message: string
   issuedAt: string
@@ -204,6 +209,14 @@ export interface QuotaWatcherOptions {
 
 const pidStates = new Map<number, PidState>()
 const accountStates = new Map<string, AccountState>()
+/** resetAt carry-forward: upstream sends the rate-limit reset header only on
+ *  SOME responses, so the aggregate's resetAt flickers to null while the
+ *  window it described is still running. Whenever an account yields a real
+ *  resetAt we record it here (timestamp of receipt + the suggested reset);
+ *  null aggregates of the same account then reuse the expectation until it
+ *  expires, and every fresh observation re-tunes it. Seeded from the previous
+ *  quota-status.json at boot so a watcher restart doesn't forget expectations. */
+const expectedResetAt = new Map<string, { resetAt: number; observedAt: number }>()
 let lastWriteAt = 0
 let pendingWrite = false
 let lastCreds: CredsSnapshot = { expiresAt: null, hint: null }
@@ -241,6 +254,21 @@ function reportCorruption(reason: string, sample: string): void {
 
 export function startQuotaWatcher(opts: QuotaWatcherOptions): () => void {
   ensureDir(CLAUDE_LOCAL)
+
+  // 0. Seed resetAt expectations from the previous snapshot BEFORE the boot
+  //    write below wipes it — a watcher restart must not forget a still-valid
+  //    reset time that upstream may not repeat for a while.
+  try {
+    const prev = JSON.parse(readFileSync(QUOTA_STATUS_JSON, 'utf8')) as QuotaStatusFile
+    const now = Date.now()
+    for (const [hint, acc] of Object.entries(prev.accounts ?? {})) {
+      if (typeof acc?.resetAt === 'number' && acc.resetAt > now) {
+        expectedResetAt.set(hint, { resetAt: acc.resetAt, observedAt: now })
+      }
+    }
+  } catch {
+    // first boot / missing / corrupt previous snapshot — nothing to seed
+  }
 
   // 1. Boot event
   appendTokenEvent({
@@ -505,7 +533,14 @@ function inferAccountHint(
   // delta > 1h → likely account swap.
   if (prev) {
     const u5delta = Math.abs((util5h ?? 0) - (prev.util5h ?? 0))
-    const resetDelta = Math.abs((resetAt ?? 0) - (prev.resetAt ?? 0))
+    // resetAt is only present on SOME upstream responses. A missing header is
+    // NOT evidence of an account swap — comparing null as 0 made every header
+    // flicker look like a >1h "drama", re-hashing the pid to a fresh hint and
+    // breaking per-account continuity (incl. resetAt carry-forward). Compare
+    // only when both sides actually carry a value.
+    const resetDelta = resetAt != null && prev.resetAt != null
+      ? Math.abs(resetAt - prev.resetAt)
+      : 0
     if (u5delta < 0.5 && resetDelta < 60 * 60_000) return prev.accountHint
   }
 
@@ -535,6 +570,24 @@ function recomputeAccountFromPids(accountHint: string): void {
     return
   }
 
+  // resetAt carry-forward (see expectedResetAt above): observed → remember/re-tune;
+  // null → reuse the unexpired expectation; expired expectation → drop it.
+  let resetAtSource: 'observed' | 'carried' | undefined
+  if (resetAt != null) {
+    resetAtSource = 'observed'
+    expectedResetAt.set(accountHint, { resetAt, observedAt: Date.now() })
+  } else {
+    const exp = expectedResetAt.get(accountHint)
+    if (exp) {
+      if (exp.resetAt > Date.now()) {
+        resetAt = exp.resetAt
+        resetAtSource = 'carried'
+      } else {
+        expectedResetAt.delete(accountHint)
+      }
+    }
+  }
+
   const level = classifyLevel(util5h, util7d)
   const resetInMin = resetAt
     ? Math.max(0, Math.round((resetAt - Date.now()) / 60_000))
@@ -558,6 +611,7 @@ function recomputeAccountFromPids(accountHint: string): void {
     util5h,
     util7d,
     resetAt,
+    ...(resetAtSource ? { resetAtSource } : {}),
     level,
     message,
     issuedAt,

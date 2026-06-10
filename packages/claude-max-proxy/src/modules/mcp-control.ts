@@ -22,7 +22,8 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition, BunServer } from '../module.js'
 import { bus } from '../event-bus.js'
-import { requireControlAuth } from '../control-auth.js'
+import { corsify, requireControlAuth } from '../control-auth.js'
+import { buildControlManifest, CONTROL_MANIFEST_URI } from './ucm-manifest.js'
 
 const PROTOCOL_VERSION = '2025-03-26'
 const SERVER_INFO = { name: 'claude-max-proxy-control', version: '1.0.0' }
@@ -44,6 +45,18 @@ const DEFAULT_STREAM_KINDS = new Set([
 
 let ctx: ModuleContext
 const liveSessions = new Set<string>()  // Mcp-Session-Id values issued by initialize
+
+// UCM-манифест (UCB, REQ-15): собирается лениво, валидируется ucm-schema
+let manifestCache: { version: string; json: string } | null = null
+function controlManifestJson(): string {
+  if (!manifestCache || manifestCache.version !== ctx.version) {
+    manifestCache = {
+      version: ctx.version,
+      json: JSON.stringify(buildControlManifest(ctx.version)),
+    }
+  }
+  return manifestCache.json
+}
 
 // ─── tool registry ───────────────────────────────────────────────────
 
@@ -148,12 +161,33 @@ async function handleRpc(msg: RpcMsg, tools: ToolDef[]): Promise<RpcMsg | null> 
     case 'initialize':
       return rpcResult(id, {
         protocolVersion: PROTOCOL_VERSION,
-        capabilities: { tools: { listChanged: false }, logging: {} },
+        capabilities: { tools: { listChanged: false }, resources: {}, logging: {} },
         serverInfo: SERVER_INFO,
-        instructions: 'claude-max-proxy control surface. Call tools/list for actions; open GET /mcp (text/event-stream) for realtime KA/org/quota events as notifications/proxy_event.',
+        instructions: 'claude-max-proxy control surface. Call tools/list for actions; read ui://control-manifest (UCM) for the control-board declaration; open GET /mcp (text/event-stream) for realtime KA/org/quota events as notifications/proxy_event.',
       })
     case 'ping':
       return rpcResult(id, {})
+    case 'resources/list':
+      return rpcResult(id, {
+        resources: [
+          {
+            uri: CONTROL_MANIFEST_URI,
+            name: 'UCM control manifest',
+            description: 'Universal Control Manifest for the Universal Control Board (UCB)',
+            mimeType: 'application/json',
+          },
+        ],
+      })
+    case 'resources/read': {
+      if (params?.uri !== CONTROL_MANIFEST_URI) {
+        return rpcError(id, -32602, `unknown resource: ${params?.uri}`)
+      }
+      return rpcResult(id, {
+        contents: [
+          { uri: CONTROL_MANIFEST_URI, mimeType: 'application/json', text: controlManifestJson() },
+        ],
+      })
+    }
     case 'tools/list':
       return rpcResult(id, {
         tools: tools.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
@@ -281,7 +315,8 @@ export function createMcpControlModule(): ProxyModule {
 
   return {
     name: 'mcp-control',
-    routes,
+    // CORS (REQ-16): web-PWA пульт — cross-origin; заголовки + OPTIONS preflight
+    routes: corsify(routes),
     init(c) { ctx = c },
   }
 }

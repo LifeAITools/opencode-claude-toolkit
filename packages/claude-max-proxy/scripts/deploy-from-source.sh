@@ -60,6 +60,20 @@ rm -rf "$SDK_DST/dist"; cp -a "$SDK_DIST" "$SDK_DST/dist"
 cp "$SDK_PKG" "$SDK_DST/package.json"
 log "SDK synced ($(grep -o '"version": "[^"]*"' "$SDK_DST/package.json" | head -1))"
 
+# 3b. Sync registry deps the live install lacks (same hand-sync pattern as the
+#     SDK: a blanket `bun install` here would overwrite the freshly synced SDK
+#     with a registry copy). @kiberos/ucm-schema (UCM contract, UCB S5) + its
+#     runtime deps zod/ajv.
+PKG_NM=$SRC_REPO/packages/claude-max-proxy/node_modules
+for dep in "@kiberos/ucm-schema" "zod" "ajv"; do
+  src_dep="$PKG_NM/$dep"
+  dst_dep="$INSTALLED/node_modules/$dep"
+  [ -d "$src_dep" ] || { log "DEP MISSING in source: $dep — run bun install in the package"; exit 1; }
+  mkdir -p "$(dirname "$dst_dep")"
+  rsync -a --delete "$src_dep/" "$dst_dep/"
+done
+log "vendor deps synced (@kiberos/ucm-schema, zod, ajv)"
+
 # 4. Write deploy manifest (sha256 of every live src file + the SDK bundle).
 #    Startup compares against this to detect post-deploy hand-edits.
 COMMIT=$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)

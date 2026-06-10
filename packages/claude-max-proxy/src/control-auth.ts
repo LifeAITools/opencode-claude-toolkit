@@ -44,3 +44,50 @@ export function requireControlAuth(
     { status: 401, headers: { 'www-authenticate': 'Bearer' } },
   )
 }
+
+// ═══ CORS for the control plane (REQ-16, UCB web-PWA) ═══════════════
+//
+// A pure web-PWA control board is cross-origin: the browser sends a
+// preflight (OPTIONS) and requires Access-Control headers on every
+// /mcp + /admin response. Native shells (Tauri) bypass CORS — this is
+// strictly for the web target. Auth still applies: CORS headers do not
+// weaken the bearer gate, they only let the browser ask.
+
+import type { RouteDefinition } from './module.js'
+
+export function corsHeaders(req: Request): Record<string, string> {
+  return {
+    'access-control-allow-origin': req.headers.get('origin') ?? '*',
+    'access-control-allow-headers': 'authorization, content-type, mcp-session-id',
+    'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+    'access-control-expose-headers': 'mcp-session-id',
+  }
+}
+
+/**
+ * Wrap a module's routes with CORS: every response gains the headers and
+ * each unique path gains an OPTIONS preflight route (router matches exact
+ * paths, so preflights must be first-class routes).
+ */
+export function corsify(routes: RouteDefinition[]): RouteDefinition[] {
+  const wrapped: RouteDefinition[] = routes.map((r) => ({
+    ...r,
+    handler: async (req, server) => {
+      const res = await r.handler(req, server)
+      const headers = new Headers(res.headers)
+      for (const [k, v] of Object.entries(corsHeaders(req))) headers.set(k, v)
+      return new Response(res.body, { status: res.status, headers })
+    },
+  }))
+  const seen = new Set<string>()
+  for (const r of routes) {
+    if (seen.has(r.path)) continue
+    seen.add(r.path)
+    wrapped.push({
+      method: 'OPTIONS',
+      path: r.path,
+      handler: async (req) => new Response(null, { status: 204, headers: corsHeaders(req) }),
+    })
+  }
+  return wrapped
+}

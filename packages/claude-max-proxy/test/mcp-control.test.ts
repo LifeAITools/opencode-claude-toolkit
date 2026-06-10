@@ -168,3 +168,71 @@ describe('control-plane auth (/mcp + /admin/*)', () => {
     expect((await sessions.handler(new Request('http://x/admin/sessions'), loopback)).status).toBe(200)
   })
 })
+
+// ─── UCM control manifest (UCB S5: ui://control-manifest + CORS) ─────
+
+import { validateManifest } from '@kiberos/ucm-schema'
+
+describe('UCM ui://control-manifest (UCB integration)', () => {
+  test('resources/list exposes the manifest resource', async () => {
+    const { ctx } = mkCtx()
+    const mod = createMcpControlModule(); mod.init(ctx)
+    const res = await route(mod, 'POST', '/mcp').handler(rpc('resources/list'), loopback)
+    const body = await res.json() as any
+    expect(body.result.resources[0].uri).toBe('ui://control-manifest')
+  })
+
+  test('resources/read returns a UCM manifest that validates pristine', async () => {
+    const { ctx } = mkCtx()
+    const mod = createMcpControlModule(); mod.init(ctx)
+    const res = await route(mod, 'POST', '/mcp').handler(
+      rpc('resources/read', { uri: 'ui://control-manifest' }), loopback)
+    const body = await res.json() as any
+    const doc = JSON.parse(body.result.contents[0].text)
+    const v = validateManifest(doc)
+    expect(v.ok).toBe(true)
+    if (v.ok) {
+      expect(v.warnings).toEqual([])
+      expect(v.manifest.service.id).toBe('claude-max-proxy')
+      expect(v.manifest.controls.map(c => c.id)).toContain('org_switch')
+      expect(v.manifest.controls.find(c => c.id === 'sessions_disarm')?.dangerous).toBe(true)
+      expect(v.manifest.version).toContain('test') // ctx.version в ключе кэша
+    }
+  })
+
+  test('resources/read of unknown uri → -32602', async () => {
+    const { ctx } = mkCtx()
+    const mod = createMcpControlModule(); mod.init(ctx)
+    const res = await route(mod, 'POST', '/mcp').handler(
+      rpc('resources/read', { uri: 'ui://nope' }), loopback)
+    const body = await res.json() as any
+    expect(body.error.code).toBe(-32602)
+  })
+
+  test('CORS: OPTIONS preflight on /mcp → 204 + headers; POST carries CORS headers', async () => {
+    const { ctx } = mkCtx()
+    const mod = createMcpControlModule(); mod.init(ctx)
+    const pre = await route(mod, 'OPTIONS', '/mcp').handler(
+      new Request('http://x/mcp', { method: 'OPTIONS', headers: { origin: 'http://board.local' } }),
+      remote)
+    expect(pre.status).toBe(204)
+    expect(pre.headers.get('access-control-allow-origin')).toBe('http://board.local')
+    expect(pre.headers.get('access-control-allow-headers')).toContain('authorization')
+
+    const post = await route(mod, 'POST', '/mcp').handler(rpc('ping'), loopback)
+    expect(post.headers.get('access-control-allow-origin')).toBeTruthy()
+    expect(post.headers.get('access-control-expose-headers')).toContain('mcp-session-id')
+  })
+
+  test('CORS на /admin: preflight открыт, сами роуты остаются за auth-гейтом', async () => {
+    const { ctx } = mkCtx(null) // нет ADMIN_TOKEN → remote fail-closed
+    const admin = createAdminModule(); admin.init(ctx)
+    const pre = await admin.routes.find(r => r.method === 'OPTIONS' && r.path === '/admin/sessions')!
+      .handler(new Request('http://x/admin/sessions', { method: 'OPTIONS' }), remote)
+    expect(pre.status).toBe(204)
+    const denied = await admin.routes.find(r => r.method === 'GET' && r.path === '/admin/sessions')!
+      .handler(new Request('http://x/admin/sessions'), remote)
+    expect(denied.status).toBe(401)
+    expect(denied.headers.get('access-control-allow-origin')).toBeTruthy()
+  })
+})

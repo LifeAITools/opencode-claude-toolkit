@@ -16,7 +16,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
-import { requireControlAuth } from '../control-auth.js'
+import { corsify, requireControlAuth } from '../control-auth.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -134,7 +134,7 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
         }
         const result = await ctx.proxyClient.switchSessionOrg(body.sessionId, body.org)
         if (!result.ok) return Response.json({ ok: false, error: result.error }, { status: 404 })
-        return Response.json({ ok: true, sessionId: body.sessionId, ...result })
+        return Response.json({ ...result, ok: true, sessionId: body.sessionId })
       },
     },
 
@@ -170,7 +170,9 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
 
   return {
     name: 'admin',
-    routes: guarded,
+    // CORS (REQ-16): web-PWA пульт ходит на control-plane cross-origin;
+    // preflight-роуты OPTIONS не гейтятся auth (браузер не шлёт credentials)
+    routes: corsify(guarded),
     init(c) { ctx = c },
   }
 }

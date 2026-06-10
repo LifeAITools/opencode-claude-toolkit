@@ -182,11 +182,20 @@ interface AccountState {
   pids: number[]
 }
 
+/** session → org attribution (multi-org hosts): which organization served a
+ *  given proxy session's traffic last. Consumers (badge, signal-wire hook)
+ *  look their own session up here FIRST; pool aggregation is the fallback. */
+interface SessionState {
+  org: string
+  lastSeenAt: number // ms
+}
+
 interface QuotaStatusFile {
   version: 1
   updatedAt: string
   accounts: Record<string, AccountState>
   pids: Record<string, PidState>
+  sessions?: Record<string, SessionState>
 }
 
 interface TokenEvent {
@@ -216,6 +225,7 @@ export interface QuotaWatcherOptions {
 
 const pidStates = new Map<number, PidState>()
 const accountStates = new Map<string, AccountState>()
+const sessionStates = new Map<string, SessionState>()
 /** resetAt carry-forward: upstream sends the rate-limit reset header only on
  *  SOME responses, so the aggregate's resetAt flickers to null while the
  *  window it described is still running. Whenever an account yields a real
@@ -411,6 +421,9 @@ function onCredsChange(path: string): void {
     for (const s of pidStates.values()) {
       if (s.accountHint === prevOrg) s.accountHint = newOrg
     }
+    for (const s of sessionStates.values()) {
+      if (s.org === prevOrg) s.org = newOrg
+    }
     emit({
       level: 'info',
       kind: 'ORG_KEY_MIGRATED',
@@ -544,6 +557,10 @@ function ingestStatsLine(line: StatsLine): void {
     level: classifyLevel(util5h, util7d),
   }
   pidStates.set(pid, state)
+  // session → org attribution for consumers (multi-org per-session lookup).
+  if (typeof line.ses === 'string' && line.ses) {
+    sessionStates.set(line.ses, { org: accountHint, lastSeenAt: ts })
+  }
   recomputeAccountFromPids(accountHint)
   // Pid moved between accounts (org stamp appeared / re-login) — recompute the
   // old account too so it doesn't keep a phantom claim on this pid.
@@ -697,6 +714,7 @@ function writeQuotaStatus(): void {
     pids: Object.fromEntries(
       Array.from(pidStates.entries()).map(([pid, s]) => [String(pid), s]),
     ),
+    sessions: Object.fromEntries(sessionStates),
   }
   const tmp = QUOTA_STATUS_JSON + '.tmp'
   try {
@@ -728,6 +746,10 @@ function pruneStaleStates(now: number): void {
     }
   }
   for (const h of affectedAccounts) recomputeAccountFromPids(h)
+  // Sessions are plain ids (no liveness probe possible) — prune by age only.
+  for (const [ses, s] of sessionStates.entries()) {
+    if (s.lastSeenAt < cutoff) sessionStates.delete(ses)
+  }
 }
 
 function isPidAlive(pid: number): boolean {

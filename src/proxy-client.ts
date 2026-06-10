@@ -1338,6 +1338,8 @@ export class ProxyClient {
             kind: 'KA_FIRE_COMPLETE',
             sessionId,
             lineageKey: stats.lineageKey,
+            // Org of the session's pinned token (multi-org quota attribution).
+            org: this.sessionPins.get(sessionId)?.orgId ?? null,
             model: stats.model,
             durationMs: stats.durationMs,
             idleMs: stats.idleMs,
@@ -1685,6 +1687,9 @@ export class ProxyClient {
         // specific agent (main vs each sub-agent) — needed to verify the main
         // agent's cache survives a sub-agent (Task-tool) excursion.
         lineageKey,
+        // Organization that actually served this request (multi-org: the
+        // session's pinned org) — the quota pipeline attributes per-org by it.
+        org: this.sessionPins.get(sessionId)?.orgId ?? null,
         model,
         durationMs: Date.now() - t0,
         usage,

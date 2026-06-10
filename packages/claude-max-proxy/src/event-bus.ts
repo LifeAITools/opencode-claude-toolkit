@@ -187,6 +187,9 @@ export interface UsageEventPayload {
 export interface RealRequestCompleteEvent extends BaseEvent {
   kind: 'REAL_REQUEST_COMPLETE'
   sessionId: string
+  /** Organization that served this request (multi-org proxy: the session's
+   *  pinned org). null/absent on pre-multi-org SDK builds. */
+  org?: string | null
   model: string
   durationMs: number
   usage: UsageEventPayload
@@ -200,6 +203,8 @@ export interface RealRequestCompleteEvent extends BaseEvent {
 export interface KaFireCompleteEvent extends BaseEvent {
   kind: 'KA_FIRE_COMPLETE'
   sessionId: string
+  /** Org of the session's pinned token — see RealRequestCompleteEvent.org. */
+  org?: string | null
   model: string
   durationMs: number
   idleMs: number

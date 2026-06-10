@@ -66,6 +66,9 @@ interface StatsLine {
   pid: number
   type: 'stream'
   model: string
+  /** Proxy session id of the request — lets quota consumers attribute a
+   *  CLAUDE SESSION to its org (multi-org hosts). */
+  ses?: string
   /** Stable per-ORGANIZATION key (additive, multi-org hosts). Today derived
    *  from the credentials this proxy instance serves — when several proxy
    *  instances with different org tokens share one stats.jsonl, each stamps
@@ -153,7 +156,10 @@ export function startStatsEmitter(): () => void {
     // The processor skips lines with no util on both axes — don't bother writing them.
     if (util5h === null && util7d === null) return
 
-    const org = currentOrgKey()
+    // Org precedence: the EVENT's per-request org (multi-org proxy — the org
+    // whose token actually served this request) wins; the credentials-file
+    // fallback covers pre-multi-org SDK builds / unpinned sessions.
+    const org = ev.org ?? currentOrgKey()
     const line: StatsLine = {
       v: STATS_SCHEMA_VERSION,
       ts: ev.ts,
@@ -161,6 +167,7 @@ export function startStatsEmitter(): () => void {
       type: 'stream',
       model: ev.model ?? '?',
       ...(org ? { org } : {}),
+      ...(ev.sessionId ? { ses: ev.sessionId } : {}),
       usage: projectUsage(ev.usage),
       rateLimit: {
         status: (ev.rateLimit as any)?.status ?? null,

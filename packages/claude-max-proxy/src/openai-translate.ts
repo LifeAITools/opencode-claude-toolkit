@@ -11,6 +11,8 @@
  *   → Anthropic SSE Response → transformAnthropicSSEToOpenAI() → OpenAI SSE
  */
 
+import { supportsAdaptiveThinking, supportsSamplingParams } from '@life-ai-tools/claude-code-sdk'
+
 // ═══ OpenAI Types ═══════════════════════════════════════════════════
 
 export interface OAIMessage {
@@ -105,6 +107,7 @@ const GPT_TO_CLAUDE: Record<string, string> = {
 }
 
 const PROXY_MODEL_MAP: Record<string, string> = {
+  'claude-v5-fable': 'claude-fable-5',
   'claude-v4.6-sonnet': 'claude-sonnet-4-6',
   'claude-v4.6-opus': 'claude-opus-4-6',
   'claude-v4.7-opus': 'claude-opus-4-7',
@@ -113,6 +116,7 @@ const PROXY_MODEL_MAP: Record<string, string> = {
 }
 
 const DIRECT_MODEL_MAP: Record<string, string> = {
+  'claude-fable-5': 'claude-fable-5',
   'claude-sonnet-4-6': 'claude-sonnet-4-6',
   'claude-opus-4-6': 'claude-opus-4-6',
   'claude-opus-4-7': 'claude-opus-4-7',
@@ -123,18 +127,31 @@ const DIRECT_MODEL_MAP: Record<string, string> = {
   'claude-opus-4-20250514': 'claude-opus-4-20250514',
 }
 
+// Models we've already warned about — one WARN per unknown model per process,
+// so a new Anthropic model showing up in traffic is visible in the log on day 1
+// instead of being discovered by a human days later (fable-5 lesson, 2026-06-10).
+const warnedUnknownModels = new Set<string>()
+
 export function resolveModel(model: string): string {
-  return GPT_TO_CLAUDE[model] ?? PROXY_MODEL_MAP[model] ?? DIRECT_MODEL_MAP[model] ?? model
+  const resolved = GPT_TO_CLAUDE[model] ?? PROXY_MODEL_MAP[model] ?? DIRECT_MODEL_MAP[model]
+  if (resolved) return resolved
+  if (!warnedUnknownModels.has(model)) {
+    warnedUnknownModels.add(model)
+    console.error(`WARN  UNKNOWN_MODEL_PASSTHROUGH model=${model} — not in any model map; passing through as-is. Add it to models.ts + openai-translate.ts (see docs/adding-a-model.md)`)
+  }
+  return model
 }
 
 export const SUPPORTED_MODELS = [
   // Claude native names
+  { id: 'claude-fable-5', name: 'Claude Fable 5' },
   { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
   { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
   { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
   { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
   // Proxy-style IDs
+  { id: 'claude-v5-fable', name: 'Claude V5 Fable' },
   { id: 'claude-v4.6-sonnet', name: 'Claude V4.6 Sonnet' },
   { id: 'claude-v4.6-opus', name: 'Claude V4.6 Opus' },
   { id: 'claude-v4.7-opus', name: 'Claude V4.7 Opus' },
@@ -204,15 +221,25 @@ export function translateToAnthropicBody(req: OAIChatRequest): TranslationResult
 
   if (tools?.length) body.tools = tools
   if (toolChoice) body.tool_choice = toolChoice
-  if (req.temperature !== undefined) body.temperature = req.temperature
-  if (req.top_p !== undefined) body.top_p = req.top_p
+  // Sampling params are REMOVED on opus-4-7+/fable-5 (Anthropic returns 400).
+  // OpenAI clients send temperature on nearly every request — silently drop
+  // it for those models instead of failing the call (capability read from
+  // the models.ts SSOT via the SDK).
+  const samplingAllowed = supportsSamplingParams(model)
+  if (samplingAllowed && req.temperature !== undefined) body.temperature = req.temperature
+  if (samplingAllowed && req.top_p !== undefined) body.top_p = req.top_p
   if (req.stop) {
     body.stop_sequences = Array.isArray(req.stop) ? req.stop : [req.stop]
   }
 
-  // reasoning_effort → thinking config
+  // reasoning_effort → thinking config. budget_tokens is removed on
+  // adaptive-only models (opus-4-7+/fable-5) — use adaptive there.
   if (req.reasoning_effort) {
-    body.thinking = { type: 'enabled', budget_tokens: thinkingBudget(req.reasoning_effort, req.max_tokens ?? 16384) }
+    if (supportsAdaptiveThinking(model)) {
+      body.thinking = { type: 'adaptive' }
+    } else {
+      body.thinking = { type: 'enabled', budget_tokens: thinkingBudget(req.reasoning_effort, req.max_tokens ?? 16384) }
+    }
   }
 
   // Inject cache markers at strategic breakpoints so Anthropic caches the

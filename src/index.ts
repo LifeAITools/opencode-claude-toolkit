@@ -172,6 +172,7 @@ export {
   resolveMaxTokens,
   getModelMetadata,
   supportsAdaptiveThinking,
+  supportsSamplingParams,
 } from './models.js'
 export type { ModelMetadata } from './models.js'
 

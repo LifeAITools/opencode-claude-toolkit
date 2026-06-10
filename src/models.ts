@@ -47,6 +47,11 @@ export interface ModelMetadata {
   maxOutput: number
   /** Whether this model supports adaptive thinking (SDK sets { type: 'adaptive' }) */
   adaptiveThinking: boolean
+  /**
+   * Whether this model still accepts sampling params (temperature/top_p/top_k).
+   * Removed (400 if sent) on opus-4-7+, opus-4-8 and fable-5.
+   */
+  samplingParams: boolean
   /** Equivalent API pricing (USD per million tokens) — for savings display on Max subscription */
   cost: {
     input: number
@@ -64,13 +69,27 @@ export interface ModelMetadata {
  * Max/Pro subscription.
  */
 export const MAX_MODELS: Record<string, ModelMetadata> = {
+  // Fable 5 — new tier above Opus. Adaptive-only thinking; sampling params
+  // (temperature/top_p/top_k) and budget_tokens are REMOVED (400 if sent).
+  // Quirk vs opus-4-7/4-8: an explicit thinking:{type:"disabled"} also 400s —
+  // the thinking field must be OMITTED entirely when thinking is off.
+  'claude-fable-5': {
+    name: 'Claude Fable 5',
+    context: 1_000_000,
+    defaultOutput: 64_000,
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    cost: { input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
+  },
   'claude-opus-4-8': {
     name: 'Claude Opus 4.8',
     context: 1_000_000,
     defaultOutput: 64_000,   // native CLI wa() default (mirrors 4.7 flagship)
     maxOutput: 128_000,      // native CLI wa() upperLimit
     adaptiveThinking: true,
-    cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 },
+    samplingParams: false,
+    cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   },
   'claude-opus-4-7': {
     name: 'Claude Opus 4.7',
@@ -78,7 +97,8 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     defaultOutput: 64_000,   // native CLI wa() default
     maxOutput: 128_000,      // native CLI wa() upperLimit
     adaptiveThinking: true,
-    cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 },
+    samplingParams: false,
+    cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   },
   'claude-opus-4-6': {
     name: 'Claude Opus 4.6',
@@ -86,7 +106,8 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     defaultOutput: 64_000,
     maxOutput: 128_000,
     adaptiveThinking: true,
-    cost: { input: 15, output: 75, cacheRead: 1.875, cacheWrite: 18.75 },
+    samplingParams: true,
+    cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   },
   'claude-sonnet-4-6': {
     name: 'Claude Sonnet 4.6',
@@ -94,6 +115,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     defaultOutput: 32_000,
     maxOutput: 128_000,
     adaptiveThinking: true,
+    samplingParams: true,
     cost: { input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 },
   },
   'claude-haiku-4-5-20251001': {
@@ -102,6 +124,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     defaultOutput: 32_000,
     maxOutput: 64_000,
     adaptiveThinking: false,
+    samplingParams: true,
     cost: { input: 0.80, output: 4, cacheRead: 0.08, cacheWrite: 1 },
   },
 }
@@ -178,10 +201,29 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
   // Legacy fuzzy checks for models not in the table (e.g. preview variants)
   const lower = modelId.toLowerCase()
   return (
+    lower.includes('fable-5') ||
     lower.includes('opus-4-8') ||
     lower.includes('opus-4-7') ||
     lower.includes('opus-4-6') ||
     lower.includes('sonnet-4-6') ||
     lower.includes('sonnet-4-7')
+  )
+}
+
+/**
+ * Check whether a model still accepts sampling params (temperature/top_p/top_k).
+ * Removed (400 if sent) on opus-4-7, opus-4-8 and fable-5 — and presumably on
+ * every model after them, so unknown models default to the registry fallback
+ * via fuzzy match, then to a conservative substring check.
+ */
+export function supportsSamplingParams(modelId: string): boolean {
+  const meta = getModelMetadata(modelId)
+  if (meta) return meta.samplingParams
+  const lower = modelId.toLowerCase()
+  // Unknown model: deny only for known sampling-removed families
+  return !(
+    lower.includes('fable-5') ||
+    lower.includes('opus-4-8') ||
+    lower.includes('opus-4-7')
   )
 }

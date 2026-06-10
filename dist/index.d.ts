@@ -26,7 +26,7 @@ export type { KeepaliveConfig, KeepaliveStats, KeepaliveTick, } from './types.js
 export { oauthLogin } from './auth.js';
 export { getClaudeConfigDir, getDefaultCredentialsPath } from './auth.js';
 export type { OAuthLoginOptions, OAuthResult } from './auth.js';
-export { MAX_MODELS, FALLBACK_MODEL, resolveMaxTokens, getModelMetadata, supportsAdaptiveThinking, } from './models.js';
+export { MAX_MODELS, FALLBACK_MODEL, resolveMaxTokens, getModelMetadata, supportsAdaptiveThinking, supportsSamplingParams, } from './models.js';
 export type { ModelMetadata } from './models.js';
 export { ANTHROPIC_API_HOST, ANTHROPIC_API_BASE, ANTHROPIC_API_MESSAGES, ANTHROPIC_API_MESSAGES_COUNT_TOKENS, ANTHROPIC_PLATFORM_BASE, ANTHROPIC_OAUTH_TOKEN_URL, ANTHROPIC_OAUTH_AUTHORIZE_URL, ANTHROPIC_OAUTH_CONSOLE_AUTHORIZE_URL, ANTHROPIC_OAUTH_MANUAL_REDIRECT_URI, ANTHROPIC_ENDPOINTS, } from './anthropic-endpoints.js';
 export { ANTHROPIC_API_VERSION, API_VERSION, HEADER_CONTENT_TYPE, HEADER_AUTHORIZATION, HEADER_ACCEPT, HEADER_USER_AGENT, HEADER_ANTHROPIC_VERSION, HEADER_ANTHROPIC_BETA, HEADER_ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS, HEADER_X_APP, HEADER_X_CLAUDE_CODE_SESSION_ID, CONTENT_TYPE_JSON, ACCEPT_JSON_SSE, CONTENT_TYPE_TEXT_HTML, ANTHROPIC_HEADERS, } from './anthropic-headers.js';

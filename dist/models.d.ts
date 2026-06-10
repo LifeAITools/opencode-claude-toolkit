@@ -46,6 +46,11 @@ export interface ModelMetadata {
     maxOutput: number;
     /** Whether this model supports adaptive thinking (SDK sets { type: 'adaptive' }) */
     adaptiveThinking: boolean;
+    /**
+     * Whether this model still accepts sampling params (temperature/top_p/top_k).
+     * Removed (400 if sent) on opus-4-7+, opus-4-8 and fable-5.
+     */
+    samplingParams: boolean;
     /** Equivalent API pricing (USD per million tokens) — for savings display on Max subscription */
     cost: {
         input: number;
@@ -90,4 +95,11 @@ export declare function getModelMetadata(modelId: string): ModelMetadata | undef
  * older { type: 'enabled', budgetTokens: N } format.)
  */
 export declare function supportsAdaptiveThinking(modelId: string): boolean;
+/**
+ * Check whether a model still accepts sampling params (temperature/top_p/top_k).
+ * Removed (400 if sent) on opus-4-7, opus-4-8 and fable-5 — and presumably on
+ * every model after them, so unknown models default to the registry fallback
+ * via fuzzy match, then to a conservative substring check.
+ */
+export declare function supportsSamplingParams(modelId: string): boolean;
 //# sourceMappingURL=models.d.ts.map

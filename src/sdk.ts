@@ -22,7 +22,7 @@ import type {
   TokenStatusEvent,
 } from './types.js'
 import { AuthError, APIError, RateLimitError, ClaudeCodeSDKError } from './types.js'
-import { resolveMaxTokens } from './models.js'
+import { resolveMaxTokens, supportsAdaptiveThinking, supportsSamplingParams } from './models.js'
 import { KeepaliveEngine } from './keepalive-engine.js'
 import { tokenHint } from './token-utils.js'
 import { TokenRotationManager } from './token-rotation.js'
@@ -985,31 +985,40 @@ export class ClaudeCodeSDK {
     }
 
     // Thinking — mirrors claude.ts:1604-1630
-    // 4.6+ models use adaptive thinking by default (opus-4-6, sonnet-4-6, opus-4-7, etc.)
-    const model = options.model.toLowerCase()
-    const isAdaptiveModel = model.includes('opus-4-6') || model.includes('sonnet-4-6')
-      || model.includes('opus-4-7') || model.includes('sonnet-4-7')
-      || model.includes('opus-4-8')
+    // Capability gate reads the models.ts SSOT (adaptiveThinking flag + fuzzy
+    // fallback) instead of a hardcoded substring list — adding a new model to
+    // MAX_MODELS is the only edit needed.
+    const isAdaptiveModel = supportsAdaptiveThinking(options.model)
+    const samplingAllowed = supportsSamplingParams(options.model)
     const thinkingDisabled = options.thinking?.type === 'disabled'
 
     if (!thinkingDisabled && isAdaptiveModel) {
-      // 4.6+ models use adaptive thinking — thinking.ts:120
       body.thinking = { type: 'adaptive' }
     } else if (options.thinking?.type === 'enabled') {
-      body.thinking = {
-        type: 'enabled',
-        budget_tokens: options.thinking.budgetTokens,
+      if (isAdaptiveModel) {
+        // budget_tokens is removed on adaptive-only models (400 if sent) —
+        // upgrade the caller's legacy request to adaptive instead of failing.
+        console.error(`[sdk] thinking:{enabled,budget_tokens} is not supported on ${options.model} — upgraded to adaptive`)
+        body.thinking = { type: 'adaptive' }
+      } else {
+        body.thinking = {
+          type: 'enabled',
+          budget_tokens: options.thinking.budgetTokens,
+        }
       }
     }
-    // When disabled or omitted for non-adaptive models: don't send thinking field
+    // When disabled or omitted: don't send the thinking field at all.
+    // fable-5 rejects even an explicit {type:"disabled"} — omission is the
+    // only safe off-state across all models.
 
-    // Temperature only when thinking is disabled — claude.ts:1691-1695
+    // Sampling params are removed on opus-4-7+/fable-5 (400 if sent).
+    // Temperature additionally conflicts with active thinking — claude.ts:1691-1695
     const hasThinking = !thinkingDisabled && (isAdaptiveModel || options.thinking?.type === 'enabled')
-    if (!hasThinking && options.temperature !== undefined) {
+    if (samplingAllowed && !hasThinking && options.temperature !== undefined) {
       body.temperature = options.temperature
     }
 
-    if (options.topP !== undefined) {
+    if (samplingAllowed && options.topP !== undefined) {
       body.top_p = options.topP
     }
 

@@ -212,15 +212,25 @@ describe('translateToAnthropicBody', () => {
   })
 
   test('reasoning_effort → thinking config', () => {
+    // Adaptive-capable models (4.6+/fable) get {type:'adaptive'} — budget_tokens
+    // is deprecated on 4.6 and a 400 on 4.7+/fable. Legacy budget path stays
+    // only for non-adaptive models (haiku).
     const req: OAIChatRequest = {
       model: 'claude-opus-4-6',
       messages: [{ role: 'user', content: 'Think hard' }],
       reasoning_effort: 'high',
     }
     const body = JSON.parse(translateToAnthropicBody(req).body)
-    expect(body.thinking).toBeDefined()
-    expect(body.thinking.type).toBe('enabled')
-    expect(body.thinking.budget_tokens).toBeGreaterThan(0)
+    expect(body.thinking).toEqual({ type: 'adaptive' })
+
+    const haikuReq: OAIChatRequest = {
+      model: 'claude-haiku-4-5',
+      messages: [{ role: 'user', content: 'Think hard' }],
+      reasoning_effort: 'high',
+    }
+    const haikuBody = JSON.parse(translateToAnthropicBody(haikuReq).body)
+    expect(haikuBody.thinking.type).toBe('enabled')
+    expect(haikuBody.thinking.budget_tokens).toBeGreaterThan(0)
   })
 
   test('stop sequences', () => {

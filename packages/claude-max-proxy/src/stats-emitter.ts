@@ -34,8 +34,9 @@
  * destabilising the proxy.
  */
 
-import { appendFileSync, mkdirSync } from 'fs'
-import { dirname } from 'path'
+import { appendFileSync, mkdirSync, readFileSync, statSync } from 'fs'
+import { homedir } from 'os'
+import { dirname, join } from 'path'
 import type {
   ProxyEvent,
   RealRequestCompleteEvent,
@@ -43,7 +44,7 @@ import type {
   UsageEventPayload,
 } from './event-bus.js'
 import { bus, emit } from './event-bus.js'
-import { STATS_JSONL, STATS_SCHEMA_VERSION } from './quota-paths.js'
+import { STATS_JSONL, STATS_SCHEMA_VERSION, orgKeyFromOauth } from './quota-paths.js'
 
 const PROXY_PID = process.pid
 
@@ -65,6 +66,13 @@ interface StatsLine {
   pid: number
   type: 'stream'
   model: string
+  /** Stable per-ORGANIZATION key (additive, multi-org hosts). Today derived
+   *  from the credentials this proxy instance serves — when several proxy
+   *  instances with different org tokens share one stats.jsonl, each stamps
+   *  its own org and the processor attributes quota to the right one.
+   *  FUTURE multi-token-in-one-proxy: the org of the token ACTUALLY used per
+   *  request must ride on RealRequestCompleteEvent and be used here instead. */
+  org?: string
   usage: StatsLineUsage
   rateLimit: {
     status: string | null
@@ -72,6 +80,28 @@ interface StatsLine {
     util7d: number | null
     resetAt?: number // unix-seconds; omitted when unknown
   }
+}
+
+// ─── Org identity of the credentials THIS proxy serves ────────────────
+// The credentials file has no organization uuid, so the stable basis is the
+// refreshToken (outlives access-token rotation; rotations are migrated by the
+// processor's creds watcher). Cached by file mtime, re-stat'ed ≤ once / 5s.
+const CREDS_PATH = join(homedir(), '.claude', '.credentials.json')
+let orgCache = { key: null as string | null, mtimeMs: 0, checkedAt: 0 }
+
+function currentOrgKey(): string | null {
+  const now = Date.now()
+  if (now - orgCache.checkedAt < 5_000) return orgCache.key
+  orgCache.checkedAt = now
+  try {
+    const st = statSync(CREDS_PATH)
+    if (st.mtimeMs === orgCache.mtimeMs) return orgCache.key
+    const oauth = JSON.parse(readFileSync(CREDS_PATH, 'utf8'))?.claudeAiOauth
+    orgCache = { key: orgKeyFromOauth(oauth), mtimeMs: st.mtimeMs, checkedAt: now }
+  } catch {
+    orgCache = { key: null, mtimeMs: 0, checkedAt: now }
+  }
+  return orgCache.key
 }
 
 function projectUsage(u: UsageEventPayload | undefined): StatsLineUsage {
@@ -123,12 +153,14 @@ export function startStatsEmitter(): () => void {
     // The processor skips lines with no util on both axes — don't bother writing them.
     if (util5h === null && util7d === null) return
 
+    const org = currentOrgKey()
     const line: StatsLine = {
       v: STATS_SCHEMA_VERSION,
       ts: ev.ts,
       pid: PROXY_PID,
       type: 'stream',
       model: ev.model ?? '?',
+      ...(org ? { org } : {}),
       usage: projectUsage(ev.usage),
       rateLimit: {
         status: (ev.rateLimit as any)?.status ?? null,

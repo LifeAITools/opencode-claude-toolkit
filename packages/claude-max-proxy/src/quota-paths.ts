@@ -17,6 +17,7 @@
 
 import { homedir } from 'os'
 import { join } from 'path'
+import { createHash } from 'crypto'
 
 export const CLAUDE_LOCAL = join(homedir(), '.claude-local')
 
@@ -39,3 +40,19 @@ export const TOKEN_EVENTS_JSONL = join(CLAUDE_LOCAL, 'token-events.jsonl')
  * so a future emitter format never silently corrupts a running processor.
  */
 export const STATS_SCHEMA_VERSION = 1
+
+/**
+ * Stable per-ORGANIZATION key shared by emitter (stamps stats lines) and
+ * processor (accounts + rotation migration). The credentials file carries no
+ * organization uuid, so the basis is the refreshToken (outlives access-token
+ * rotation; remaining rotations are migrated by the processor's creds
+ * watcher), falling back to accessToken. Part of the stage contract — lives
+ * here so both stages always derive the SAME key.
+ */
+export function orgKeyFromOauth(
+  oauth: { refreshToken?: string; accessToken?: string } | undefined | null,
+): string | null {
+  const basis = oauth?.refreshToken ?? oauth?.accessToken
+  if (!basis) return null
+  return 'org-' + createHash('sha256').update(basis).digest('hex').slice(0, 12)
+}

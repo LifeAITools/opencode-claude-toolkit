@@ -111,6 +111,7 @@ import {
   QUOTA_STATUS_JSON,
   TOKEN_EVENTS_JSONL,
   STATS_SCHEMA_VERSION,
+  orgKeyFromOauth,
 } from './quota-paths.js'
 
 // ─── Paths ────────────────────────────────────────────────────────────
@@ -136,6 +137,9 @@ interface StatsLine {
   pid?: number
   ses?: string
   type?: string
+  /** Stable per-organization key stamped by the emitter (multi-org hosts).
+   *  When present it IS the account identity — no trajectory heuristics. */
+  org?: string
   usage?: {
     in?: number
     out?: number
@@ -199,6 +203,9 @@ interface TokenEvent {
 interface CredsSnapshot {
   expiresAt: number | null
   hint: string | null   // sha256(accessToken)[0:12]
+  /** Per-organization key (orgKeyFromOauth) — same derivation the emitter
+   *  stamps on stats lines; used to migrate state on token rotation. */
+  orgKey: string | null
 }
 
 export interface QuotaWatcherOptions {
@@ -219,7 +226,7 @@ const accountStates = new Map<string, AccountState>()
 const expectedResetAt = new Map<string, { resetAt: number; observedAt: number }>()
 let lastWriteAt = 0
 let pendingWrite = false
-let lastCreds: CredsSnapshot = { expiresAt: null, hint: null }
+let lastCreds: CredsSnapshot = { expiresAt: null, hint: null, orgKey: null }
 let credsWatcher: FSWatcher | null = null
 let statsTailTimer: ReturnType<typeof setInterval> | null = null
 let statsFileOffset = 0  // byte offset into stats.jsonl for tail-from-end
@@ -380,6 +387,37 @@ function onCredsChange(path: string): void {
     newHint: fresh.hint,
     expiresInSec: evt.expiresInSec,
   })
+
+  // Org-key rotation migration: the org key is token-derived (no real org uuid
+  // exists in the creds), so a refresh-token rotation changes it while the
+  // ORGANIZATION stays the same. Carry account state + reset expectations over
+  // so quota continuity (and resetAt carry-forward) survive rotation. A true
+  // org switch (re-login to another org) migrates too — harmless, since the
+  // old org's pids stop producing lines and the migrated state is overwritten
+  // by the new org's next readings.
+  const prevOrg = lastCreds.orgKey
+  const newOrg = fresh.orgKey
+  if (prevOrg && newOrg && prevOrg !== newOrg) {
+    const exp = expectedResetAt.get(prevOrg)
+    if (exp) {
+      expectedResetAt.set(newOrg, exp)
+      expectedResetAt.delete(prevOrg)
+    }
+    const acct = accountStates.get(prevOrg)
+    if (acct) {
+      accountStates.set(newOrg, { ...acct, accountHint: newOrg })
+      accountStates.delete(prevOrg)
+    }
+    for (const s of pidStates.values()) {
+      if (s.accountHint === prevOrg) s.accountHint = newOrg
+    }
+    emit({
+      level: 'info',
+      kind: 'ORG_KEY_MIGRATED',
+      msg: `org key rotated with token: ${prevOrg} → ${newOrg} (state migrated)`,
+    })
+  }
+
   lastCreds = fresh
 }
 
@@ -388,13 +426,14 @@ function readCreds(path: string): CredsSnapshot {
     const raw = readFileSync(path, 'utf8')
     const parsed = JSON.parse(raw)
     const oauth = parsed?.claudeAiOauth
-    if (!oauth?.accessToken) return { expiresAt: null, hint: null }
+    if (!oauth?.accessToken) return { expiresAt: null, hint: null, orgKey: null }
     return {
       expiresAt: typeof oauth.expiresAt === 'number' ? oauth.expiresAt : null,
       hint: createHash('sha256').update(oauth.accessToken).digest('hex').slice(0, 12),
+      orgKey: orgKeyFromOauth(oauth),
     }
   } catch {
-    return { expiresAt: null, hint: null }
+    return { expiresAt: null, hint: null, orgKey: null }
   }
 }
 
@@ -487,11 +526,12 @@ function ingestStatsLine(line: StatsLine): void {
   const prev = pidStates.get(pid)
   const utilChanged = !prev || prev.util5h !== util5h || prev.util7d !== util7d
 
-  // Account hint inference: trajectory clustering by util5h+resetAt window.
-  // Pids sharing the same (util5h band, resetAt) within a 60s window are
-  // "same account". For first-seen pids we hash their first util5h+resetAt
-  // signature; subsequent pids matching that signature inherit the hint.
-  const accountHint = inferAccountHint(pid, util5h, resetAt, prev)
+  // Account identity: the emitter's per-organization stamp wins outright
+  // (exact attribution on multi-org hosts). Trajectory-clustering heuristics
+  // remain ONLY for legacy lines that predate the `org` field.
+  const accountHint = typeof line.org === 'string' && line.org
+    ? line.org
+    : inferAccountHint(pid, util5h, resetAt, prev)
 
   const state: PidState = {
     pid,
@@ -505,6 +545,11 @@ function ingestStatsLine(line: StatsLine): void {
   }
   pidStates.set(pid, state)
   recomputeAccountFromPids(accountHint)
+  // Pid moved between accounts (org stamp appeared / re-login) — recompute the
+  // old account too so it doesn't keep a phantom claim on this pid.
+  if (prev && prev.accountHint !== accountHint) {
+    recomputeAccountFromPids(prev.accountHint)
+  }
 }
 
 function classifyLevel(

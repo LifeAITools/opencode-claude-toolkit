@@ -50,7 +50,18 @@ rsync -a --exclude='.claude' --exclude='*.bak*' --exclude='*.broken' "$PROXY_SRC
 cp "$PROXY_PKG" "$INSTALLED/package.json"
 log "src synced"
 
-# 3. Rebuild + sync SDK bundle + version.
+# 3a. Install registry deps with the FULL transitive closure. Hand-syncing
+#     individual packages is FORBIDDEN here: on 2026-06-10 a partial sync
+#     (ucm-schema+zod+ajv without ajv's fast-deep-equal) import-crashed the
+#     proxy 129 times until systemd StartLimit — blocking every agent on the
+#     proxy. bun install resolves everything; the SDK gets re-synced from the
+#     local build AFTER this step, so the registry copy never survives.
+log "bun install (full dependency closure)"
+( cd "$INSTALLED" && "$HOME/.bun/bin/bun" install --no-save >/dev/null 2>&1 ) \
+  || { log "BUN INSTALL FAILED in $INSTALLED — aborting deploy"; exit 1; }
+
+# 3b. Rebuild + sync SDK bundle + version — MUST run after bun install
+#     (install pulls the registry SDK; the locally built dist must win).
 #    ALWAYS rebuild from source first: copying a stale $SDK_DIST is how a
 #    committed-but-unbuilt fix gets "deployed" yet never reaches live (the
 #    2026-05-28 thinking-block flood — fix in source, stale bundle on disk).
@@ -60,19 +71,6 @@ rm -rf "$SDK_DST/dist"; cp -a "$SDK_DIST" "$SDK_DST/dist"
 cp "$SDK_PKG" "$SDK_DST/package.json"
 log "SDK synced ($(grep -o '"version": "[^"]*"' "$SDK_DST/package.json" | head -1))"
 
-# 3b. Sync registry deps the live install lacks (same hand-sync pattern as the
-#     SDK: a blanket `bun install` here would overwrite the freshly synced SDK
-#     with a registry copy). @kiberos/ucm-schema (UCM contract, UCB S5) + its
-#     runtime deps zod/ajv.
-PKG_NM=$SRC_REPO/packages/claude-max-proxy/node_modules
-for dep in "@kiberos/ucm-schema" "zod" "ajv"; do
-  src_dep="$PKG_NM/$dep"
-  dst_dep="$INSTALLED/node_modules/$dep"
-  [ -d "$src_dep" ] || { log "DEP MISSING in source: $dep — run bun install in the package"; exit 1; }
-  mkdir -p "$(dirname "$dst_dep")"
-  rsync -a --delete "$src_dep/" "$dst_dep/"
-done
-log "vendor deps synced (@kiberos/ucm-schema, zod, ajv)"
 
 # 4. Write deploy manifest (sha256 of every live src file + the SDK bundle).
 #    Startup compares against this to detect post-deploy hand-edits.
@@ -94,6 +92,17 @@ COMMIT=$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)
   echo "}"
 } > "$MANIFEST"
 log "manifest -> $MANIFEST ($(find "$INSTALLED/src" -name '*.ts' ! -name '*bak*' | wc -l) files, commit $COMMIT)"
+
+# 5a. Guard: port 5050 must belong to the systemd unit. A stray manual
+#     `bun run server.ts` survives `systemctl restart` and EADDRINUSE-crash-loops
+#     the unit until StartLimit (129 crashes on 2026-06-10). Fail loudly instead.
+PORT_PID=$(ss -tlnp 2>/dev/null | grep -o ':5050 .*pid=[0-9]*' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)
+UNIT_PID=$(systemctl --user show claude-max-proxy.service -p MainPID --value 2>/dev/null || echo 0)
+if [ -n "${PORT_PID:-}" ] && [ "$PORT_PID" != "$UNIT_PID" ]; then
+  log "ABORT: port 5050 held by stray pid $PORT_PID (unit MainPID=$UNIT_PID)."
+  log "A non-systemd proxy instance is running. Verify and stop it first: kill $PORT_PID"
+  exit 1
+fi
 
 # 5. Restart both services (proxy + quota-watcher run from $INSTALLED/src)
 systemctl --user restart claude-max-proxy.service

@@ -48,6 +48,14 @@ export declare const DEFAULT_ACCOUNT_CONFIG_PATH: string;
  */
 export declare function readOrgIdFromConfig(configPath: string): string | null;
 /**
+ * Read org id + display name together (vault/display use). Same source and
+ * fail-soft semantics as readOrgIdFromConfig.
+ */
+export declare function readOrgInfoFromConfig(configPath?: string): {
+    orgId: string | null;
+    orgName: string | null;
+};
+/**
  * Resolves the current org UUID. Implemented as a port so tests can drive
  * org switches directly and production reads the real account file — mirrors
  * the ICredentialsProvider / IUpstreamFetcher dependency-injection style of

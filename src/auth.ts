@@ -307,3 +307,45 @@ async function tryOpenBrowser(url: string): Promise<void> {
     } catch { /* try next */ }
   }
 }
+
+// ─── OAuth refresh grant (per-org vault support) ───────────────────
+
+/** Result of a refresh-token grant. The refresh token ROTATES — the caller
+ *  MUST persist the new one immediately or the org's credential line dies. */
+export interface RefreshedTokens {
+  accessToken: string
+  refreshToken: string
+  expiresAt: number
+}
+
+/**
+ * Exchange a refresh token for a fresh access token (standard OAuth
+ * `refresh_token` grant against the same TOKEN_URL/CLIENT_ID as login).
+ *
+ * Pure network call — does NOT touch `~/.claude/.credentials.json` (the
+ * native CLI owns that file; the per-org vault persists these instead).
+ * Throws on HTTP failure so the caller can distinguish "refresh denied"
+ * (revoked grant → drop the vault entry) from network noise (keep + retry).
+ */
+export async function refreshOAuthToken(refreshToken: string): Promise<RefreshedTokens> {
+  const resp = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
+    body: JSON.stringify({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: CLIENT_ID,
+    }),
+  })
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '')
+    throw new Error(`OAuth refresh failed (${resp.status}): ${body.slice(0, 200)}`)
+  }
+  const data = await resp.json() as { access_token: string; refresh_token?: string; expires_in: number }
+  return {
+    accessToken: data.access_token,
+    // Some providers omit rotation; Anthropic rotates — fall back to the old one if absent.
+    refreshToken: data.refresh_token ?? refreshToken,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  }
+}

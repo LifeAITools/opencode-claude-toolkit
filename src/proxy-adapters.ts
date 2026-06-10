@@ -85,6 +85,12 @@ export class FileCredentialsProvider implements ICredentialsProvider {
     return this.cached?.expiresAt ?? null
   }
 
+  /** Refresh token of the cached credential — feeds the per-org vault. */
+  currentRefreshToken(): string | null {
+    if (!this.cached) this.cached = this.readFromDisk()
+    return this.cached?.refreshToken ?? null
+  }
+
   private readFromDisk(): StoredCredentials | null {
     try {
       const raw = readFileSync(this.path, 'utf8')

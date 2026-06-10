@@ -77,7 +77,9 @@ import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { consumeConsent } from './rewrite-consent.js'
-import { FileOrgIdResolver, type OrgIdResolver } from './org-identity.js'
+import { FileOrgIdResolver, readOrgInfoFromConfig, type OrgIdResolver } from './org-identity.js'
+import { OrgVault } from './org-vault.js'
+import { refreshOAuthToken } from './auth.js'
 import {
   writeRewriteBlockDump,
   DEFAULT_REWRITE_DUMP_DIR,
@@ -267,6 +269,15 @@ export interface ProxyClientOptions {
    * Default: `~/.claude-local/proxy-ka-snapshots.json`. Injectable for tests.
    */
   kaSnapshotPath?: string
+
+  /**
+   * Optional: per-organization credential vault (multi-org sessions). Stores
+   * every credential ever seen keyed by org UUID + session→org pin bindings,
+   * so a cross-org login never loses the previous org's tokens and a proxy
+   * restart restores HOLDs. Injectable for tests (pass a tmp-path OrgVault).
+   * Default: OrgVault at `~/.claude-local/org-vault.json`.
+   */
+  orgVault?: OrgVault
 }
 
 /** One persisted cache-prefix fingerprint, keyed by `${sessionId}:${lineageKey}`. */
@@ -400,6 +411,15 @@ export class ProxyClient {
    *  reaped with the session. Drives forward token selection (hold cross-org /
    *  adopt same-org / rebind on marker+reload / 401 on cross-org expiry). */
   private readonly sessionPins: Map<string, SessionPin> = new Map()
+  /** Per-org credential vault + persisted pin bindings (multi-org support). */
+  private readonly orgVault: OrgVault
+  /** One-shot consents from an explicit `switchSessionOrg` — exempts the very
+   *  next request's org-switch from the rewrite guard (maintenance rotate). */
+  private readonly orgRotateConsent: Set<string> = new Set()
+  /** Per-session org actually served by Anthropic (response header evidence). */
+  private readonly lastServedOrg: Map<string, string> = new Map()
+  /** Single-flight refresh guard per orgId. */
+  private readonly orgRefreshInflight: Map<string, Promise<void>> = new Map()
 
   /** Resolves the current Anthropic org UUID — drives org-switch detection. */
   private readonly orgIdResolver: OrgIdResolver
@@ -433,6 +453,7 @@ export class ProxyClient {
     this.rewriteBlockDumpDir = opts.rewriteBlockDumpDir ?? DEFAULT_REWRITE_DUMP_DIR
     this.proxyStartedAt = opts.proxyStartedAt ?? Date.now()
     this.kaSnapshotPath = opts.kaSnapshotPath ?? DEFAULT_KA_SNAPSHOT_PATH
+    this.orgVault = opts.orgVault ?? new OrgVault()
     this.prefixHistory = loadPrefixHistory(this.prefixHistoryPath)
 
     // Cache metrics collector — emits CACHE_METRICS_SUMMARY every 60s and
@@ -633,6 +654,128 @@ export class ProxyClient {
     this.credentials.invalidate()
     this.orgIdResolver.invalidate()
     this.events.emit({ level: 'info', kind: 'CREDENTIALS_CHANGED', reason })
+    // Vault: capture the NEW credential under its org before anything uses it.
+    // (The previous org's entry is untouched — orgs are separate accounts, so
+    // a cross-org login must never cost us the old org's tokens.)
+    void this.snapshotCurrentAccount('credentials-changed')
+  }
+
+  /**
+   * Snapshot the system credential file's current token into the per-org
+   * vault, keyed by the org that owns it. Fail-soft, never throws — the vault
+   * is strictly additive safety. Called on startup-ish (first request) and on
+   * every credentials-file change.
+   */
+  async snapshotCurrentAccount(reason: string): Promise<void> {
+    try {
+      const token = await this.credentials.getAccessToken()
+      const { orgId, orgName } = readOrgInfoFromConfig()
+      const resolvedOrg = orgId ?? this.orgIdResolver.current()
+      if (!resolvedOrg || !token) return
+      this.orgVault.upsert({
+        orgId: resolvedOrg,
+        orgName: orgName ?? undefined,
+        accessToken: token,
+        refreshToken: this.credentials.currentRefreshToken?.() ?? null,
+        expiresAt: this.credentials.currentExpiresAt?.() ?? null,
+        capturedAt: Date.now(),
+      })
+      this.events.emit({ level: 'debug', kind: 'ORG_VAULT_SNAPSHOT', orgId: resolvedOrg, reason })
+    } catch { /* fail-soft */ }
+  }
+
+  /**
+   * Ensure the vault's token for `orgId` is alive; refresh via the OAuth
+   * refresh grant when it is expired/near-expiry and a refresh token exists.
+   * Single-flight per org. Fail-soft: on refresh failure the old entry is
+   * kept (network noise) and the caller proceeds with whatever is there —
+   * the upstream-401 path remains the hard stop.
+   */
+  private async ensureOrgTokenFresh(orgId: string): Promise<void> {
+    const entry = this.orgVault.get(orgId)
+    if (!entry || !entry.refreshToken) return
+    const REFRESH_AHEAD_MS = 10 * 60 * 1000
+    if (entry.expiresAt === null || entry.expiresAt - Date.now() > REFRESH_AHEAD_MS) return
+    const inflight = this.orgRefreshInflight.get(orgId)
+    if (inflight) { await inflight; return }
+    const run = (async () => {
+      try {
+        const fresh = await refreshOAuthToken(entry.refreshToken!)
+        this.orgVault.upsert({
+          ...entry,
+          accessToken: fresh.accessToken,
+          refreshToken: fresh.refreshToken,
+          expiresAt: fresh.expiresAt,
+          capturedAt: Date.now(),
+        })
+        this.events.emit({ level: 'info', kind: 'ORG_TOKEN_REFRESHED', orgId })
+      } catch (err) {
+        this.events.emit({
+          level: 'error', kind: 'ORG_TOKEN_REFRESH_FAILED', orgId,
+          msg: String((err as Error)?.message ?? err).slice(0, 200),
+        })
+      } finally {
+        this.orgRefreshInflight.delete(orgId)
+      }
+    })()
+    this.orgRefreshInflight.set(orgId, run)
+    await run
+  }
+
+  /**
+   * Explicit maintenance rotate: bind `sessionId` to `orgQuery`'s org using
+   * the vault's credential for it. This is the `claude-max org switch`
+   * backend. It does NOT weaken the rewrite guard — it grants exactly ONE
+   * org-switch consent for this session (equivalent in strength to the
+   * existing `[%reload-ok%]` marker, but scoped and org-targeted).
+   */
+  async switchSessionOrg(sessionId: string, orgQuery: string): Promise<
+    | { ok: true; orgId: string; orgName?: string; refreshed: boolean }
+    | { ok: false; error: string }
+  > {
+    // Make sure the CURRENT account is in the vault too (so switching back is
+    // always possible, and switching TO the current org works by id).
+    await this.snapshotCurrentAccount('org-switch')
+    const entry = this.orgVault.resolve(orgQuery)
+    if (!entry) {
+      return { ok: false, error: `no vault entry matches "${orgQuery}" — known orgs: ${this.orgVault.list().map(e => `${e.orgId.slice(0, 8)}(${e.orgName ?? '?'})`).join(', ') || 'none'}` }
+    }
+    let refreshed = false
+    if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+      await this.ensureOrgTokenFresh(entry.orgId)
+      const after = this.orgVault.get(entry.orgId)
+      if (!after || (after.expiresAt !== null && after.expiresAt <= Date.now())) {
+        return { ok: false, error: `org ${entry.orgId.slice(0, 8)} token expired and refresh failed — log into that org once to recapture` }
+      }
+      refreshed = true
+    }
+    const live = this.orgVault.get(entry.orgId)!
+    this.sessionPins.set(sessionId, { orgId: live.orgId, token: live.accessToken, expiresAt: live.expiresAt })
+    this.orgVault.setPin(sessionId, live.orgId)
+    this.orgRotateConsent.add(sessionId)
+    this.events.emit({
+      level: 'info', kind: 'ORG_PIN_ROTATED', sessionId,
+      orgId: live.orgId, msg: `session pinned to org ${live.orgId.slice(0, 8)} (${live.orgName ?? '?'}) by explicit rotate`,
+    })
+    return { ok: true, orgId: live.orgId, orgName: live.orgName, refreshed }
+  }
+
+  /** Org surface snapshot for /admin/orgs — tokens redacted. */
+  orgSurface(): {
+    orgs: Array<{ orgId: string; orgName?: string; expiresAt: number | null; hasRefreshToken: boolean; capturedAt: number; lastVerifiedAt?: number }>
+    sessions: Array<{ sessionId: string; pinnedOrg: string | null; servedOrg: string | null }>
+  } {
+    const orgs = this.orgVault.list().map(e => ({
+      orgId: e.orgId, orgName: e.orgName, expiresAt: e.expiresAt,
+      hasRefreshToken: !!e.refreshToken, capturedAt: e.capturedAt, lastVerifiedAt: e.lastVerifiedAt,
+    }))
+    const ids = new Set<string>([...this.sessionPins.keys(), ...this.lastServedOrg.keys()])
+    const sessions = [...ids].map(sid => ({
+      sessionId: sid,
+      pinnedOrg: this.sessionPins.get(sid)?.orgId ?? null,
+      servedOrg: this.lastServedOrg.get(sid) ?? null,
+    }))
+    return { orgs, sessions }
   }
 
   /**
@@ -762,6 +905,8 @@ export class ProxyClient {
     // does — otherwise the documented org-swap path would demand a second,
     // different marker. (Defaults false on any credentials read failure.)
     let reloadAsked = false
+    // One-shot consent from an explicit switchSessionOrg rotate (maintenance).
+    let rotateConsumed = false
     try {
       const account = {
         orgId: this.orgIdResolver.current(),
@@ -771,6 +916,40 @@ export class ProxyClient {
       reloadAsked = inspectLastUserMessage(
         parsedBody, loadKeepaliveConfig().rewriteGuard.reloadMarker,
       ).hasMarker
+      // Vault: make sure the CURRENT account is captured (first-request lazy
+      // snapshot — startup equivalent), and restore a persisted pin binding
+      // for this session if the proxy restarted since it was set.
+      void this.snapshotCurrentAccount('lazy')
+      if (!this.sessionPins.has(sessionId) && !reloadAsked) {
+        const persisted = this.orgVault.getPin(sessionId)
+        if (persisted && persisted.orgId !== account.orgId) {
+          await this.ensureOrgTokenFresh(persisted.orgId)
+          const ve = this.orgVault.get(persisted.orgId)
+          if (ve && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
+            this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })
+            this.events.emit({
+              level: 'info', kind: 'ORG_PIN_RESTORED', sessionId,
+              msg: `session pin restored from vault after proxy restart — holding org ${ve.orgId.slice(0, 8)}`,
+            })
+          } else {
+            this.orgVault.deletePin(sessionId)  // dead binding — fall through to normal bind
+          }
+        }
+      }
+      // Vault: a session HOLDing a non-current org gets its held token kept
+      // fresh from the vault (refresh grant) instead of dying at expiry.
+      {
+        const pin = this.sessionPins.get(sessionId)
+        if (pin && pin.orgId !== null && account.orgId !== null && pin.orgId !== account.orgId) {
+          await this.ensureOrgTokenFresh(pin.orgId)
+          const ve = this.orgVault.get(pin.orgId)
+          if (ve && ve.accessToken !== pin.token && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
+            pin.token = ve.accessToken
+            pin.expiresAt = ve.expiresAt
+          }
+        }
+      }
+      rotateConsumed = this.orgRotateConsent.delete(sessionId)
       const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now())
       if (sel.stop) {
         this.events.emit({
@@ -874,7 +1053,7 @@ export class ProxyClient {
           // consent), not delegate to a Layer 2 that isn't there. (2026-06-08:
           // a global reload cleared all pins 2s before a switch → ~526K tok
           // burned on the new org with no block and no signal.)
-          && !(rewriteAssessment.signals.orgChanged && (orgHeld || reloadAsked))
+          && !(rewriteAssessment.signals.orgChanged && (orgHeld || reloadAsked || rotateConsumed))
           && rewriteAssessment.predictedTokens >= guard.minRewriteTokens) {
         // Consent check. Inspect the in-message marker first (no side effect);
         // only when it is ABSENT consume a session grant (single-use). The
@@ -941,7 +1120,7 @@ export class ProxyClient {
     // the hold: while held, KA replays the snapshot's old token. The flag tracks
     // the PIN state (source of truth), not the assess-time orgChanged: set while
     // held, cleared on rebind / same-org so KA resumes fresh-token warming.
-    if (orgHeld) session.engine.markOrgSwitchPending(reqLineageKey)
+    if (orgHeld || rotateConsumed) session.engine.markOrgSwitchPending(reqLineageKey)
     else session.engine.clearOrgSwitchPending(reqLineageKey)
 
     // PROCEED path — the request will be forwarded. ONLY NOW mutate keepalive:
@@ -991,6 +1170,24 @@ export class ProxyClient {
 
       // Parse rate-limit headers into snapshot
       this.lastRateLimit = parseRateLimitHeaders(upstream.headers)
+
+      // Ground-truth org evidence: Anthropic names the serving org on every
+      // response. Verify the vault binding and surface mismatches (a session
+      // believing it posts to org A while org B serves it = quota leak).
+      {
+        const servedOrg = upstream.headers.get('anthropic-organization-id')
+        if (servedOrg) {
+          this.lastServedOrg.set(sessionId, servedOrg)
+          this.orgVault.markVerified(servedOrg)
+          const expected = this.sessionPins.get(sessionId)?.orgId ?? this.orgIdResolver.current()
+          if (expected !== null && expected !== servedOrg) {
+            this.events.emit({
+              level: 'error', kind: 'ORG_SERVED_MISMATCH', sessionId,
+              msg: `expected org ${expected.slice(0, 8)} but Anthropic served ${servedOrg.slice(0, 8)} — token/org binding is wrong`,
+            })
+          }
+        }
+      }
 
       if (upstream.ok
           || !TRANSIENT_UPSTREAM_STATUSES.has(upstream.status)
@@ -1547,7 +1744,10 @@ export class ProxyClient {
       const now = Date.now()
       const ph = prefixHashes(body)
       const prev = this.prefixHistory.get(key)
-      const orgId = this.orgIdResolver.current()
+      // Org of record for this lineage: the session's PIN org when present
+      // (multi-org sessions must not flap the guard against the global org),
+      // else the global resolver as before.
+      const orgId = this.sessionPins.get(sessionId)?.orgId ?? this.orgIdResolver.current()
       // Capture the previous cacheable prefix (read-only) so a guard-block dump
       // can diff old vs new system/tools. The actual history WRITE is deferred
       // to commitPrefixHistory (proceed path only).

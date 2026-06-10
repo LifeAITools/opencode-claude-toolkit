@@ -69,6 +69,28 @@ export function readOrgIdFromConfig(configPath: string): string | null {
 }
 
 /**
+ * Read org id + display name together (vault/display use). Same source and
+ * fail-soft semantics as readOrgIdFromConfig.
+ */
+export function readOrgInfoFromConfig(
+  configPath: string = DEFAULT_ACCOUNT_CONFIG_PATH,
+): { orgId: string | null; orgName: string | null } {
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf8')) as {
+      oauthAccount?: { organizationUuid?: unknown; organizationName?: unknown }
+    }
+    const id = raw?.oauthAccount?.organizationUuid
+    const name = raw?.oauthAccount?.organizationName
+    return {
+      orgId: typeof id === 'string' && id.length > 0 ? id : null,
+      orgName: typeof name === 'string' && name.length > 0 ? name : null,
+    }
+  } catch {
+    return { orgId: null, orgName: null }
+  }
+}
+
+/**
  * Resolves the current org UUID. Implemented as a port so tests can drive
  * org switches directly and production reads the real account file — mirrors
  * the ICredentialsProvider / IUpstreamFetcher dependency-injection style of

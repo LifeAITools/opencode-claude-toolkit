@@ -176,6 +176,12 @@ export {
 } from './models.js'
 export type { ModelMetadata } from './models.js'
 
+// Per-organization credential vault (multi-org session support)
+export { OrgVault, DEFAULT_ORG_VAULT_PATH } from './org-vault.js'
+export type { OrgVaultEntry, OrgPin } from './org-vault.js'
+export { refreshOAuthToken } from './auth.js'
+export { readOrgInfoFromConfig } from './org-identity.js'
+
 // ─── SSOT: Anthropic endpoint URLs ──────────────────────────────────
 // REQ-12 / SSOT-01: every production caller imports endpoint URLs from
 // here. NO inline literals allowed in production files (test fixtures

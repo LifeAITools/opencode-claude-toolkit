@@ -33,6 +33,8 @@ export declare class FileCredentialsProvider implements ICredentialsProvider {
     /** Expiry (ms epoch) of the currently-cached token, or null if none cached.
      *  Feeds the per-session pin's "is the held cross-org token still alive?" check. */
     currentExpiresAt(): number | null;
+    /** Refresh token of the cached credential — feeds the per-org vault. */
+    currentRefreshToken(): string | null;
     private readFromDisk;
     private mtimeChanged;
     private getMtime;

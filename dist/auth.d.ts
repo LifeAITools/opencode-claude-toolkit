@@ -38,4 +38,21 @@ export interface OAuthResult {
     credentialsPath: string;
 }
 export declare function oauthLogin(options?: OAuthLoginOptions): Promise<OAuthResult>;
+/** Result of a refresh-token grant. The refresh token ROTATES — the caller
+ *  MUST persist the new one immediately or the org's credential line dies. */
+export interface RefreshedTokens {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+}
+/**
+ * Exchange a refresh token for a fresh access token (standard OAuth
+ * `refresh_token` grant against the same TOKEN_URL/CLIENT_ID as login).
+ *
+ * Pure network call — does NOT touch `~/.claude/.credentials.json` (the
+ * native CLI owns that file; the per-org vault persists these instead).
+ * Throws on HTTP failure so the caller can distinguish "refresh denied"
+ * (revoked grant → drop the vault entry) from network noise (keep + retry).
+ */
+export declare function refreshOAuthToken(refreshToken: string): Promise<RefreshedTokens>;
 //# sourceMappingURL=auth.d.ts.map

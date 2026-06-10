@@ -996,6 +996,78 @@ async function cmdReload(args: string[]): Promise<void> {
   }
 }
 
+async function cmdOrg(args: string[]): Promise<void> {
+  // Org surface: per-org credential vault + per-session org pins.
+  //
+  // Usage:
+  //   claude-max org list                          # vault orgs + session pins
+  //   claude-max org switch <session-id> <org>     # pin a session to an org
+  //                                                # (<org> = UUID / unique prefix / name)
+  //
+  // `switch` is a maintenance rotate: it grants the session exactly ONE
+  // rewrite-guard org-switch consent (same strength as [%reload-ok%], but
+  // scoped to that session). Organizations are separate accounts — switching
+  // one session never invalidates other orgs' tokens.
+  const { url } = getProxyUrl()
+  const sub = args[0]
+
+  if (sub === 'switch') {
+    const sessionId = args[1]
+    const org = args[2]
+    if (!sessionId || !org) {
+      err('Usage: claude-max org switch <session-id> <org-uuid|prefix|name>')
+      process.exit(2)
+    }
+    let resp: Response
+    try {
+      resp = await fetch(`${url}/admin/sessions/org`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId, org }),
+      })
+    } catch (e: any) {
+      err(`Could not reach proxy at ${url}: ${e?.message ?? e}`)
+      process.exit(1)
+    }
+    const r = await resp.json().catch(() => ({})) as any
+    if (!resp.ok || !r.ok) {
+      err(`Switch failed: ${r.error ?? `HTTP ${resp.status}`}`)
+      process.exit(1)
+    }
+    ok(`Session ${sessionId.slice(0, 8)} pinned to org ${r.orgId.slice(0, 8)} (${r.orgName ?? '?'})${r.refreshed ? ' [token refreshed]' : ''}`)
+    info('The next request from this session carries a one-shot guard consent for the org switch.')
+    return
+  }
+
+  // default: list
+  let resp: Response
+  try {
+    resp = await fetch(`${url}/admin/orgs`)
+  } catch (e: any) {
+    err(`Could not reach proxy at ${url}: ${e?.message ?? e}`)
+    warn('Is the proxy running? Try: claude-max status')
+    process.exit(1)
+  }
+  const r = await resp.json() as {
+    orgs: Array<{ orgId: string; orgName?: string; expiresAt: number | null; hasRefreshToken: boolean; capturedAt: number; lastVerifiedAt?: number }>
+    sessions: Array<{ sessionId: string; pinnedOrg: string | null; servedOrg: string | null }>
+  }
+  console.log(c(C.bold, 'Organizations in vault:'))
+  if (!r.orgs.length) info('  (empty — the vault fills on the next proxy request / credentials change)')
+  for (const o of r.orgs) {
+    const exp = o.expiresAt === null ? 'expiry unknown'
+      : o.expiresAt > Date.now() ? `expires in ${Math.round((o.expiresAt - Date.now()) / 60000)}m` : c(C.red, 'EXPIRED')
+    const refresh = o.hasRefreshToken ? 'refreshable' : c(C.yellow, 'no refresh token')
+    const verified = o.lastVerifiedAt ? `verified ${new Date(o.lastVerifiedAt).toISOString().slice(11, 19)}Z` : 'unverified'
+    console.log(`  ${o.orgId.slice(0, 8)}  ${(o.orgName ?? '?').padEnd(24)} ${exp}; ${refresh}; ${verified}`)
+  }
+  console.log(c(C.bold, 'Session pins:'))
+  if (!r.sessions.length) info('  (none — sessions follow the current system org)')
+  for (const sess of r.sessions) {
+    console.log(`  ${sess.sessionId.slice(0, 8)}  pinned=${sess.pinnedOrg?.slice(0, 8) ?? '-'}  served=${sess.servedOrg?.slice(0, 8) ?? '-'}`)
+  }
+}
+
 async function cmdLogs(args: string[]): Promise<void> {
   const follow = args.includes('-f') || args.includes('--follow')
   if (!existsSync(LOG_FILE)) { warn(`No log file at ${LOG_FILE}`); return }
@@ -1140,6 +1212,7 @@ async function main() {
     case 'restart':   await cmdRestart(); break
     case 'disarm':    await cmdDisarm(rest); break
     case 'reload':    await cmdReload(rest); break
+    case 'org':       await cmdOrg(rest); break
     case 'logs':      await cmdLogs(rest); break
     case 'watch':     await cmdWatch(); break
     case 'doctor':    await cmdDoctor(); break
@@ -1160,6 +1233,7 @@ ${c(C.bold, 'Usage:')}
   claude-max restart      ${c(C.dim, 'stop + start')}
   claude-max disarm [sid] ${c(C.dim, 'drop KA snapshots + invalidate token — STOPS keepalive')}
   claude-max reload [sid] ${c(C.dim, 'drop snapshots + invalidate token — KEEPS keepalive (safe org swap)')}
+  claude-max org list|switch ${c(C.dim, 'per-org token vault; pin a session to an org (multi-org)')}
   claude-max doctor       ${c(C.dim, 'self-check: what is installed vs missing')}
   claude-max uninstall    ${c(C.dim, 'remove service + binaries (keeps logs/creds)')}
 

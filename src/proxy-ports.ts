@@ -78,6 +78,14 @@ export interface ICredentialsProvider {
    * upstream-401 path as the stop condition. Additive: keeps the port stable.
    */
   currentExpiresAt?(): number | null
+
+  /**
+   * Refresh token of the currently-cached credential, or null. OPTIONAL,
+   * additive (same pattern as currentExpiresAt). Consumed by the per-org
+   * vault so a credential overwritten by a cross-org login can still be
+   * refreshed independently later.
+   */
+  currentRefreshToken?(): string | null
 }
 
 // ═══ Port 2: Event Emitter ═════════════════════════════════════════

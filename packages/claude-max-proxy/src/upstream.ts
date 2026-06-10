@@ -30,12 +30,17 @@ export class ProxyConfigCredentialsAdapter implements ICredentialsProvider {
   currentExpiresAt(): number | null {
     return _cachedToken?.expiresAt ?? null
   }
+  /** Refresh token of the cached credential — feeds the per-org vault so a
+   *  cross-org login never loses the previous org's refresh capability. */
+  currentRefreshToken(): string | null {
+    return _cachedToken?.refreshToken ?? null
+  }
 }
 
 // ═══ Credential reader ═══════════════════════════════════════════
 
 let _store: FileCredentialStore | null = null
-let _cachedToken: { accessToken: string; expiresAt: number } | null = null
+let _cachedToken: { accessToken: string; expiresAt: number; refreshToken?: string | null } | null = null
 
 function getStore(cfg: ProxyConfig): FileCredentialStore {
   if (!_store) _store = new FileCredentialStore(cfg.credentialsPath)
@@ -65,7 +70,7 @@ export async function getAccessToken(cfg: ProxyConfig): Promise<string> {
     throw new Error('NO_CREDENTIALS')
   }
 
-  _cachedToken = { accessToken: creds.accessToken, expiresAt: creds.expiresAt }
+  _cachedToken = { accessToken: creds.accessToken, expiresAt: creds.expiresAt, refreshToken: (creds as { refreshToken?: string }).refreshToken ?? null }
 
   if (creds.expiresAt - now < 5 * 60 * 1000) {
     emit({

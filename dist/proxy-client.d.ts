@@ -57,6 +57,7 @@
 import { KeepaliveEngine } from './keepalive-engine.js';
 import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, Session } from './proxy-ports.js';
 import { type OrgIdResolver } from './org-identity.js';
+import { OrgVault } from './org-vault.js';
 export interface ProxyClientConfig {
     /** Anthropic API base URL. Default: https://api.anthropic.com */
     anthropicBaseUrl?: string;
@@ -170,6 +171,14 @@ export interface ProxyClientOptions {
      * Default: `~/.claude-local/proxy-ka-snapshots.json`. Injectable for tests.
      */
     kaSnapshotPath?: string;
+    /**
+     * Optional: per-organization credential vault (multi-org sessions). Stores
+     * every credential ever seen keyed by org UUID + session→org pin bindings,
+     * so a cross-org login never loses the previous org's tokens and a proxy
+     * restart restores HOLDs. Injectable for tests (pass a tmp-path OrgVault).
+     * Default: OrgVault at `~/.claude-local/org-vault.json`.
+     */
+    orgVault?: OrgVault;
 }
 export interface HandleRequestContext {
     /** Unique identifier for the logical session. */
@@ -241,6 +250,15 @@ export declare class ProxyClient {
      *  reaped with the session. Drives forward token selection (hold cross-org /
      *  adopt same-org / rebind on marker+reload / 401 on cross-org expiry). */
     private readonly sessionPins;
+    /** Per-org credential vault + persisted pin bindings (multi-org support). */
+    private readonly orgVault;
+    /** One-shot consents from an explicit `switchSessionOrg` — exempts the very
+     *  next request's org-switch from the rewrite guard (maintenance rotate). */
+    private readonly orgRotateConsent;
+    /** Per-session org actually served by Anthropic (response header evidence). */
+    private readonly lastServedOrg;
+    /** Single-flight refresh guard per orgId. */
+    private readonly orgRefreshInflight;
     /** Resolves the current Anthropic org UUID — drives org-switch detection. */
     private readonly orgIdResolver;
     /** Shared across every per-session KA engine — fleet-wide eviction-storm hold. */
@@ -309,6 +327,53 @@ export declare class ProxyClient {
      * caches; Layer 2 (pins) decides what each session does with the result.
      */
     notifyCredentialsChanged(reason: string): void;
+    /**
+     * Snapshot the system credential file's current token into the per-org
+     * vault, keyed by the org that owns it. Fail-soft, never throws — the vault
+     * is strictly additive safety. Called on startup-ish (first request) and on
+     * every credentials-file change.
+     */
+    snapshotCurrentAccount(reason: string): Promise<void>;
+    /**
+     * Ensure the vault's token for `orgId` is alive; refresh via the OAuth
+     * refresh grant when it is expired/near-expiry and a refresh token exists.
+     * Single-flight per org. Fail-soft: on refresh failure the old entry is
+     * kept (network noise) and the caller proceeds with whatever is there —
+     * the upstream-401 path remains the hard stop.
+     */
+    private ensureOrgTokenFresh;
+    /**
+     * Explicit maintenance rotate: bind `sessionId` to `orgQuery`'s org using
+     * the vault's credential for it. This is the `claude-max org switch`
+     * backend. It does NOT weaken the rewrite guard — it grants exactly ONE
+     * org-switch consent for this session (equivalent in strength to the
+     * existing `[%reload-ok%]` marker, but scoped and org-targeted).
+     */
+    switchSessionOrg(sessionId: string, orgQuery: string): Promise<{
+        ok: true;
+        orgId: string;
+        orgName?: string;
+        refreshed: boolean;
+    } | {
+        ok: false;
+        error: string;
+    }>;
+    /** Org surface snapshot for /admin/orgs — tokens redacted. */
+    orgSurface(): {
+        orgs: Array<{
+            orgId: string;
+            orgName?: string;
+            expiresAt: number | null;
+            hasRefreshToken: boolean;
+            capturedAt: number;
+            lastVerifiedAt?: number;
+        }>;
+        sessions: Array<{
+            sessionId: string;
+            pinnedOrg: string | null;
+            servedOrg: string | null;
+        }>;
+    };
     /**
      * Decide which token a session's request uses, given the live account snapshot
      * and the session's existing pin. The whole per-session model lives here:

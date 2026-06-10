@@ -10,6 +10,8 @@
  *   POST   /admin/shutdown          — graceful shutdown
  *   POST   /admin/disarm            — disarm KA + invalidate token
  *   POST   /admin/reload            — reload KA (keep timers)
+ *   GET    /admin/orgs              — org vault + session org pins (redacted)
+ *   POST   /admin/sessions/org      — pin a session to an org from the vault
  */
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
@@ -108,6 +110,30 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
           ok: true, disarmedCount: disarmed.length, sessionIds: disarmed,
           reason, tokenCacheInvalidated: true,
         })
+      },
+    },
+
+    // Org surface — per-org credential vault + session pins (multi-org)
+    {
+      method: 'GET',
+      path: '/admin/orgs',
+      handler: async () => Response.json(ctx.proxyClient.orgSurface()),
+    },
+
+    // Explicit per-session org rotate (maintenance, one-shot guard consent).
+    // Body: { sessionId, org } — org accepts a UUID, unique prefix, or name.
+    {
+      method: 'POST',
+      path: '/admin/sessions/org',
+      handler: async (req) => {
+        let body: { sessionId?: string; org?: string } = {}
+        try { body = await req.json() as any } catch { /* fall through to 400 */ }
+        if (!body.sessionId || !body.org) {
+          return Response.json({ error: 'sessionId and org required' }, { status: 400 })
+        }
+        const result = await ctx.proxyClient.switchSessionOrg(body.sessionId, body.org)
+        if (!result.ok) return Response.json({ ok: false, error: result.error }, { status: 404 })
+        return Response.json({ ok: true, sessionId: body.sessionId, ...result })
       },
     },
 

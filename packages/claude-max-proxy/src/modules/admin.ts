@@ -16,6 +16,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
+import { requireControlAuth } from '../control-auth.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -154,9 +155,22 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
     },
   ]
 
+  // Control-plane auth: every /admin/* route requires loopback OR the
+  // ADMIN_TOKEN bearer (control-auth.ts). The proxy may listen on 0.0.0.0
+  // for the /v1 data plane — that must never expose shutdown/disarm/org
+  // controls to the LAN unauthenticated.
+  const guarded = routes.map(r => ({
+    ...r,
+    handler: async (req: Request, server: Parameters<RouteDefinition['handler']>[1]) => {
+      const denied = requireControlAuth(req, server, (ctx.config as { adminToken?: string | null }).adminToken ?? null)
+      if (denied) return denied
+      return r.handler(req, server)
+    },
+  }))
+
   return {
     name: 'admin',
-    routes,
+    routes: guarded,
     init(c) { ctx = c },
   }
 }

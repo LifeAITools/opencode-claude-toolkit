@@ -48,6 +48,7 @@ export interface ProxyConfig {
   // Network
   proxyPort: number
   proxyHost: string
+  adminToken: string | null
 
   // Summary heartbeat
   healthHeartbeatSec: number  // 0 = disabled
@@ -154,6 +155,9 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
 
     proxyPort: readInt('PROXY_PORT', 5050, fileEnv),
     proxyHost: read('PROXY_HOST', '127.0.0.1', fileEnv),
+    // Control-plane bearer token (/mcp + /admin/*). Empty = remote control
+    // plane DISABLED (loopback callers always allowed). See control-auth.ts.
+    adminToken: read('ADMIN_TOKEN', '', fileEnv) || null,
 
     healthHeartbeatSec: readInt('HEALTH_HEARTBEAT_SEC', 30, fileEnv),
 

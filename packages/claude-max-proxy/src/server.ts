@@ -308,6 +308,7 @@ import { loadModules, matchRoute, type ModuleContext } from './module.js'
 import { setCompatVersion } from './openai-translate.js'
 import { createHealthModule } from './modules/health.js'
 import { createAdminModule } from './modules/admin.js'
+import { createMcpControlModule } from './modules/mcp-control.js'
 import { createAnthropicModule } from './modules/anthropic.js'
 import { createOpenAICompatModule } from './modules/openai-compat.js'
 
@@ -336,6 +337,7 @@ const healthModuleOpts = {
 const modules = [
   createHealthModule(healthModuleOpts),
   createAdminModule(() => shutdown()),
+  createMcpControlModule(),
   createAnthropicModule(),
   createOpenAICompatModule(),
 ]

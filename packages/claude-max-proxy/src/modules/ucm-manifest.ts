@@ -13,7 +13,7 @@
 import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
-const UCM_MANIFEST_REV = 3
+const UCM_MANIFEST_REV = 4
 
 /**
  * Динамические опции "выбор сессии" (UCM 1.1 optionsSources): пульт зовёт
@@ -31,7 +31,7 @@ export const CONTROL_MANIFEST_URI = 'ui://control-manifest'
 
 export function buildControlManifest(proxyVersion: string): UcmManifest {
   const manifest = {
-    ucm: '1.1',
+    ucm: '1.2',
     version: `${proxyVersion}+ucm${UCM_MANIFEST_REV}`,
     service: {
       id: 'claude-max-proxy',
@@ -39,14 +39,26 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
       auth: { type: 'bearer', scopeHint: 'control' },
     },
     transport: { type: 'mcp-streamable-http', endpoint: '/mcp' },
+    // layout-дерево UCM 1.2: парные действия/индикаторы объединены в card
+    // (одна карточка, контролы без собственных рамок)
     layout: [
       { type: 'group', title: 'Organizations', controls: ['orgs_list', 'org_switch'] },
       {
         type: 'group',
         title: 'Keepalive',
-        controls: ['ka_indicator', 'sessions_reload', 'sessions_disarm'],
+        controls: ['ka_indicator'],
+        children: [
+          { type: 'card', title: 'KA actions', controls: ['sessions_reload', 'sessions_disarm'] },
+        ],
       },
-      { type: 'group', title: 'Health', controls: ['health_indicator', 'proxy_status'] },
+      {
+        type: 'group',
+        title: 'Health',
+        controls: [],
+        children: [
+          { type: 'card', title: 'Heartbeat & status', controls: ['health_indicator', 'proxy_status'] },
+        ],
+      },
     ],
     controls: [
       {

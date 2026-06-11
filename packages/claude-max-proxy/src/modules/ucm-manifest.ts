@@ -13,7 +13,7 @@
 import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
-const UCM_MANIFEST_REV = 4
+const UCM_MANIFEST_REV = 5
 
 /**
  * Динамические опции "выбор сессии" (UCM 1.1 optionsSources): пульт зовёт
@@ -137,6 +137,8 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         kind: 'indicator',
         title: 'Heartbeat',
         schema: { type: 'object' },
+        // valueLabel: пульт показывает строку вместо сырого JSON heartbeat'а
+        uiHints: { valueLabel: '{/sessions} sessions · {/liveKa} live KA · {/firesLastHour} fires/h' },
         binding: { type: 'event', op: 'stream', match: { kind: 'HEALTH_HEARTBEAT' } },
       },
       {

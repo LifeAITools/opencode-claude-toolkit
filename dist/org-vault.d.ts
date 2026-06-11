@@ -38,6 +38,11 @@ export declare const DEFAULT_ORG_VAULT_PATH: string;
 export interface OrgVaultEntry {
     orgId: string;
     orgName?: string;
+    /** Account email that captured this credential (claude.json oauthAccount).
+     *  First-class resolve() key: personal orgs happen to embed the email in
+     *  orgName ("x@y's Organization"), but team/enterprise orgs carry custom
+     *  names — email matching must not depend on Anthropic's naming. */
+    accountEmail?: string;
     accessToken: string;
     refreshToken: string | null;
     /** epoch ms; null = unknown (treat as alive, upstream 401 is the backstop) */
@@ -62,7 +67,8 @@ export declare class OrgVault {
     /** Insert/update an org credential record. Newer capture always wins. */
     upsert(entry: OrgVaultEntry): void;
     get(orgId: string): OrgVaultEntry | null;
-    /** Fuzzy resolve: exact orgId, then unique prefix, then unique orgName substring. */
+    /** Fuzzy resolve: exact orgId, then unique prefix, then unique account
+     *  email substring, then unique orgName substring. */
     resolve(query: string): OrgVaultEntry | null;
     list(): OrgVaultEntry[];
     /** API confirmed this org served a request — ground-truth verification. */

@@ -71,6 +71,27 @@ describe('OrgVault — resolve (fuzzy)', () => {
     expect(v.resolve('zzz')).toBeNull()
     expect(v.resolve('1')).toBeTruthy()  // unique prefix '1111…'
   })
+
+  test('unique account-email substring resolves even with a custom org name', () => {
+    const v = new OrgVault(vpath())
+    // Enterprise org: custom name carries NO email — email must still match.
+    v.upsert(entry('aaaa1111-1111', { orgName: 'Acme Inc', accountEmail: 'ruslan@acme.com' }))
+    v.upsert(entry('bbbb2222-2222', { orgName: 'Beta LLC', accountEmail: 'ops@beta.io' }))
+    expect(v.resolve('ruslan@acme.com')?.orgId).toBe('aaaa1111-1111')
+    expect(v.resolve('ruslan')?.orgId).toBe('aaaa1111-1111')      // partial email
+    expect(v.resolve('beta.io')?.orgId).toBe('bbbb2222-2222')
+    // ambiguous across email+name domains → null, never a guess
+    v.upsert(entry('cccc3333-3333', { orgName: 'Gamma', accountEmail: 'ruslan@gamma.dev' }))
+    expect(v.resolve('ruslan')).toBeNull()
+  })
+
+  test('upsert preserves accountEmail across credential refreshes', () => {
+    const p = vpath()
+    const v = new OrgVault(p)
+    v.upsert(entry('org-A', { accountEmail: 'me@mail.com', capturedAt: 1000 }))
+    v.upsert(entry('org-A', { accountEmail: undefined, capturedAt: 2000 }))  // refresh w/o email
+    expect(new OrgVault(p).get('org-A')?.accountEmail).toBe('me@mail.com')
+  })
 })
 
 describe('OrgVault — pins', () => {

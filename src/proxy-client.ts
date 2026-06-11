@@ -669,12 +669,13 @@ export class ProxyClient {
   async snapshotCurrentAccount(reason: string): Promise<void> {
     try {
       const token = await this.credentials.getAccessToken()
-      const { orgId, orgName } = readOrgInfoFromConfig()
+      const { orgId, orgName, accountEmail } = readOrgInfoFromConfig()
       const resolvedOrg = orgId ?? this.orgIdResolver.current()
       if (!resolvedOrg || !token) return
       this.orgVault.upsert({
         orgId: resolvedOrg,
         orgName: orgName ?? undefined,
+        accountEmail: accountEmail ?? undefined,
         accessToken: token,
         refreshToken: this.credentials.currentRefreshToken?.() ?? null,
         expiresAt: this.credentials.currentExpiresAt?.() ?? null,
@@ -762,11 +763,11 @@ export class ProxyClient {
 
   /** Org surface snapshot for /admin/orgs — tokens redacted. */
   orgSurface(): {
-    orgs: Array<{ orgId: string; orgName?: string; expiresAt: number | null; hasRefreshToken: boolean; capturedAt: number; lastVerifiedAt?: number }>
+    orgs: Array<{ orgId: string; orgName?: string; accountEmail?: string; expiresAt: number | null; hasRefreshToken: boolean; capturedAt: number; lastVerifiedAt?: number }>
     sessions: Array<{ sessionId: string; pinnedOrg: string | null; servedOrg: string | null }>
   } {
     const orgs = this.orgVault.list().map(e => ({
-      orgId: e.orgId, orgName: e.orgName, expiresAt: e.expiresAt,
+      orgId: e.orgId, orgName: e.orgName, accountEmail: e.accountEmail, expiresAt: e.expiresAt,
       hasRefreshToken: !!e.refreshToken, capturedAt: e.capturedAt, lastVerifiedAt: e.lastVerifiedAt,
     }))
     const ids = new Set<string>([...this.sessionPins.keys(), ...this.lastServedOrg.keys()])

@@ -1064,7 +1064,7 @@ async function cmdOrg(args: string[]): Promise<void> {
     process.exit(1)
   }
   const r = await resp.json() as {
-    orgs: Array<{ orgId: string; orgName?: string; expiresAt: number | null; hasRefreshToken: boolean; capturedAt: number; lastVerifiedAt?: number }>
+    orgs: Array<{ orgId: string; orgName?: string; accountEmail?: string; expiresAt: number | null; hasRefreshToken: boolean; capturedAt: number; lastVerifiedAt?: number }>
     sessions: Array<{ sessionId: string; pinnedOrg: string | null; servedOrg: string | null }>
   }
   console.log(c(C.bold, 'Organizations in vault:'))
@@ -1074,7 +1074,11 @@ async function cmdOrg(args: string[]): Promise<void> {
       : o.expiresAt > Date.now() ? `expires in ${Math.round((o.expiresAt - Date.now()) / 60000)}m` : c(C.red, 'EXPIRED')
     const refresh = o.hasRefreshToken ? 'refreshable' : c(C.yellow, 'no refresh token')
     const verified = o.lastVerifiedAt ? `verified ${new Date(o.lastVerifiedAt).toISOString().slice(11, 19)}Z` : 'unverified'
-    console.log(`  ${o.orgId.slice(0, 8)}  ${(o.orgName ?? '?').padEnd(24)} ${exp}; ${refresh}; ${verified}`)
+    // Show the account email when the org name doesn't already carry it
+    // (custom team/enterprise names) — it is a resolve() key for org switch.
+    const email = o.accountEmail && !(o.orgName ?? '').includes(o.accountEmail)
+      ? ` <${o.accountEmail}>` : ''
+    console.log(`  ${o.orgId.slice(0, 8)}  ${((o.orgName ?? '?') + email).padEnd(24)} ${exp}; ${refresh}; ${verified}`)
   }
   console.log(c(C.bold, 'Session pins:'))
   if (!r.sessions.length) info('  (none — sessions follow the current system org)')

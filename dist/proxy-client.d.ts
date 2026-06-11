@@ -363,6 +363,7 @@ export declare class ProxyClient {
         orgs: Array<{
             orgId: string;
             orgName?: string;
+            accountEmail?: string;
             expiresAt: number | null;
             hasRefreshToken: boolean;
             capturedAt: number;

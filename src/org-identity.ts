@@ -74,19 +74,21 @@ export function readOrgIdFromConfig(configPath: string): string | null {
  */
 export function readOrgInfoFromConfig(
   configPath: string = DEFAULT_ACCOUNT_CONFIG_PATH,
-): { orgId: string | null; orgName: string | null } {
+): { orgId: string | null; orgName: string | null; accountEmail: string | null } {
   try {
     const raw = JSON.parse(readFileSync(configPath, 'utf8')) as {
-      oauthAccount?: { organizationUuid?: unknown; organizationName?: unknown }
+      oauthAccount?: { organizationUuid?: unknown; organizationName?: unknown; emailAddress?: unknown }
     }
     const id = raw?.oauthAccount?.organizationUuid
     const name = raw?.oauthAccount?.organizationName
+    const email = raw?.oauthAccount?.emailAddress
     return {
       orgId: typeof id === 'string' && id.length > 0 ? id : null,
       orgName: typeof name === 'string' && name.length > 0 ? name : null,
+      accountEmail: typeof email === 'string' && email.length > 0 ? email : null,
     }
   } catch {
-    return { orgId: null, orgName: null }
+    return { orgId: null, orgName: null, accountEmail: null }
   }
 }
 

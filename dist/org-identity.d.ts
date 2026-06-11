@@ -54,6 +54,7 @@ export declare function readOrgIdFromConfig(configPath: string): string | null;
 export declare function readOrgInfoFromConfig(configPath?: string): {
     orgId: string | null;
     orgName: string | null;
+    accountEmail: string | null;
 };
 /**
  * Resolves the current org UUID. Implemented as a port so tests can drive

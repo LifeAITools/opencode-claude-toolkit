@@ -44,6 +44,11 @@ export const DEFAULT_ORG_VAULT_PATH = join(homedir(), '.claude-local', 'org-vaul
 export interface OrgVaultEntry {
   orgId: string
   orgName?: string
+  /** Account email that captured this credential (claude.json oauthAccount).
+   *  First-class resolve() key: personal orgs happen to embed the email in
+   *  orgName ("x@y's Organization"), but team/enterprise orgs carry custom
+   *  names — email matching must not depend on Anthropic's naming. */
+  accountEmail?: string
   accessToken: string
   refreshToken: string | null
   /** epoch ms; null = unknown (treat as alive, upstream 401 is the backstop) */
@@ -110,6 +115,7 @@ export class OrgVault {
     this.state.orgs[entry.orgId] = {
       ...entry,
       orgName: entry.orgName ?? prev?.orgName,
+      accountEmail: entry.accountEmail ?? prev?.accountEmail,
       lastVerifiedAt: prev?.lastVerifiedAt && (!entry.lastVerifiedAt || prev.lastVerifiedAt > entry.lastVerifiedAt)
         ? prev.lastVerifiedAt : entry.lastVerifiedAt,
     }
@@ -121,7 +127,8 @@ export class OrgVault {
     return this.state.orgs[orgId] ?? null
   }
 
-  /** Fuzzy resolve: exact orgId, then unique prefix, then unique orgName substring. */
+  /** Fuzzy resolve: exact orgId, then unique prefix, then unique account
+   *  email substring, then unique orgName substring. */
   resolve(query: string): OrgVaultEntry | null {
     this.ensureLoaded()
     const q = query.toLowerCase()
@@ -130,6 +137,8 @@ export class OrgVault {
     if (exact) return exact
     const byPrefix = all.filter(e => e.orgId.toLowerCase().startsWith(q))
     if (byPrefix.length === 1) return byPrefix[0]!
+    const byEmail = all.filter(e => (e.accountEmail ?? '').toLowerCase().includes(q))
+    if (byEmail.length === 1) return byEmail[0]!
     const byName = all.filter(e => (e.orgName ?? '').toLowerCase().includes(q))
     if (byName.length === 1) return byName[0]!
     return null

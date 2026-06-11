@@ -13,13 +13,25 @@
 import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
-const UCM_MANIFEST_REV = 1
+const UCM_MANIFEST_REV = 2
+
+/**
+ * Динамические опции "выбор сессии" (UCM 1.1 optionsSources): пульт зовёт
+ * sessions_list и показывает display (cwd · model — "кто есть кто"), отправляя
+ * sessionId. refreshMs держит список живым (сессии приходят/уходят).
+ */
+const SESSION_OPTIONS = {
+  binding: { type: 'tool', op: 'sessions_list' },
+  value: '/sessionId',
+  label: '{/display}',
+  refreshMs: 30_000,
+}
 
 export const CONTROL_MANIFEST_URI = 'ui://control-manifest'
 
 export function buildControlManifest(proxyVersion: string): UcmManifest {
   const manifest = {
-    ucm: '1.0',
+    ucm: '1.1',
     version: `${proxyVersion}+ucm${UCM_MANIFEST_REV}`,
     service: {
       id: 'claude-max-proxy',
@@ -58,6 +70,15 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         },
         uiHints: { icon: 'swap' },
         binding: { type: 'tool', op: 'org_switch' },
+        optionsSources: {
+          session_id: SESSION_OPTIONS,
+          org: {
+            binding: { type: 'tool', op: 'orgs_list' },
+            items: '/orgs',
+            value: '/orgId',
+            label: '{/orgName} ({/orgId})',
+          },
+        },
       },
       {
         id: 'ka_indicator',
@@ -79,6 +100,7 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
           },
         },
         binding: { type: 'tool', op: 'sessions_reload' },
+        optionsSources: { session_id: SESSION_OPTIONS },
       },
       {
         id: 'sessions_disarm',
@@ -93,6 +115,7 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
           },
         },
         binding: { type: 'tool', op: 'sessions_disarm' },
+        optionsSources: { session_id: SESSION_OPTIONS },
       },
       {
         id: 'health_indicator',

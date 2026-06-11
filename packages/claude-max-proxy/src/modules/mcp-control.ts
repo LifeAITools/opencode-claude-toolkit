@@ -20,6 +20,7 @@
  * mirrors kibctl's "no framework dep" stance (see module.ts header).
  */
 
+import { readlinkSync } from 'node:fs'
 import type { ProxyModule, ModuleContext, RouteDefinition, BunServer } from '../module.js'
 import { bus } from '../event-bus.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
@@ -60,6 +61,12 @@ function controlManifestJson(): string {
 
 // ─── tool registry ───────────────────────────────────────────────────
 
+/** cwd процесса-владельца сессии (Linux /proc); null когда pid неизвестен/умер. */
+function sessionCwd(pid: number | null): string | null {
+  if (!pid || process.platform !== 'linux') return null
+  try { return readlinkSync(`/proc/${pid}/cwd`) } catch { return null }
+}
+
 interface ToolDef {
   name: string
   description: string
@@ -82,12 +89,18 @@ function buildTools(): ToolDef[] {
     },
     {
       name: 'sessions_list',
-      description: 'List tracked Claude Code sessions (id, pid, model, first/last request timestamps).',
+      description: 'List tracked Claude Code sessions (id, pid, model, cwd of the owning process, human display label, first/last request timestamps).',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      run: async () => ctx.proxyClient.listSessions().map(s => ({
-        sessionId: s.sessionId, pid: s.pid, model: s.model,
-        firstSeenAt: s.firstSeenAt, lastRequestAt: s.lastRequestAt,
-      })),
+      run: async () => ctx.proxyClient.listSessions().map(s => {
+        const cwd = sessionCwd(s.pid)
+        return {
+          sessionId: s.sessionId, pid: s.pid, model: s.model,
+          firstSeenAt: s.firstSeenAt, lastRequestAt: s.lastRequestAt,
+          cwd,
+          // "who is who" в выпадающих списках пультов (UCM optionsSources)
+          display: `${cwd ?? s.sessionId.slice(0, 8)} · ${s.model ?? '?'}`,
+        }
+      }),
     },
     {
       name: 'orgs_list',

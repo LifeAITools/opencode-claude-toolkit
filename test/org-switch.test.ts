@@ -181,3 +181,55 @@ describe('served-org evidence', () => {
     c.stop()
   })
 })
+
+describe('auto-HOLD persistence + served-org self-heal (2026-06-11 incident class)', () => {
+  test('cross-org HOLD persists the pin binding to the vault (restart-safe)', async () => {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    const auth: string[] = []
+    const state = { orgId: 'org-A', token: 'tok-A', expiresAt: Date.now() + 3_600_000 }
+    const c = mkClient({
+      orgVault: vault,
+      credentialsProvider: {
+        getAccessToken: async () => state.token,
+        invalidate() {},
+        currentExpiresAt: () => state.expiresAt,
+      },
+      orgIdResolver: { current: () => state.orgId, invalidate() {} },
+      upstreamFetcher: sseUpstream({ auth }),
+    })
+    await c.handleRequest(body('hi'), {}, { sessionId: 's-hold' })        // auto-pin org-A
+    state.orgId = 'org-B'; state.token = 'tok-B'                          // cross-org login
+    const r = await c.handleRequest(body('hi again'), {}, { sessionId: 's-hold' })  // HOLD
+    expect(r.status).toBe(200)
+    // The HOLD binding must survive a proxy restart — orgId-only, in the vault.
+    expect(vault.getPin('s-hold')).toEqual({ orgId: 'org-A' })
+    c.stop()
+  })
+
+  test('served-org mismatch invalidates BOTH caches in lock-step (self-heal)', async () => {
+    let creds = 0, org = 0
+    const c = mkClient({
+      credentialsProvider: { getAccessToken: async () => 'tok-X', invalidate() { creds++ } },
+      orgIdResolver: { current: () => 'org-expected', invalidate() { org++ } },
+      upstreamFetcher: sseUpstream({ auth: [] }, 'org-actually-served'),
+    })
+    const r = await c.handleRequest(body('hi'), {}, { sessionId: 's-mm' })
+    expect(r.status).toBe(200)
+    expect(creds).toBeGreaterThanOrEqual(1)   // token cache dropped
+    expect(org).toBeGreaterThanOrEqual(1)     // org-id cache dropped in lock-step
+    c.stop()
+  })
+
+  test('no mismatch → caches untouched (no invalidation churn)', async () => {
+    let creds = 0, org = 0
+    const c = mkClient({
+      credentialsProvider: { getAccessToken: async () => 'tok-X', invalidate() { creds++ } },
+      orgIdResolver: { current: () => 'org-served', invalidate() { org++ } },
+      upstreamFetcher: sseUpstream({ auth: [] }, 'org-served'),
+    })
+    await c.handleRequest(body('hi'), {}, { sessionId: 's-ok' })
+    expect(creds).toBe(0)
+    expect(org).toBe(0)
+    c.stop()
+  })
+})

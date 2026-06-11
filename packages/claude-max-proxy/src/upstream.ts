@@ -5,6 +5,7 @@
  * with native `claude` CLI (both read/write ~/.claude/.credentials.json).
  */
 
+import { statSync } from 'node:fs'
 import { FileCredentialStore } from '@life-ai-tools/claude-code-sdk'
 import type { StreamEvent } from '@life-ai-tools/claude-code-sdk'
 import type { ProxyConfig } from './config.js'
@@ -41,10 +42,22 @@ export class ProxyConfigCredentialsAdapter implements ICredentialsProvider {
 
 let _store: FileCredentialStore | null = null
 let _cachedToken: { accessToken: string; expiresAt: number; refreshToken?: string | null } | null = null
+// mtime of the credentials file at the moment the cache was filled. A cached
+// token is valid ONLY while the file is byte-identical to what produced it —
+// a cross-org `claude login` rotates the file, and serving the previous
+// token past that point posts real traffic to the WRONG org for hours
+// (2026-06-11 incident: stale f9420373 token served while disk held
+// b3219c9b; fs.watch had died after an atomic rename, so per-request mtime
+// coherence is the correctness layer, the watcher is just a fast path).
+let _cachedMtimeMs: number | null = null
 
 function getStore(cfg: ProxyConfig): FileCredentialStore {
   if (!_store) _store = new FileCredentialStore(cfg.credentialsPath)
   return _store
+}
+
+function credsMtimeMs(path: string): number | null {
+  try { return statSync(path).mtimeMs } catch { return null }
 }
 
 /**
@@ -54,8 +67,11 @@ function getStore(cfg: ProxyConfig): FileCredentialStore {
  */
 export async function getAccessToken(cfg: ProxyConfig): Promise<string> {
   const now = Date.now()
-  // 5-min safety buffer
-  if (_cachedToken && _cachedToken.expiresAt - now > 5 * 60 * 1000) {
+  const mtime = credsMtimeMs(cfg.credentialsPath)
+  // Serve from cache only while BOTH hold: 5-min expiry safety buffer AND the
+  // credentials file is unchanged since the cache was filled (org-coherence).
+  if (_cachedToken && _cachedToken.expiresAt - now > 5 * 60 * 1000
+      && mtime !== null && mtime === _cachedMtimeMs) {
     return _cachedToken.accessToken
   }
 
@@ -71,6 +87,9 @@ export async function getAccessToken(cfg: ProxyConfig): Promise<string> {
   }
 
   _cachedToken = { accessToken: creds.accessToken, expiresAt: creds.expiresAt, refreshToken: (creds as { refreshToken?: string }).refreshToken ?? null }
+  // Re-stat AFTER the read: if the file rotated mid-read we record the newer
+  // mtime and the next call re-reads — never serves a half-stale pair.
+  _cachedMtimeMs = credsMtimeMs(cfg.credentialsPath)
 
   if (creds.expiresAt - now < 5 * 60 * 1000) {
     emit({
@@ -87,6 +106,7 @@ export async function getAccessToken(cfg: ProxyConfig): Promise<string> {
 /** Invalidate cached token (call after 401 from upstream). */
 export function invalidateTokenCache(): void {
   _cachedToken = null
+  _cachedMtimeMs = null
 }
 
 // ═══ Raw upstream fetch ═══════════════════════════════════════════

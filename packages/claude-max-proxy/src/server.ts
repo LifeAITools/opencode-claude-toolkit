@@ -257,15 +257,34 @@ const proxyClient = new ProxyClient({
 //
 // Token cache in upstream.ts only invalidates on 401. But quota-exhaustion
 // returns 429 (NOT 401), so after `claude login` to a new org the proxy
-// would keep using the stale cached token for up to ~5min. fs.watch on
-// the credentials file makes the proxy react immediately to login/refresh.
+// would keep using the stale cached token for up to ~5min. The watcher makes
+// the proxy react immediately to login/refresh.
 // 200ms debounce coalesces the read+write storm of credential file rotation.
-import { watch as fsWatch } from 'node:fs'
+//
+// Watch the DIRECTORY, not the file: `claude login` replaces the file via
+// atomic rename, and an inotify watch on the file itself follows the OLD
+// inode — it fires once for the first rotation and then silently dies
+// (2026-06-11: dead watcher let a stale cross-org token serve for hours).
+// A directory watch survives any number of rename-overs. Bun's dir watch
+// reports a rename with the SOURCE (temp) filename only, so filtering by
+// name misses the rotation — instead accept every event and let the
+// debounced handler stat the credentials file: only an actual mtime change
+// triggers invalidation. Unrelated dir traffic (log appends) costs one
+// statSync per quiet 200ms window — nothing.
+import { watch as fsWatch, statSync as fsStatSync } from 'node:fs'
+import { dirname as pathDirname } from 'node:path'
 let _credsDebounce: ReturnType<typeof setTimeout> | null = null
+const credsMtime = (): number | null => {
+  try { return fsStatSync(cfg.credentialsPath).mtimeMs } catch { return null }
+}
+let _lastSeenCredsMtime: number | null = credsMtime()
 try {
-  fsWatch(cfg.credentialsPath, { persistent: false }, () => {
+  fsWatch(pathDirname(cfg.credentialsPath), { persistent: false }, () => {
     if (_credsDebounce) clearTimeout(_credsDebounce)
     _credsDebounce = setTimeout(() => {
+      const m = credsMtime()
+      if (m === _lastSeenCredsMtime) return   // unrelated dir event — file untouched
+      _lastSeenCredsMtime = m
       // Invalidate the token cache AND the org-id cache in lock-step (Layer 1):
       // a cross-org `claude login` flips both files, and resolving them on two
       // independent clocks let real traffic slip onto a new org silently for up
@@ -280,7 +299,7 @@ try {
       })
     }, 200)
   })
-  emit({ level: 'info', kind: 'INFO', msg: `Credentials fs.watch armed on ${cfg.credentialsPath}` })
+  emit({ level: 'info', kind: 'INFO', msg: `Credentials fs.watch armed on ${pathDirname(cfg.credentialsPath)} (dir mode, mtime-gated)` })
 } catch (e: any) {
   // fs.watch can fail if the file doesn't exist yet (fresh install) —
   // not fatal; first `claude login` will create it and next invalidation

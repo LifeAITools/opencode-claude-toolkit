@@ -969,6 +969,15 @@ export class ProxyClient {
       }
       if (sel.held) {
         orgHeld = true
+        // Persist the HOLD binding (orgId only — tokens live in the vault's
+        // org entries). Auto-captured pins are otherwise in-memory, so a
+        // proxy restart would silently rebind every held session to the
+        // current org = the exact forced cross-org cache rewrite HOLD exists
+        // to prevent. Guard on getPin to avoid a vault write per request.
+        const heldOrgId = this.sessionPins.get(sessionId)?.orgId
+        if (heldOrgId && this.orgVault.getPin(sessionId)?.orgId !== heldOrgId) {
+          this.orgVault.setPin(sessionId, heldOrgId)
+        }
         this.events.emit({
           level: 'info',
           kind: 'ORG_PIN_HELD',
@@ -1185,6 +1194,13 @@ export class ProxyClient {
               level: 'error', kind: 'ORG_SERVED_MISMATCH', sessionId,
               msg: `expected org ${expected.slice(0, 8)} but Anthropic served ${servedOrg.slice(0, 8)} — token/org binding is wrong`,
             })
+            // Self-heal: a served-org mismatch means a cached (orgId, token)
+            // pair is lying — re-read both from disk so the NEXT request pairs
+            // truthfully. Without this a dead fs.watch turned one stale cache
+            // into hours of wrong-org traffic (2026-06-11: 37 mismatch alerts,
+            // f9420373's 5h window burned to 429 while logged into b3219c9b).
+            this.credentials.invalidate()
+            this.orgIdResolver.invalidate()
           }
         }
       }

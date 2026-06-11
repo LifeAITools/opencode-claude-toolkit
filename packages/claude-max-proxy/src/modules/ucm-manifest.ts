@@ -13,7 +13,7 @@
 import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
-const UCM_MANIFEST_REV = 2
+const UCM_MANIFEST_REV = 3
 
 /**
  * Динамические опции "выбор сессии" (UCM 1.1 optionsSources): пульт зовёт
@@ -55,6 +55,9 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         title: 'Organizations',
         schema: { type: 'object', properties: {}, additionalProperties: false },
         binding: { type: 'tool', op: 'orgs_list' },
+        // человеческие строки вместо сырого JSON: items указывает на /orgs,
+        // itemLabel — шаблон строки (рендерит пульт, UCM 1.1 uiHints)
+        uiHints: { items: '/orgs', itemLabel: '{/orgName} — {/orgId}' },
       },
       {
         id: 'org_switch',

@@ -135,8 +135,11 @@ export interface ResolvedKeepaliveConfig {
  *     they re-send (with the marker) and the SAME re-cache happens.
  *   - It DOES turn a silent quota spend into an explicit, consented one — a
  *     "confirm large spend" checkpoint. Cost: one rejected round-trip per block.
- *   - `expected:*` rewrites (cold-start / compact / tools-changed) are NEVER
- *     blocked — only `avoidable:ttl-expiry` / `anomalous:*`.
+ *   - `expected:*` rewrites (compact / tools-changed) are never blocked.
+ *     `expected:cold-start` is the one exception: a HUGE first write
+ *     (≥ minColdStartTokens) blocks too — founder directive 2026-06-12, after a
+ *     model switch on a 342k-context session re-cached ~272k with no consent
+ *     step (the switch changed the system hash → new lineage → "cold start").
  * Default: disabled (opt-in).
  */
 export interface RewriteGuardConfig {
@@ -144,6 +147,13 @@ export interface RewriteGuardConfig {
     readonly enabled: boolean;
     /** Only block when predicted cache_creation exceeds this many tokens. Default 50000. */
     readonly minRewriteTokens: number;
+    /** Block an `expected:cold-start` (first-request) write when its predicted
+     *  cache_creation exceeds this many tokens — a huge primary write is an
+     *  unconfirmed quota spend even when "expected" (e.g. a model switch maps the
+     *  session to a fresh lineage and re-caches the whole context). Higher than
+     *  minRewriteTokens so routine session starts and compacted resumes never
+     *  prompt. Same consent flow (marker / `context cache-rewrite-ok`). Default 150000. */
+    readonly minColdStartTokens: number;
     /** Substring in the LATEST user message that overrides the block (fresh-consent:
      *  only the current turn's message is scanned, not history). Default below. */
     readonly overrideMarker: string;

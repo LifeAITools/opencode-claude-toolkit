@@ -141,8 +141,10 @@ export interface KeepaliveConfig {
 
   onHeartbeat?: (stats: KeepaliveStats) => void
   onTick?: (tick: KeepaliveTick) => void
-  /** Fired when KA disarms (network/cache issues) but timer stays alive for auto-resume */
-  onDisarmed?: (info: { reason: string; at: number }) => void
+  /** Fired when KA disarms (network/cache issues) but timer stays alive for auto-resume.
+   *  errStatus/errMessage carry the upstream error of the current fault episode
+   *  (e.g. 401 during a token-rotation wave) — null when the disarm had none. */
+  onDisarmed?: (info: { reason: string; at: number; errStatus?: number | null; errMessage?: string | null }) => void
   /** Fired on next real stream after long idle — surfaces potential cache_write cost */
   onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
   /** Fired when network health probe transitions (degraded ↔ healthy). Reserved for Layer 2. */

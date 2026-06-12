@@ -994,8 +994,11 @@ describe('KeepaliveEngine: auth (401/403) is a transient fault that recovers', (
     await (e as any).tick()                          // fire #1 (401) → auth retryChain capped at 5
     await new Promise((r) => setTimeout(r, 120))     // let the capped chain run to exhaustion
 
-    expect(disarmReason).toBe('retry_exhausted')     // genuine revoke gives up (TTL-safe)
+    expect(disarmReason).toBe('auth_retry_exhausted') // auth-origin exhaust is named distinctly
     expect(calls).toBe(6)                            // 1 initial + 5 capped retries (NOT 1 + 13)
+    // 2026-06-12: a warm snapshot is KEPT on auth exhaust — the escalating
+    // re-arm ladder retries; a real revoke falls out when the TTL runs dry.
+    expect(e._registry.size).toBeGreaterThan(0)
     e.stop()
   })
 })
@@ -1096,6 +1099,115 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     expect(calls).toBeGreaterThanOrEqual(2)       // retryChain actually retried
     expect(disarmReason).toBe('retry_exhausted')
     expect(e._registry.size).toBeGreaterThan(0)   // snapshot KEPT for probe re-fire (Fix 3)
+    e.stop()
+  })
+
+  // ─── Founder directive 2026-06-12: keep registry while TTL alive + escalating re-arm ───
+  //
+  // A ~20-min upstream 401 wave (14:09Z) exhausted the auth chains of ~7 idle
+  // sessions; the old auth exhaust cleared each registry, so the TCP probe's
+  // re-fire gate found nothing to revive — warm caches with 31 min TTL left
+  // died. Now: every exhaust with TTL headroom keeps the snapshot and retries
+  // on the REARM ladder; the disarm payload carries the actual error.
+
+  test('auth retry_exhausted with WARM cache keeps the snapshot + schedules re-arm + surfaces the 401 (2026-06-12)', async () => {
+    let calls = 0
+    const fail401 = async function* (): AsyncGenerator<StreamEvent> {
+      calls++
+      throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    let disarmInfo: any = null
+    const e = mkEng(fail401, (i) => { disarmInfo = i })
+    ;(e as any).retryDelaysMs = [3, 3, 3, 3, 3]
+    ;(e as any).safetyMarginMs = 1
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 1_000)          // cache warm
+    ;(e as any).lastRealActivityAt = Date.now() - 200_000
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    await new Promise((r) => setTimeout(r, 150))      // let the capped chain exhaust
+    expect(disarmInfo?.reason).toBe('auth_retry_exhausted')
+    expect(disarmInfo?.errStatus).toBe(401)           // error visibility (directive #2)
+    expect(String(disarmInfo?.errMessage)).toContain('Unauthorized')
+    expect(e._registry.size).toBeGreaterThan(0)       // snapshot KEPT (directive #1)
+    expect(e._rearm.timerArmed).toBe(true)            // escalating re-arm scheduled
+    expect(e._rearm.holdUntil).toBeGreaterThan(Date.now())
+    e.stop()
+  })
+
+  test('re-arm ladder retries the fire; a success ends the back-off episode', async () => {
+    let calls = 0
+    const recoveringFetch = async function* (): AsyncGenerator<StreamEvent> {
+      calls++
+      if (calls <= 2) throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      yield { type: 'message_stop', usage: { inputTokens: 5, outputTokens: 1, cacheReadInputTokens: 5000, cacheCreationInputTokens: 0 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const e = mkEng(recoveringFetch, () => {})
+    ;(e as any).retryDelaysMs = [3]        // auth budget = min(5,1) = 1 retry per chain
+    ;(e as any).safetyMarginMs = 1
+    ;(e as any).rearmDelaysMs = [20]       // fast ladder for the test
+    ;(e as any).jitterMs = 0
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 1_000)
+    ;(e as any).lastRealActivityAt = Date.now() - 200_000
+    { const st = e._lineageStats.get(a); if (st) (st as any).lastWarmedAt = Date.now() - 200_000 }
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)  // 401 → chain 401 → exhaust → re-arm in 20ms
+    await new Promise((r) => setTimeout(r, 150))               // re-arm tick fires → success
+    expect(calls).toBeGreaterThanOrEqual(3)        // the ladder actually re-fired
+    expect(e._registry.size).toBeGreaterThan(0)
+    expect(e._rearm.attempt).toBe(0)               // success reset the episode
+    expect(e._rearm.holdUntil).toBe(0)
+    e.stop()
+  })
+
+  test('a re-arm slot that would land after cacheDiesAt clears the registry (KA never cold-writes)', async () => {
+    const fail401 = async function* (): AsyncGenerator<StreamEvent> {
+      throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const e = mkEng(fail401, () => {})
+    ;(e as any).retryDelaysMs = [3]
+    ;(e as any).rearmDelaysMs = [60_000]   // slot lands after the cache dies
+    ;(e as any).safetyMarginMs = 1_000
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 270_000)   // 300s TTL → ~30s left
+    ;(e as any).lastRealActivityAt = Date.now() - 280_000
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(e._registry.size).toBe(0)             // rearm_outlives_ttl → cleared
+    expect(e._rearm.timerArmed).toBe(false)
+    e.stop()
+  })
+
+  test('interval ticks are gated while the re-arm hold is active (no tight fire loop)', async () => {
+    let calls = 0
+    const fail401 = async function* (): AsyncGenerator<StreamEvent> {
+      calls++
+      throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const e = mkEng(fail401, () => {})
+    ;(e as any).retryDelaysMs = [3]
+    ;(e as any).safetyMarginMs = 1
+    ;(e as any).rearmDelaysMs = [60_000]   // long hold — stays active for the test
+    ;(e as any).jitterMs = 0
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 1_000)
+    ;(e as any).lastRealActivityAt = Date.now() - 200_000
+    { const st = e._lineageStats.get(a); if (st) (st as any).lastWarmedAt = Date.now() - 200_000 }
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    await new Promise((r) => setTimeout(r, 50))    // chain exhausts → hold 60s armed
+    const callsAfterExhaust = calls
+    await (e as any).tick()                        // gated by the hold → no new fire
+    expect(calls).toBe(callsAfterExhaust)
+    expect(e._registry.size).toBeGreaterThan(0)
     e.stop()
   })
 })

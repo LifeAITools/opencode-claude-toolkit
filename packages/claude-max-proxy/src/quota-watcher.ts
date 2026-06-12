@@ -315,6 +315,10 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): () => void {
     try { pollStatsTail() } catch (e) {
       emit({ level: 'error', kind: 'QUOTA_WATCHER_TAIL_ERROR', msg: String(e) })
     }
+    // Self-heal on a traffic-less reset: pollStatsTail only rewrites the SSOT
+    // when new stats lines arrive, so a 5h window that resets while the host
+    // is idle would otherwise keep advertising the PRE-reset utilization.
+    try { applyResetPassed() } catch { /* best-effort — next tick retries */ }
   }, STATS_POLL_INTERVAL_MS)
   ;(statsTailTimer as any)?.unref?.()
 
@@ -688,6 +692,60 @@ function levelRank(l: 'ok' | 'warning' | 'critical'): number {
 function pct(v: number | null): string {
   if (v == null) return '?'
   return `${(v * 100).toFixed(0)}%`
+}
+
+/**
+ * Self-heal the SSOT when a 5h window reset passes with ZERO traffic.
+ *
+ * The snapshot is otherwise rewritten only when new stats lines arrive (live
+ * traffic), so after a reset on an idle host the file kept advertising the
+ * PRE-reset utilization — consumers (signal-wire quota hints) alarmed
+ * "util5h=0.96 critical" minutes after the window had already rolled
+ * (founder gap 2026-06-12: reset 15:50Z, hint still showed 0.96 at 15:53Z
+ * while the live HEALTH_HEARTBEAT already reported 0.01).
+ *
+ * Once `now >= resetAt` for an account (pid-observed, account-aggregate, or
+ * carried expectation), the recorded util5h belongs to the PREVIOUS window:
+ * zero it (a fresh window starts at 0 until new usage), recompute levels, and
+ * force a write so the file heals within one poll tick. util7d is untouched —
+ * the 7-day window does not reset at the 5h boundary. Runs every poll tick;
+ * no-ops until a reset actually passes.
+ */
+function applyResetPassed(): void {
+  const now = Date.now()
+  const touched = new Set<string>()
+  for (const p of pidStates.values()) {
+    if (p.resetAt != null && now >= p.resetAt) touched.add(p.accountHint)
+  }
+  for (const [hint, acc] of accountStates.entries()) {
+    if (acc.resetAt != null && now >= acc.resetAt) touched.add(hint)
+  }
+  for (const [hint, exp] of expectedResetAt.entries()) {
+    if (exp.resetAt <= now) {
+      expectedResetAt.delete(hint)
+      touched.add(hint)
+    }
+  }
+  if (touched.size === 0) return
+  for (const hint of touched) {
+    for (const p of pidStates.values()) {
+      if (p.accountHint !== hint) continue
+      // A pid pinned to a FUTURE window (fresh observation racing this sweep)
+      // is not part of the reset that just passed — leave it alone.
+      if (p.resetAt != null && p.resetAt > now) continue
+      p.util5h = 0
+      p.resetAt = null
+      p.level = classifyLevel(0, p.util7d)
+    }
+    recomputeAccountFromPids(hint)
+  }
+  emit({
+    level: 'info',
+    kind: 'QUOTA_RESET_PASSED',
+    msg: `5h reset passed for ${touched.size} account(s) — util5h zeroed pending fresh traffic`,
+    accounts: Array.from(touched),
+  })
+  writeQuotaStatus()
 }
 
 // ─── SSOT writer (atomic, throttled) ─────────────────────────────────

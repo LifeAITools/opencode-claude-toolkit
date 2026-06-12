@@ -1040,8 +1040,12 @@ export class ProxyClient {
     // configured token threshold that has NOT been consented is rejected with
     // 400 for EVERY consumer: interactive human, automated agent, programmatic
     // endpoint, AND tool-loop continuation. No silent expensive re-cache ever
-    // slips through. `expected:*` rewrites (cold-start / compact / tools-changed)
-    // are never blocked. This does NOT save the cost — the re-sent request
+    // slips through. `expected:*` rewrites (compact / tools-changed) are never
+    // blocked — with ONE exception: an `expected:cold-start` whose predicted
+    // write exceeds minColdStartTokens blocks too (founder directive
+    // 2026-06-12: a model switch maps the session to a fresh lineage, so a
+    // 342k-context re-cache sailed through as a "cold start" with no consent
+    // step). This does NOT save the cost — the re-sent request
     // re-caches the same — it converts a silent quota spend into an explicit,
     // consented one. Consent has TWO channels:
     //   1. `overrideMarker` in the latest user message — for an interactive
@@ -1053,18 +1057,26 @@ export class ProxyClient {
     //      `context cache-rewrite-ok <sessionId>`.
     {
       const guard = loadKeepaliveConfig().rewriteGuard
-      if (guard.enabled && rewriteAssessment && !rewriteAssessment.expected
-          // org-switch stands down ONLY when Layer 2 actually absorbs the cost:
-          // either this session HOLDS its old org+token (no cross-org burn), or
-          // the user EXPLICITLY reloaded into the current org ([%reload-ok%] =
-          // consent to migrate). When neither holds — a pin lost to a proxy
-          // restart or a global `claude-max reload` — an org-switch is a real
-          // silent cross-org cold rewrite; the guard MUST surface it (block +
-          // consent), not delegate to a Layer 2 that isn't there. (2026-06-08:
-          // a global reload cleared all pins 2s before a switch → ~526K tok
-          // burned on the new org with no block and no signal.)
-          && !(rewriteAssessment.signals.orgChanged && (orgHeld || reloadAsked || rotateConsumed))
-          && rewriteAssessment.predictedTokens >= guard.minRewriteTokens) {
+      // org-switch stands down ONLY when Layer 2 actually absorbs the cost:
+      // either this session HOLDS its old org+token (no cross-org burn), or
+      // the user EXPLICITLY reloaded into the current org ([%reload-ok%] =
+      // consent to migrate). When neither holds — a pin lost to a proxy
+      // restart or a global `claude-max reload` — an org-switch is a real
+      // silent cross-org cold rewrite; the guard MUST surface it (block +
+      // consent), not delegate to a Layer 2 that isn't there. (2026-06-08:
+      // a global reload cleared all pins 2s before a switch → ~526K tok
+      // burned on the new org with no block and no signal.)
+      const blockAvoidable = !!rewriteAssessment && !rewriteAssessment.expected
+        && !(rewriteAssessment.signals.orgChanged && (orgHeld || reloadAsked || rotateConsumed))
+        && rewriteAssessment.predictedTokens >= guard.minRewriteTokens
+      // Founder directive 2026-06-12: a HUGE first write for a new lineage is
+      // an unconfirmed quota spend even though it is "expected" — stop and ask
+      // for the same consent. Routine session starts and compacted resumes sit
+      // far below minColdStartTokens and never prompt.
+      const blockColdStart = !!rewriteAssessment
+        && rewriteAssessment.rewriteClass === 'expected:cold-start'
+        && rewriteAssessment.predictedTokens >= guard.minColdStartTokens
+      if (guard.enabled && rewriteAssessment && (blockAvoidable || blockColdStart)) {
         // Consent check. Inspect the in-message marker first (no side effect);
         // only when it is ABSENT consume a session grant (single-use). The
         // short-circuit OR guarantees a marker'd turn never burns a grant.
@@ -1105,6 +1117,7 @@ export class ProxyClient {
               rewriteClass: rewriteAssessment.rewriteClass,
               predictedTokens: rewriteAssessment.predictedTokens,
               minRewriteTokens: guard.minRewriteTokens,
+              minColdStartTokens: guard.minColdStartTokens,
               // Machine-parseable consent affordances so a programmatic client
               // or agent harness can act on the block without scraping prose.
               consent: {
@@ -1390,7 +1403,10 @@ export class ProxyClient {
           kind: 'KA_DISARM',
           sessionId,
           reason: info.reason,
-          msg: `KA disarmed for session ${sessionId.slice(0, 8)} — reason=${info.reason}`,
+          errStatus: info.errStatus ?? null,
+          errMessage: info.errMessage ?? null,
+          msg: `KA disarmed for session ${sessionId.slice(0, 8)} — reason=${info.reason}`
+            + (info.errStatus || info.errMessage ? ` err=${info.errStatus ?? 'na'}:${info.errMessage ?? ''}` : ''),
         }),
         onRewriteWarning: (info) => this.events.emit({
           level: info.blocked ? 'error' : 'info',

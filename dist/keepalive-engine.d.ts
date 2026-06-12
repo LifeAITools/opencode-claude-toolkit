@@ -172,6 +172,11 @@ export declare class KeepaliveEngine {
     private lastActivityAt;
     private lastRealActivityAt;
     private cacheWrittenAt;
+    private rearmDelaysMs;
+    private rearmAttempt;
+    private rearmHoldUntil;
+    private rearmTimer;
+    private lastKaError;
     private timer;
     private retryTimer;
     private abortController;
@@ -328,6 +333,20 @@ export declare class KeepaliveEngine {
      */
     private onDisarmed;
     /**
+     * Schedule the next post-exhaust fire attempt on the escalating
+     * REARM_DELAYS_MS ladder. Called ONLY from the retry-exhaust path with a
+     * still-warm cache: keeps the registry, sets the hold window (gating ticks
+     * and probe re-fires), and arms a timer that retries via tick(). A slot
+     * that would land after cacheDiesAt clears the registry instead — the cache
+     * cannot be saved, and firing past TTL would cold-write (the KA invariant).
+     */
+    private scheduleRearm;
+    /** A fire succeeded or a real request landed — the fault episode is over. */
+    private resetRearmState;
+    /** Record the upstream error a KA fire / retry attempt just hit (status +
+     *  truncated message) — feeds the exhaust diag and onDisarmed payload. */
+    private noteKaError;
+    /**
      * Aggressive TCP health probe to api.anthropic.com:443.
      * Uses escalating intervals [5s, 5s, 10s, 10s, 20s, 20s, 30s, 30s, ...] —
      * hits fast first (cache is precious, network blip may be short) and
@@ -370,6 +389,8 @@ export declare class KeepaliveEngine {
         onDisarmed?: (info: {
             reason: string;
             at: number;
+            errStatus?: number | null;
+            errMessage?: string | null;
         }) => void;
         onRewriteWarning?: (info: {
             idleMs: number;
@@ -404,6 +425,12 @@ export declare class KeepaliveEngine {
     /** @internal — for test inspection (smart-pause state) */
     get _quotaPauseTimer(): ReturnType<typeof setTimeout> | null;
     get _quotaPauseUntil(): number | null;
+    /** @internal — post-exhaust re-arm state (for tests). */
+    get _rearm(): {
+        attempt: number;
+        holdUntil: number;
+        timerArmed: boolean;
+    };
     /** @internal — for test invocation of the smart-pause handler */
     _testHandleQuotaRateLimit(entry: {
         body: Record<string, unknown>;

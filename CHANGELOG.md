@@ -2,6 +2,39 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.23] - 2026-06-12 (proxy 1.0.7)
+
+Founder directives after the 2026-06-12 14:09Z upstream 401 wave killed ~7 idle
+sessions' warm caches (root cause: auth retry-chain exhaust cleared the registry
+while 31 min of TTL remained, so the TCP probe's re-fire gate had nothing to revive).
+
+### Changed
+- **Keepalive keeps the registry on EVERY retry-chain exhaust while the cache
+  TTL has headroom** — auth (401/403) exhausts no longer `clearRegistry()`. A new
+  escalating re-arm ladder (`30s → 1m → 2m → 4m → 8m → 10m`, TTL-bounded) retries
+  the fire; the hold window also gates interval ticks and probe re-fires, so a
+  persistent fault can never hammer upstream in a tight loop. A slot that would
+  land after `cacheDiesAt` clears the registry instead (`rearm_outlives_ttl`) —
+  the KA never-cold-write invariant holds. Auth-origin exhausts get a distinct
+  reason `auth_retry_exhausted` (no TCP probe — the link is fine, the token isn't).
+- **Interval ticks are gated while a retry chain owns the fire path**
+  (`if (retryTimer) return`) — the incident's confusing parallel second chain
+  (exhausting against an already-cleared registry) is structurally impossible now.
+- **Error visibility**: the engine records the last KA upstream error
+  (status + message) and surfaces it in `KA_CLEAR_DIAG` exhaust lines and the
+  `onDisarmed` payload → proxy `KA_DISARM` events now carry `errStatus`/`errMessage`
+  (no more proving "it was a 401" from `budget=5` arithmetic).
+- **Rewrite guard: huge cold-starts now block too.** New
+  `rewriteGuard.minColdStartTokens` (default 150000): an `expected:cold-start`
+  first write above it stops for the SAME consent flow (marker / grant). Closes
+  the model-switch hole — switching models maps the session to a fresh lineage,
+  so a ~272k re-cache previously sailed through with no consent step. Routine
+  session starts and compacted resumes sit far below the threshold.
+- **quota-watcher self-heals after a traffic-less 5h reset**: a 1s sweep zeroes
+  `util5h` (and recomputes levels) the moment `resetAt` passes, forcing an SSOT
+  write even with zero traffic — consumers (signal-wire quota hints) no longer
+  alarm "0.96 critical" minutes after the window rolled. `util7d` untouched.
+
 ## [0.20.20] - 2026-06-09
 
 ### Changed

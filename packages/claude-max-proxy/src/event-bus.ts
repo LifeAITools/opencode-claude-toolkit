@@ -219,6 +219,11 @@ export interface KaDisarmEvent extends BaseEvent {
   kind: 'KA_DISARM'
   sessionId: string
   reason: string
+  /** Upstream error behind the disarm (when the engine saw one in this fault
+   *  episode) — e.g. 401 for an auth wave. Null when the disarm had no
+   *  upstream error (admin disarm, TTL expiry, quota). */
+  errStatus?: number | null
+  errMessage?: string | null
 }
 
 export interface HealthHeartbeatEvent extends BaseEvent {

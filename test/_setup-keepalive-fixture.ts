@@ -20,6 +20,10 @@ writeFileSync(FIXTURE_PATH, JSON.stringify({
   rewriteGuard: {
     enabled: true,
     minRewriteTokens: 1000,
+    // Cold-start blocking threshold (founder 2026-06-12). Test bodies are ~6KB
+    // (~1.5k tok) so ordinary first requests stay far below; the dedicated
+    // cold-start tests send ~240KB (~60k tok) to cross it.
+    minColdStartTokens: 50000,
     overrideMarker: '[cache-rewrite-ok]',
     // Hermetic consent-grant store — never touch the host's
     // ~/.claude-local/cache-rewrite-grants.json from a test.

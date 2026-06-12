@@ -177,6 +177,23 @@ type ErrorCategory = 'network' | 'server_transient' | 'auth' | 'permanent'
  */
 const KA_AUTH_MAX_RETRIES = 5
 
+/**
+ * Escalating post-exhaust re-arm slots (founder directive 2026-06-12): when a
+ * retry chain exhausts but the cache still has TTL headroom, the registry is
+ * KEPT and the next fire attempt is scheduled on this ladder instead of being
+ * abandoned (auth) or hammered in a tight probe→fire→exhaust loop (5xx storm).
+ * Bounded by the cache TTL — a slot that would land after cacheDiesAt clears
+ * the registry instead. The attempt counter resets on any successful fire or
+ * real request.
+ *
+ * Why it exists: 2026-06-12 14:09Z a ~20-min upstream 401 wave exhausted the
+ * auth chains of ~7 idle sessions; the old exhaust path cleared each registry
+ * (probeOnExhaust=false), so the TCP probe's re-fire gate (registry.size > 0)
+ * found nothing to revive — every warm cache (31 min TTL left each) died and
+ * the next real turns all hit avoidable:ttl-expiry rewrite-guard blocks.
+ */
+const REARM_DELAYS_MS: readonly number[] = [30_000, 60_000, 120_000, 240_000, 480_000, 600_000]
+
 function classifyError(err: unknown): ErrorCategory {
   const e = err as {
     status?: number
@@ -465,7 +482,7 @@ export class KeepaliveEngine {
   private config: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens' | 'maxFiresPerTick' | 'rewriteWarnIdleMs' | 'rewriteWarnTokens' | 'rewriteBlockIdleMs' | 'rewriteBlockEnabled'>> & {
     onHeartbeat?: (stats: KeepaliveStats) => void
     onTick?: (tick: KeepaliveTick) => void
-    onDisarmed?: (info: { reason: string; at: number }) => void
+    onDisarmed?: (info: { reason: string; at: number; errStatus?: number | null; errMessage?: string | null }) => void
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
     onNetworkStateChange?: (info: { from: string; to: string; at: number }) => void
     onTtlScan?: (info: { minTtlMs: number | null; previousTtlMs: number | null; hasAnyCacheControl: boolean; at: number }) => void
@@ -541,6 +558,22 @@ export class KeepaliveEngine {
   private lastActivityAt = 0
   private lastRealActivityAt = 0
   private cacheWrittenAt = 0
+
+  // Post-exhaust escalating re-arm state (see REARM_DELAYS_MS). The hold
+  // window gates interval ticks AND probe re-fires, so a persistent fault can
+  // never hammer upstream in a tight fire→exhaust loop; the rearm timer is the
+  // scheduled attempt that ends the hold. Instance field (not the module
+  // const) so tests can shrink the ladder.
+  private rearmDelaysMs: readonly number[] = REARM_DELAYS_MS
+  private rearmAttempt = 0
+  private rearmHoldUntil = 0
+  private rearmTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Last upstream error seen by a KA fire / retry attempt — surfaced in the
+  // exhaust diag and the onDisarmed payload so a disarm names its actual
+  // error instead of leaving the class to be inferred from retry-budget
+  // arithmetic (the 2026-06-12 post-mortem had to prove "401" via budget=5).
+  private lastKaError: { status: number | null; message: string; at: number } | null = null
 
   // Timers & abort
   private timer: ReturnType<typeof setInterval> | null = null
@@ -791,6 +824,9 @@ export class KeepaliveEngine {
     this.lastActivityAt = now
     this.lastRealActivityAt = now  // only REAL requests set this
     this.cacheWrittenAt = now      // cache is fresh right now
+    // A real request ends any post-exhaust back-off episode: fresh snapshot,
+    // fresh creds — resume normal cadence immediately.
+    this.resetRearmState()
 
     // Layer 2: real stream succeeded → network is definitively healthy.
     if (this.healthProbeTimer || this.networkState !== 'healthy') {
@@ -919,6 +955,7 @@ export class KeepaliveEngine {
     this.clearRegistry()
     this.inFlight = false
     this.stopHealthProbe()
+    this.resetRearmState()
   }
 
   /**
@@ -962,6 +999,7 @@ export class KeepaliveEngine {
     this.abortController = null
     this.inFlight = false
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+    this.resetRearmState()
     // Drop committed (stale-org) snapshots. Pending in-flight snapshots are
     // kept — their real request goes to the NEW org, so their completion is a
     // valid fresh registration.
@@ -1008,6 +1046,15 @@ export class KeepaliveEngine {
     } catch { /* logging best-effort */ }
 
     if (this.inFlight) return
+    // A retry chain owns the fire path — an interval tick starting a SECOND
+    // fire/chain in parallel is pure waste and confuses diagnosis (the
+    // 2026-06-12 incident's "regSize=0 exhaust" was exactly such a parallel
+    // chain outliving the first chain's registry clear).
+    if (this.retryTimer) return
+    // Post-exhaust escalating back-off: while the hold is active, neither the
+    // interval tick nor a probe-triggered re-fire may fire — the scheduled
+    // rearm timer ends the hold and retries on the REARM_DELAYS_MS ladder.
+    if (Date.now() < this.rearmHoldUntil) return
     // Empty registry: try self-heal (re-prime a live idle session whose snapshot
     // was dropped by reload). If not eligible/possible, nothing to fire.
     if (this.registry.size === 0 && !this.trySelfHeal()) return
@@ -1301,6 +1348,7 @@ export class KeepaliveEngine {
       // Update fire timer (for spacing keepalives) but NOT realActivityAt
       this.lastActivityAt = Date.now()
       this.cacheWrittenAt = Date.now()
+      this.resetRearmState()  // successful fire ends any back-off episode
       // A successful KA fire warmed THIS lineage — advance its per-lineage
       // idle clock so the next fire is spaced one interval out from here.
       const firedStat = this.lineageStats.get(best.lineageKey)
@@ -1381,6 +1429,7 @@ export class KeepaliveEngine {
       // Healthy refresh — the tick loop may proceed to the next eligible lineage.
       return 'ok'
     } catch (err: unknown) {
+      this.noteKaError(err)
       const category = classifyError(err)
 
       if (category === 'network') {
@@ -1421,10 +1470,12 @@ export class KeepaliveEngine {
         // backoff. retryChain rebuilds Authorization from a fresh getToken() on
         // every attempt (line ~1667), so a rotated token is picked up and the
         // cache is saved. A GENUINE revoke keeps 401ing and exhausts the budget
-        // → retry_exhausted disarm (still TTL-safe). Matches this category's
-        // documented intent ("refresh token, retry"). Capped at KA_AUTH_MAX_RETRIES
-        // (< the full 5xx budget): a token rotation recovers within a few attempts,
-        // a genuine revoke gives up fast instead of spamming doomed 401s.
+        // → auth_retry_exhausted disarm that KEEPS the warm snapshot and retries
+        // on the escalating REARM ladder until the TTL runs dry (founder
+        // directive 2026-06-12 — a 20-min upstream 401 wave must not kill warm
+        // caches). Capped at KA_AUTH_MAX_RETRIES per chain: a token rotation
+        // recovers within a few attempts; a real revoke costs a handful of
+        // token-free 401s per ladder slot, bounded by the TTL.
         this.retryChain(best, 0, KA_AUTH_MAX_RETRIES, /* probeOnExhaust */ false)
       } else {
         // Permanent (400, malformed request, etc). Don't retry.
@@ -1618,23 +1669,38 @@ export class KeepaliveEngine {
     // clears in <~10s so a handful of retries recovers it, while a genuine revoke
     // gives up fast instead of burning the whole 13-step budget on doomed 401s.
     maxAttempts = this.retryDelaysMs.length,
-    // Transient (5xx/network) chains pass true: on exhaustion, if the cache is
-    // still warm, keep the snapshot so the health probe can re-fire when upstream
-    // recovers. Auth (revoke) chains pass false: a probe would only re-fire doomed
-    // 401s, so give up fast and re-arm on the next real request (fresh creds).
+    // Chain origin marker. Transient (5xx/network) chains pass true; auth
+    // (401/403) chains pass false. BOTH keep the snapshot on exhaustion while
+    // the TTL has headroom (escalating REARM ladder retries the fire); the flag
+    // now only picks the disarm reason — 'retry_exhausted' (network-probed) vs
+    // 'auth_retry_exhausted' (no TCP probe: the link is fine, the token isn't).
     probeOnExhaust = true,
   ): void {
     const budget = Math.min(maxAttempts, this.retryDelaysMs.length)
     if (attemptIndex >= budget) {
-      this.logClearDiag('retry_exhausted', { attemptIndex, budget, retryDelaysMsLen: this.retryDelaysMs.length })
-      // Transient + cache still warm: keep the snapshot so onDisarmed
-      // ('retry_exhausted' is a networkReason) starts a health probe that re-fires
-      // KA once upstream recovers — instead of permanently killing keepalive on a
-      // passing 529/network blip (→ cache expiry → morning rewrite-guard 400).
-      // Otherwise (auth revoke, or cache past TTL) clear so the probe no-ops.
+      // Founder directive 2026-06-12: keep the cache + registry for EVERY
+      // failure class as long as the TTL has headroom and recovery has a
+      // chance. The old auth path (probeOnExhaust=false) cleared the registry
+      // here, so the probe's re-fire gate (registry.size > 0) found nothing to
+      // revive after a transient 401 wave — warm caches with 31 min TTL left
+      // died for good. Now: auth and transient exhausts both keep the snapshot
+      // and retry on the escalating REARM ladder; only a cache that cannot
+      // survive to the next slot is cleared. A genuine revoke keeps 401ing
+      // through the ladder and falls out when the TTL runs dry — bounded, and
+      // each doomed 401 costs no tokens.
       const ttlRemaining = this.cacheTtlMs - (Date.now() - this.cacheWrittenAt)
-      if (!probeOnExhaust || ttlRemaining <= this.safetyMarginMs) this.clearRegistry()
-      this.onDisarmed('retry_exhausted')
+      const reason = probeOnExhaust ? 'retry_exhausted' : 'auth_retry_exhausted'
+      this.logClearDiag(reason, {
+        attemptIndex, budget, retryDelaysMsLen: this.retryDelaysMs.length,
+        errStatus: this.lastKaError?.status ?? null,
+        errMessage: this.lastKaError?.message ?? null,
+      })
+      if (ttlRemaining <= this.safetyMarginMs) {
+        this.clearRegistry()
+      } else {
+        this.scheduleRearm()
+      }
+      this.onDisarmed(reason)
       return
     }
 
@@ -1727,7 +1793,9 @@ export class KeepaliveEngine {
 
         this.lastActivityAt = Date.now()
         this.cacheWrittenAt = Date.now()
+        this.resetRearmState()  // successful retry-fire ends the fault episode
       } catch (err: unknown) {
+        this.noteKaError(err)
         const category = classifyError(err)
 
         if (category === 'network') {
@@ -1795,7 +1863,17 @@ export class KeepaliveEngine {
       this.retryTimer = null
     }
     // NOTE: intentionally NOT calling clearInterval(timer).
-    try { this.config.onDisarmed?.({ reason, at: Date.now() }) } catch {}
+    // Surface the last KA error alongside the reason — only when it is fresh
+    // (same fault episode, <10 min) so a stale error from hours ago is never
+    // attributed to an unrelated disarm.
+    const err = this.lastKaError && Date.now() - this.lastKaError.at < 600_000 ? this.lastKaError : null
+    try {
+      this.config.onDisarmed?.({
+        reason, at: Date.now(),
+        errStatus: err?.status ?? null,
+        errMessage: err?.message ?? null,
+      })
+    } catch {}
 
     // Layer 2: start network health probe on any network-related disarm.
     // Escalating intervals [5s, 5s, 10s, 10s, 20s, ...] — fast reaction if
@@ -1823,6 +1901,60 @@ export class KeepaliveEngine {
       const reviveMode = ttlRemaining <= this.safetyMarginMs
       this.startHealthProbe({ reviveMode })
     }
+  }
+
+  /**
+   * Schedule the next post-exhaust fire attempt on the escalating
+   * REARM_DELAYS_MS ladder. Called ONLY from the retry-exhaust path with a
+   * still-warm cache: keeps the registry, sets the hold window (gating ticks
+   * and probe re-fires), and arms a timer that retries via tick(). A slot
+   * that would land after cacheDiesAt clears the registry instead — the cache
+   * cannot be saved, and firing past TTL would cold-write (the KA invariant).
+   */
+  private scheduleRearm(): void {
+    const delay = this.rearmDelaysMs[Math.min(this.rearmAttempt, this.rearmDelaysMs.length - 1)]!
+    this.rearmAttempt++
+    const cacheDiesAt = this.cacheWrittenAt + this.cacheTtlMs - this.safetyMarginMs
+    if (Date.now() + delay >= cacheDiesAt) {
+      this.logClearDiag('rearm_outlives_ttl', { rearmAttempt: this.rearmAttempt, nextRearmDelayMs: delay })
+      this.clearRegistry()
+      return
+    }
+    this.rearmHoldUntil = Date.now() + delay
+    if (this.rearmTimer) clearTimeout(this.rearmTimer)
+    this.rearmTimer = setTimeout(() => {
+      this.rearmTimer = null
+      this.rearmHoldUntil = 0
+      void this.tick().catch((e) => this.logAsyncReject('tick@rearm', e))
+    }, delay)
+    if (this.rearmTimer && typeof this.rearmTimer === 'object' && 'unref' in this.rearmTimer) {
+      (this.rearmTimer as any).unref()
+    }
+    try {
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] KA_REARM_SCHEDULED pid=${process.pid} attempt=${this.rearmAttempt} delaySec=${Math.round(delay / 1000)} regSize=${this.registry.size} ttlRemainingSec=${Math.round((cacheDiesAt - Date.now()) / 1000)}\n`)
+    } catch { /* logging best-effort */ }
+  }
+
+  /** A fire succeeded or a real request landed — the fault episode is over. */
+  private resetRearmState(): void {
+    this.rearmAttempt = 0
+    this.rearmHoldUntil = 0
+    if (this.rearmTimer) { clearTimeout(this.rearmTimer); this.rearmTimer = null }
+    this.lastKaError = null
+  }
+
+  /** Record the upstream error a KA fire / retry attempt just hit (status +
+   *  truncated message) — feeds the exhaust diag and onDisarmed payload. */
+  private noteKaError(err: unknown): void {
+    try {
+      const e = err as { status?: unknown; message?: unknown } | null
+      this.lastKaError = {
+        status: typeof e?.status === 'number' ? e.status : null,
+        message: String((e?.message as string | undefined) ?? err).slice(0, 200),
+        at: Date.now(),
+      }
+    } catch { /* observability must never break the fire path */ }
   }
 
   // ────────────────────────────────────────────────────────────
@@ -2085,6 +2217,11 @@ export class KeepaliveEngine {
   /** @internal — for test inspection (smart-pause state) */
   get _quotaPauseTimer(): ReturnType<typeof setTimeout> | null { return this.quotaPauseTimer }
   get _quotaPauseUntil(): number | null { return this.quotaPauseUntil }
+
+  /** @internal — post-exhaust re-arm state (for tests). */
+  get _rearm(): { attempt: number; holdUntil: number; timerArmed: boolean } {
+    return { attempt: this.rearmAttempt, holdUntil: this.rearmHoldUntil, timerArmed: this.rearmTimer !== null }
+  }
 
   /** @internal — for test invocation of the smart-pause handler */
   _testHandleQuotaRateLimit(

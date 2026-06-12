@@ -74,9 +74,46 @@ const reqBody = (extra = '') => JSON.stringify({
 })
 
 describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () => {
-  test('first request is NEVER blocked (expected:cold-start)', async () => {
+  test('first request below the cold-start threshold is NOT blocked (expected:cold-start)', async () => {
     const c = mkClient()
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sess-1' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+
+  // ── Cold-start threshold (founder directive 2026-06-12) ─────────────────
+  // A model switch maps the session to a fresh lineage (the system prompt
+  // embeds the model name → new sysHash), so a 342k-context re-cache used to
+  // sail through as an unblockable "cold start". A first write above
+  // minColdStartTokens now stops for the SAME consent flow.
+  const hugeColdBody = (extra = '') => JSON.stringify({
+    model: 'claude-opus-4-8',
+    system: [{ type: 'text', text: 'system prompt (new model)', cache_control: { type: 'ephemeral' } }],
+    tools: [],
+    messages: [{ role: 'user', content: 'resume after model switch ' + 'y'.repeat(240_000) + ' ' + extra }],
+  })
+
+  test('huge first request (≥ minColdStartTokens) IS blocked — model-switch recache case', async () => {
+    const c = mkClient()
+    const r = await c.handleRequest(hugeColdBody(), {}, { sessionId: 'rg-cold-1' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { type?: string; rewriteClass?: string } }
+    expect(j.error?.type).toBe('cache_rewrite_guard')
+    expect(j.error?.rewriteClass).toBe('expected:cold-start')
+    c.stop()
+  })
+
+  test('huge first request WITH the override marker passes (same consent flow)', async () => {
+    const c = mkClient()
+    const r = await c.handleRequest(hugeColdBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-cold-2' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+
+  test('huge first request PASSES with a session grant (programmatic consent channel)', async () => {
+    grantConsent(GRANT_PATH, 'rg-cold-3', 180_000)
+    const c = mkClient()
+    const r = await c.handleRequest(hugeColdBody(), {}, { sessionId: 'rg-cold-3' })
     expect(r.status).not.toBe(400)
     c.stop()
   })

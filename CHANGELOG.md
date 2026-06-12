@@ -2,6 +2,20 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.26] - 2026-06-13 (proxy 1.0.10)
+
+### Fixed
+- **False cold-start block of a KA-kept-warm session after a proxy restart**
+  (incident 93ef0df0: a 381k warm cache READ was blocked as
+  `expected:cold-start` and the user closed the session). Two-layer fix:
+  1. `loadPrefixHistory` now prunes by `max(lastReqAt, lastKaAt)` — pruning by
+     `lastReqAt` alone dropped every KA-kept-warm idle session's guard history
+     on each proxy restart (user idle >1h while KA refreshed every ~28m), so
+     its next real request read as a first-ever request.
+  2. The guard consults the live KA registry as a second source of truth: an
+     `isFirstRequest` whose lineage has a LIVE warm KA snapshot is a cache
+     READ — classified quiet, history re-seeded via the normal commit path.
+
 ## [0.20.25] - 2026-06-12 (proxy 1.0.9)
 
 ### Changed

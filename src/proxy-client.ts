@@ -1753,6 +1753,16 @@ export class ProxyClient {
   // user's "первичный запуск = норм") logs at info; avoidable:* / anomalous:*
   // log at error. Never throws — observability must not affect throughput.
 
+  /** Does this session's KA engine hold a live, still-warm snapshot for the
+   *  lineage? Second source of truth for the rewrite-guard — see the
+   *  isFirstRequest consultation in assessCacheMiss. Never throws. */
+  private kaHoldsWarmLineage(sessionId: string, lineageKeyArg: string): boolean {
+    try {
+      const s = this.store.list().find((x) => x.sessionId === sessionId)
+      return !!s?.engine.hasWarmLineage(lineageKeyArg)
+    } catch { return false }
+  }
+
   /**
    * Pure assessment of whether this request incurs a cache rewrite — does NOT
    * mutate prefix history. Returns a `commit` payload (always, so the PROCEED
@@ -1864,6 +1874,17 @@ export class ProxyClient {
         const added = [...now2].filter((t) => !sib.has(t))
         toolDrift = ` [tool-set drift${removed.length ? ' −[' + removed.join(',') + ']' : ''}`
           + `${added.length ? ' +[' + added.join(',') + ']' : ''} → ~${Math.round(bodyBytes / 4)} tok re-cache]`
+      }
+
+      // FIRST request by the guard's books — but the KA engine holds a LIVE
+      // warm snapshot for the very same lineage. The guard's prefix-history is
+      // the weaker record (lost to restart pruning or a session reap), while a
+      // warm KA snapshot proves the Anthropic-side prefix is hot: this request
+      // is a cache READ, not a rewrite. Stay quiet and let the commit re-seed
+      // the history. (2026-06-13 93ef0df0: a KA-kept-warm 381k session was
+      // false-blocked as expected:cold-start after a restart pruned its entry.)
+      if (isFirstRequest && this.kaHoldsWarmLineage(sessionId, lineageKey)) {
+        return { commit, assessment: null }
       }
 
       // Prefix unchanged + within TTL + same org → a cache HIT is expected; stay
@@ -2018,7 +2039,17 @@ function loadPrefixHistory(path: string): Map<string, PrefixHistoryEntry> {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, Partial<PrefixHistoryEntry>>
     const cutoff = Date.now() - PREFIX_HISTORY_MAX_AGE_MS
     for (const [k, v] of Object.entries(raw)) {
-      if (v && typeof v.lastReqAt === 'number' && v.lastReqAt >= cutoff && v.hashes) {
+      // Age by the LAST WARM-UP — a real request OR a KA fire. Pruning by
+      // lastReqAt alone dropped every KA-kept-warm idle session's entry on a
+      // proxy restart (user idle >1h while KA refreshed the cache every ~28m),
+      // so its next real request read as isFirstRequest → expected:cold-start —
+      // and since minColdStartTokens that FALSE-BLOCKED a warm cache-read
+      // (2026-06-13 93ef0df0: lastReq 65min old, lastKaAt 9min old, ~381k
+      // "rewrite" predicted for what was a hot cache hit).
+      const warmAt = v && typeof v.lastReqAt === 'number'
+        ? Math.max(v.lastReqAt, typeof v.lastKaAt === 'number' ? v.lastKaAt : 0)
+        : 0
+      if (v && typeof v.lastReqAt === 'number' && warmAt >= cutoff && v.hashes) {
         // `orgId` is absent in entries written before org-awareness — normalize
         // to `null` so a pre-upgrade prefix never reads as a (false) org-switch.
         m.set(k, {

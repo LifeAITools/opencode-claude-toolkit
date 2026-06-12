@@ -118,6 +118,41 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     c.stop()
   })
 
+  // ── Warm-KA second source of truth (2026-06-13 93ef0df0 false-block) ────
+  // A restart pruned the guard's history entry for a KA-kept-warm idle session
+  // → its next real request read as isFirstRequest → expected:cold-start →
+  // false-blocked a hot cache READ. The guard now consults the live KA
+  // registry; the prune itself now ages by max(lastReqAt, lastKaAt).
+
+  test('KA-warm lineage is NEVER cold-start-blocked even when guard history was lost', async () => {
+    const c = mkClient({ config: { kaCacheTtlSec: 300 } })
+    const r1 = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-warm-ka' })
+    expect(r1.status).not.toBe(400)             // session + KA engine exist now
+    // Seed a LIVE warm KA snapshot for the huge body's lineage (what a revived
+    // engine holds after a restart), with the guard history for it ABSENT.
+    const eng = (c as any).store.list().find((s: any) => s.sessionId === 'rg-warm-ka').engine
+    eng._setPendingSnapshot('claude-opus-4-8', JSON.parse(hugeColdBody()), {})
+    eng.notifyRealRequestComplete({ inputTokens: 200_000, outputTokens: 1 })
+    ;(c as any).prefixHistory.clear()           // the restart-prune loss
+    const r2 = await c.handleRequest(hugeColdBody(), {}, { sessionId: 'rg-warm-ka' })
+    expect(r2.status).not.toBe(400)             // hot cache READ — must not block
+    c.stop()
+  })
+
+  test('history prune ages by max(lastReqAt, lastKaAt) — a KA-kept-warm entry survives a restart', () => {
+    const path = join(TMP, 'ph-prune.json')
+    const now = Date.now()
+    writeFileSync(path, JSON.stringify({
+      'sidA:lin': { hashes: { system: 's', toolNames: 't' }, lastReqAt: now - 2 * 3600_000, lastKaAt: now - 5 * 60_000, orgId: null },
+      'sidB:lin': { hashes: { system: 's', toolNames: 't' }, lastReqAt: now - 2 * 3600_000, orgId: null },
+    }))
+    const c = mkClient({ prefixHistoryPath: path })
+    expect(((c as any).prefixHistory as Map<string, unknown>).has('sidA:lin')).toBe(true)   // KA kept it warm → kept
+    expect(((c as any).prefixHistory as Map<string, unknown>).has('sidB:lin')).toBe(false)  // genuinely stale → pruned
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
   test('idle-past-TTL avoidable rewrite WITHOUT marker → 400 cache_rewrite_guard', async () => {
     // Seed a 10-min-idle lineage — past the 5m wire TTL of reqBody()'s
     // ephemeral markers, so the next request is a genuine avoidable:ttl-expiry.

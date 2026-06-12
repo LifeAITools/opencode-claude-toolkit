@@ -429,6 +429,10 @@ export declare class ProxyClient {
     private recordReviveDrop;
     private engineDoFetch;
     private parseSSEAndNotify;
+    /** Does this session's KA engine hold a live, still-warm snapshot for the
+     *  lineage? Second source of truth for the rewrite-guard — see the
+     *  isFirstRequest consultation in assessCacheMiss. Never throws. */
+    private kaHoldsWarmLineage;
     /**
      * Pure assessment of whether this request incurs a cache rewrite — does NOT
      * mutate prefix history. Returns a `commit` payload (always, so the PROCEED

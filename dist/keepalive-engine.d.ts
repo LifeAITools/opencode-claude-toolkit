@@ -237,6 +237,15 @@ export declare class KeepaliveEngine {
      *   - If gap > blockIdleMs AND blockEnabled → throws CacheRewriteBlockedError
      */
     checkRewriteGuard(model: string): void;
+    /**
+     * True when this engine holds a LIVE registry snapshot for the lineage AND
+     * the cache it protects is still warm (within TTL − safety margin). The
+     * proxy's rewrite-guard consults this as a SECOND source of truth: its own
+     * prefix-history can be lost (restart prune, session reap), but a warm KA
+     * snapshot proves the Anthropic-side prefix is hot — the next real request
+     * of this lineage is a cache READ, not a rewrite, and must not be blocked.
+     */
+    hasWarmLineage(lineageKeyArg: string): boolean;
     /** Full shutdown — clears all timers, aborts in-flight. */
     stop(): void;
     /**

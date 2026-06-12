@@ -334,11 +334,21 @@ export declare class KeepaliveEngine {
     private onDisarmed;
     /**
      * Schedule the next post-exhaust fire attempt on the escalating
-     * REARM_DELAYS_MS ladder. Called ONLY from the retry-exhaust path with a
-     * still-warm cache: keeps the registry, sets the hold window (gating ticks
-     * and probe re-fires), and arms a timer that retries via tick(). A slot
-     * that would land after cacheDiesAt clears the registry instead — the cache
-     * cannot be saved, and firing past TTL would cold-write (the KA invariant).
+     * REARM_DELAYS_MS ladder, CLAMPED to the cache's remaining TTL. Called ONLY
+     * from the retry-exhaust path with a still-warm cache: keeps the registry,
+     * sets the hold window (gating ticks and probe re-fires), and arms a timer
+     * that retries via tick().
+     *
+     * TTL sensitivity (founder directive 2026-06-12 #2): when the ladder slot
+     * would land after cacheDiesAt, the delay is NOT abandoned — it is clamped
+     * to a LAST-CHANCE attempt at `cacheDiesAt - lead`: the latest moment a
+     * fire can still start safely (cacheDiesAt already subtracts the safety
+     * margin, so a fire starting before it lands within the true TTL; the lead
+     * covers getToken + dispatch). A short-TTL session therefore always gets a
+     * final retry before the cache is guaranteed dead, instead of retiring it
+     * untried. Only when even the last chance cannot fit (< the minimum
+     * schedulable delay) does the registry clear — firing past TTL would
+     * cold-write (the KA invariant).
      */
     private scheduleRearm;
     /** A fire succeeded or a real request landed — the fault episode is over. */

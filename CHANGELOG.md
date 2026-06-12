@@ -2,6 +2,18 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.24] - 2026-06-12 (proxy 1.0.8)
+
+### Changed
+- **Re-arm ladder is TTL-sensitive (founder follow-up to 0.20.23).** A ladder
+  slot that would land after `cacheDiesAt` is no longer abandoned — it is
+  CLAMPED to a last-chance retry at `cacheDiesAt − 5s` (the latest moment a
+  fire can still start inside the margin-protected window), so a short-TTL
+  session always gets a final recovery attempt before the cache is retired.
+  `rearm_outlives_ttl` (clearRegistry) now fires ONLY when even the last
+  chance cannot fit (< 1s schedulable). `KA_REARM_SCHEDULED` logs
+  `lastChance=true` for clamped slots.
+
 ## [0.20.23] - 2026-06-12 (proxy 1.0.7)
 
 Founder directives after the 2026-06-12 14:09Z upstream 401 wave killed ~7 idle

@@ -1163,7 +1163,7 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     e.stop()
   })
 
-  test('a re-arm slot that would land after cacheDiesAt clears the registry (KA never cold-writes)', async () => {
+  test('a ladder slot past cacheDiesAt is CLAMPED to a last-chance retry inside the TTL (short-TTL sensitivity)', async () => {
     const fail401 = async function* (): AsyncGenerator<StreamEvent> {
       throw Object.assign(new Error('Unauthorized'), { status: 401 })
       // eslint-disable-next-line no-unreachable
@@ -1171,12 +1171,40 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     }
     const e = mkEng(fail401, () => {})
     ;(e as any).retryDelaysMs = [3]
-    ;(e as any).rearmDelaysMs = [60_000]   // slot lands after the cache dies
+    ;(e as any).rearmDelaysMs = [60_000]   // ladder says 60s — but only ~30s of TTL remain
     ;(e as any).safetyMarginMs = 1_000
     const a = e.notifyRealRequestStart('m', bodyA, {})
     e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
     e._setCacheWrittenAt(Date.now() - 270_000)   // 300s TTL → ~30s left
     ;(e as any).lastRealActivityAt = Date.now() - 280_000
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    await new Promise((r) => setTimeout(r, 100))
+    // Founder directive: the cache must get a FINAL retry before guaranteed
+    // death — the slot is clamped to lastChanceAt, not abandoned.
+    expect(e._registry.size).toBeGreaterThan(0)  // snapshot KEPT for the last chance
+    expect(e._rearm.timerArmed).toBe(true)
+    const cacheDiesAt = e._cacheWrittenAt + 300_000 - 1_000
+    expect(e._rearm.holdUntil).toBeLessThan(cacheDiesAt)            // fires BEFORE death
+    expect(e._rearm.holdUntil).toBeGreaterThan(Date.now() + 10_000) // ...but as late as safely possible (~24s out)
+    e.stop()
+  })
+
+  test('when even a last-chance retry cannot fit inside the TTL, the registry clears (KA never cold-writes)', async () => {
+    const fail401 = async function* (): AsyncGenerator<StreamEvent> {
+      throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const e = mkEng(fail401, () => {})
+    ;(e as any).retryDelaysMs = [3]
+    ;(e as any).rearmDelaysMs = [60_000]
+    ;(e as any).safetyMarginMs = 2_000
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    // ~5s of TTL left → lastChanceAt (cacheDiesAt − 5s lead) is already in the
+    // past — no retry can safely start; the cache is retired untried.
+    e._setCacheWrittenAt(Date.now() - 295_000)
+    ;(e as any).lastRealActivityAt = Date.now() - 296_000
     await (e as any).fireLineage(e._registry.get(a)!, 70_000)
     await new Promise((r) => setTimeout(r, 100))
     expect(e._registry.size).toBe(0)             // rearm_outlives_ttl → cleared

@@ -194,6 +194,14 @@ const KA_AUTH_MAX_RETRIES = 5
  */
 const REARM_DELAYS_MS: readonly number[] = [30_000, 60_000, 120_000, 240_000, 480_000, 600_000]
 
+/** Lead before cacheDiesAt at which a TTL-clamped LAST-CHANCE re-arm fires —
+ *  covers getToken + request dispatch so the fire still starts safely inside
+ *  the margin-protected window. */
+const REARM_LAST_CHANCE_LEAD_MS = 5_000
+/** Minimum schedulable re-arm delay — below this even a last chance cannot
+ *  meaningfully run; the cache is retired instead. */
+const REARM_MIN_DELAY_MS = 1_000
+
 function classifyError(err: unknown): ErrorCategory {
   const e = err as {
     status?: number
@@ -1905,21 +1913,42 @@ export class KeepaliveEngine {
 
   /**
    * Schedule the next post-exhaust fire attempt on the escalating
-   * REARM_DELAYS_MS ladder. Called ONLY from the retry-exhaust path with a
-   * still-warm cache: keeps the registry, sets the hold window (gating ticks
-   * and probe re-fires), and arms a timer that retries via tick(). A slot
-   * that would land after cacheDiesAt clears the registry instead — the cache
-   * cannot be saved, and firing past TTL would cold-write (the KA invariant).
+   * REARM_DELAYS_MS ladder, CLAMPED to the cache's remaining TTL. Called ONLY
+   * from the retry-exhaust path with a still-warm cache: keeps the registry,
+   * sets the hold window (gating ticks and probe re-fires), and arms a timer
+   * that retries via tick().
+   *
+   * TTL sensitivity (founder directive 2026-06-12 #2): when the ladder slot
+   * would land after cacheDiesAt, the delay is NOT abandoned — it is clamped
+   * to a LAST-CHANCE attempt at `cacheDiesAt - lead`: the latest moment a
+   * fire can still start safely (cacheDiesAt already subtracts the safety
+   * margin, so a fire starting before it lands within the true TTL; the lead
+   * covers getToken + dispatch). A short-TTL session therefore always gets a
+   * final retry before the cache is guaranteed dead, instead of retiring it
+   * untried. Only when even the last chance cannot fit (< the minimum
+   * schedulable delay) does the registry clear — firing past TTL would
+   * cold-write (the KA invariant).
    */
   private scheduleRearm(): void {
-    const delay = this.rearmDelaysMs[Math.min(this.rearmAttempt, this.rearmDelaysMs.length - 1)]!
-    this.rearmAttempt++
+    const ladderDelay = this.rearmDelaysMs[Math.min(this.rearmAttempt, this.rearmDelaysMs.length - 1)]!
     const cacheDiesAt = this.cacheWrittenAt + this.cacheTtlMs - this.safetyMarginMs
-    if (Date.now() + delay >= cacheDiesAt) {
-      this.logClearDiag('rearm_outlives_ttl', { rearmAttempt: this.rearmAttempt, nextRearmDelayMs: delay })
-      this.clearRegistry()
-      return
+    const lastChanceAt = cacheDiesAt - REARM_LAST_CHANCE_LEAD_MS
+    let delay = ladderDelay
+    let lastChance = false
+    if (Date.now() + ladderDelay >= lastChanceAt) {
+      delay = lastChanceAt - Date.now()
+      lastChance = true
+      if (delay < REARM_MIN_DELAY_MS) {
+        // Even the last chance doesn't fit — the cache dies before any retry
+        // could safely start. Retire it (the only branch that gives up).
+        this.logClearDiag('rearm_outlives_ttl', {
+          rearmAttempt: this.rearmAttempt, ladderDelayMs: ladderDelay, lastChanceDelayMs: delay,
+        })
+        this.clearRegistry()
+        return
+      }
     }
+    this.rearmAttempt++
     this.rearmHoldUntil = Date.now() + delay
     if (this.rearmTimer) clearTimeout(this.rearmTimer)
     this.rearmTimer = setTimeout(() => {
@@ -1932,7 +1961,7 @@ export class KeepaliveEngine {
     }
     try {
       appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
-        `[${new Date().toISOString()}] KA_REARM_SCHEDULED pid=${process.pid} attempt=${this.rearmAttempt} delaySec=${Math.round(delay / 1000)} regSize=${this.registry.size} ttlRemainingSec=${Math.round((cacheDiesAt - Date.now()) / 1000)}\n`)
+        `[${new Date().toISOString()}] KA_REARM_SCHEDULED pid=${process.pid} attempt=${this.rearmAttempt} delaySec=${Math.round(delay / 1000)} lastChance=${lastChance} regSize=${this.registry.size} ttlRemainingSec=${Math.round((cacheDiesAt - Date.now()) / 1000)}\n`)
     } catch { /* logging best-effort */ }
   }
 

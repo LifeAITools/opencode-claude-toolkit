@@ -2,6 +2,19 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [0.20.25] - 2026-06-12 (proxy 1.0.9)
+
+### Changed
+- **Re-arm endgame cadence (founder refinement of 0.20.24).** The single
+  clamped last-chance attempt is replaced by an adaptive cadence: while
+  `timeToDeath > 5m` the escalating ladder applies (clamped so a long slot
+  lands AT the endgame boundary, never past it); inside the last 5 minutes
+  retries run every 30s; inside the last minute every 5s; and a HARD safe
+  edge stops all attempts 10s before `cacheDiesAt` (itself already
+  `safetyMarginMs` before the true TTL) — double protection against
+  local/server clock skew turning a rescue fire into a silent cold rewrite.
+  `KA_REARM_SCHEDULED` logs `mode=ladder|endgame|final`.
+
 ## [0.20.24] - 2026-06-12 (proxy 1.0.8)
 
 ### Changed

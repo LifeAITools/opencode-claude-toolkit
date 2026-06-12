@@ -1148,6 +1148,10 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     ;(e as any).retryDelaysMs = [3]        // auth budget = min(5,1) = 1 retry per chain
     ;(e as any).safetyMarginMs = 1
     ;(e as any).rearmDelaysMs = [20]       // fast ladder for the test
+    // Force the pure-ladder path: the 300s test TTL is otherwise entirely
+    // inside the default 5m endgame window (its 30s cadence would stall the test).
+    ;(e as any).rearmEndgameWindowMs = 0
+    ;(e as any).rearmFinalWindowMs = 0
     ;(e as any).jitterMs = 0
     const a = e.notifyRealRequestStart('m', bodyA, {})
     e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
@@ -1163,7 +1167,7 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     e.stop()
   })
 
-  test('a ladder slot past cacheDiesAt is CLAMPED to a last-chance retry inside the TTL (short-TTL sensitivity)', async () => {
+  test('FINAL window (≤1m to death): re-arm densifies to the 5s cadence instead of abandoning the cache', async () => {
     const fail401 = async function* (): AsyncGenerator<StreamEvent> {
       throw Object.assign(new Error('Unauthorized'), { status: 401 })
       // eslint-disable-next-line no-unreachable
@@ -1171,21 +1175,70 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     }
     const e = mkEng(fail401, () => {})
     ;(e as any).retryDelaysMs = [3]
-    ;(e as any).rearmDelaysMs = [60_000]   // ladder says 60s — but only ~30s of TTL remain
+    ;(e as any).rearmDelaysMs = [60_000]   // ladder is irrelevant inside the final window
     ;(e as any).safetyMarginMs = 1_000
     const a = e.notifyRealRequestStart('m', bodyA, {})
     e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
-    e._setCacheWrittenAt(Date.now() - 270_000)   // 300s TTL → ~30s left
+    e._setCacheWrittenAt(Date.now() - 270_000)   // 300s TTL → ~29s to cacheDiesAt
     ;(e as any).lastRealActivityAt = Date.now() - 280_000
     await (e as any).fireLineage(e._registry.get(a)!, 70_000)
     await new Promise((r) => setTimeout(r, 100))
-    // Founder directive: the cache must get a FINAL retry before guaranteed
-    // death — the slot is clamped to lastChanceAt, not abandoned.
-    expect(e._registry.size).toBeGreaterThan(0)  // snapshot KEPT for the last chance
+    expect(e._registry.size).toBeGreaterThan(0)  // snapshot KEPT — dense retries continue
     expect(e._rearm.timerArmed).toBe(true)
-    const cacheDiesAt = e._cacheWrittenAt + 300_000 - 1_000
-    expect(e._rearm.holdUntil).toBeLessThan(cacheDiesAt)            // fires BEFORE death
-    expect(e._rearm.holdUntil).toBeGreaterThan(Date.now() + 10_000) // ...but as late as safely possible (~24s out)
+    const now = Date.now()
+    expect(e._rearm.holdUntil).toBeGreaterThan(now + 2_000)   // ~5s cadence
+    expect(e._rearm.holdUntil).toBeLessThan(now + 9_000)
+    const hardStopAt = e._cacheWrittenAt + 300_000 - 1_000 - 10_000  // cacheDiesAt − safeEdge
+    expect(e._rearm.holdUntil).toBeLessThan(hardStopAt)       // never past the safe edge
+    e.stop()
+  })
+
+  test('ENDGAME window (≤5m to death): re-arm runs on the 30s cadence', async () => {
+    const fail401 = async function* (): AsyncGenerator<StreamEvent> {
+      throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const e = mkEng(fail401, () => {})
+    ;(e as any).retryDelaysMs = [3]
+    ;(e as any).rearmDelaysMs = [600_000]  // ladder would say 10m — endgame overrides
+    ;(e as any).safetyMarginMs = 1_000
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 180_000)   // 300s TTL → ~2m to cacheDiesAt
+    ;(e as any).lastRealActivityAt = Date.now() - 190_000
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(e._registry.size).toBeGreaterThan(0)
+    expect(e._rearm.timerArmed).toBe(true)
+    const now = Date.now()
+    expect(e._rearm.holdUntil).toBeGreaterThan(now + 25_000)  // ~30s cadence
+    expect(e._rearm.holdUntil).toBeLessThan(now + 35_000)
+    e.stop()
+  })
+
+  test('a ladder slot never leapfrogs the endgame — it is clamped to land at the endgame boundary', async () => {
+    const fail401 = async function* (): AsyncGenerator<StreamEvent> {
+      throw Object.assign(new Error('Unauthorized'), { status: 401 })
+      // eslint-disable-next-line no-unreachable
+      yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 1 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const e = mkEng(fail401, () => {})
+    ;(e as any).retryDelaysMs = [3]
+    ;(e as any).rearmDelaysMs = [60_000]        // ladder 60s...
+    ;(e as any).rearmEndgameWindowMs = 10_000   // ...endgame starts 10s before death
+    ;(e as any).rearmFinalWindowMs = 5_000
+    ;(e as any).safetyMarginMs = 1_000
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 270_000)  // ~29s to death; tillEndgame ≈ 19s
+    ;(e as any).lastRealActivityAt = Date.now() - 280_000
+    await (e as any).fireLineage(e._registry.get(a)!, 70_000)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(e._rearm.timerArmed).toBe(true)
+    const now = Date.now()
+    expect(e._rearm.holdUntil).toBeGreaterThan(now + 15_000)  // clamped to ~19s (NOT the 60s slot)
+    expect(e._rearm.holdUntil).toBeLessThan(now + 22_000)
     e.stop()
   })
 

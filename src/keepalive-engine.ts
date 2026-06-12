@@ -194,12 +194,24 @@ const KA_AUTH_MAX_RETRIES = 5
  */
 const REARM_DELAYS_MS: readonly number[] = [30_000, 60_000, 120_000, 240_000, 480_000, 600_000]
 
-/** Lead before cacheDiesAt at which a TTL-clamped LAST-CHANCE re-arm fires —
- *  covers getToken + request dispatch so the fire still starts safely inside
- *  the margin-protected window. */
-const REARM_LAST_CHANCE_LEAD_MS = 5_000
-/** Minimum schedulable re-arm delay — below this even a last chance cannot
- *  meaningfully run; the cache is retired instead. */
+/** Endgame cadence (founder directive 2026-06-12): inside the last
+ *  REARM_ENDGAME_WINDOW_MS of cache life the escalating ladder is replaced by
+ *  DENSE retries — every REARM_ENDGAME_INTERVAL_MS, tightening to every
+ *  REARM_FINAL_INTERVAL_MS inside the last REARM_FINAL_WINDOW_MS — so a fault
+ *  that clears late still saves the cache. */
+const REARM_ENDGAME_WINDOW_MS = 5 * 60_000
+const REARM_ENDGAME_INTERVAL_MS = 30_000
+const REARM_FINAL_WINDOW_MS = 60_000
+const REARM_FINAL_INTERVAL_MS = 5_000
+/** Hard floor before cacheDiesAt past which NO re-arm fire may start. This is
+ *  an EXTRA buffer on top of safetyMarginMs (already subtracted into
+ *  cacheDiesAt): local and server clocks never align perfectly, and a fire
+ *  that lands past the true TTL silently COLD-WRITES the whole prefix — the
+ *  exact spend the engine exists to prevent. Better to lose the cache than to
+ *  gamble a rewrite on clock skew. */
+const REARM_SAFE_EDGE_MS = 10_000
+/** Minimum schedulable re-arm delay — below this even a squeezed final attempt
+ *  cannot meaningfully run; the cache is retired instead. */
 const REARM_MIN_DELAY_MS = 1_000
 
 function classifyError(err: unknown): ErrorCategory {
@@ -570,9 +582,14 @@ export class KeepaliveEngine {
   // Post-exhaust escalating re-arm state (see REARM_DELAYS_MS). The hold
   // window gates interval ticks AND probe re-fires, so a persistent fault can
   // never hammer upstream in a tight fire→exhaust loop; the rearm timer is the
-  // scheduled attempt that ends the hold. Instance field (not the module
-  // const) so tests can shrink the ladder.
+  // scheduled attempt that ends the hold. Instance fields (not the module
+  // consts) so tests can shrink the ladder / cadence windows.
   private rearmDelaysMs: readonly number[] = REARM_DELAYS_MS
+  private rearmEndgameWindowMs = REARM_ENDGAME_WINDOW_MS
+  private rearmEndgameIntervalMs = REARM_ENDGAME_INTERVAL_MS
+  private rearmFinalWindowMs = REARM_FINAL_WINDOW_MS
+  private rearmFinalIntervalMs = REARM_FINAL_INTERVAL_MS
+  private rearmSafeEdgeMs = REARM_SAFE_EDGE_MS
   private rearmAttempt = 0
   private rearmHoldUntil = 0
   private rearmTimer: ReturnType<typeof setTimeout> | null = null
@@ -1912,44 +1929,66 @@ export class KeepaliveEngine {
   }
 
   /**
-   * Schedule the next post-exhaust fire attempt on the escalating
-   * REARM_DELAYS_MS ladder, CLAMPED to the cache's remaining TTL. Called ONLY
-   * from the retry-exhaust path with a still-warm cache: keeps the registry,
-   * sets the hold window (gating ticks and probe re-fires), and arms a timer
-   * that retries via tick().
+   * Schedule the next post-exhaust fire attempt. Called ONLY from the
+   * retry-exhaust path with a still-warm cache: keeps the registry, sets the
+   * hold window (gating ticks and probe re-fires), and arms a timer that
+   * retries via tick().
    *
-   * TTL sensitivity (founder directive 2026-06-12 #2): when the ladder slot
-   * would land after cacheDiesAt, the delay is NOT abandoned — it is clamped
-   * to a LAST-CHANCE attempt at `cacheDiesAt - lead`: the latest moment a
-   * fire can still start safely (cacheDiesAt already subtracts the safety
-   * margin, so a fire starting before it lands within the true TTL; the lead
-   * covers getToken + dispatch). A short-TTL session therefore always gets a
-   * final retry before the cache is guaranteed dead, instead of retiring it
-   * untried. Only when even the last chance cannot fit (< the minimum
-   * schedulable delay) does the registry clear — firing past TTL would
-   * cold-write (the KA invariant).
+   * TTL sensitivity (founder directive 2026-06-12): the cadence adapts to how
+   * close the cache is to dying —
+   *
+   *   timeToDeath > endgameWindow (5m): escalating ladder 30s→10m, clamped so
+   *     a long slot never leapfrogs the endgame (it lands AT the endgame
+   *     boundary instead);
+   *   timeToDeath ≤ endgameWindow (5m): every 30s — dense recovery pressure;
+   *   timeToDeath ≤ finalWindow (1m):   every 5s — last-minute push;
+   *   hard stop at cacheDiesAt − safeEdge (10s): NO fire may start past it.
+   *
+   * The safe edge is an EXTRA buffer on top of safetyMarginMs (already inside
+   * cacheDiesAt): local vs server clock skew must never let a "rescue" fire
+   * land past the true TTL and silently cold-write the prefix. Only when even
+   * a squeezed final attempt cannot fit before the edge does the registry
+   * clear (`rearm_outlives_ttl`) — better a lost cache than a gambled rewrite.
    */
   private scheduleRearm(): void {
-    const ladderDelay = this.rearmDelaysMs[Math.min(this.rearmAttempt, this.rearmDelaysMs.length - 1)]!
+    const now = Date.now()
     const cacheDiesAt = this.cacheWrittenAt + this.cacheTtlMs - this.safetyMarginMs
-    const lastChanceAt = cacheDiesAt - REARM_LAST_CHANCE_LEAD_MS
-    let delay = ladderDelay
-    let lastChance = false
-    if (Date.now() + ladderDelay >= lastChanceAt) {
-      delay = lastChanceAt - Date.now()
-      lastChance = true
+    const hardStopAt = cacheDiesAt - this.rearmSafeEdgeMs
+    const timeToDeath = cacheDiesAt - now
+
+    let delay: number
+    let mode: 'ladder' | 'endgame' | 'final'
+    if (timeToDeath <= this.rearmFinalWindowMs) {
+      mode = 'final'
+      delay = this.rearmFinalIntervalMs
+    } else if (timeToDeath <= this.rearmEndgameWindowMs) {
+      mode = 'endgame'
+      delay = this.rearmEndgameIntervalMs
+    } else {
+      mode = 'ladder'
+      delay = this.rearmDelaysMs[Math.min(this.rearmAttempt, this.rearmDelaysMs.length - 1)]!
+      // Never leapfrog the endgame: a slot longer than the time until the
+      // endgame boundary is clamped to land exactly at it.
+      const tillEndgame = timeToDeath - this.rearmEndgameWindowMs
+      if (delay > tillEndgame) delay = Math.max(tillEndgame, REARM_MIN_DELAY_MS)
+    }
+
+    // Hard stop: the fire must START before the safe edge.
+    if (now + delay > hardStopAt) {
+      delay = hardStopAt - now
       if (delay < REARM_MIN_DELAY_MS) {
-        // Even the last chance doesn't fit — the cache dies before any retry
-        // could safely start. Retire it (the only branch that gives up).
+        // Even a squeezed final attempt cannot start safely — the cache dies
+        // first. Retire it (the only branch that gives up).
         this.logClearDiag('rearm_outlives_ttl', {
-          rearmAttempt: this.rearmAttempt, ladderDelayMs: ladderDelay, lastChanceDelayMs: delay,
+          rearmAttempt: this.rearmAttempt, mode, timeToDeathMs: timeToDeath,
         })
         this.clearRegistry()
         return
       }
     }
+
     this.rearmAttempt++
-    this.rearmHoldUntil = Date.now() + delay
+    this.rearmHoldUntil = now + delay
     if (this.rearmTimer) clearTimeout(this.rearmTimer)
     this.rearmTimer = setTimeout(() => {
       this.rearmTimer = null
@@ -1961,7 +2000,7 @@ export class KeepaliveEngine {
     }
     try {
       appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
-        `[${new Date().toISOString()}] KA_REARM_SCHEDULED pid=${process.pid} attempt=${this.rearmAttempt} delaySec=${Math.round(delay / 1000)} lastChance=${lastChance} regSize=${this.registry.size} ttlRemainingSec=${Math.round((cacheDiesAt - Date.now()) / 1000)}\n`)
+        `[${new Date().toISOString()}] KA_REARM_SCHEDULED pid=${process.pid} attempt=${this.rearmAttempt} mode=${mode} delaySec=${Math.round(delay / 1000)} regSize=${this.registry.size} ttlRemainingSec=${Math.round(timeToDeath / 1000)}\n`)
     } catch { /* logging best-effort */ }
   }
 

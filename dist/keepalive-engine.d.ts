@@ -173,6 +173,11 @@ export declare class KeepaliveEngine {
     private lastRealActivityAt;
     private cacheWrittenAt;
     private rearmDelaysMs;
+    private rearmEndgameWindowMs;
+    private rearmEndgameIntervalMs;
+    private rearmFinalWindowMs;
+    private rearmFinalIntervalMs;
+    private rearmSafeEdgeMs;
     private rearmAttempt;
     private rearmHoldUntil;
     private rearmTimer;
@@ -333,22 +338,26 @@ export declare class KeepaliveEngine {
      */
     private onDisarmed;
     /**
-     * Schedule the next post-exhaust fire attempt on the escalating
-     * REARM_DELAYS_MS ladder, CLAMPED to the cache's remaining TTL. Called ONLY
-     * from the retry-exhaust path with a still-warm cache: keeps the registry,
-     * sets the hold window (gating ticks and probe re-fires), and arms a timer
-     * that retries via tick().
+     * Schedule the next post-exhaust fire attempt. Called ONLY from the
+     * retry-exhaust path with a still-warm cache: keeps the registry, sets the
+     * hold window (gating ticks and probe re-fires), and arms a timer that
+     * retries via tick().
      *
-     * TTL sensitivity (founder directive 2026-06-12 #2): when the ladder slot
-     * would land after cacheDiesAt, the delay is NOT abandoned — it is clamped
-     * to a LAST-CHANCE attempt at `cacheDiesAt - lead`: the latest moment a
-     * fire can still start safely (cacheDiesAt already subtracts the safety
-     * margin, so a fire starting before it lands within the true TTL; the lead
-     * covers getToken + dispatch). A short-TTL session therefore always gets a
-     * final retry before the cache is guaranteed dead, instead of retiring it
-     * untried. Only when even the last chance cannot fit (< the minimum
-     * schedulable delay) does the registry clear — firing past TTL would
-     * cold-write (the KA invariant).
+     * TTL sensitivity (founder directive 2026-06-12): the cadence adapts to how
+     * close the cache is to dying —
+     *
+     *   timeToDeath > endgameWindow (5m): escalating ladder 30s→10m, clamped so
+     *     a long slot never leapfrogs the endgame (it lands AT the endgame
+     *     boundary instead);
+     *   timeToDeath ≤ endgameWindow (5m): every 30s — dense recovery pressure;
+     *   timeToDeath ≤ finalWindow (1m):   every 5s — last-minute push;
+     *   hard stop at cacheDiesAt − safeEdge (10s): NO fire may start past it.
+     *
+     * The safe edge is an EXTRA buffer on top of safetyMarginMs (already inside
+     * cacheDiesAt): local vs server clock skew must never let a "rescue" fire
+     * land past the true TTL and silently cold-write the prefix. Only when even
+     * a squeezed final attempt cannot fit before the edge does the registry
+     * clear (`rearm_outlives_ttl`) — better a lost cache than a gambled rewrite.
      */
     private scheduleRearm;
     /** A fire succeeded or a real request landed — the fault episode is over. */

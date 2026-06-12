@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kiberos/ucm-schema": "0.3.0",
+    "@kiberos/ucm-schema": "0.4.0",
     "@life-ai-tools/claude-code-sdk": "^0.20.20",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0"

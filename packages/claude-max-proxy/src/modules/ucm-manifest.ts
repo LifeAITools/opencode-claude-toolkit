@@ -13,7 +13,7 @@
 import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
-const UCM_MANIFEST_REV = 5
+const UCM_MANIFEST_REV = 6
 
 /**
  * Динамические опции "выбор сессии" (UCM 1.1 optionsSources): пульт зовёт
@@ -54,9 +54,10 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
       {
         type: 'group',
         title: 'Health',
-        controls: [],
+        controls: ['ka_level'],
         children: [
           { type: 'card', title: 'Heartbeat & status', controls: ['health_indicator', 'proxy_status'] },
+          { type: 'card', title: 'Live metrics', controls: ['sessions_value', 'heartbeat_kv'] },
         ],
       },
     ],
@@ -147,6 +148,31 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         title: 'Proxy status',
         schema: { type: 'object', properties: {}, additionalProperties: false },
         binding: { type: 'tool', op: 'proxy_status' },
+      },
+      // --- богатая палитра на живых метриках (словарь 1.5) ---
+      {
+        id: 'sessions_value',
+        kind: 'value',
+        title: 'Active sessions',
+        schema: { type: 'object' },
+        uiHints: { valueLabel: '{/sessions}', unit: 'live' },
+        binding: { type: 'event', op: 'stream', match: { kind: 'HEALTH_HEARTBEAT' } },
+      },
+      {
+        id: 'heartbeat_kv',
+        kind: 'kv-table',
+        title: 'Heartbeat detail',
+        schema: { type: 'object' },
+        uiHints: { keys: ['sessions', 'liveKa', 'firesLastHour'] },
+        binding: { type: 'event', op: 'stream', match: { kind: 'HEALTH_HEARTBEAT' } },
+      },
+      {
+        id: 'ka_level',
+        kind: 'led-bar',
+        title: 'KA activity',
+        schema: { type: 'number', minimum: 0, maximum: 20 },
+        uiHints: { count: 20, warn: 0.7, err: 0.9 },
+        binding: { type: 'event', op: 'stream', match: { kind: 'PROXY_KA_TICK' } },
       },
     ],
     apps: [],

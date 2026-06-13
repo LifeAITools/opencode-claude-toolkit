@@ -882,15 +882,22 @@ export class KeepaliveEngine {
       // not, a KA fire refreshes nothing on Anthropic's side — skipped in tick().
       const { hasAnyCacheControl } = detectCacheTtlFromBody(body)
 
-      // Register for KA — UNLESS this is a sub-agent lineage. An active
-      // sub-agent self-warms via its own ~10s traffic; an idle one is finished,
-      // not parked. Only main/unknown lineages get parked-and-resumed and thus
-      // need KA. (`unknown` registers as the over-KA-safe default — under-KA is
-      // expensive, over-KA is cheap.) Registry is keyed by lineage, so a heavy
-      // sub-agent can no longer clobber the main agent's slot.
+      // Register for KA — ALL roles, including sub-agents. Design evolution
+      // (2026-06-13): the prior "an idle sub-agent is finished, not parked"
+      // assumption is false for an orchestration layer that RE-DELEGATES
+      // (resumes) workers — a delegated worker that goes idle may be re-tasked,
+      // so its cache must stay warm while its owning process lives, else the
+      // resume pays a full cold rewrite (the 48254e2e/2008a618e269 421k
+      // ttl-expiry block). The registry is keyed by lineage, so a sub-agent
+      // registering CANNOT clobber the main agent's slot (different key) — the
+      // old "don't register sub" protection is obsolete now that single-slot is
+      // gone. Liveness is the qualitative gate: a truly-ephemeral sub whose
+      // owning process exits is dropped by the owner_dead path; a resumable
+      // worker whose process lives stays warm. (Bounded by maxWarmSubLineages —
+      // see the LRU eviction below.) (`unknown` registers as the over-KA-safe
+      // default — under-KA is expensive, over-KA is cheap.)
       const existing = this.registry.get(key)
-      if (role !== 'sub'
-          && totalTokens >= this.config.minTokens
+      if (totalTokens >= this.config.minTokens
           && (!existing || totalTokens >= existing.inputTokens)) {
         const entry = {
           body, headers, model, lineageKey: key, role,
@@ -899,6 +906,33 @@ export class KeepaliveEngine {
         this.registry.set(key, entry)
         this.lastSnapshots.set(key, entry) // retain for self-heal re-prime
         this.notifyRegistryChanged()
+
+        // Bound the warm-set per session. A session can accumulate many lineages
+        // (model/tool churn + delegated sub-agents that may be re-delegated). Keep
+        // the most-recently-warmed K; LRU-evict the oldest NON-main lineage beyond
+        // K — a re-delegation to a RECENT worker stays warm, an ancient one falls
+        // cold (acceptable). Main is NEVER evicted by the bound. Cost is ~free
+        // reads, so this is registry/fire hygiene, not a quota lever. Cap read
+        // from the hot-reloadable SSOT (same as roleDetector).
+        const warmCap = loadKeepaliveConfig().maxWarmLineagesPerSession
+        while (this.registry.size > warmCap) {
+          let victim: string | null = null
+          let oldestWarmedAt = Infinity
+          for (const [k, e2] of this.registry) {
+            if (e2.role === 'main') continue            // never evict main
+            const warmedAt = this.lineageStats.get(k)?.lastWarmedAt ?? 0
+            if (warmedAt < oldestWarmedAt) { oldestWarmedAt = warmedAt; victim = k }
+          }
+          if (victim === null) break                    // only main lineages remain
+          this.registry.delete(victim)
+          this.lastSnapshots.delete(victim)
+          this.notifyRegistryChanged()
+          // No silent truncation — record which warm lineage the bound dropped.
+          try {
+            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+              `[${new Date().toISOString()}] KA_WARMSET_EVICTED pid=${process.pid} cap=${warmCap} evicted=${victim} regSize=${this.registry.size}\n`)
+          } catch { /* logging best-effort */ }
+        }
       }
 
       // Track largest observed cache size per model — feeds the rewrite-guard
@@ -1080,8 +1114,12 @@ export class KeepaliveEngine {
       const idleSec = Math.round((Date.now() - this.lastActivityAt) / 1000)
       const nextFireSec = Math.max(0, Math.round((this.config.intervalMs - (Date.now() - this.lastActivityAt)) / 1000))
       const state = this.inFlight ? 'firing' : (this.registry.size === 0 ? 'empty_registry' : 'armed')
+      // Warm-set composition — always visible: how many MAIN vs delegated/SUB
+      // lineages are kept warm (the latter being the 2026-06-13 re-delegation fix).
+      let warmMain = 0, warmSub = 0
+      for (const e2 of this.registry.values()) { if (e2.role === 'main') warmMain++; else warmSub++ }
       appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
-        `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${state} regSize=${this.registry.size} idleSec=${idleSec} nextFireSec=${nextFireSec} cacheAgeSec=${cacheAge < 0 ? 'na' : Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}\n`)
+        `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} state=${state} regSize=${this.registry.size} warmMain=${warmMain} warmSub=${warmSub} idleSec=${idleSec} nextFireSec=${nextFireSec} cacheAgeSec=${cacheAge < 0 ? 'na' : Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} intervalSec=${Math.round(this.config.intervalMs / 1000)}\n`)
     } catch { /* logging best-effort */ }
 
     if (this.inFlight) return

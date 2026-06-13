@@ -577,10 +577,15 @@ describe('KeepaliveEngine Layer 2: heaviest-wins snapshot registry', () => {
     e.stop()
   })
 
-  test('sub-agent request (agent-id header) does NOT register — cannot touch main slot', () => {
-    // Subagent protection is now by ROLE, not by size: a sub-agent lineage is
-    // never registered for KA at all (it self-warms via its own traffic), so
-    // it physically cannot clobber the main agent's slot regardless of weight.
+  test('sub-agent lineage IS registered for KA (kept warm for re-delegation) — coexists with main, never clobbers it', () => {
+    // Design evolution (2026-06-13): the prior invariant "an idle sub-agent is
+    // finished, not parked" is FALSE for an orchestration layer that RE-DELEGATES
+    // (resumes) workers. A delegated worker that goes idle may be re-tasked, so
+    // its cache must stay warm while its owning process lives — else the resume
+    // pays a full cold rewrite (the 48254e2e/2008a618e269 421k ttl-expiry block).
+    // The registry is keyed by lineageKey, so a sub registering CANNOT clobber the
+    // main's slot (different key) — the old "don't register sub" protection is
+    // obsolete now that single-slot is gone.
     const e = mkEngine({ minTokens: 100 })
     const mainTools = [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }]
 
@@ -589,18 +594,43 @@ describe('KeepaliveEngine Layer 2: heaviest-wins snapshot registry', () => {
       { system: [{ type: 'text', text: 'main' }], tools: mainTools }, {})
     e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 100, cacheReadInputTokens: 40000 })
     expect(e._registry.size).toBe(1)
-    expect(Array.from(e._registry.values())[0]!.role).toBe('main')
 
-    // Sub-agent — distinct lineage, agent-id header present → role=sub →
-    // NOT registered. Main entry untouched.
+    // Sub-agent — distinct lineage, agent-id header → role=sub → NOW registered
+    // (kept warm for re-delegation), as a SEPARATE entry. Main untouched.
     e.notifyRealRequestStart('claude-opus-4-7',
       { system: [{ type: 'text', text: 'sub' }], tools: mainTools.slice(0, 10) },
       { 'x-claude-code-agent-id': 'sub-1' })
     e.notifyRealRequestComplete({ inputTokens: 200, outputTokens: 10 })
 
-    expect(e._registry.size).toBe(1)  // still only the main lineage
-    expect(Array.from(e._registry.values())[0]!.inputTokens).toBe(90000)
-    expect(Array.from(e._registry.values())[0]!.role).toBe('main')
+    expect(e._registry.size).toBe(2)  // main + sub both kept warm
+    const roles = Array.from(e._registry.values()).map((x) => x.role).sort()
+    expect(roles).toEqual(['main', 'sub'])
+    // Main slot intact (heaviest, role=main).
+    const main = Array.from(e._registry.values()).find((x) => x.role === 'main')!
+    expect(main.inputTokens).toBe(90000)
+    e.stop()
+  })
+
+  test('warm-set bounded per session — oldest sub LRU-evicted beyond maxWarmLineagesPerSession; main never evicted', () => {
+    // Fixture cap = default 4 (main + ~3 recent workers). A session that churns
+    // many delegated lineages keeps only the most-recently-warmed K; main is
+    // protected from eviction so the orchestrator's own cache always survives.
+    const e = mkEngine({ minTokens: 100 })
+    e.notifyRealRequestStart('m',
+      { system: [{ type: 'text', text: 'MAIN' }],
+        tools: [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })
+    // 4 distinct delegated sub lineages (agent-id header → role=sub).
+    for (let i = 1; i <= 4; i++) {
+      e.notifyRealRequestStart('m',
+        { system: [{ type: 'text', text: `SUB${i}` }], tools: [{ name: 'x' }] },
+        { 'x-claude-code-agent-id': `s${i}` })
+      e.notifyRealRequestComplete({ inputTokens: 10000, outputTokens: 1 })
+    }
+    expect(e._registry.size).toBe(4)                   // capped: main + 3 newest subs
+    const roles = Array.from(e._registry.values()).map((x) => x.role)
+    expect(roles.filter((r) => r === 'main').length).toBe(1)  // main survived the bound
+    expect(roles.filter((r) => r === 'sub').length).toBe(3)   // oldest sub LRU-evicted
     e.stop()
   })
 
@@ -1453,7 +1483,7 @@ describe('KeepaliveEngine: agent-aware per-lineage KA + reload', () => {
     e.stop()
   })
 
-  test('main and sub-agent are distinct lineages — only main is registered', () => {
+  test('main and sub-agent are distinct lineages — BOTH registered (sub kept warm for re-delegation)', () => {
     const e = mkEngine({ minTokens: 100 })
     const kMain = e.notifyRealRequestStart('m', mainBody('main'), {})
     e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 }, kMain)
@@ -1461,8 +1491,8 @@ describe('KeepaliveEngine: agent-aware per-lineage KA + reload', () => {
     e.notifyRealRequestComplete({ inputTokens: 30000, outputTokens: 1 }, kSub)
 
     expect(kMain).not.toBe(kSub)        // distinct cache lineages
-    expect(e._registry.size).toBe(1)    // sub-agent NOT registered
-    expect(Array.from(e._registry.values())[0]!.role).toBe('main')
+    expect(e._registry.size).toBe(2)    // sub-agent NOW registered (kept warm), own distinct slot
+    expect(new Set(Array.from(e._registry.values()).map((x) => x.role))).toEqual(new Set(['main', 'sub']))
     e.stop()
   })
 

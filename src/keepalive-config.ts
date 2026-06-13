@@ -122,6 +122,14 @@ export interface ResolvedKeepaliveConfig {
    *  Default: 8. Overflow is warmed on subsequent ticks (≤30s apart). */
   readonly maxFiresPerTick: number
 
+  /** Max cache lineages KEPT WARM per session (registry bound). A session can
+   *  accumulate many lineages (model/tool churn + delegated sub-agents that may
+   *  be re-delegated). We keep the most-recently-warmed K and LRU-evict the
+   *  oldest NON-main lineage beyond K (main is never evicted). Default: 4
+   *  (main + ~3 recent workers). Reads are ~free for the Max quota window, so
+   *  this is registry/fire hygiene, not direct cost. */
+  readonly maxWarmLineagesPerSession: number
+
   /** Block real requests with too-aggressive cache rewrites (rare safety net). Default: false. */
   readonly rewriteBlockEnabled: boolean
 
@@ -269,6 +277,7 @@ const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampM
   idleTimeoutMs:             Infinity,
   minTokens:                 2000,
   maxFiresPerTick:           8,
+  maxWarmLineagesPerSession: 4,
   rewriteBlockEnabled:       false,
   dump:                      DEFAULT_DUMP,
   roleDetector:              DEFAULT_ROLE_WEIGHTS,
@@ -547,6 +556,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
           0, 86_400_000),
     minTokens: num(raw?.minTokens, 'minTokens', LEGACY_DEFAULTS.minTokens, 1, 1_000_000),
     maxFiresPerTick: num(raw?.maxFiresPerTick, 'maxFiresPerTick', LEGACY_DEFAULTS.maxFiresPerTick, 1, 1_000),
+    maxWarmLineagesPerSession: num(raw?.maxWarmLineagesPerSession, 'maxWarmLineagesPerSession', LEGACY_DEFAULTS.maxWarmLineagesPerSession, 1, 64),
     rewriteBlockEnabled: bool(raw?.rewriteBlockEnabled, LEGACY_DEFAULTS.rewriteBlockEnabled),
     // Body-dump policy. NOTE: parsing of raw?.dump.* fields not yet implemented;
     // for now we emit DEFAULT_DUMP. Full parsing is the in-flight work that

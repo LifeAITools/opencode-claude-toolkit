@@ -13,7 +13,7 @@
 import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
-const UCM_MANIFEST_REV = 6
+const UCM_MANIFEST_REV = 7
 
 /**
  * Динамические опции "выбор сессии" (UCM 1.1 optionsSources): пульт зовёт
@@ -46,7 +46,7 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
       {
         type: 'group',
         title: 'Keepalive',
-        controls: ['ka_indicator'],
+        controls: ['ka_indicator', 'ka_chart'],
         children: [
           { type: 'card', title: 'KA actions', controls: ['sessions_reload', 'sessions_disarm'] },
         ],
@@ -102,6 +102,16 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         title: 'KA ticks',
         schema: { type: 'object' },
         uiHints: { widget: 'sparkline' },
+        binding: { type: 'event', op: 'stream', match: { kind: 'PROXY_KA_TICK' } },
+      },
+      {
+        // Φ7 chart на РЕАЛЬНЫХ KA-данных: история тиков → area-график (ECharts).
+        // Анимация — motion-токенами пульта. Демонстрирует богатую палитру на проде.
+        id: 'ka_chart',
+        kind: 'chart',
+        title: 'KA activity',
+        schema: { type: 'object' },
+        uiHints: { chartType: 'area' },
         binding: { type: 'event', op: 'stream', match: { kind: 'PROXY_KA_TICK' } },
       },
       {

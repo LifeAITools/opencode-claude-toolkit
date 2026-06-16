@@ -9,11 +9,20 @@
  *
  * Версия инстанса (`version`) — ключ кэша пультов: меняется с версией прокси
  * и ревизией маппинга (UCM_MANIFEST_REV) — любое изменение инвалидирует кэш.
+ *
+ * REV 8 — композиция дашборда (правильное использование примитивов/layout):
+ *  - KPI-полоска (toolbar) из value-стат поверх HEALTH_HEARTBEAT (valueLabel
+ *    извлекает поле объекта; число извлекается строковым шаблоном, НЕ метром);
+ *  - Keepalive (split): chart+led-bar на СКАЛЯРНОМ PROXY_KA_TICK (числовые
+ *    метры выбирают первое число — корректны только на скалярном событии),
+ *    рядом kv-table телеметрии;
+ *  - Действия (card): reload/disarm/status в одной панели, без sprawl;
+ *  - Орг и сессии (split): org_switch + чистый список орг и список сессий.
  */
 import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
-const UCM_MANIFEST_REV = 7
+const UCM_MANIFEST_REV = 8
 
 /**
  * Динамические опции "выбор сессии" (UCM 1.1 optionsSources): пульт зовёт
@@ -27,7 +36,28 @@ const SESSION_OPTIONS = {
   refreshMs: 30_000,
 }
 
+/** Биндинг к heartbeat-стриму (объект телеметрии, обновляется раз в N сек). */
+const HEARTBEAT = { type: 'event', op: 'stream', match: { kind: 'HEALTH_HEARTBEAT' } }
+/** Биндинг к скалярному KA-тику (одно число — годен для числовых метров/графиков). */
+const KA_TICK = { type: 'event', op: 'stream', match: { kind: 'PROXY_KA_TICK' } }
+
 export const CONTROL_MANIFEST_URI = 'ui://control-manifest'
+
+/**
+ * KPI-стат поверх HEALTH_HEARTBEAT: `value` извлекает поле объекта строковым
+ * шаблоном valueLabel ({/field}) — это единственный корректный способ достать
+ * конкретное поле из объектного события (числовые метры берут первое число).
+ */
+function kpi(id: string, title: string, field: string, unit: string) {
+  return {
+    id,
+    kind: 'value',
+    title,
+    schema: { type: 'object' },
+    uiHints: { valueLabel: `{${field}}`, unit },
+    binding: HEARTBEAT,
+  }
+}
 
 export function buildControlManifest(proxyVersion: string): UcmManifest {
   const manifest = {
@@ -39,81 +69,79 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
       auth: { type: 'bearer', scopeHint: 'control' },
     },
     transport: { type: 'mcp-streamable-http', endpoint: '/mcp' },
-    // layout-дерево UCM 1.2: парные действия/индикаторы объединены в card
-    // (одна карточка, контролы без собственных рамок)
+    // Композиция дашборда: KPI-полоска → keepalive (split) → действия (card)
+    // → орг/сессии (split). toolbar=ряд, card=одна панель, split=2 колонки.
     layout: [
-      { type: 'group', title: 'Organizations', controls: ['orgs_list', 'org_switch'] },
       {
-        type: 'group',
+        type: 'toolbar',
+        title: 'Обзор',
+        controls: ['kpi_sessions', 'kpi_liveka', 'kpi_fires', 'kpi_ticks', 'kpi_util5h', 'kpi_util7d'],
+      },
+      {
+        type: 'split',
         title: 'Keepalive',
-        controls: ['ka_indicator', 'ka_chart'],
+        uiHints: { ratio: 0.6 },
+        controls: [],
         children: [
-          { type: 'card', title: 'KA actions', controls: ['sessions_reload', 'sessions_disarm'] },
+          { type: 'card', title: 'Активность KA', controls: ['ka_chart', 'ka_level'] },
+          { type: 'card', title: 'Телеметрия', controls: ['heartbeat_kv'] },
         ],
       },
       {
-        type: 'group',
-        title: 'Health',
-        controls: ['ka_level'],
+        type: 'card',
+        title: 'Действия с сессиями',
+        controls: ['sessions_reload', 'sessions_disarm', 'proxy_status'],
+      },
+      {
+        type: 'split',
+        title: 'Организации и сессии',
+        uiHints: { ratio: 0.5 },
+        controls: [],
         children: [
-          { type: 'card', title: 'Heartbeat & status', controls: ['health_indicator', 'proxy_status'] },
-          { type: 'card', title: 'Live metrics', controls: ['sessions_value', 'heartbeat_kv'] },
+          { type: 'card', title: 'Организации', controls: ['org_switch', 'orgs_list'] },
+          { type: 'card', title: 'Отслеживаемые сессии', controls: ['sessions_list_view'] },
         ],
       },
     ],
     controls: [
+      // --- KPI-полоска (value-стат поверх HEALTH_HEARTBEAT, valueLabel-поле) ---
+      kpi('kpi_sessions', 'Сессии', '/sessions', 'активных'),
+      kpi('kpi_liveka', 'Live KA', '/liveKa', 'держим'),
+      kpi('kpi_fires', 'Срабатываний', '/firesLastHour', 'за час'),
+      kpi('kpi_ticks', 'Тиков', '/ticksLastHour', 'за час'),
+      kpi('kpi_util5h', 'Квота 5ч', '/util5h', 'util'),
+      kpi('kpi_util7d', 'Квота 7д', '/util7d', 'util'),
+
+      // --- Keepalive: числовые виджеты на СКАЛЯРНОМ PROXY_KA_TICK ---
       {
-        id: 'orgs_list',
-        kind: 'list',
-        title: 'Organizations',
-        schema: { type: 'object', properties: {}, additionalProperties: false },
-        binding: { type: 'tool', op: 'orgs_list' },
-        // человеческие строки вместо сырого JSON: items указывает на /orgs,
-        // itemLabel — шаблон строки (рендерит пульт, UCM 1.1 uiHints)
-        uiHints: { items: '/orgs', itemLabel: '{/orgName} — {/orgId}' },
-      },
-      {
-        id: 'org_switch',
-        kind: 'select',
-        title: 'Switch session org',
-        schema: {
-          type: 'object',
-          properties: {
-            session_id: { type: 'string', title: 'Session UUID' },
-            org: { type: 'string', title: 'Org (UUID / prefix / name)' },
-          },
-          required: ['session_id', 'org'],
-        },
-        uiHints: { icon: 'swap' },
-        binding: { type: 'tool', op: 'org_switch' },
-        optionsSources: {
-          session_id: SESSION_OPTIONS,
-          org: {
-            binding: { type: 'tool', op: 'orgs_list' },
-            items: '/orgs',
-            value: '/orgId',
-            label: '{/orgName} ({/orgId})',
-          },
-        },
-      },
-      {
-        id: 'ka_indicator',
-        kind: 'indicator',
-        title: 'KA ticks',
-        schema: { type: 'object' },
-        uiHints: { widget: 'sparkline' },
-        binding: { type: 'event', op: 'stream', match: { kind: 'PROXY_KA_TICK' } },
-      },
-      {
-        // Φ7 chart на РЕАЛЬНЫХ KA-данных: история тиков → area-график (ECharts).
-        // Анимация — motion-токенами пульта. Демонстрирует богатую палитру на проде.
+        // Φ7 chart на реальных KA-данных: история тиков → area-график (ECharts).
         id: 'ka_chart',
         kind: 'chart',
-        title: 'KA activity',
+        title: 'Активность KA',
         schema: { type: 'object' },
-        uiHints: { chartType: 'area' },
-        binding: { type: 'event', op: 'stream', match: { kind: 'PROXY_KA_TICK' } },
+        uiHints: { chartType: 'area', height: 180, unit: 'тик' },
+        binding: KA_TICK,
       },
+      {
+        id: 'ka_level',
+        kind: 'led-bar',
+        title: 'Уровень KA',
+        schema: { type: 'number', minimum: 0, maximum: 20 },
+        uiHints: { count: 20, warn: 0.7, err: 0.9 },
+        binding: KA_TICK,
+      },
+      {
+        id: 'heartbeat_kv',
+        kind: 'kv-table',
+        title: 'Телеметрия',
+        schema: { type: 'object' },
+        uiHints: {
+          keys: ['sessions', 'liveKa', 'firesLastHour', 'ticksLastHour', 'avgCacheRead', 'zeroCacheWrites', 'util5h', 'util7d'],
+        },
+        binding: HEARTBEAT,
+      },
+
+      // --- Действия с сессиями (одна панель) ---
       {
         id: 'sessions_reload',
         kind: 'button',
@@ -121,8 +149,8 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         schema: {
           type: 'object',
           properties: {
-            session_id: { type: 'string', title: 'Session (empty = all)' },
-            reason: { type: 'string', title: 'Reason' },
+            session_id: { type: 'string', title: 'Сессия (пусто = все)' },
+            reason: { type: 'string', title: 'Причина' },
           },
         },
         binding: { type: 'tool', op: 'sessions_reload' },
@@ -136,21 +164,12 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         schema: {
           type: 'object',
           properties: {
-            session_id: { type: 'string', title: 'Session (empty = all)' },
-            reason: { type: 'string', title: 'Reason' },
+            session_id: { type: 'string', title: 'Сессия (пусто = все)' },
+            reason: { type: 'string', title: 'Причина' },
           },
         },
         binding: { type: 'tool', op: 'sessions_disarm' },
         optionsSources: { session_id: SESSION_OPTIONS },
-      },
-      {
-        id: 'health_indicator',
-        kind: 'indicator',
-        title: 'Heartbeat',
-        schema: { type: 'object' },
-        // valueLabel: пульт показывает строку вместо сырого JSON heartbeat'а
-        uiHints: { valueLabel: '{/sessions} sessions · {/liveKa} live KA · {/firesLastHour} fires/h' },
-        binding: { type: 'event', op: 'stream', match: { kind: 'HEALTH_HEARTBEAT' } },
       },
       {
         id: 'proxy_status',
@@ -159,30 +178,47 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
         schema: { type: 'object', properties: {}, additionalProperties: false },
         binding: { type: 'tool', op: 'proxy_status' },
       },
-      // --- богатая палитра на живых метриках (словарь 1.5) ---
+
+      // --- Организации и сессии ---
       {
-        id: 'sessions_value',
-        kind: 'value',
-        title: 'Active sessions',
-        schema: { type: 'object' },
-        uiHints: { valueLabel: '{/sessions}', unit: 'live' },
-        binding: { type: 'event', op: 'stream', match: { kind: 'HEALTH_HEARTBEAT' } },
+        id: 'org_switch',
+        kind: 'select',
+        title: 'Переключить орг сессии',
+        schema: {
+          type: 'object',
+          properties: {
+            session_id: { type: 'string', title: 'Сессия' },
+            org: { type: 'string', title: 'Орг (UUID / префикс / имя)' },
+          },
+          required: ['session_id', 'org'],
+        },
+        uiHints: { icon: 'swap' },
+        binding: { type: 'tool', op: 'org_switch' },
+        optionsSources: {
+          session_id: SESSION_OPTIONS,
+          org: {
+            binding: { type: 'tool', op: 'orgs_list' },
+            items: '/orgs',
+            value: '/orgId',
+            label: '{/orgName}',
+          },
+        },
       },
       {
-        id: 'heartbeat_kv',
-        kind: 'kv-table',
-        title: 'Heartbeat detail',
-        schema: { type: 'object' },
-        uiHints: { keys: ['sessions', 'liveKa', 'firesLastHour'] },
-        binding: { type: 'event', op: 'stream', match: { kind: 'HEALTH_HEARTBEAT' } },
+        id: 'orgs_list',
+        kind: 'list',
+        title: 'Организации',
+        schema: { type: 'object', properties: {}, additionalProperties: false },
+        binding: { type: 'tool', op: 'orgs_list' },
+        uiHints: { items: '/orgs', itemLabel: '{/orgName}' },
       },
       {
-        id: 'ka_level',
-        kind: 'led-bar',
-        title: 'KA activity',
-        schema: { type: 'number', minimum: 0, maximum: 20 },
-        uiHints: { count: 20, warn: 0.7, err: 0.9 },
-        binding: { type: 'event', op: 'stream', match: { kind: 'PROXY_KA_TICK' } },
+        id: 'sessions_list_view',
+        kind: 'list',
+        title: 'Отслеживаемые сессии',
+        schema: { type: 'object', properties: {}, additionalProperties: false },
+        binding: { type: 'tool', op: 'sessions_list' },
+        uiHints: { itemLabel: '{/display}' },
       },
     ],
     apps: [],

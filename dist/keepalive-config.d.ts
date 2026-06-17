@@ -98,6 +98,13 @@ export interface ResolvedKeepaliveConfig {
     /** Max cache lineages warmed per KA tick (multi-lineage keepalive cap).
      *  Default: 8. Overflow is warmed on subsequent ticks (≤30s apart). */
     readonly maxFiresPerTick: number;
+    /** Max cache lineages KEPT WARM per session (registry bound). A session can
+     *  accumulate many lineages (model/tool churn + delegated sub-agents that may
+     *  be re-delegated). We keep the most-recently-warmed K and LRU-evict the
+     *  oldest NON-main lineage beyond K (main is never evicted). Default: 4
+     *  (main + ~3 recent workers). Reads are ~free for the Max quota window, so
+     *  this is registry/fire hygiene, not direct cost. */
+    readonly maxWarmLineagesPerSession: number;
     /** Block real requests with too-aggressive cache rewrites (rare safety net). Default: false. */
     readonly rewriteBlockEnabled: boolean;
     /** Body-dump policy with rotation. See DumpConfig docs. */

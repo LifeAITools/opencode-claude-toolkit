@@ -1202,6 +1202,26 @@ export class ProxyClient {
         if (servedOrg) {
           this.lastServedOrg.set(sessionId, servedOrg)
           this.orgVault.markVerified(servedOrg)
+          // TOFU auto-pin: the first org Anthropic actually serves a session
+          // becomes a sticky implicit pin, so an unpinned session stops
+          // following ~/.claude.json default-org churn (multiple Claude Code
+          // processes on different orgs each rewrite that one shared file,
+          // oscillating it → unpinned sessions flip org between requests). Only
+          // an explicit `org switch` changes it afterwards. Creating a real pin
+          // reuses the existing pin machinery (vault token refresh, HOLD,
+          // restart-restore). servedOrg is ground truth (response header) — we
+          // bind to what was actually served, not the racy resolver default.
+          if (!this.sessionPins.has(sessionId)) {
+            const ve = this.orgVault.get(servedOrg)
+            if (ve && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
+              this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })
+              this.orgVault.setPin(sessionId, servedOrg)
+              this.events.emit({
+                level: 'info', kind: 'ORG_PIN_AUTO', sessionId,
+                msg: `auto-pinned to first-served org ${servedOrg.slice(0, 8)} (TOFU — sticky; change via 'org switch')`,
+              })
+            }
+          }
           const expected = this.sessionPins.get(sessionId)?.orgId ?? this.orgIdResolver.current()
           if (expected !== null && expected !== servedOrg) {
             this.events.emit({

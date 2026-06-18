@@ -1652,6 +1652,16 @@ export class ProxyClient {
       const decoder = new TextDecoder()
       const reader = stream.getReader()
       let buffer = ''
+      // Non-streaming fallback: a consumer (e.g. the tixi agent-sidecar) may POST
+      // WITHOUT stream:true, so the upstream body is a single Anthropic Message
+      // JSON, not an SSE event stream. We accumulate the raw body (only until SSE
+      // usage is seen, to bound memory on real streams) and parse it as JSON after
+      // the loop when the data:-line scan found no `message_start`. Without this,
+      // usage stays 0 for every non-streaming request → the engine never records
+      // the warm cache → perpetual `expected:cold-start` mispredictions and
+      // cache-metrics hitRate=0, even while Anthropic serves 40k+ cache reads.
+      let rawAll = ''
+      let sawSseUsage = false
       while (true) {
         let done: boolean, value: Uint8Array | undefined
         try {
@@ -1669,7 +1679,9 @@ export class ProxyClient {
         }
         if (done) break
         if (!value) continue
-        buffer += decoder.decode(value, { stream: true })
+        const chunk = decoder.decode(value, { stream: true })
+        buffer += chunk
+        if (!sawSseUsage) rawAll += chunk
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
         for (const line of lines) {
@@ -1679,6 +1691,7 @@ export class ProxyClient {
           try {
             const p = JSON.parse(raw)
             if (p.type === 'message_start' && p.message?.usage) {
+              sawSseUsage = true
               const u = p.message.usage
               usage = {
                 inputTokens: u.input_tokens ?? 0,
@@ -1707,6 +1720,33 @@ export class ProxyClient {
             }
           } catch { /* malformed line, skip */ }
         }
+      }
+
+      // Flush the decoder and handle a NON-streaming JSON response: when the
+      // data:-line scan above saw no `message_start`, the body is a single
+      // Anthropic Message object — parse it and lift `usage` so the engine and
+      // rolling metrics see the real cache tokens (otherwise REAL_REQUEST_COMPLETE
+      // reports 0 and every request mispredicts cold-start).
+      rawAll += decoder.decode()
+      if (!sawSseUsage) {
+        try {
+          const msg = JSON.parse(rawAll.trim())
+          const u = msg?.usage
+          if (u && typeof u === 'object') {
+            usage = {
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+              cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+            }
+            const cc = u.cache_creation
+            if (cc && typeof cc === 'object') {
+              if (typeof cc.ephemeral_5m_input_tokens === 'number') usage.cacheCreation5mInputTokens = cc.ephemeral_5m_input_tokens
+              if (typeof cc.ephemeral_1h_input_tokens === 'number') usage.cacheCreation1hInputTokens = cc.ephemeral_1h_input_tokens
+            }
+            if (typeof u.cache_deleted_input_tokens === 'number') usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
+          }
+        } catch { /* not JSON (e.g. an SSE stream that simply carried no usage) — leave zero */ }
       }
 
       const isFirstCall = session.lastUsage === null

@@ -2268,13 +2268,24 @@ async function* parseSSEToEvents(
   const reader = body.getReader()
   let buffer = ''
   let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
+  // KA fires (engineDoFetch) replay a NON-streaming snapshot — the agent's real
+  // request has no stream:true — so the upstream response is a single Anthropic
+  // Message JSON, not an SSE stream. The data:-line scan finds no message_stop →
+  // the engine gets no usage → KA_FIRE_COMPLETE logs cacheRead=0 even when the
+  // fire HIT the warm cache, so the engine cannot tell a healthy refresh from a
+  // miss (and the eviction guard can't work). Accumulate the body and, when no
+  // SSE message_stop arrived, parse it as JSON and synthesize the terminal event.
+  let rawAll = ''
+  let yieldedStop = false
 
   try {
     while (true) {
       if (signal?.aborted) { reader.cancel(); return }
       const { done, value } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      const chunk = decoder.decode(value, { stream: true })
+      buffer += chunk
+      rawAll += chunk
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
       for (const line of lines) {
@@ -2309,9 +2320,36 @@ async function* parseSSEToEvents(
         } else if (p.type === 'message_delta' && p.usage?.output_tokens) {
           usage.outputTokens = p.usage.output_tokens
         } else if (p.type === 'message_stop') {
+          yieldedStop = true
           yield { type: 'message_stop', usage, stopReason: null }
         }
       }
+    }
+    // Non-streaming fallback (KA replays a non-streaming snapshot): no SSE
+    // message_stop arrived → parse the whole body as one Anthropic Message, lift
+    // usage (incl 5m/1h/deleted subfields), and synthesize the terminal event the
+    // engine waits for — so KA fires report real cacheRead and the eviction guard
+    // can distinguish a healthy refresh from a stale-snapshot miss.
+    if (!yieldedStop) {
+      try {
+        const msg = JSON.parse(rawAll.trim())
+        const u = msg?.usage
+        if (u && typeof u === 'object') {
+          usage = {
+            inputTokens: u.input_tokens ?? 0,
+            outputTokens: u.output_tokens ?? 0,
+            cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+            cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+          }
+          const cc = u.cache_creation
+          if (cc && typeof cc === 'object') {
+            if (typeof cc.ephemeral_5m_input_tokens === 'number') usage.cacheCreation5mInputTokens = cc.ephemeral_5m_input_tokens
+            if (typeof cc.ephemeral_1h_input_tokens === 'number') usage.cacheCreation1hInputTokens = cc.ephemeral_1h_input_tokens
+          }
+          if (typeof u.cache_deleted_input_tokens === 'number') usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
+        }
+      } catch { /* not JSON — yield the zero-usage terminal so the engine still completes */ }
+      yield { type: 'message_stop', usage, stopReason: null }
     }
   } finally {
     reader.releaseLock()

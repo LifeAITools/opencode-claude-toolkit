@@ -157,6 +157,15 @@ async function* parseSSE(
   const decoder = new TextDecoder()
   const reader = body.getReader()
   let buffer = ''
+  // KA fires replay a NON-streaming snapshot (the agent's real request carries no
+  // stream:true), so the upstream response is a single Anthropic Message JSON, not
+  // an SSE stream → the data:-line scan below yields no message_stop and usage
+  // stays 0. We accumulate the raw body and, when no message_stop was yielded,
+  // parse it as JSON and synthesize a message_stop so the KA path reports the real
+  // cacheRead — otherwise every KA fire looks like a 0-read miss and the engine
+  // cannot confirm it actually hit the warm cache.
+  let rawAll = ''
+  let yieldedStop = false
   // TokenUsage shape — split fields (cacheCreation5m/1h, cacheDeleted) start
   // undefined and only get populated when the response actually contains
   // `usage.cache_creation.*` / `usage.cache_deleted_input_tokens`. Per
@@ -176,7 +185,9 @@ async function* parseSSE(
       if (signal?.aborted) { reader.cancel(); return }
       const { done, value } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      const chunk = decoder.decode(value, { stream: true })
+      buffer += chunk
+      rawAll += chunk
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
       for (const line of lines) {
@@ -220,12 +231,38 @@ async function* parseSSE(
           if (parsed.delta?.stop_reason) stopReason = parsed.delta.stop_reason
           if (parsed.usage?.output_tokens) usage.outputTokens = parsed.usage.output_tokens
         } else if (parsed.type === 'message_stop') {
+          yieldedStop = true
           yield { type: 'message_stop', usage, stopReason }
         }
         // Other SSE events (content_block_delta etc) not yielded here — the proxy
         // byte-pipes them directly to CC in the passthrough handler. KA fires use
         // this parser only to drain and extract usage.
       }
+    }
+    // Non-streaming fallback (KA replays a non-streaming snapshot): no SSE
+    // message_stop arrived, so parse the whole body as one Anthropic Message,
+    // lift usage, and synthesize the terminal event the consumer waits for.
+    if (!yieldedStop) {
+      try {
+        const msg = JSON.parse(rawAll.trim())
+        const u = msg?.usage
+        if (u && typeof u === 'object') {
+          usage = {
+            inputTokens: u.input_tokens ?? 0,
+            outputTokens: u.output_tokens ?? 0,
+            cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+            cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+          }
+          const cc = u.cache_creation
+          if (cc && typeof cc === 'object') {
+            if (typeof cc.ephemeral_5m_input_tokens === 'number') usage.cacheCreation5mInputTokens = cc.ephemeral_5m_input_tokens
+            if (typeof cc.ephemeral_1h_input_tokens === 'number') usage.cacheCreation1hInputTokens = cc.ephemeral_1h_input_tokens
+          }
+          if (typeof u.cache_deleted_input_tokens === 'number') usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
+        }
+        if (typeof msg?.stop_reason === 'string') stopReason = msg.stop_reason
+      } catch { /* not JSON — still yield a zero-usage terminal so the consumer completes */ }
+      yield { type: 'message_stop', usage, stopReason }
     }
   } finally {
     reader.releaseLock()

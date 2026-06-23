@@ -524,5 +524,7 @@ process.on('uncaughtException', (err) => {
   emit({ level: 'error', kind: 'ERROR', msg: `uncaughtException: ${err?.message}`, stack: err?.stack?.split('\n').slice(0, 4) })
 })
 process.on('unhandledRejection', (reason: any) => {
-  emit({ level: 'error', kind: 'ERROR', msg: `unhandledRejection: ${reason?.message ?? reason}` })
+  // Log the stack (mirrors uncaughtException above) so a recurring rejection is
+  // LOCATABLE — without it `null is not an object` floods the log with no origin.
+  emit({ level: 'error', kind: 'ERROR', msg: `unhandledRejection: ${reason?.message ?? reason}`, stack: reason?.stack?.split('\n').slice(0, 6) })
 })

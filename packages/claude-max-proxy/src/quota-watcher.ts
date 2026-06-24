@@ -179,7 +179,10 @@ interface AccountState {
   level: 'ok' | 'warning' | 'critical'
   message: string
   issuedAt: string
-  pids: number[]
+  /** pidStates keys contributing to this account (composite `${pid}::${org}`
+   *  for org-stamped traffic; bare pid for legacy). Consumers index the
+   *  snapshot `pids` map by these to derive per-account last-seen freshness. */
+  pids: string[]
 }
 
 /** session → org attribution (multi-org hosts): which organization served a
@@ -223,7 +226,10 @@ export interface QuotaWatcherOptions {
 
 // ─── State ───────────────────────────────────────────────────────────
 
-const pidStates = new Map<number, PidState>()
+// Keyed by `${pid}::${org}` for org-stamped lines (one virtual client per
+// concurrently-served org — see ingestStatsLine) and by the bare `${pid}` for
+// legacy lines with no org field.
+const pidStates = new Map<string, PidState>()
 const accountStates = new Map<string, AccountState>()
 const sessionStates = new Map<string, SessionState>()
 /** resetAt carry-forward: upstream sends the rate-limit reset header only on
@@ -540,14 +546,28 @@ function ingestStatsLine(line: StatsLine): void {
   // skip rows with no rate-limit info (KA fires sometimes lack it)
   if (util5h === null && util7d === null) return
 
-  const prev = pidStates.get(pid)
+  // Per-ORG virtual client. Every stats line carries the SINGLE proxy process
+  // pid (the emitter stamps PROXY_PID on all orgs), so keying pidStates by the
+  // bare pid collapses every concurrently-served org onto ONE oscillating
+  // account: recomputeAccountFromPids then finds zero pids for the just-left
+  // org and DELETES it, so accounts never holds more than one org at a time.
+  // The reader (signal-wire hook) can't find its session's org → falls through
+  // to the only present org → shows a DIFFERENT org's quota (a session on a
+  // healthy org sees an exhausted org's util, and vice-versa — false
+  // cross-org display feeding both the badge AND the agent's quota gate).
+  // Key by `${pid}::${org}` so each live org is its own virtual client and the
+  // per-pid model keeps one AccountState per org. Legacy lines without an org
+  // field keep the bare-pid key (pre-multi-org behaviour, trajectory-inferred).
+  const hasOrg = typeof line.org === 'string' && line.org.length > 0
+  const pidKey = hasOrg ? `${pid}::${line.org}` : String(pid)
+  const prev = pidStates.get(pidKey)
   const utilChanged = !prev || prev.util5h !== util5h || prev.util7d !== util7d
 
   // Account identity: the emitter's per-organization stamp wins outright
   // (exact attribution on multi-org hosts). Trajectory-clustering heuristics
   // remain ONLY for legacy lines that predate the `org` field.
-  const accountHint = typeof line.org === 'string' && line.org
-    ? line.org
+  const accountHint = hasOrg
+    ? (line.org as string)
     : inferAccountHint(pid, util5h, resetAt, prev)
 
   const state: PidState = {
@@ -560,14 +580,17 @@ function ingestStatsLine(line: StatsLine): void {
     lastUtil5hChange: utilChanged ? ts : (prev?.lastUtil5hChange ?? ts),
     level: classifyLevel(util5h, util7d),
   }
-  pidStates.set(pid, state)
+  pidStates.set(pidKey, state)
   // session → org attribution for consumers (multi-org per-session lookup).
   if (typeof line.ses === 'string' && line.ses) {
     sessionStates.set(line.ses, { org: accountHint, lastSeenAt: ts })
   }
   recomputeAccountFromPids(accountHint)
-  // Pid moved between accounts (org stamp appeared / re-login) — recompute the
-  // old account too so it doesn't keep a phantom claim on this pid.
+  // Pid moved between accounts (legacy re-login / trajectory swap on a bare-pid
+  // key) — recompute the old account too so it doesn't keep a phantom claim on
+  // this pid. For org-stamped lines the org is part of pidKey, so prev always
+  // shares accountHint and this branch is a no-op (orgs no longer evict each
+  // other — the whole point of the composite key).
   if (prev && prev.accountHint !== accountHint) {
     recomputeAccountFromPids(prev.accountHint)
   }
@@ -622,11 +645,11 @@ function recomputeAccountFromPids(accountHint: string): void {
   let util5h: number | null = null
   let util7d: number | null = null
   let resetAt: number | null = null
-  const pids: number[] = []
+  const pids: string[] = []
 
-  for (const s of pidStates.values()) {
+  for (const [pidKey, s] of pidStates.entries()) {
     if (s.accountHint !== accountHint) continue
-    pids.push(s.pid)
+    pids.push(pidKey)
     if (s.util5h != null && (util5h == null || s.util5h > util5h)) util5h = s.util5h
     if (s.util7d != null && (util7d == null || s.util7d > util7d)) util7d = s.util7d
     if (s.resetAt != null && (resetAt == null || s.resetAt > resetAt)) resetAt = s.resetAt
@@ -791,12 +814,18 @@ function writeQuotaStatus(): void {
 function pruneStaleStates(now: number): void {
   const cutoff = now - PID_STATE_PRUNE_AFTER_MS
   const affectedAccounts = new Set<string>()
-  for (const [pid, s] of pidStates.entries()) {
+  for (const [pidKey, s] of pidStates.entries()) {
     if (s.lastSeenAt < cutoff) {
       affectedAccounts.add(s.accountHint)
-      // Also reap if pid is dead (kill -0 check)
-      if (!isPidAlive(pid)) {
-        pidStates.delete(pid)
+      // Reap when the real process is gone, OR when this is a per-org virtual
+      // client (composite `${pid}::${org}` key): the proxy pid is shared across
+      // orgs, so there is no distinct OS process to kill-0 probe — staleness is
+      // its only liveness signal, and leaving it would pin a long-idle org's
+      // account forever (the proxy pid never dies). Bare-pid (legacy) entries
+      // still reap by the process check so a live proxy keeps its account warm
+      // between bursts.
+      if (pidKey.includes('::') || !isPidAlive(s.pid)) {
+        pidStates.delete(pidKey)
         continue
       }
       // Pid alive but silent — keep state but mark stale by zeroing util
@@ -836,6 +865,29 @@ function ensureDir(d: string): void {
   if (!existsSync(d)) {
     try { mkdirSync(d, { recursive: true }) } catch { /* ignore */ }
   }
+}
+
+// ─── Test surface (additive; not used in production) ─────────────────
+//
+// Lets unit tests drive the PURE processor logic (ingest → aggregate →
+// snapshot) without spinning the file-tailing daemon. Mirrors the
+// `invalidateTokenCache` test-export pattern in upstream.ts.
+export const __testing = {
+  ingestStatsLine,
+  pruneStaleStates,
+  snapshot: (): QuotaStatusFile => ({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    accounts: Object.fromEntries(accountStates),
+    pids: Object.fromEntries(pidStates),
+    sessions: Object.fromEntries(sessionStates),
+  }),
+  reset: (): void => {
+    pidStates.clear()
+    accountStates.clear()
+    sessionStates.clear()
+    expectedResetAt.clear()
+  },
 }
 
 // ─── Standalone entry (the PROCESSOR runs as its own service) ─────────

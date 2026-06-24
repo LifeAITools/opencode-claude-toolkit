@@ -1179,6 +1179,15 @@ export class ProxyClient {
     const TRANSIENT_UPSTREAM_STATUSES = new Set([500, 502, 503, 529])
     let upstream: Response
     let realAttempt = 0
+    // Per-request rate-limit snapshot — captured in THIS request's scope (from
+    // its own upstream response) and passed to the async parser. Must NOT read
+    // the shared this.lastRateLimit at emit time: REAL_REQUEST_COMPLETE fires
+    // AFTER the body has streamed (up to ~60s), during which a concurrent request
+    // on ANOTHER org overwrites this.lastRateLimit — so the completing request
+    // would emit a different org's utilisation under its own org label (cross-org
+    // quota contamination feeding the per-session badge + agent gate; 2026-06-24:
+    // a b3219c9b request emitted f9420373's 7d=0.99).
+    let reqRateLimit: RateLimitSnapshot
     for (;;) {
       try {
         upstream = await this.upstream.fetch(`${this.config.anthropicBaseUrl}/v1/messages?beta=true`, {
@@ -1191,8 +1200,11 @@ export class ProxyClient {
         return this.handleNetworkError(sessionId, fetchErr)
       }
 
-      // Parse rate-limit headers into snapshot
-      this.lastRateLimit = parseRateLimitHeaders(upstream.headers)
+      // Parse rate-limit headers into snapshot (request-local AND shared field:
+      // the shared one still feeds heartbeat/rateLimitSnapshot + 429 handling;
+      // the local is what REAL_REQUEST_COMPLETE emits, race-free).
+      reqRateLimit = parseRateLimitHeaders(upstream.headers)
+      this.lastRateLimit = reqRateLimit
 
       // Ground-truth org evidence: Anthropic names the serving org on every
       // response. Verify the vault binding and surface mismatches (a session
@@ -1327,7 +1339,7 @@ export class ProxyClient {
     }
 
     // Parse in background — extract usage + notify engine. Never crashes.
-    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0, reqLineageKey).catch((e) => {
+    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0, reqLineageKey, reqRateLimit).catch((e) => {
       this.events.emit({
         level: 'error',
         kind: 'REAL_REQUEST_ERROR',
@@ -1646,6 +1658,10 @@ export class ProxyClient {
     model: string,
     t0: number,
     lineageKey: string,
+    // Frozen at call time from THIS request's upstream response — emitting the
+    // shared this.lastRateLimit here would race with concurrent other-org
+    // requests (cross-org quota contamination). See handleRequest's reqRateLimit.
+    reqRateLimit: RateLimitSnapshot,
   ): Promise<void> {
     try {
       let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
@@ -1787,9 +1803,9 @@ export class ProxyClient {
         durationMs: Date.now() - t0,
         usage,
         rateLimit: {
-          util5h: this.lastRateLimit.utilization5h,
-          util7d: this.lastRateLimit.utilization7d,
-          status: this.lastRateLimit.status,
+          util5h: reqRateLimit.utilization5h,
+          util7d: reqRateLimit.utilization7d,
+          status: reqRateLimit.status,
         },
       })
     } catch (err: any) {

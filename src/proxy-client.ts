@@ -361,7 +361,13 @@ export class ProxyClient {
   // don't surface to Claude Code as a hard error requiring a manual re-resume.
   // Short by design; not a substitute for surviving a multi-minute outage.
   // Overridable in tests via (client as any).realRetryDelaysMs.
-  private readonly realRetryDelaysMs: readonly number[] = [1_000, 2_000, 4_000]
+  private readonly realRetryDelaysMs: readonly number[] = [1_000, 2_000, 4_000, 8_000]
+  // Absolute ceiling for any single backoff wait (caps a large upstream
+  // retry-after and the jittered baseline). Overridable in tests.
+  private readonly retryCeilingMs: number = 10_000
+  // Jitter source for de-syncing concurrent retries; Math.random in prod,
+  // pinned in tests via (client as any).retryRandom for deterministic delays.
+  private readonly retryRandom: () => number = Math.random
 
   private readonly reaperTimer: ReturnType<typeof setInterval>
   private lastRateLimit: RateLimitSnapshot = {
@@ -1257,12 +1263,23 @@ export class ProxyClient {
         break  // success, non-retryable, or budget exhausted → fall through below
       }
 
-      // Transient upstream fault → back off and retry. Honor a sane retry-after.
+      // Transient upstream fault → back off and retry. Honor retry-after only to
+      // LENGTHEN the wait, never to shorten it below our exponential floor:
+      // Anthropic emits `retry-after: 0` during wide overloads, and obeying it
+      // verbatim retries an already-overloaded upstream with ZERO spacing
+      // (2026-06-24: delayMs=0 fired twice in a row, burning the whole retry
+      // budget in <2s → "Repeated 529" surfaced to the user on a fresh session).
+      // floor = baseline schedule; cap = retryCeilingMs. Then ±20% jitter so the
+      // many concurrent sessions / KA-ticks all hitting the same blip don't
+      // retry in lockstep and re-spike the upstream.
+      const baseMs = this.realRetryDelaysMs[realAttempt]!
       const retryAfterHeader = upstream.headers.get('retry-after')
       const retryAfterParsed = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN
-      const delayMs = Number.isFinite(retryAfterParsed)
-        ? Math.min(Math.max(retryAfterParsed * 1_000, 0), 10_000)
-        : this.realRetryDelaysMs[realAttempt]!
+      const honoredMs = Number.isFinite(retryAfterParsed)
+        ? Math.max(retryAfterParsed * 1_000, baseMs)
+        : baseMs
+      const jittered = honoredMs * (1 + (this.retryRandom() - 0.5) * 0.4)
+      const delayMs = Math.round(Math.min(jittered, this.retryCeilingMs))
       // Release the error-response body so the connection can be reused.
       try { await upstream.body?.cancel() } catch { /* best-effort */ }
       this.events.emit({

@@ -53,8 +53,9 @@ function mkClient(upstreamFetcher: ProxyClientOptions['upstreamFetcher'], extra:
     proxyStartedAt: 0,
     ...extra,
   })
-  // Shrink the backoff so tests don't wait the real 1/2/4s.
-  ;(c as any).realRetryDelaysMs = [5, 5, 5]
+  // Shrink the backoff so tests don't wait the real 1/2/4/8s — but keep the
+  // production budget LENGTH (4 retries) so the exhaustion test stays faithful.
+  ;(c as any).realRetryDelaysMs = [5, 5, 5, 5]
   return c
 }
 
@@ -75,7 +76,7 @@ describe('real-request transient-upstream retry', () => {
     const c = mkClient({ fetch: async () => { calls++; return errResponse(529) } })
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'retry-exhaust' })
     expect(r.status).toBe(529)
-    expect(calls).toBe(4)            // 1 initial + 3 retries (budget length), then give up
+    expect(calls).toBe(5)            // 1 initial + 4 retries (budget length), then give up
     c.stop()
   })
 
@@ -105,6 +106,29 @@ describe('real-request transient-upstream retry', () => {
     const r = await c.handleRequest(reqBody(), {}, { sessionId: 'retry-503-ra' })
     expect(r.status).toBe(200)
     expect(calls).toBe(2)
+    c.stop()
+  })
+
+  // Regression 2026-06-24: Anthropic emits `retry-after: 0` during wide
+  // overloads. The proxy used to obey it verbatim (delayMs=0) → it retried an
+  // already-overloaded upstream with zero spacing, burning the whole budget in
+  // <2s and surfacing "Repeated 529" instantly. retry-after must only LENGTHEN
+  // the wait, never shorten it below the exponential floor.
+  test('retry-after:0 does NOT collapse backoff below baseline floor', async () => {
+    const events: any[] = []
+    let calls = 0
+    const c = mkClient(
+      { fetch: async () => { calls++; return errResponse(529, '0') } },
+      { eventEmitter: { emit: (e: any) => events.push(e) } as any },
+    )
+    ;(c as any).realRetryDelaysMs = [40, 40, 40, 40]   // known baseline
+    ;(c as any).retryRandom = () => 0.5                // pin jitter to no-op
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'retry-floor' })
+    expect(r.status).toBe(529)
+    const retries = events.filter((e) => e.kind === 'REAL_REQUEST_RETRY')
+    expect(retries.length).toBe(4)
+    // Every backoff honored the baseline floor despite retry-after:0 — none at 0.
+    for (const ev of retries) expect(ev.delayMs).toBe(40)
     c.stop()
   })
 })

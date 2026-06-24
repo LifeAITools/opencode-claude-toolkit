@@ -215,6 +215,8 @@ export declare class ProxyClient {
     private readonly upstream;
     private readonly liveness;
     private readonly realRetryDelaysMs;
+    private readonly retryCeilingMs;
+    private readonly retryRandom;
     private readonly reaperTimer;
     private lastRateLimit;
     /** Previous request's cacheable-prefix fingerprint per `${sessionId}:${lineageKey}`.

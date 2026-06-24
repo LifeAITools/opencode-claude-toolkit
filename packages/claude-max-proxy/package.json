@@ -4,7 +4,7 @@
   "description": "Transparent Anthropic-native proxy for native Claude Code CLI — keeps prompt cache warm via autonomous keepalive hits. Saves subscription quota by preventing cache_write bursts.",
   "type": "module",
   "bin": {
-    "claude-max": "./bin/claude-max"
+    "claude-max": "bin/claude-max"
   },
   "files": [
     "bin",

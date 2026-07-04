@@ -890,13 +890,41 @@ export function corsPreflightResponse(): Response {
 // will recognize (requires prompt-caching-scope-2026-01-05 beta — always
 // injected by enrichAnthropicRequest).
 //
-// IMPORTANT: Only injects markers where NONE exist. If the client already
-// placed cache_control markers (e.g. native CC, advanced Anthropic SDK
-// user), their markers are PRESERVED — we don't overwrite or conflict.
+// IMPORTANT: Only injects markers when the body carries NONE anywhere. A client
+// that placed ANY cache_control is cache-AWARE and owns its breakpoint PLAN —
+// Anthropic hard-caps 4 marks per request, so per-slot topping-up of a partially
+// marked body can push it over the cap (live-hit 2026-07-04: kiberos-agent@0.3.1
+// budgets exactly 4 marks [2×system + last-tool + moving messages mark]; the old
+// per-slot logic added a 4th/5th onto the unmarked LAST message → API 400
+// "A maximum of 4 blocks with cache_control may be provided. Found 5." on every
+// multi-step turn). Marker-less bodies (OpenAI-compat, bare SDK) keep the full
+// BP1-3 injection exactly as before.
 
 const CACHE_MARKER = { cache_control: { type: 'ephemeral' as const, ttl: '1h' as const } }
 
+/** True when ANY cache_control mark exists in system ⊕ tools ⊕ messages. */
+export function hasAnyCacheControl(body: Record<string, unknown>): boolean {
+  const blockHas = (b: unknown): boolean =>
+    b !== null && typeof b === 'object' && Boolean((b as Record<string, unknown>).cache_control)
+  const sys = body.system
+  if (Array.isArray(sys) && sys.some(blockHas)) return true
+  const tools = body.tools
+  if (Array.isArray(tools) && tools.some(blockHas)) return true
+  const messages = body.messages
+  if (Array.isArray(messages)) {
+    for (const m of messages) {
+      if (blockHas(m)) return true
+      const content = (m as Record<string, unknown> | null)?.content
+      if (Array.isArray(content) && content.some(blockHas)) return true
+    }
+  }
+  return false
+}
+
 export function injectCacheMarkers(body: Record<string, unknown>): number {
+  // Cache-aware client (≥1 own mark) ⇒ faithful pass-through, zero injection.
+  if (hasAnyCacheControl(body)) return 0
+
   let injected = 0
 
   // BP1: last system block

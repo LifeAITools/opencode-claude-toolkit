@@ -34,6 +34,7 @@ import {
   applyCompactResults,
   applyChatHintResults,
   applyBlockResults,
+  writeThoughtFile,
 } from './hook-listener'
 import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
@@ -521,8 +522,14 @@ export default {
             // into the void since signal-wire-architecture-v3.
             const hintTexts: string[] = []
             for (const r of result.results) {
-              const ar = r as { type?: string; success?: boolean; hintText?: string }
-              if ((ar.type === 'hint' || ar.type === 'respond') && ar.success && ar.hintText) {
+              const ar = r as { type?: string; success?: boolean; hintText?: string; inject?: boolean }
+              // v1.6 exec-inject twin gate (core ≥0.3.4): an exec result
+              // flagged inject:true carries its stdout in hintText and must
+              // ride the same injection path as hint/respond — without this
+              // the memory-recall inject leg is silently dropped in opencode.
+              const carriesHint =
+                ar.type === 'hint' || ar.type === 'respond' || (ar.type === 'exec' && ar.inject === true)
+              if (carriesHint && ar.success && ar.hintText) {
                 hintTexts.push(ar.hintText)
               }
             }
@@ -759,6 +766,12 @@ export default {
           if (event.sessionId && signalWire) {
             try { signalWire.setSessionId(event.sessionId) } catch { /* */ }
           }
+          // Memory-recall thought side-channel (Phase 1.5) — MUST land BEFORE
+          // evaluateHook: the memory-recall rule's detached searcher exec runs
+          // during evaluation and reads this turn's thought from the file.
+          try {
+            writeThoughtFile(event.sessionId, String((event.payload as any)?.prompt ?? ''))
+          } catch { /* fail-open — recall is an enhancement, never a blocker */ }
           // Track model from input.model — opencode supplies provider+modelID.
           // Updates runtimeMeta lastModel for subsequent runtimeMeta predicates
           // and template interpolation in this and following turns.

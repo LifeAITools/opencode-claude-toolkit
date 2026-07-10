@@ -164,7 +164,7 @@ class RulesStore {
     try {
       const raw = JSON.parse(readFileSync(this.path, 'utf8'))
       const legacy = (raw.rules ?? []) as unknown[]
-      const canonical = translateLegacyRules(legacy, this.platform)
+      const canonical = translateLegacyRules(legacy)
       // CRITICAL (v1.2): pass _minCoreVersion through to validateRuleSet so
       // the engine version gate fires. Without this, an updated rules.json
       // requiring a newer core would silently load in older engines and
@@ -215,7 +215,7 @@ class RulesStore {
     try {
       const raw = JSON.parse(readFileSync(this.path, 'utf8'))
       const legacy = (raw.rules ?? []) as unknown[]
-      const canonical = translateLegacyRules(legacy, this.platform)
+      const canonical = translateLegacyRules(legacy)
       const minCoreVersion = typeof raw._minCoreVersion === 'string' ? raw._minCoreVersion : undefined
       const result = validateRuleSet({ rules: canonical, _minCoreVersion: minCoreVersion }, this.registry)
       const oldCount = this.rules.length
@@ -281,7 +281,7 @@ class RulesStore {
         if (rule.enabled !== false) continue // only check currently-disabled rules
 
         const probe = { ...rule, enabled: true } as unknown as Record<string, unknown>
-        const probeCanonical = translateLegacyRules([probe], this.platform)
+        const probeCanonical = translateLegacyRules([probe])
         const probeResult = validateRuleSet(
           {
             rules: probeCanonical,
@@ -896,8 +896,13 @@ export class SignalWire {
   // ─── Internal ──────────────────────────────────────────
 
   private toLegacy(results: EmitResult[]): SignalWireResult | null {
+    // v1.6 exec-inject twin gate (core ≥0.3.4): exec results flagged
+    // inject:true carry stdout in hintText — same injection contract as
+    // hint/respond (pack-hints.ts in core is the primary gate; this is the
+    // legacy-path twin so the memory-recall inject leg is not dropped).
     const hintBearing = results.filter(r =>
-      (r.type === 'hint' || r.type === 'respond') && r.success && r.hintText,
+      (r.type === 'hint' || r.type === 'respond' || (r.type === 'exec' && (r as { inject?: boolean }).inject === true)) &&
+      r.success && r.hintText,
     )
     if (hintBearing.length === 0) return null
     const picked = hintBearing.slice(0, this.maxRulesPerFire)

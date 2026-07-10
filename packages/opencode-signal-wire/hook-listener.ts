@@ -36,7 +36,7 @@ import {
   type EmitResult,
   type PackOutput,
 } from '@kiberos/signal-wire-core'
-import { appendFileSync, existsSync, writeFileSync, mkdirSync } from 'fs'
+import { appendFileSync, existsSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 import { createHash } from 'crypto'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -173,6 +173,40 @@ function extractPromptText(parts: unknown[]): string {
     }
   }
   return texts.join('\n')
+}
+
+// ─── Memory-recall thought side-channel (proactive-memory-recall Phase 1.5) ──
+
+/**
+ * The `memory-recall` rule's detached searcher reads the CURRENT user thought
+ * from `thought-<sid>.txt` — in Claude Code that file is written by
+ * signal-wire-hook.sh (plugin ≥2.19.47); THIS is the opencode twin. Without
+ * it the searcher silently no-ops in opencode sessions.
+ *
+ * Contract mirrored 1:1 from `signal-wire-core/scripts/memory-recall-common.ts`
+ * (single writer per file, atomic tmp+rename, session-keyed):
+ *   dir      = $MEMORY_RECALL_STATE_DIR ?? ~/.claude/hooks/state/memory-recall
+ *   filename = thought-<sid sanitized [a-zA-Z0-9_-], max 64>.txt
+ *
+ * The prompt travels via FILE, never shell interpolation (injection + ARG_MAX).
+ * Fail-open: any error is swallowed — recall is an enhancement, never a
+ * blocker for the user's message.
+ */
+export function writeThoughtFile(sessionId: string | null | undefined, promptText: string): boolean {
+  if (!sessionId || promptText.length === 0) return false
+  try {
+    const dir =
+      process.env.MEMORY_RECALL_STATE_DIR ?? join(homedir(), '.claude', 'hooks', 'state', 'memory-recall')
+    mkdirSync(dir, { recursive: true })
+    const safeSid = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64)
+    const finalPath = join(dir, `thought-${safeSid}.txt`)
+    const tmpPath = `${finalPath}.tmp.${process.pid}`
+    writeFileSync(tmpPath, promptText)
+    renameSync(tmpPath, finalPath)
+    return true
+  } catch {
+    return false
+  }
 }
 
 // ─── Result Appliers ────────────────────────────────────────────────

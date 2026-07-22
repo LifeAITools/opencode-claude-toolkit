@@ -67,9 +67,13 @@ interface VaultFile {
   version: 1
   orgs: Record<string, OrgVaultEntry>
   pins: Record<string, OrgPin>
+  /** session → last-seen watermark (epoch ms) for pin GC (T4.3). Kept SEPARATE
+   *  from `pins` so a pin record stays a pure `{orgId}` binding (no tokens, no
+   *  GC metadata leaking into the binding contract). Absent for legacy files. */
+  pinsSeen?: Record<string, number>
 }
 
-const EMPTY: VaultFile = { version: 1, orgs: {}, pins: {} }
+const EMPTY: VaultFile = { version: 1, orgs: {}, pins: {}, pinsSeen: {} }
 
 export class OrgVault {
   private state: VaultFile = structuredClone(EMPTY)
@@ -89,6 +93,7 @@ export class OrgVault {
           version: 1,
           orgs: (raw.orgs && typeof raw.orgs === 'object') ? raw.orgs as VaultFile['orgs'] : {},
           pins: (raw.pins && typeof raw.pins === 'object') ? raw.pins as VaultFile['pins'] : {},
+          pinsSeen: (raw.pinsSeen && typeof raw.pinsSeen === 'object') ? raw.pinsSeen as VaultFile['pinsSeen'] : {},
         }
       }
     } catch { /* fail-soft: empty vault */ }
@@ -165,18 +170,23 @@ export class OrgVault {
   setPin(sessionId: string, orgId: string): void {
     this.ensureLoaded()
     this.state.pins[sessionId] = { orgId }
+    ;(this.state.pinsSeen ??= {})[sessionId] = Date.now()   // GC watermark (T4.3)
     this.persist()
   }
 
   getPin(sessionId: string): OrgPin | null {
     this.ensureLoaded()
-    return this.state.pins[sessionId] ?? null
+    const pin = this.state.pins[sessionId]
+    // Normalize to the pure binding contract (`{orgId}`) — GC metadata lives in
+    // `pinsSeen`, never in the returned pin.
+    return pin ? { orgId: pin.orgId } : null
   }
 
   deletePin(sessionId: string): void {
     this.ensureLoaded()
-    if (this.state.pins[sessionId]) {
+    if (this.state.pins[sessionId] || this.state.pinsSeen?.[sessionId] !== undefined) {
       delete this.state.pins[sessionId]
+      if (this.state.pinsSeen) delete this.state.pinsSeen[sessionId]
       this.persist()
     }
   }
@@ -184,5 +194,48 @@ export class OrgVault {
   pins(): Record<string, OrgPin> {
     this.ensureLoaded()
     return { ...this.state.pins }
+  }
+
+  /**
+   * Refresh a pin's last-seen watermark (T4.3 GC anti-staleness). Throttled by
+   * the caller via `minStaleMs`: only writes when the watermark is at least that
+   * stale, so a hot request path costs at most one vault write per throttle
+   * window per session. No-op when the session has no pin.
+   */
+  touchPin(sessionId: string, now: number = Date.now(), minStaleMs = 0): void {
+    this.ensureLoaded()
+    if (!this.state.pins[sessionId]) return
+    const seen = (this.state.pinsSeen ??= {})
+    const last = seen[sessionId]
+    if (last !== undefined && now - last < minStaleMs) return
+    seen[sessionId] = now
+    this.persist()
+  }
+
+  /**
+   * Retire session pins the caller deems dead (T4.3). `retain(sessionId,
+   * lastSeenAt)` returns true to KEEP a pin. A pin with NO recorded watermark is
+   * SEEDED to `now` (persisted) and kept this round — so a legacy pin gets a full
+   * grace window and its clock starts even across restarts (the seed is
+   * persisted, not reset each load). Only `pins` / `pinsSeen` are touched —
+   * `orgs` (credentials) are NEVER dropped (a stale pin must never cost an org
+   * its tokens). Returns the retired session ids.
+   */
+  gcPins(retain: (sessionId: string, lastSeenAt: number) => boolean, now: number = Date.now()): string[] {
+    this.ensureLoaded()
+    const seen = (this.state.pinsSeen ??= {})
+    const retired: string[] = []
+    let changed = false
+    for (const sid of Object.keys(this.state.pins)) {
+      let watermark = seen[sid]
+      if (watermark === undefined) { watermark = seen[sid] = now; changed = true }   // seed grace
+      if (retain(sid, watermark)) continue
+      delete this.state.pins[sid]
+      delete seen[sid]
+      retired.push(sid)
+      changed = true
+    }
+    if (changed) this.persist()
+    return retired
   }
 }

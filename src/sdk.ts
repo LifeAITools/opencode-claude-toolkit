@@ -1437,6 +1437,20 @@ export class ClaudeCodeSDK {
    * Schedule a background refresh at ~50% of token lifetime.
    * With ~11h tokens, fires at ~5.5h — leaving 5.5h for retries.
    * Emits escalating warnings as token approaches expiry.
+   *
+   * OWNERSHIP BOUNDARY (T1.5, per-org-token-rotation). This timer owns refresh
+   * for the SINGLE active `.credentials.json` token of a direct-SDK / opencode
+   * consumer only — it is OrgVault-blind and multi-org-blind. The proxy
+   * (`ProxyClient`) does NOT instantiate this class; its per-org proactive loop
+   * (`proactiveOrgSweep` → `withFreshOrgToken`) is the sole owner of multi-org +
+   * active-org refresh in the proxy process, so the two never double-refresh
+   * within one process. Cross-process, a co-located ClaudeCodeSDK + the proxy +
+   * the native CLI coordinate their `.credentials.json` writes via the config-dir
+   * `proper-lockfile` lock (config-dir-lock.ts) — the proxy's active-org
+   * co-write takes that lock; the native CLI takes the same lock. (This SDK
+   * timer still uses its own `.token-refresh-lock`; unifying it onto the
+   * config-dir lock is a separate, higher-blast-radius change scoped away from
+   * this evolution to avoid regressing the opencode plugin.)
    */
   private scheduleProactiveRotation(): void {
     if (this.tokenRotationTimer) {

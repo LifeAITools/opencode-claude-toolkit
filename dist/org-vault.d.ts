@@ -77,5 +77,22 @@ export declare class OrgVault {
     getPin(sessionId: string): OrgPin | null;
     deletePin(sessionId: string): void;
     pins(): Record<string, OrgPin>;
+    /**
+     * Refresh a pin's last-seen watermark (T4.3 GC anti-staleness). Throttled by
+     * the caller via `minStaleMs`: only writes when the watermark is at least that
+     * stale, so a hot request path costs at most one vault write per throttle
+     * window per session. No-op when the session has no pin.
+     */
+    touchPin(sessionId: string, now?: number, minStaleMs?: number): void;
+    /**
+     * Retire session pins the caller deems dead (T4.3). `retain(sessionId,
+     * lastSeenAt)` returns true to KEEP a pin. A pin with NO recorded watermark is
+     * SEEDED to `now` (persisted) and kept this round — so a legacy pin gets a full
+     * grace window and its clock starts even across restarts (the seed is
+     * persisted, not reset each load). Only `pins` / `pinsSeen` are touched —
+     * `orgs` (credentials) are NEVER dropped (a stale pin must never cost an org
+     * its tokens). Returns the retired session ids.
+     */
+    gcPins(retain: (sessionId: string, lastSeenAt: number) => boolean, now?: number): string[];
 }
 //# sourceMappingURL=org-vault.d.ts.map

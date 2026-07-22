@@ -13,7 +13,7 @@
  */
 
 import { createHash, randomBytes } from 'crypto'
-import { writeFileSync, readFileSync, mkdirSync, chmodSync } from 'fs'
+import { writeFileSync, readFileSync, mkdirSync, chmodSync, renameSync } from 'fs'
 import { dirname, join } from 'path'
 import { homedir } from 'os'
 import {
@@ -195,22 +195,16 @@ export async function oauthLogin(options: OAuthLoginOptions = {}): Promise<OAuth
 
   const expiresAt = Date.now() + (tokenData.expires_in * 1000)
 
-  // Save credentials
+  // Save credentials via the shared atomic writer (tmp+rename, chmod 0600,
+  // preserve-on-null) so the login path and the proxy's active-org co-write
+  // path share ONE writer (no drift between the two).
   const creds = {
     accessToken: tokenData.access_token,
     refreshToken: tokenData.refresh_token,
     expiresAt,
     scopes: tokenData.scope?.split(' ') ?? [],
   }
-
-  let existing: Record<string, unknown> = {}
-  try { existing = JSON.parse(readFileSync(credPath, 'utf8')) } catch { /* new file */ }
-  existing.claudeAiOauth = creds
-
-  const dir = dirname(credPath)
-  try { mkdirSync(dir, { recursive: true }) } catch { /* exists */ }
-  writeFileSync(credPath, JSON.stringify(existing, null, 2), 'utf8')
-  chmodSync(credPath, 0o600)
+  writeClaudeCredentials(credPath, creds)
 
   console.log(`\n✅ Login successful! Credentials saved to ${credPath}\n`)
 
@@ -220,6 +214,72 @@ export async function oauthLogin(options: OAuthLoginOptions = {}): Promise<OAuth
     expiresAt: creds.expiresAt,
     credentialsPath: credPath,
   }
+}
+
+// ─── .credentials.json read/write (shared, atomic) ─────────────────
+
+/** The `claudeAiOauth` block persisted in `~/.claude/.credentials.json`. */
+export interface ClaudeAiOAuthCredentials {
+  accessToken: string
+  refreshToken: string
+  expiresAt: number
+  scopes?: string[]
+  subscriptionType?: string | null
+  rateLimitTier?: string | null
+}
+
+/**
+ * Read the raw `.credentials.json` file. Returns the parsed object (with an
+ * optional `claudeAiOauth` block) or `null` when the file is missing/malformed.
+ * Fail-soft, never throws.
+ */
+export function readClaudeCredentials(
+  credPath: string = getDefaultCredentialsPath(),
+): { claudeAiOauth?: ClaudeAiOAuthCredentials; [k: string]: unknown } | null {
+  try {
+    return JSON.parse(readFileSync(credPath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Atomically persist the `claudeAiOauth` block into `.credentials.json`
+ * (tmp+rename + chmod 0600), merging into any existing top-level keys and
+ * preserving `subscriptionType`/`rateLimitTier` when the fresh grant returns
+ * null for them — byte-for-byte the native CLI's `saveOAuthTokensIfNeeded`
+ * preserve-on-null contract (`claude-code-source/src/utils/auth.ts:1217`).
+ *
+ * The atomic tmp+rename is strictly SAFER than the native in-place write:
+ * a concurrent reader (native CLI, opencode) never observes a torn file.
+ * Callers that co-write the ACTIVE org MUST hold the config-dir lock
+ * (see config-dir-lock.ts) so this write is serialized with the native CLI's
+ * own refresh (`lockfile.lock(claudeDir)`).
+ */
+export function writeClaudeCredentials(
+  credPath: string,
+  oauth: ClaudeAiOAuthCredentials,
+): void {
+  let existing: Record<string, unknown> = {}
+  try { existing = JSON.parse(readFileSync(credPath, 'utf8')) } catch { /* new file */ }
+  const prev = (existing.claudeAiOauth ?? {}) as Partial<ClaudeAiOAuthCredentials>
+  existing.claudeAiOauth = {
+    accessToken: oauth.accessToken,
+    refreshToken: oauth.refreshToken,
+    expiresAt: oauth.expiresAt,
+    scopes: oauth.scopes ?? prev.scopes,
+    // Preserve profile-derived fields the refresh grant doesn't return (null)
+    // — clobbering a valid subscription with null would strand paying users.
+    subscriptionType: oauth.subscriptionType ?? prev.subscriptionType ?? null,
+    rateLimitTier: oauth.rateLimitTier ?? prev.rateLimitTier ?? null,
+  }
+
+  const dir = dirname(credPath)
+  try { mkdirSync(dir, { recursive: true }) } catch { /* exists */ }
+  const tmp = `${credPath}.tmp-${process.pid}-${Date.now()}`
+  writeFileSync(tmp, JSON.stringify(existing, null, 2), { mode: 0o600 })
+  try { chmodSync(tmp, 0o600) } catch { /* mode set on create */ }
+  renameSync(tmp, credPath)
 }
 
 // ─── Localhost callback server ─────────────────────────────
@@ -316,16 +376,46 @@ export interface RefreshedTokens {
   accessToken: string
   refreshToken: string
   expiresAt: number
+  /** Scopes returned by the grant (Anthropic allows scope expansion on refresh). */
+  scopes?: string[]
+}
+
+/**
+ * A refresh-token grant that failed at the HTTP layer. Carries the status +
+ * body so the caller can distinguish a REVOKED grant (`400/401 invalid_grant`
+ * → the org needs a fresh `claude login`, stop re-forcing) from transient
+ * network/5xx noise (keep the entry + retry). Mirrors the expiry-vs-revoke
+ * classification the KA force-on-401 backstop needs (architect-review H3).
+ */
+export class OAuthRefreshError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: string,
+  ) {
+    super(`OAuth refresh failed (${status}): ${body.slice(0, 200)}`)
+    this.name = 'OAuthRefreshError'
+  }
+
+  /** A revoked / no-longer-valid refresh_token — re-login required, not retryable. */
+  get isInvalidGrant(): boolean {
+    return (this.status === 400 || this.status === 401) && /invalid_grant/i.test(this.body)
+  }
 }
 
 /**
  * Exchange a refresh token for a fresh access token (standard OAuth
  * `refresh_token` grant against the same TOKEN_URL/CLIENT_ID as login).
  *
- * Pure network call — does NOT touch `~/.claude/.credentials.json` (the
- * native CLI owns that file; the per-org vault persists these instead).
- * Throws on HTTP failure so the caller can distinguish "refresh denied"
- * (revoked grant → drop the vault entry) from network noise (keep + retry).
+ * Pure network call — does NOT itself touch `~/.claude/.credentials.json`.
+ * Persistence is the caller's job and depends on WHICH org this is:
+ *   - the ACTIVE org co-writes `.credentials.json` under the native CLI's
+ *     config-dir `proper-lockfile` lock (proxy-client `withFreshOrgToken`),
+ *     because that file is the native CLI's source of truth and Anthropic
+ *     rotates the refresh_token on every grant — writing only the vault would
+ *     strand the disk token for the native CLI + every other consumer;
+ *   - a non-active VAULT org persists into the per-org `OrgVault` instead.
+ * Throws `OAuthRefreshError` (with .status/.isInvalidGrant) on HTTP failure so
+ * the caller can distinguish a revoke from transient noise.
  */
 export async function refreshOAuthToken(refreshToken: string): Promise<RefreshedTokens> {
   const resp = await fetch(TOKEN_URL, {
@@ -339,13 +429,14 @@ export async function refreshOAuthToken(refreshToken: string): Promise<Refreshed
   })
   if (!resp.ok) {
     const body = await resp.text().catch(() => '')
-    throw new Error(`OAuth refresh failed (${resp.status}): ${body.slice(0, 200)}`)
+    throw new OAuthRefreshError(resp.status, body)
   }
-  const data = await resp.json() as { access_token: string; refresh_token?: string; expires_in: number }
+  const data = await resp.json() as { access_token: string; refresh_token?: string; expires_in: number; scope?: string }
   return {
     accessToken: data.access_token,
     // Some providers omit rotation; Anthropic rotates — fall back to the old one if absent.
     refreshToken: data.refresh_token ?? refreshToken,
     expiresAt: Date.now() + data.expires_in * 1000,
+    scopes: data.scope ? data.scope.split(' ') : undefined,
   }
 }

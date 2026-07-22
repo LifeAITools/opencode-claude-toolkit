@@ -58,6 +58,7 @@ import { KeepaliveEngine } from './keepalive-engine.js';
 import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, Session } from './proxy-ports.js';
 import { type OrgIdResolver } from './org-identity.js';
 import { OrgVault } from './org-vault.js';
+import { type RefreshedTokens } from './auth.js';
 export interface ProxyClientConfig {
     /** Anthropic API base URL. Default: https://api.anthropic.com */
     anthropicBaseUrl?: string;
@@ -124,6 +125,15 @@ export interface ProxyClientConfig {
      * marker-slide. Default: 1.
      */
     kaEvictionMinTrips?: number;
+    /**
+     * Cadence (SECONDS) of the daemon-owned per-org proactive refresh sweep. The
+     * sweep refreshes EVERY vault org + the active org on its own budget-safe
+     * cadence, independent of session traffic — the ONLY thing that keeps a
+     * zero-live-session org's token alive (architect-review C2). 0 disables the
+     * sweep (used by tests that drive `_runOrgProactiveSweep()` manually).
+     * Default: 60.
+     */
+    orgProactiveRefreshSec?: number;
 }
 export interface ProxyClientOptions {
     /** Config tuning — all fields optional (sensible defaults) */
@@ -179,6 +189,30 @@ export interface ProxyClientOptions {
      * Default: OrgVault at `~/.claude-local/org-vault.json`.
      */
     orgVault?: OrgVault;
+    /**
+     * Optional: the Claude config directory (`~/.claude`) whose `.credentials.json`
+     * holds the ACTIVE org's credential. The per-org choke-point co-writes this
+     * file under the config-dir lock when it refreshes the active org. Injectable
+     * for tests. Default: `getClaudeConfigDir()`.
+     */
+    claudeConfigDir?: string;
+    /**
+     * Optional: path to `.credentials.json` (the active org's on-disk credential).
+     * Injectable for tests. Default: `getDefaultCredentialsPath()`.
+     */
+    credentialsPath?: string;
+    /**
+     * Optional: the OAuth refresh-grant function. Injectable for tests so the
+     * choke-point can be exercised without real network. Default: the real
+     * `refreshOAuthToken` (POSTs the Anthropic token endpoint).
+     */
+    oauthRefresher?: (refreshToken: string) => Promise<RefreshedTokens>;
+    /**
+     * Optional: acquire the cross-process config-dir lock (for the active-org
+     * `.credentials.json` co-write). Resolves to a release fn, or null if a peer
+     * holds it. Injectable for tests. Default: `acquireConfigDirLock` (proper-lockfile).
+     */
+    acquireConfigLock?: (configDir: string) => Promise<(() => Promise<void>) | null>;
 }
 export interface HandleRequestContext {
     /** Unique identifier for the logical session. */
@@ -261,6 +295,19 @@ export declare class ProxyClient {
     private readonly lastServedOrg;
     /** Single-flight refresh guard per orgId. */
     private readonly orgRefreshInflight;
+    /** Last successful refresh (epoch ms) per orgId — the H2 min-interval floor. */
+    private readonly orgLastRefreshAt;
+    /** Per-org refresh-failure cooldown (H3): back off before forcing again. */
+    private readonly orgRefreshCooldown;
+    /** Daemon-owned proactive per-org refresh sweep timer (C2). */
+    private orgProactiveTimer;
+    /** Config dir (`~/.claude`) + `.credentials.json` path — active-org co-write. */
+    private readonly claudeConfigDir;
+    private readonly credentialsPath;
+    /** OAuth refresh-grant fn (injectable for tests). */
+    private readonly oauthRefresher;
+    /** Config-dir lock acquirer (injectable for tests). */
+    private readonly acquireConfigLock;
     /** Resolves the current Anthropic org UUID — drives org-switch detection. */
     private readonly orgIdResolver;
     /** Shared across every per-session KA engine — fleet-wide eviction-storm hold. */
@@ -336,14 +383,98 @@ export declare class ProxyClient {
      * every credentials-file change.
      */
     snapshotCurrentAccount(reason: string): Promise<void>;
+    /** True when `orgId` is the machine's ACTIVE org (the one in `.credentials.json`). */
+    private isActiveOrg;
+    /** Token metadata for `orgId` — from disk for the active org, from the vault
+     *  otherwise. `capturedAt` (lifetime estimate) comes from the vault mirror
+     *  even for the active org. Null when there is nothing to refresh. */
+    private orgTokenMeta;
+    /** Proactive refresh-due test (H2): remaining < min(kaInterval+margin, RATIO×lifetime),
+     *  floored at the cheap 5-min expiry buffer. Never couples to a bare interval. */
+    private isRefreshDueByExpiry;
+    /** Per-org failure cooldown (H3): a forced refresh must not fire while backing off. */
+    private inFailureCooldown;
+    /** H2 min-interval floor — caps PROACTIVE grant frequency regardless of token length. */
+    private minRefreshIntervalElapsed;
+    private recordRefreshSuccess;
+    /** Record a failed grant → exponential backoff; classify a revoke → needs-relogin. */
+    private recordRefreshFailure;
     /**
-     * Ensure the vault's token for `orgId` is alive; refresh via the OAuth
-     * refresh grant when it is expired/near-expiry and a refresh token exists.
-     * Single-flight per org. Fail-soft: on refresh failure the old entry is
-     * kept (network noise) and the caller proceeds with whatever is there —
-     * the upstream-401 path remains the hard stop.
+     * The single choke-point: return a FRESH access token for `orgId`, refreshing
+     * first when due (or `force`). Returns the current token when no refresh is
+     * needed/possible (fail-soft — the upstream-401 path stays the hard stop).
      */
-    private ensureOrgTokenFresh;
+    private withFreshOrgToken;
+    /**
+     * ACTIVE-org refresh (C1): grant → co-write `.credentials.json` atomically
+     * under the native CLI's config-dir `proper-lockfile` lock → mirror into the
+     * vault → invalidate the proxy token cache so `getAccessToken` re-reads.
+     * NEVER rotates the shared refresh_token into a vault-only store. Returns the
+     * fresh access token (or the current disk token on lock-contention / failure).
+     */
+    private refreshActiveOrg;
+    /**
+     * VAULT (non-active) org refresh (M1): grant → `orgVault.upsert` (write-before-use).
+     * Proxy-owned single-writer store → in-process single-flight only, NO
+     * cross-process lock (H1). Returns the fresh access token (or the current one
+     * on failure — fail-soft).
+     */
+    private refreshVaultOrg;
+    /**
+     * Force-on-401 backstop (H3), mirroring CC's `handleOAuth401Error`: re-read
+     * the served org's token — if a peer already rotated it (different token),
+     * adopt that with no grant; else force ONE refresh (cooldown-gated). Wired
+     * into the KA engine's `onAuthError`.
+     */
+    private handleOrg401;
+    /**
+     * The org a session is CURRENTLY serving its token from — the pinned org when
+     * held, else the machine's active org (mirror `selectSessionToken`'s decision).
+     * The KA fast path, the KA 401 backstop, AND the real-request 401 backstop all
+     * resolve the served org through this ONE seam, so every path force-refreshes
+     * the SAME org whose token was actually sent.
+     */
+    private resolveServedOrg;
+    /**
+     * Resolve the org a session is CURRENTLY SERVING (mirror `selectSessionToken`:
+     * a held cross-org session serves its pinned org; everything else serves the
+     * active org) and return a FRESH token for it (M3). Used by the KA `getToken`
+     * fast path so an idle held session warms the RIGHT org's cache with a
+     * refreshed token — not the active account's (the proxy-client:1489 bug).
+     */
+    private getTokenForSession;
+    /**
+     * Daemon-owned proactive sweep (C2): refresh EVERY vault org + the active org
+     * on its own budget-safe cadence, independent of session traffic. This is the
+     * ONLY thing that keeps a zero-live-session org's token alive. Fail-soft per org.
+     */
+    private proactiveOrgSweep;
+    /** Test seam — run one proactive sweep synchronously. */
+    _runOrgProactiveSweep(): Promise<void>;
+    /**
+     * Session-pin GC (T4.3): retire vault pins whose session is NEITHER currently
+     * tracked in the store NOR seen within `PIN_GC_MAX_AGE_MS`. A currently-live
+     * session is always kept regardless of watermark age; a legacy pin with no
+     * watermark is seeded on first sweep (a full grace window before it can age
+     * out). NEVER drops an `orgs` credential — only `pins`. Runs on the reaper
+     * tick and drops the paired in-memory pin too.
+     */
+    private gcSessionPins;
+    /** Test seam — run one pin-GC pass at a controlled clock. */
+    _gcSessionPins(now?: number): void;
+    /** Test seam — read the per-org cooldown state (H3 assertions). */
+    _orgCooldown(orgId: string): {
+        until: number;
+        attempts: number;
+        needsRelogin: boolean;
+    } | undefined;
+    /** Test seam — direct choke-point invocation. */
+    _withFreshOrgToken(orgId: string, opts?: {
+        force?: boolean;
+        reason?: string;
+    }): Promise<string | null>;
+    /** Test seam — force-on-401 backstop for a served org (H3 assertions). */
+    _forceOrg401(orgId: string, failedToken: string): Promise<void>;
     /**
      * Explicit maintenance rotate: bind `sessionId` to `orgQuery`'s org using
      * the vault's credential for it. This is the `claude-max org switch`
@@ -376,6 +507,20 @@ export declare class ProxyClient {
             pinnedOrg: string | null;
             servedOrg: string | null;
         }>;
+    };
+    /**
+     * Per-org token health for the heartbeat (T4.1 observability). Surfaces the
+     * MINIMUM remaining lifetime across the active + every vault org, how many are
+     * already expired, and how many are flagged needs-relogin (an `invalid_grant`
+     * revoke classified by `recordRefreshFailure`). A stranded / −42h org is thus
+     * VISIBLE in `HEALTH_HEARTBEAT` before a session ever needs it — the L1 gap
+     * where the −42h relish org stayed invisible until manual inspection.
+     */
+    orgTokenHealth(): {
+        orgs: number;
+        minOrgExpiresInSec: number | null;
+        orgsExpired: number;
+        orgsNeedRelogin: number;
     };
     /**
      * Decide which token a session's request uses, given the live account snapshot

@@ -71,4 +71,58 @@ describe('KeepaliveEngine — org-switch-pending lifecycle', () => {
     expect(captured.length).toBeGreaterThan(0)
     expect(captured.at(-1)!.headers.Authorization).toBe('Bearer NEW-token')
   })
+
+  // M3 (per-org-token-rotation): a HELD cross-org session's KA fire must carry
+  // the token that `getToken()` resolves — in the proxy that closure resolves
+  // the session's SERVED (held) org and routes through withFreshOrgToken, so it
+  // returns the held org's REFRESHED vault token, not the active account's. At
+  // the engine level this reduces to: a non-pending fire uses whatever the
+  // (served-org-aware) getToken returns, even after the held token rotated.
+  test('M3: held-session (non-pending) KA fire carries the getToken()-resolved refreshed held-org token', async () => {
+    const t0 = Date.now()
+    setSystemTime(t0)
+    let heldOrgToken = 'HELD-old'
+    const captured: { headers: Record<string, string> }[] = []
+    const e = new KeepaliveEngine({
+      getToken: async () => heldOrgToken,   // proxy's served-org resolver
+      doFetch: async function* (_body, headers): AsyncGenerator<StreamEvent> {
+        captured.push({ headers })
+        yield { type: 'message_stop', usage: { inputTokens: 100, outputTokens: 1, cacheReadInputTokens: 50_000 }, stopReason: 'end_turn' }
+      },
+      getRateLimitInfo: (): RateLimitInfo => ({ status: 'allowed', resetAt: null, claim: null, retryAfter: null, utilization5h: 0, utilization7d: 0 }),
+    })
+    arm(e, 'Bearer HELD-old')
+    heldOrgToken = 'HELD-refreshed'          // proxy refreshed the held org's vault token
+    setSystemTime(t0 + 120_000)
+    await e._tick()
+    setSystemTime()
+    expect(captured.at(-1)!.headers.Authorization).toBe('Bearer HELD-refreshed')  // NOT the stale held token, NOT the active account
+  })
+
+  // H3 (force-on-401): on a KA auth error the engine invokes onAuthError with
+  // the exact token that was rejected (mirror CC's handleOAuth401Error), BEFORE
+  // the retry chain rebuilds Authorization from a fresh getToken().
+  test('H3: onAuthError backstop fires with the rejected token on a 401', async () => {
+    const t0 = Date.now()
+    setSystemTime(t0)
+    const seen: string[] = []
+    const e = new KeepaliveEngine({
+      getToken: async () => 'TOK',
+      onAuthError: async (failed: string) => { seen.push(failed) },
+      doFetch: async function* (): AsyncGenerator<StreamEvent> {
+        const err = new Error('OAuth access token has expired') as Error & { status?: number }
+        err.status = 401
+        throw err
+        // eslint-disable-next-line no-unreachable
+        yield { type: 'message_stop', usage: { inputTokens: 0, outputTokens: 0 }, stopReason: 'end_turn' }
+      },
+      getRateLimitInfo: (): RateLimitInfo => ({ status: 'allowed', resetAt: null, claim: null, retryAfter: null, utilization5h: 0, utilization7d: 0 }),
+    })
+    arm(e, 'Bearer TOK')
+    setSystemTime(t0 + 120_000)
+    await e._tick()
+    setSystemTime()
+    e.stop()   // clear the scheduled auth-retry timer
+    expect(seen).toContain('TOK')   // backstop received the rejected token
+  })
 })

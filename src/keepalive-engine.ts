@@ -56,6 +56,20 @@ export interface KeepaliveEngineOptions {
   getToken: () => Promise<string>
 
   /**
+   * Optional force-on-401 backstop. Called when a KA fire is rejected with an
+   * auth error (401/403), BEFORE the retry chain rebuilds Authorization from
+   * `getToken()`. Receives the access token that was just rejected so the owner
+   * can mirror the native CLI's `handleOAuth401Error`: re-read the org token —
+   * if a peer already rotated it, adopt that; else force ONE refresh (gated by
+   * a per-org failure cooldown so a genuine revoke doesn't hammer the OAuth
+   * endpoint across the REARM ladder). The engine ignores the result and simply
+   * re-fires with a fresh `getToken()` afterward. Omit for single-session SDK
+   * use — then auth errors fall through to the existing retry-with-getToken
+   * behavior unchanged (architect-review H3).
+   */
+  onAuthError?: (failedAccessToken: string) => Promise<void>
+
+  /**
    * Performs the actual Anthropic API request and yields SSE events.
    * Engine uses this for KA fires; consumer uses whatever transport it wants.
    * Must throw APIError/RateLimitError with .status for error classification.
@@ -516,6 +530,7 @@ export class KeepaliveEngine {
 
   // ── Injected deps ──────────────────────────────────────────
   private readonly getToken: () => Promise<string>
+  private readonly onAuthError?: (failedAccessToken: string) => Promise<void>
   private readonly doFetch: KeepaliveEngineOptions['doFetch']
   private readonly getRateLimitInfo: () => RateLimitInfo
   private readonly isOwnerAlive: () => boolean
@@ -624,8 +639,12 @@ export class KeepaliveEngine {
   // Debug counter
   private snapshotCallCount = 0
 
+  /** The bearer token used by the most recent fire — fed to onAuthError on 401. */
+  private lastFireToken: string | null = null
+
   constructor(opts: KeepaliveEngineOptions) {
     this.getToken = opts.getToken
+    this.onAuthError = opts.onAuthError
     this.doFetch = opts.doFetch
     this.getRateLimitInfo = opts.getRateLimitInfo
     // Default: always-alive (preserve existing behavior when caller omits).
@@ -1395,6 +1414,19 @@ export class KeepaliveEngine {
    * Invariant: KA fire NEVER writes cache (max_tokens=1, identical prefix
    * replay) — pinned by test/keepalive-regression.test.ts.
    */
+  /**
+   * Run the force-on-401 backstop with the token that was just rejected.
+   * Fail-soft: a backstop error must never break the retry chain — the chain's
+   * fresh-getToken() retries + bounded budget remain the ultimate guard.
+   */
+  private async runAuthErrorBackstop(): Promise<void> {
+    const failed = this.lastFireToken
+    if (!failed || !this.onAuthError) return
+    try {
+      await this.onAuthError(failed)
+    } catch { /* best-effort — retry chain still runs */ }
+  }
+
   private async fireLineage(best: RegistryEntry, idle: number): Promise<'ok' | 'stop'> {
     this.inFlight = true
     this.inFlightLineageKey = best.lineageKey
@@ -1407,9 +1439,23 @@ export class KeepaliveEngine {
       // While this lineage is org-switch-pending, replay the snapshot's OWN
       // (old-org) Authorization so the OLD cache stays warm until the user
       // decides. Otherwise rebuild auth from a fresh getToken() (refresh-safe).
-      const headers = this.orgSwitchPending.has(best.lineageKey) && best.headers.Authorization
-        ? { ...best.headers }
-        : { ...best.headers, Authorization: `Bearer ${await this.getToken()}` }
+      //
+      // M3 (per-org-token-rotation): the org-switch-pending replay is
+      // INTENTIONALLY frozen on the snapshot token — it is a deliberate hold of
+      // the OLD org's exact credential until an explicit reload, bounded by the
+      // cache TTL (the ladder falls out when the TTL runs dry). It does NOT
+      // route through the refresh choke-point on purpose: refreshing here would
+      // defeat the hold. All NON-pending fires DO go through getToken() →
+      // withFreshOrgToken (the served-org fast path).
+      const usePendingAuth = this.orgSwitchPending.has(best.lineageKey) && !!best.headers.Authorization
+      const authValue = usePendingAuth
+        ? best.headers.Authorization!
+        : `Bearer ${await this.getToken()}`
+      const headers = { ...best.headers, Authorization: authValue }
+      // Remember the exact bearer we sent so a 401 can drive the force-on-401
+      // backstop with the token that was actually rejected (mirror CC's
+      // handleOAuth401Error(failedAccessToken)).
+      this.lastFireToken = authValue.startsWith('Bearer ') ? authValue.slice(7) : authValue
 
       const controller = new AbortController()
       this.abortController = controller
@@ -1553,6 +1599,12 @@ export class KeepaliveEngine {
         // caches). Capped at KA_AUTH_MAX_RETRIES per chain: a token rotation
         // recovers within a few attempts; a real revoke costs a handful of
         // token-free 401s per ladder slot, bounded by the TTL.
+        //
+        // Force-on-401 backstop (H3): before the retry chain, ask the owner to
+        // force-refresh THIS session's served-org token (per-org cooldown +
+        // revoke classification live there). retryChain then rebuilds
+        // Authorization from a fresh getToken() and picks up the new token.
+        await this.runAuthErrorBackstop()
         this.retryChain(best, 0, KA_AUTH_MAX_RETRIES, /* probeOnExhaust */ false)
       } else {
         // Permanent (400, malformed request, etc). Don't retry.
@@ -1857,9 +1909,12 @@ export class KeepaliveEngine {
         const body = JSON.parse(JSON.stringify(entry.body))
         const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
         body.max_tokens = budgetTokens > 0 ? budgetTokens + 1 : 1
-        const headers = this.orgSwitchPending.has(entry.lineageKey) && entry.headers.Authorization
-          ? { ...entry.headers }
-          : { ...entry.headers, Authorization: `Bearer ${await this.getToken()}` }
+        const usePendingAuth = this.orgSwitchPending.has(entry.lineageKey) && !!entry.headers.Authorization
+        const authValue = usePendingAuth
+          ? entry.headers.Authorization!
+          : `Bearer ${await this.getToken()}`
+        const headers = { ...entry.headers, Authorization: authValue }
+        this.lastFireToken = authValue.startsWith('Bearer ') ? authValue.slice(7) : authValue
 
         const controller = new AbortController()
         this.abortController = controller
@@ -1907,6 +1962,9 @@ export class KeepaliveEngine {
           // falls out as retry_exhausted (TTL-safe), never an unbounded loop.
           this.inFlight = false
           this.abortController = null
+          // Force-on-401 backstop (H3) — cooldown-gated in the owner, so a
+          // sequential retry against a dead refresh_token doesn't re-hammer.
+          await this.runAuthErrorBackstop()
           this.retryChain(entry, attemptIndex + 1, maxAttempts, probeOnExhaust)
           return
         } else {

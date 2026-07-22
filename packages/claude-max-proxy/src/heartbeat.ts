@@ -74,10 +74,20 @@ bus.onKind('REAL_REQUEST_ERROR', (e: any) => {
   _lastErrorAt = Date.now()
 })
 
+/** Per-org token health snapshot (T4.1) — sourced from the SDK ProxyClient's
+ *  OrgVault so a stranded / −42h org is visible before a session needs it. */
+interface OrgTokenHealth {
+  orgs: number
+  minOrgExpiresInSec: number | null
+  orgsExpired: number
+  orgsNeedRelogin: number
+}
+
 export function startHeartbeat(
   cfg: ProxyConfig,
   tracker: HeartbeatTracker,
   getRateLimit: () => { utilization5h: number | null; utilization7d: number | null },
+  getOrgHealth?: () => OrgTokenHealth,
 ): () => void {
   if (cfg.healthHeartbeatSec <= 0) return () => {}
 
@@ -110,6 +120,13 @@ export function startHeartbeat(
     const lastDisarmAgoSec = _lastDisarmAt ? Math.floor((now - _lastDisarmAt) / 1000) : null
     const lastErrorAgoSec = _lastErrorAt ? Math.floor((now - _lastErrorAt) / 1000) : null
 
+    // Per-org token health (T4.1): the min expiry across ALL orgs (active +
+    // vault), the count already expired, and the count needing a fresh login —
+    // so a −42h / stranded org shows up here BEFORE a session tries to use it.
+    // Fail-soft: any error leaves the fields absent (never sinks the heartbeat).
+    let org: OrgTokenHealth | null = null
+    try { org = getOrgHealth?.() ?? null } catch { org = null }
+
     emit({
       level: 'info',
       kind: 'HEALTH_HEARTBEAT',
@@ -122,6 +139,11 @@ export function startHeartbeat(
       util5h: rl.utilization5h,
       util7d: rl.utilization7d,
       tokenExpiresInSec,
+      // Per-org health (null when no org-health provider is wired).
+      minOrgExpiresInSec: org?.minOrgExpiresInSec ?? null,
+      orgsTracked: org?.orgs ?? null,
+      orgsExpired: org?.orgsExpired ?? null,
+      orgsNeedRelogin: org?.orgsNeedRelogin ?? null,
       networkState: _networkState,
       disarmsLastHour: _disarmsLastHour.length,
       lastDisarmReason: _lastDisarmReason,

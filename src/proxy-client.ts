@@ -79,7 +79,28 @@ import { loadKeepaliveConfig } from './keepalive-config.js'
 import { consumeConsent } from './rewrite-consent.js'
 import { FileOrgIdResolver, readOrgInfoFromConfig, type OrgIdResolver } from './org-identity.js'
 import { OrgVault } from './org-vault.js'
-import { refreshOAuthToken } from './auth.js'
+import {
+  refreshOAuthToken,
+  readClaudeCredentials,
+  writeClaudeCredentials,
+  getClaudeConfigDir,
+  getDefaultCredentialsPath,
+  OAuthRefreshError,
+  type RefreshedTokens,
+} from './auth.js'
+import { acquireConfigDirLock } from './config-dir-lock.js'
+import {
+  EXPIRY_BUFFER_MS,
+  PROACTIVE_REFRESH_RATIO,
+  PROACTIVE_REFRESH_MIN_INTERVAL_MS,
+  ORG_REFRESH_MARGIN_MS,
+  DEFAULT_TOKEN_LIFETIME_MS,
+  DEFAULT_KA_INTERVAL_SEC,
+  REFRESH_FAILURE_COOLDOWN_BASE_MS,
+  REFRESH_FAILURE_COOLDOWN_MAX_MS,
+  REVOKE_RELOGIN_COOLDOWN_MS,
+  DEFAULT_ORG_PROACTIVE_SWEEP_SEC,
+} from './token-cadence.js'
 import {
   writeRewriteBlockDump,
   DEFAULT_REWRITE_DUMP_DIR,
@@ -181,6 +202,16 @@ export interface ProxyClientConfig {
    * marker-slide. Default: 1.
    */
   kaEvictionMinTrips?: number
+
+  /**
+   * Cadence (SECONDS) of the daemon-owned per-org proactive refresh sweep. The
+   * sweep refreshes EVERY vault org + the active org on its own budget-safe
+   * cadence, independent of session traffic — the ONLY thing that keeps a
+   * zero-live-session org's token alive (architect-review C2). 0 disables the
+   * sweep (used by tests that drive `_runOrgProactiveSweep()` manually).
+   * Default: 60.
+   */
+  orgProactiveRefreshSec?: number
 }
 
 // Note: kaIntervalSec intentionally NOT defaulted here.
@@ -192,6 +223,18 @@ export interface ProxyClientConfig {
 // genuinely IS 1h. The autoscan downlock (notifyRealRequestStart) still pins a
 // session to 5m if it ever observes an un-upgraded marker — so this default is
 // a safe ceiling, not the 2026-05-17 wire-TTL mismatch. See ProxyClientConfig.
+// ── Session-pin GC (T4.3) ──────────────────────────────────────────────────
+// The vault accumulates a pin per session that ever held / auto-pinned an org
+// (200+ incl. `synthetic-*` + the `rotate-probe-test` live-validation artifact).
+// A pin is retired only when it is BOTH not currently tracked AND unseen beyond
+// this age — never sooner, so a resumed conversation (same sessionId, new PID)
+// keeps its HOLD binding within the window. `orgs` are NEVER touched.
+const PIN_GC_MAX_AGE_DAYS = 7
+const PIN_GC_MAX_AGE_MS = PIN_GC_MAX_AGE_DAYS * 24 * 60 * 60 * 1000
+// A live pin's watermark is refreshed at most once per this window (the request
+// path is hot; the vault already persists per response via markVerified).
+const PIN_TOUCH_THROTTLE_MS = 60 * 60 * 1000   // 1 h
+
 const DEFAULT_CONFIG: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
   kaIntervalSec: number | undefined
 } = {
@@ -211,6 +254,7 @@ const DEFAULT_CONFIG: Omit<Required<ProxyClientConfig>, 'kaIntervalSec'> & {
   // with the primary-lineage role gate (keepalive-engine eviction block), this
   // makes a fleet hold require real corroboration, not one session's cold-write.
   kaEvictionMinTrips: 2,
+  orgProactiveRefreshSec: DEFAULT_ORG_PROACTIVE_SWEEP_SEC,
 }
 
 export interface ProxyClientOptions {
@@ -278,6 +322,34 @@ export interface ProxyClientOptions {
    * Default: OrgVault at `~/.claude-local/org-vault.json`.
    */
   orgVault?: OrgVault
+
+  /**
+   * Optional: the Claude config directory (`~/.claude`) whose `.credentials.json`
+   * holds the ACTIVE org's credential. The per-org choke-point co-writes this
+   * file under the config-dir lock when it refreshes the active org. Injectable
+   * for tests. Default: `getClaudeConfigDir()`.
+   */
+  claudeConfigDir?: string
+
+  /**
+   * Optional: path to `.credentials.json` (the active org's on-disk credential).
+   * Injectable for tests. Default: `getDefaultCredentialsPath()`.
+   */
+  credentialsPath?: string
+
+  /**
+   * Optional: the OAuth refresh-grant function. Injectable for tests so the
+   * choke-point can be exercised without real network. Default: the real
+   * `refreshOAuthToken` (POSTs the Anthropic token endpoint).
+   */
+  oauthRefresher?: (refreshToken: string) => Promise<RefreshedTokens>
+
+  /**
+   * Optional: acquire the cross-process config-dir lock (for the active-org
+   * `.credentials.json` co-write). Resolves to a release fn, or null if a peer
+   * holds it. Injectable for tests. Default: `acquireConfigDirLock` (proper-lockfile).
+   */
+  acquireConfigLock?: (configDir: string) => Promise<(() => Promise<void>) | null>
 }
 
 /** One persisted cache-prefix fingerprint, keyed by `${sessionId}:${lineageKey}`. */
@@ -426,6 +498,19 @@ export class ProxyClient {
   private readonly lastServedOrg: Map<string, string> = new Map()
   /** Single-flight refresh guard per orgId. */
   private readonly orgRefreshInflight: Map<string, Promise<void>> = new Map()
+  /** Last successful refresh (epoch ms) per orgId — the H2 min-interval floor. */
+  private readonly orgLastRefreshAt: Map<string, number> = new Map()
+  /** Per-org refresh-failure cooldown (H3): back off before forcing again. */
+  private readonly orgRefreshCooldown: Map<string, { until: number; attempts: number; needsRelogin: boolean }> = new Map()
+  /** Daemon-owned proactive per-org refresh sweep timer (C2). */
+  private orgProactiveTimer: ReturnType<typeof setInterval> | null = null
+  /** Config dir (`~/.claude`) + `.credentials.json` path — active-org co-write. */
+  private readonly claudeConfigDir: string
+  private readonly credentialsPath: string
+  /** OAuth refresh-grant fn (injectable for tests). */
+  private readonly oauthRefresher: (refreshToken: string) => Promise<RefreshedTokens>
+  /** Config-dir lock acquirer (injectable for tests). */
+  private readonly acquireConfigLock: (configDir: string) => Promise<(() => Promise<void>) | null>
 
   /** Resolves the current Anthropic org UUID — drives org-switch detection. */
   private readonly orgIdResolver: OrgIdResolver
@@ -460,6 +545,10 @@ export class ProxyClient {
     this.proxyStartedAt = opts.proxyStartedAt ?? Date.now()
     this.kaSnapshotPath = opts.kaSnapshotPath ?? DEFAULT_KA_SNAPSHOT_PATH
     this.orgVault = opts.orgVault ?? new OrgVault()
+    this.claudeConfigDir = opts.claudeConfigDir ?? getClaudeConfigDir()
+    this.credentialsPath = opts.credentialsPath ?? getDefaultCredentialsPath()
+    this.oauthRefresher = opts.oauthRefresher ?? refreshOAuthToken
+    this.acquireConfigLock = opts.acquireConfigLock ?? acquireConfigDirLock
     this.prefixHistory = loadPrefixHistory(this.prefixHistoryPath)
 
     // Cache metrics collector — emits CACHE_METRICS_SUMMARY every 60s and
@@ -498,6 +587,13 @@ export class ProxyClient {
         this.sessionPins.delete(sid)  // drop the per-session org/token pin
         this.kaSnapshotDirty = true   // a reaped session must leave the KA file
       }
+      // Session-pin GC (T4.3): age out vault pins for long-dead sessions so the
+      // binding table can't grow unbounded (the 200+ `synthetic-*` /
+      // `rotate-probe-test` accumulation). A reaped pid_gone session keeps its
+      // vault pin for the grace window (a resumed conversation restores its
+      // HOLD); it is retired only once unseen > N days AND not live. Never drops
+      // an `orgs` credential.
+      this.gcSessionPins()
       // Persist prefix history each reaper tick so it survives a proxy restart.
       savePrefixHistory(this.prefixHistory, this.prefixHistoryPath)
       // Persist the KA snapshot registry, but only when something changed —
@@ -514,6 +610,22 @@ export class ProxyClient {
     // Revive KA engines for sessions whose cache is provably still warm —
     // last step of construction so every dependency above is ready.
     this.reviveKaSnapshots()
+
+    // Daemon-owned proactive per-org refresh sweep (C2). A keepalive daemon
+    // exists to keep caches warm for clients that have GONE AWAY, so token
+    // freshness cannot be coupled to session traffic — this loop refreshes
+    // EVERY org on its own budget-safe cadence, independent of KA fires. It is
+    // the only thing that keeps a zero-live-session org alive. 0 disables it
+    // (tests drive `_runOrgProactiveSweep()` directly).
+    const sweepSec = this.config.orgProactiveRefreshSec
+    if (sweepSec && sweepSec > 0) {
+      this.orgProactiveTimer = setInterval(() => {
+        void this.proactiveOrgSweep()
+      }, sweepSec * 1000)
+      if (this.orgProactiveTimer && typeof this.orgProactiveTimer === 'object' && 'unref' in this.orgProactiveTimer) {
+        (this.orgProactiveTimer as any).unref()
+      }
+    }
   }
 
   // ─── Public getters ─────────────────────────────────────────────
@@ -553,6 +665,7 @@ export class ProxyClient {
   /** Clean shutdown — stops reaper, metrics collector, and all KA engines in store. */
   stop(): void {
     clearInterval(this.reaperTimer)
+    if (this.orgProactiveTimer) clearInterval(this.orgProactiveTimer)
     savePrefixHistory(this.prefixHistory, this.prefixHistoryPath)
     // Final KA-snapshot persist — must run BEFORE store.stopAll() empties the
     // engines, so a clean shutdown leaves a current registry to revive from.
@@ -691,42 +804,356 @@ export class ProxyClient {
     } catch { /* fail-soft */ }
   }
 
-  /**
-   * Ensure the vault's token for `orgId` is alive; refresh via the OAuth
-   * refresh grant when it is expired/near-expiry and a refresh token exists.
-   * Single-flight per org. Fail-soft: on refresh failure the old entry is
-   * kept (network noise) and the caller proceeds with whatever is there —
-   * the upstream-401 path remains the hard stop.
-   */
-  private async ensureOrgTokenFresh(orgId: string): Promise<void> {
-    const entry = this.orgVault.get(orgId)
-    if (!entry || !entry.refreshToken) return
-    const REFRESH_AHEAD_MS = 10 * 60 * 1000
-    if (entry.expiresAt === null || entry.expiresAt - Date.now() > REFRESH_AHEAD_MS) return
-    const inflight = this.orgRefreshInflight.get(orgId)
-    if (inflight) { await inflight; return }
-    const run = (async () => {
-      try {
-        const fresh = await refreshOAuthToken(entry.refreshToken!)
-        this.orgVault.upsert({
-          ...entry,
-          accessToken: fresh.accessToken,
-          refreshToken: fresh.refreshToken,
-          expiresAt: fresh.expiresAt,
-          capturedAt: Date.now(),
-        })
-        this.events.emit({ level: 'info', kind: 'ORG_TOKEN_REFRESHED', orgId })
-      } catch (err) {
-        this.events.emit({
-          level: 'error', kind: 'ORG_TOKEN_REFRESH_FAILED', orgId,
-          msg: String((err as Error)?.message ?? err).slice(0, 200),
-        })
-      } finally {
-        this.orgRefreshInflight.delete(orgId)
+  // ─── Per-org token freshness — the single choke-point (M2/C1/H1/H2/H3) ───
+  //
+  // EVERY use of a pinned-org token routes through `withFreshOrgToken`:
+  // real-request held/persisted pins, the KA-fire fast path, the force-on-401
+  // backstop, and the daemon proactive sweep. It enforces the invariant "any
+  // use of an org token is preceded by a check-and-refresh" at ONE seam, so a
+  // new consumer cannot silently bypass it (the KA-path bypass this evolution
+  // fixes). It BRANCHES active-vs-vault:
+  //   - ACTIVE org → refresh + co-write `.credentials.json` under the native
+  //                  CLI's config-dir `proper-lockfile` lock (never rotate the
+  //                  shared refresh_token into a vault-only store — that would
+  //                  strand the disk token for the native CLI, architect C1);
+  //   - VAULT org  → refresh + `orgVault.upsert` (proxy-owned, in-process
+  //                  single-flight only — no cross-process lock, architect H1).
+
+  /** True when `orgId` is the machine's ACTIVE org (the one in `.credentials.json`). */
+  private isActiveOrg(orgId: string): boolean {
+    const active = this.orgIdResolver.current()
+    return active !== null && active === orgId
+  }
+
+  /** Token metadata for `orgId` — from disk for the active org, from the vault
+   *  otherwise. `capturedAt` (lifetime estimate) comes from the vault mirror
+   *  even for the active org. Null when there is nothing to refresh. */
+  private orgTokenMeta(orgId: string): { accessToken: string | null; refreshToken: string | null; expiresAt: number | null; capturedAt: number | null } | null {
+    if (this.isActiveOrg(orgId)) {
+      const disk = readClaudeCredentials(this.credentialsPath)?.claudeAiOauth
+      if (!disk) return null
+      const ve = this.orgVault.get(orgId)
+      return {
+        accessToken: disk.accessToken ?? null,
+        refreshToken: disk.refreshToken ?? null,
+        expiresAt: disk.expiresAt ?? null,
+        capturedAt: ve?.capturedAt ?? null,
       }
-    })()
-    this.orgRefreshInflight.set(orgId, run)
-    await run
+    }
+    const e = this.orgVault.get(orgId)
+    if (!e) return null
+    return { accessToken: e.accessToken, refreshToken: e.refreshToken, expiresAt: e.expiresAt, capturedAt: e.capturedAt }
+  }
+
+  /** Proactive refresh-due test (H2): remaining < min(kaInterval+margin, RATIO×lifetime),
+   *  floored at the cheap 5-min expiry buffer. Never couples to a bare interval. */
+  private isRefreshDueByExpiry(meta: { expiresAt: number | null; capturedAt: number | null }): boolean {
+    if (meta.expiresAt === null) return false      // unknown expiry → 401 backstop is the guard
+    const now = Date.now()
+    const remaining = meta.expiresAt - now
+    if (remaining <= 0) return true
+    const lifetime = (meta.capturedAt !== null && meta.expiresAt > meta.capturedAt)
+      ? meta.expiresAt - meta.capturedAt
+      : DEFAULT_TOKEN_LIFETIME_MS
+    const kaIntervalMs = (this.config.kaIntervalSec ?? DEFAULT_KA_INTERVAL_SEC) * 1000
+    const intervalMargin = kaIntervalMs + ORG_REFRESH_MARGIN_MS
+    const threshold = Math.min(intervalMargin, PROACTIVE_REFRESH_RATIO * lifetime)
+    return remaining < Math.max(threshold, EXPIRY_BUFFER_MS)
+  }
+
+  /** Per-org failure cooldown (H3): a forced refresh must not fire while backing off. */
+  private inFailureCooldown(orgId: string, now: number): boolean {
+    const cd = this.orgRefreshCooldown.get(orgId)
+    return !!cd && cd.until > now
+  }
+
+  /** H2 min-interval floor — caps PROACTIVE grant frequency regardless of token length. */
+  private minRefreshIntervalElapsed(orgId: string, now: number): boolean {
+    const last = this.orgLastRefreshAt.get(orgId) ?? 0
+    return now - last >= PROACTIVE_REFRESH_MIN_INTERVAL_MS
+  }
+
+  private recordRefreshSuccess(orgId: string, now: number): void {
+    this.orgLastRefreshAt.set(orgId, now)
+    this.orgRefreshCooldown.delete(orgId)     // clear any prior failure backoff
+  }
+
+  /** Record a failed grant → exponential backoff; classify a revoke → needs-relogin. */
+  private recordRefreshFailure(orgId: string, err: unknown, now: number): void {
+    const prev = this.orgRefreshCooldown.get(orgId)
+    const attempts = (prev?.attempts ?? 0) + 1
+    const revoke = err instanceof OAuthRefreshError && err.isInvalidGrant
+    if (revoke) {
+      const wasRelogin = prev?.needsRelogin === true
+      this.orgRefreshCooldown.set(orgId, { until: now + REVOKE_RELOGIN_COOLDOWN_MS, attempts, needsRelogin: true })
+      if (!wasRelogin) {
+        // Emit once per entry into the needs-relogin state (parity with CC
+        // tengu_oauth_token_refresh_error on a hard revoke).
+        this.events.emit({
+          level: 'error', kind: 'ORG_TOKEN_NEEDS_RELOGIN', orgId,
+          msg: `org ${orgId.slice(0, 8)} refresh_token revoked (invalid_grant) — run: claude login for that org`,
+        })
+      }
+    } else {
+      const backoff = Math.min(REFRESH_FAILURE_COOLDOWN_BASE_MS * 2 ** (attempts - 1), REFRESH_FAILURE_COOLDOWN_MAX_MS)
+      this.orgRefreshCooldown.set(orgId, { until: now + backoff, attempts, needsRelogin: false })
+    }
+    this.events.emit({
+      level: 'error', kind: 'ORG_TOKEN_REFRESH_FAILED', orgId, revoke,
+      msg: String((err as Error)?.message ?? err).slice(0, 200),
+    })
+  }
+
+  /**
+   * The single choke-point: return a FRESH access token for `orgId`, refreshing
+   * first when due (or `force`). Returns the current token when no refresh is
+   * needed/possible (fail-soft — the upstream-401 path stays the hard stop).
+   */
+  private async withFreshOrgToken(orgId: string, opts: { force?: boolean; reason?: string } = {}): Promise<string | null> {
+    const meta = this.orgTokenMeta(orgId)
+    if (!meta) return null
+    if (!meta.refreshToken) return meta.accessToken       // nothing to refresh with
+    const now = Date.now()
+
+    if (!opts.force) {
+      // Proactive/fast-path: refresh only when actually due AND the min-interval
+      // floor has elapsed (H2 — a short token can't force a grant every fire).
+      if (!this.isRefreshDueByExpiry(meta)) return meta.accessToken
+      if (!this.minRefreshIntervalElapsed(orgId, now)) return meta.accessToken
+    }
+    // Both proactive and force respect the FAILURE cooldown (H3 — a revoke must
+    // not be re-forced on every REARM-ladder slot). Force bypasses only the
+    // min-interval floor (a genuine 401 must be able to recover).
+    if (this.inFailureCooldown(orgId, now)) return meta.accessToken
+
+    // Single-flight per org (coalesce concurrent fires → exactly ONE grant).
+    const inflight = this.orgRefreshInflight.get(orgId)
+    if (inflight) {
+      await inflight.catch(() => {})
+      return this.orgTokenMeta(orgId)?.accessToken ?? meta.accessToken
+    }
+    const reason = opts.reason ?? (opts.force ? 'force-401' : 'proactive')
+    const run = this.isActiveOrg(orgId)
+      ? this.refreshActiveOrg(orgId, meta.refreshToken, reason)
+      : this.refreshVaultOrg(orgId, meta, reason)
+    this.orgRefreshInflight.set(orgId, run.then(() => {}, () => {}))
+    try {
+      return await run
+    } finally {
+      this.orgRefreshInflight.delete(orgId)
+    }
+  }
+
+  /**
+   * ACTIVE-org refresh (C1): grant → co-write `.credentials.json` atomically
+   * under the native CLI's config-dir `proper-lockfile` lock → mirror into the
+   * vault → invalidate the proxy token cache so `getAccessToken` re-reads.
+   * NEVER rotates the shared refresh_token into a vault-only store. Returns the
+   * fresh access token (or the current disk token on lock-contention / failure).
+   */
+  private async refreshActiveOrg(orgId: string, refreshToken: string, reason: string): Promise<string | null> {
+    const release = await this.acquireConfigLock(this.claudeConfigDir)
+    if (!release) {
+      // A peer / the native CLI holds the lock (mid-refresh). Re-read disk — the
+      // winner will have written a fresh token — and use whatever is there.
+      this.credentials.invalidate()
+      const disk = readClaudeCredentials(this.credentialsPath)?.claudeAiOauth
+      return disk?.accessToken ?? null
+    }
+    try {
+      // Triple-check under lock (race_resolved): a peer / the native CLI may
+      // have refreshed while we waited. Detect it by refresh_token identity —
+      // if the on-disk refresh_token ROTATED away from the one we entered with,
+      // a peer already refreshed: adopt the disk token, skip our grant (mirror
+      // CC's "storage holds a different token → use it"). Same token → no peer,
+      // proceed to grant.
+      const diskNow = readClaudeCredentials(this.credentialsPath)?.claudeAiOauth
+      if (diskNow?.accessToken && diskNow.refreshToken && diskNow.refreshToken !== refreshToken) {
+        this.credentials.invalidate()
+        this.events.emit({ level: 'info', kind: 'ORG_TOKEN_REFRESHED', orgId, active: true, reason: 'race-resolved' })
+        return diskNow.accessToken
+      }
+      const grantToken = diskNow?.refreshToken ?? refreshToken
+      const fresh = await this.oauthRefresher(grantToken)
+      // Write-before-use: persist the rotated refresh_token to DISK first, so the
+      // native CLI + every other consumer see it; then mirror into the vault.
+      writeClaudeCredentials(this.credentialsPath, {
+        accessToken: fresh.accessToken,
+        refreshToken: fresh.refreshToken,
+        expiresAt: fresh.expiresAt,
+        scopes: fresh.scopes,
+      })
+      const info = readOrgInfoFromConfig()
+      this.orgVault.upsert({
+        orgId,
+        orgName: info.orgName ?? undefined,
+        accountEmail: info.accountEmail ?? undefined,
+        accessToken: fresh.accessToken,
+        refreshToken: fresh.refreshToken,
+        expiresAt: fresh.expiresAt,
+        capturedAt: Date.now(),
+      })
+      this.credentials.invalidate()
+      this.recordRefreshSuccess(orgId, Date.now())
+      this.events.emit({ level: 'info', kind: 'ORG_TOKEN_REFRESHED', orgId, active: true, reason })
+      return fresh.accessToken
+    } catch (err) {
+      this.recordRefreshFailure(orgId, err, Date.now())
+      const disk = readClaudeCredentials(this.credentialsPath)?.claudeAiOauth
+      return disk?.accessToken ?? null
+    } finally {
+      try { await release() } catch { /* release best-effort */ }
+    }
+  }
+
+  /**
+   * VAULT (non-active) org refresh (M1): grant → `orgVault.upsert` (write-before-use).
+   * Proxy-owned single-writer store → in-process single-flight only, NO
+   * cross-process lock (H1). Returns the fresh access token (or the current one
+   * on failure — fail-soft).
+   */
+  private async refreshVaultOrg(
+    orgId: string,
+    meta: { accessToken: string | null; refreshToken: string | null; expiresAt: number | null; capturedAt: number | null },
+    reason: string,
+  ): Promise<string | null> {
+    const entry = this.orgVault.get(orgId)
+    const refreshToken = entry?.refreshToken ?? meta.refreshToken
+    if (!refreshToken) return meta.accessToken
+    try {
+      const fresh = await this.oauthRefresher(refreshToken)
+      // Write-before-use: the rotated refresh_token lands in the vault BEFORE the
+      // new access token is handed back to serve/replay anything.
+      this.orgVault.upsert({
+        orgId,
+        orgName: entry?.orgName,
+        accountEmail: entry?.accountEmail,
+        accessToken: fresh.accessToken,
+        refreshToken: fresh.refreshToken,
+        expiresAt: fresh.expiresAt,
+        capturedAt: Date.now(),
+        lastVerifiedAt: entry?.lastVerifiedAt,
+      })
+      this.recordRefreshSuccess(orgId, Date.now())
+      this.events.emit({ level: 'info', kind: 'ORG_TOKEN_REFRESHED', orgId, active: false, reason })
+      return fresh.accessToken
+    } catch (err) {
+      this.recordRefreshFailure(orgId, err, Date.now())
+      return entry?.accessToken ?? meta.accessToken
+    }
+  }
+
+  /**
+   * Force-on-401 backstop (H3), mirroring CC's `handleOAuth401Error`: re-read
+   * the served org's token — if a peer already rotated it (different token),
+   * adopt that with no grant; else force ONE refresh (cooldown-gated). Wired
+   * into the KA engine's `onAuthError`.
+   */
+  private async handleOrg401(orgId: string, failedToken: string): Promise<void> {
+    const current = this.orgTokenMeta(orgId)?.accessToken
+    if (current && current !== failedToken) {
+      // A peer / native-CLI already refreshed — the next getToken() picks it up.
+      this.events.emit({ level: 'info', kind: 'ORG_TOKEN_REFRESHED', orgId, reason: 'recovered-peer' })
+      return
+    }
+    await this.withFreshOrgToken(orgId, { force: true, reason: 'force-401' })
+  }
+
+  /**
+   * The org a session is CURRENTLY serving its token from — the pinned org when
+   * held, else the machine's active org (mirror `selectSessionToken`'s decision).
+   * The KA fast path, the KA 401 backstop, AND the real-request 401 backstop all
+   * resolve the served org through this ONE seam, so every path force-refreshes
+   * the SAME org whose token was actually sent.
+   */
+  private resolveServedOrg(sessionId: string): string | null {
+    return this.sessionPins.get(sessionId)?.orgId ?? this.orgIdResolver.current()
+  }
+
+  /**
+   * Resolve the org a session is CURRENTLY SERVING (mirror `selectSessionToken`:
+   * a held cross-org session serves its pinned org; everything else serves the
+   * active org) and return a FRESH token for it (M3). Used by the KA `getToken`
+   * fast path so an idle held session warms the RIGHT org's cache with a
+   * refreshed token — not the active account's (the proxy-client:1489 bug).
+   */
+  private async getTokenForSession(sessionId: string): Promise<string> {
+    const pin = this.sessionPins.get(sessionId)
+    const servedOrg = this.resolveServedOrg(sessionId)
+    if (servedOrg) {
+      const fresh = await this.withFreshOrgToken(servedOrg, { reason: 'ka-fast-path' })
+      if (fresh) return fresh
+    }
+    // Fall back: a held cross-org pin with no refreshable vault token keeps its
+    // last-known token (never silently warm the active org for a held session);
+    // otherwise the active disk token.
+    if (pin && pin.orgId !== null && pin.orgId !== this.orgIdResolver.current() && pin.token) {
+      return pin.token
+    }
+    return this.credentials.getAccessToken()
+  }
+
+  /**
+   * Daemon-owned proactive sweep (C2): refresh EVERY vault org + the active org
+   * on its own budget-safe cadence, independent of session traffic. This is the
+   * ONLY thing that keeps a zero-live-session org's token alive. Fail-soft per org.
+   */
+  private async proactiveOrgSweep(): Promise<void> {
+    const seen = new Set<string>()
+    const active = this.orgIdResolver.current()
+    if (active) {
+      seen.add(active)
+      try { await this.withFreshOrgToken(active, { reason: 'proactive-loop' }) } catch { /* cooldown handles it */ }
+    }
+    for (const e of this.orgVault.list()) {
+      if (seen.has(e.orgId)) continue
+      seen.add(e.orgId)
+      try { await this.withFreshOrgToken(e.orgId, { reason: 'proactive-loop' }) } catch { /* fail-soft */ }
+    }
+  }
+
+  /** Test seam — run one proactive sweep synchronously. */
+  async _runOrgProactiveSweep(): Promise<void> { return this.proactiveOrgSweep() }
+
+  /**
+   * Session-pin GC (T4.3): retire vault pins whose session is NEITHER currently
+   * tracked in the store NOR seen within `PIN_GC_MAX_AGE_MS`. A currently-live
+   * session is always kept regardless of watermark age; a legacy pin with no
+   * watermark is seeded on first sweep (a full grace window before it can age
+   * out). NEVER drops an `orgs` credential — only `pins`. Runs on the reaper
+   * tick and drops the paired in-memory pin too.
+   */
+  private gcSessionPins(now = Date.now()): void {
+    const live = new Set(this.store.list().map(s => s.sessionId))
+    const retired = this.orgVault.gcPins(
+      (sid, lastSeenAt) => live.has(sid) || (now - lastSeenAt) <= PIN_GC_MAX_AGE_MS,
+      now,
+    )
+    for (const sid of retired) {
+      this.sessionPins.delete(sid)
+      this.events.emit({
+        level: 'info', kind: 'ORG_PIN_GC', sessionId: sid,
+        msg: `retired dead-session pin (no live session, unseen > ${PIN_GC_MAX_AGE_DAYS}d)`,
+      })
+    }
+  }
+
+  /** Test seam — run one pin-GC pass at a controlled clock. */
+  _gcSessionPins(now = Date.now()): void { return this.gcSessionPins(now) }
+
+  /** Test seam — read the per-org cooldown state (H3 assertions). */
+  _orgCooldown(orgId: string): { until: number; attempts: number; needsRelogin: boolean } | undefined {
+    return this.orgRefreshCooldown.get(orgId)
+  }
+
+  /** Test seam — direct choke-point invocation. */
+  async _withFreshOrgToken(orgId: string, opts: { force?: boolean; reason?: string } = {}): Promise<string | null> {
+    return this.withFreshOrgToken(orgId, opts)
+  }
+
+  /** Test seam — force-on-401 backstop for a served org (H3 assertions). */
+  async _forceOrg401(orgId: string, failedToken: string): Promise<void> {
+    return this.handleOrg401(orgId, failedToken)
   }
 
   /**
@@ -749,7 +1176,7 @@ export class ProxyClient {
     }
     let refreshed = false
     if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
-      await this.ensureOrgTokenFresh(entry.orgId)
+      await this.withFreshOrgToken(entry.orgId, { force: true, reason: 'org-switch' })
       const after = this.orgVault.get(entry.orgId)
       if (!after || (after.expiresAt !== null && after.expiresAt <= Date.now())) {
         return { ok: false, error: `org ${entry.orgId.slice(0, 8)} token expired and refresh failed — log into that org once to recapture` }
@@ -783,6 +1210,37 @@ export class ProxyClient {
       servedOrg: this.lastServedOrg.get(sid) ?? null,
     }))
     return { orgs, sessions }
+  }
+
+  /**
+   * Per-org token health for the heartbeat (T4.1 observability). Surfaces the
+   * MINIMUM remaining lifetime across the active + every vault org, how many are
+   * already expired, and how many are flagged needs-relogin (an `invalid_grant`
+   * revoke classified by `recordRefreshFailure`). A stranded / −42h org is thus
+   * VISIBLE in `HEALTH_HEARTBEAT` before a session ever needs it — the L1 gap
+   * where the −42h relish org stayed invisible until manual inspection.
+   */
+  orgTokenHealth(): { orgs: number; minOrgExpiresInSec: number | null; orgsExpired: number; orgsNeedRelogin: number } {
+    const now = Date.now()
+    const expiries: number[] = []          // epoch ms, known-expiry orgs only
+    const seen = new Set<string>()
+    const active = this.orgIdResolver.current()
+    if (active) {
+      seen.add(active)
+      const meta = this.orgTokenMeta(active)
+      if (meta?.expiresAt != null) expiries.push(meta.expiresAt)
+    }
+    for (const e of this.orgVault.list()) {
+      if (seen.has(e.orgId)) continue
+      seen.add(e.orgId)
+      if (e.expiresAt != null) expiries.push(e.expiresAt)
+    }
+    const orgsExpired = expiries.filter(ms => ms <= now).length
+    const minMs = expiries.length ? Math.min(...expiries) : null
+    const minOrgExpiresInSec = minMs === null ? null : Math.floor((minMs - now) / 1000)
+    let orgsNeedRelogin = 0
+    for (const cd of this.orgRefreshCooldown.values()) if (cd.needsRelogin) orgsNeedRelogin++
+    return { orgs: seen.size, minOrgExpiresInSec, orgsExpired, orgsNeedRelogin }
   }
 
   /**
@@ -914,6 +1372,11 @@ export class ProxyClient {
     let reloadAsked = false
     // One-shot consent from an explicit switchSessionOrg rotate (maintenance).
     let rotateConsumed = false
+    // The EXACT bearer token placed on the upstream request — captured in fn
+    // scope so the upstream-401 backstop below can force-refresh the SERVED org
+    // keyed by the token that was actually rejected (mirror handleOrg401's
+    // failed-token contract). Set once the Authorization header is built.
+    let sentToken: string | null = null
     try {
       const account = {
         orgId: this.orgIdResolver.current(),
@@ -927,10 +1390,14 @@ export class ProxyClient {
       // snapshot — startup equivalent), and restore a persisted pin binding
       // for this session if the proxy restarted since it was set.
       void this.snapshotCurrentAccount('lazy')
+      // Refresh this session's pin-GC watermark (throttled — at most 1 vault
+      // write/hour/session). No-op unless the session has a persisted pin; keeps
+      // an actively-used HOLD/auto-pin from ageing out of the GC window (T4.3).
+      this.orgVault.touchPin(sessionId, Date.now(), PIN_TOUCH_THROTTLE_MS)
       if (!this.sessionPins.has(sessionId) && !reloadAsked) {
         const persisted = this.orgVault.getPin(sessionId)
         if (persisted && persisted.orgId !== account.orgId) {
-          await this.ensureOrgTokenFresh(persisted.orgId)
+          await this.withFreshOrgToken(persisted.orgId, { reason: 'real-request' })
           const ve = this.orgVault.get(persisted.orgId)
           if (ve && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
             this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })
@@ -948,7 +1415,7 @@ export class ProxyClient {
       {
         const pin = this.sessionPins.get(sessionId)
         if (pin && pin.orgId !== null && account.orgId !== null && pin.orgId !== account.orgId) {
-          await this.ensureOrgTokenFresh(pin.orgId)
+          await this.withFreshOrgToken(pin.orgId, { reason: 'real-request' })
           const ve = this.orgVault.get(pin.orgId)
           if (ve && ve.accessToken !== pin.token && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
             pin.token = ve.accessToken
@@ -993,6 +1460,7 @@ export class ProxyClient {
         })
       }
       upstreamHeaders[HEADER_AUTHORIZATION] = `Bearer ${sel.token}`
+      sentToken = sel.token
     } catch (credErr: any) {
       this.events.emit({
         level: 'error',
@@ -1306,7 +1774,23 @@ export class ProxyClient {
 
     if (!upstream.ok) {
       const errText = await upstream.text().catch(() => '')
-      if (upstream.status === 401) this.credentials.invalidate()
+      if (upstream.status === 401) {
+        // Real-request 401 backstop (mirror the KA `onAuthError` path + CC's
+        // `handleOAuth401Error`). The token we ACTUALLY sent (`sentToken`) was
+        // rejected → force ONE refresh of the SERVED org through the choke-point:
+        // `handleOrg401` re-reads the org token (adopts a peer's fresh token if
+        // one rotated in) else force-refreshes, per-org-cooldown-gated so a
+        // genuine `invalid_grant` revoke classifies to relogin-once and does NOT
+        // hammer the endpoint (the config-dir lock is taken only when a refresh
+        // is actually due). Without this a stale active-org token only cleared
+        // the in-memory cache and re-read the SAME stale disk token, returning
+        // 401 with no self-heal (the P0 drift this closes).
+        const servedOrg = this.resolveServedOrg(sessionId)
+        if (servedOrg && sentToken) await this.handleOrg401(servedOrg, sentToken)
+        // Keep the cache invalidation: the active-org path re-reads fresh disk on
+        // the next request, and this covers the served=null / no-sentToken edge.
+        this.credentials.invalidate()
+      }
 
       this.events.emit({
         level: 'error',
@@ -1486,7 +1970,17 @@ export class ProxyClient {
         // persists the fresh state on its next tick.
         onRegistryChange: () => { this.kaSnapshotDirty = true },
       },
-      getToken: () => this.credentials.getAccessToken(),
+      // KA fast path (M3): resolve the session's currently-SERVED org (a held
+      // cross-org session serves its pinned org, not the active account) and
+      // route its token through the refresh choke-point, so an idle held
+      // session warms the RIGHT org's cache with a REFRESHED token.
+      getToken: () => this.getTokenForSession(sessionId),
+      // Force-on-401 backstop (H3): on a KA auth error, re-read the served org's
+      // token / force ONE refresh (per-org cooldown + revoke classification).
+      onAuthError: (failedToken: string) => {
+        const servedOrg = this.resolveServedOrg(sessionId)
+        return servedOrg ? this.handleOrg401(servedOrg, failedToken) : Promise.resolve()
+      },
       doFetch: (body, headers, signal) => this.engineDoFetch(body, headers, signal),
       getRateLimitInfo: () => this.lastRateLimit,
       isOwnerAlive: () => this.store.isOwnerAlive(sessionId),

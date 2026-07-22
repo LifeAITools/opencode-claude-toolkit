@@ -319,7 +319,11 @@ const tracker = {
 // ═══ Heartbeat ═══════════════════════════════════════════════════════
 // Still uses its own timer; reads rate limit from proxyClient.
 
-const stopHeartbeat = startHeartbeat(cfg, tracker, () => proxyClient.rateLimitSnapshot)
+const stopHeartbeat = startHeartbeat(
+  cfg, tracker, () => proxyClient.rateLimitSnapshot,
+  // T4.1: per-org token health from the SDK OrgVault → HEALTH_HEARTBEAT.
+  () => proxyClient.orgTokenHealth(),
+)
 
 // ═══ Module System ═══════════════════════════════════════════════
 //

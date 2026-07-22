@@ -36,6 +36,19 @@ export interface KeepaliveEngineOptions {
     /** Returns a fresh access_token. Implementation handles refresh/triple-check/etc. */
     getToken: () => Promise<string>;
     /**
+     * Optional force-on-401 backstop. Called when a KA fire is rejected with an
+     * auth error (401/403), BEFORE the retry chain rebuilds Authorization from
+     * `getToken()`. Receives the access token that was just rejected so the owner
+     * can mirror the native CLI's `handleOAuth401Error`: re-read the org token —
+     * if a peer already rotated it, adopt that; else force ONE refresh (gated by
+     * a per-org failure cooldown so a genuine revoke doesn't hammer the OAuth
+     * endpoint across the REARM ladder). The engine ignores the result and simply
+     * re-fires with a fresh `getToken()` afterward. Omit for single-session SDK
+     * use — then auth errors fall through to the existing retry-with-getToken
+     * behavior unchanged (architect-review H3).
+     */
+    onAuthError?: (failedAccessToken: string) => Promise<void>;
+    /**
      * Performs the actual Anthropic API request and yields SSE events.
      * Engine uses this for KA fires; consumer uses whatever transport it wants.
      * Must throw APIError/RateLimitError with .status for error classification.
@@ -151,6 +164,7 @@ export declare class KeepaliveEngine {
     /** True once the first TTL scan has run — distinguishes "never seen" from "seen null". */
     private ttlEverObserved;
     private readonly getToken;
+    private readonly onAuthError?;
     private readonly doFetch;
     private readonly getRateLimitInfo;
     private readonly isOwnerAlive;
@@ -193,6 +207,8 @@ export declare class KeepaliveEngine {
     private quotaPauseTimer;
     private quotaPauseUntil;
     private snapshotCallCount;
+    /** The bearer token used by the most recent fire — fed to onAuthError on 401. */
+    private lastFireToken;
     constructor(opts: KeepaliveEngineOptions);
     /**
      * Call at the top of every real request. Primes the pending snapshot slot
@@ -289,6 +305,12 @@ export declare class KeepaliveEngine {
      * Invariant: KA fire NEVER writes cache (max_tokens=1, identical prefix
      * replay) — pinned by test/keepalive-regression.test.ts.
      */
+    /**
+     * Run the force-on-401 backstop with the token that was just rejected.
+     * Fail-soft: a backstop error must never break the retry chain — the chain's
+     * fresh-getToken() retries + bounded budget remain the ultimate guard.
+     */
+    private runAuthErrorBackstop;
     private fireLineage;
     /**
      * Diagnostic logger — call BEFORE registry.clear() to capture exact

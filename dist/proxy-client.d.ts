@@ -377,6 +377,26 @@ export declare class ProxyClient {
      */
     notifyCredentialsChanged(reason: string): void;
     /**
+     * Proactive re-login/refresh reconcile (re-login-revoke incident 2026-07-23).
+     * The fresh disk credential belongs to org X; a native RE-LOGIN to X revokes
+     * X's previous token. Every session SERVED BY X that is currently frozen on an
+     * org-switch-pending snapshot token is replaying that now-revoked token in its
+     * KA — and an idle one issues no real request to discover the rotation, so it
+     * 401s until `auth_retry_exhausted` → disarm → its warm cache ages out and dies.
+     *
+     * Unfreeze those sessions here so their KA re-arms with X's CURRENT token on the
+     * next tick — proactively, not reactively per-401. This is a token SWAP only
+     * (the pin / served org is unchanged; `getTokenForSession` still resolves X) —
+     * never a cross-org migration. Best-effort by design: a session this org
+     * resolution misses (e.g. multi-process `.claude.json` org oscillation) is
+     * still caught by the KA-401 frozen-replay fall-through (the guaranteed backstop).
+     */
+    private reconcileFrozenSessionsForChangedOrg;
+    /** Test seam — run the credentials-change frozen-session reconcile directly. */
+    _reconcileFrozenSessionsForChangedOrg(): void;
+    /** Test seam — how many KA lineages a session is currently frozen (org-switch-pending) on. */
+    _sessionFrozenLineages(sessionId: string): number;
+    /**
      * Snapshot the system credential file's current token into the per-org
      * vault, keyed by the org that owns it. Fail-soft, never throws — the vault
      * is strictly additive safety. Called on startup-ish (first request) and on

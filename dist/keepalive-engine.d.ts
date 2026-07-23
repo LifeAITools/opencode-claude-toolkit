@@ -234,6 +234,34 @@ export declare class KeepaliveEngine {
     /** Clear the org-switch-pending flag for a lineage. */
     clearOrgSwitchPending(lineageKeyArg: string): void;
     /**
+     * Clear ALL org-switch-pending freezes on this engine, returning the count
+     * cleared. Used by ProxyClient's credentials-change reconcile to PROACTIVELY
+     * thaw a session frozen on a now-rotated snapshot token, so its KA re-arms with
+     * the served org's CURRENT token on the next tick instead of discovering the
+     * rotation reactively via a 401 (which an idle frozen session may never issue —
+     * the re-login-revoke incident, 2026-07-23). Pairs with the KA-401
+     * fall-through (`thawOrgSwitchPendingOnAuth`), which is the guaranteed backstop.
+     */
+    clearAllOrgSwitchPending(): number;
+    /** Test seam — is this lineage currently frozen on its snapshot token? */
+    get _hasOrgSwitchPending(): (lineageKey: string) => boolean;
+    /**
+     * Frozen-replay fall-through (re-login-revoke incident, 2026-07-23). A lineage
+     * flagged org-switch-pending replays its FROZEN snapshot Authorization to keep
+     * the OLD org's cache warm during a cross-org HOLD. If that frozen token is
+     * REVOKED (a native re-login to the held org) or simply expires, every replay
+     * and every retry 401s on the same dead token — and an IDLE held session issues
+     * no real request to clear the flag, so its KA can never re-resolve: it exhausts
+     * the auth budget, disarms, and the warm cache ages out and dies (session
+     * ab787846, 2026-07-23T05:24Z). Dropping the freeze on a 401 lets the retry
+     * chain + all later fires rebuild Authorization from getToken() →
+     * withFreshOrgToken(servedOrg), adopting the pinned org's CURRENT valid token.
+     * A revoked token warms NO cache, so the "hold the old cache warm" rationale is
+     * already moot; this is NOT a cross-org migration (the pin / served org is
+     * unchanged — only the dead snapshot token is abandoned for the org's fresh one).
+     */
+    private thawOrgSwitchPendingOnAuth;
+    /**
      * Layer 3 — Cache rewrite burst protection.
      * Call at the top of every real request BEFORE sending.
      *

@@ -976,6 +976,47 @@ export class KeepaliveEngine {
   clearOrgSwitchPending(lineageKeyArg: string): void { this.orgSwitchPending.delete(lineageKeyArg) }
 
   /**
+   * Clear ALL org-switch-pending freezes on this engine, returning the count
+   * cleared. Used by ProxyClient's credentials-change reconcile to PROACTIVELY
+   * thaw a session frozen on a now-rotated snapshot token, so its KA re-arms with
+   * the served org's CURRENT token on the next tick instead of discovering the
+   * rotation reactively via a 401 (which an idle frozen session may never issue —
+   * the re-login-revoke incident, 2026-07-23). Pairs with the KA-401
+   * fall-through (`thawOrgSwitchPendingOnAuth`), which is the guaranteed backstop.
+   */
+  clearAllOrgSwitchPending(): number {
+    const n = this.orgSwitchPending.size
+    if (n > 0) this.orgSwitchPending.clear()
+    return n
+  }
+
+  /** Test seam — is this lineage currently frozen on its snapshot token? */
+  get _hasOrgSwitchPending(): (lineageKey: string) => boolean {
+    return (k: string) => this.orgSwitchPending.has(k)
+  }
+
+  /**
+   * Frozen-replay fall-through (re-login-revoke incident, 2026-07-23). A lineage
+   * flagged org-switch-pending replays its FROZEN snapshot Authorization to keep
+   * the OLD org's cache warm during a cross-org HOLD. If that frozen token is
+   * REVOKED (a native re-login to the held org) or simply expires, every replay
+   * and every retry 401s on the same dead token — and an IDLE held session issues
+   * no real request to clear the flag, so its KA can never re-resolve: it exhausts
+   * the auth budget, disarms, and the warm cache ages out and dies (session
+   * ab787846, 2026-07-23T05:24Z). Dropping the freeze on a 401 lets the retry
+   * chain + all later fires rebuild Authorization from getToken() →
+   * withFreshOrgToken(servedOrg), adopting the pinned org's CURRENT valid token.
+   * A revoked token warms NO cache, so the "hold the old cache warm" rationale is
+   * already moot; this is NOT a cross-org migration (the pin / served org is
+   * unchanged — only the dead snapshot token is abandoned for the org's fresh one).
+   */
+  private thawOrgSwitchPendingOnAuth(lineageKey: string): void {
+    if (this.orgSwitchPending.delete(lineageKey)) {
+      this.logClearDiag('org_switch_pending_thawed_on_auth', { lineageKey })
+    }
+  }
+
+  /**
    * Layer 3 — Cache rewrite burst protection.
    * Call at the top of every real request BEFORE sending.
    *
@@ -1600,6 +1641,14 @@ export class KeepaliveEngine {
         // recovers within a few attempts; a real revoke costs a handful of
         // token-free 401s per ladder slot, bounded by the TTL.
         //
+        // Frozen-replay fall-through (re-login-revoke incident 2026-07-23): if
+        // this fire replayed a FROZEN org-switch-pending token, the 401 proves it
+        // is dead (expired or, on a native re-login to the held org, REVOKED).
+        // Thaw the freeze BEFORE the retry so the chain + all later fires rebuild
+        // auth from getToken() → the served org's CURRENT token — instead of
+        // replaying the dead frozen token to auth_retry_exhausted → disarm, which
+        // an idle held session can never escape (no real request to clear it).
+        this.thawOrgSwitchPendingOnAuth(best.lineageKey)
         // Force-on-401 backstop (H3): before the retry chain, ask the owner to
         // force-refresh THIS session's served-org token (per-org cooldown +
         // revoke classification live there). retryChain then rebuilds
@@ -1962,6 +2011,11 @@ export class KeepaliveEngine {
           // falls out as retry_exhausted (TTL-safe), never an unbounded loop.
           this.inFlight = false
           this.abortController = null
+          // Frozen-replay fall-through (2026-07-23): a mid-retry 401 on a still-
+          // frozen lineage means the snapshot token is dead — thaw so the next
+          // retry rebuilds auth from getToken() (the served org's current token),
+          // never looping on a revoked frozen token.
+          this.thawOrgSwitchPendingOnAuth(entry.lineageKey)
           // Force-on-401 backstop (H3) — cooldown-gated in the owner, so a
           // sequential retry against a dead refresh_token doesn't re-hammer.
           await this.runAuthErrorBackstop()

@@ -775,8 +775,73 @@ export class ProxyClient {
     this.events.emit({ level: 'info', kind: 'CREDENTIALS_CHANGED', reason })
     // Vault: capture the NEW credential under its org before anything uses it.
     // (The previous org's entry is untouched — orgs are separate accounts, so
-    // a cross-org login must never cost us the old org's tokens.)
+    // a cross-org login must never cost us the old org's tokens.) THEN — once the
+    // fresh token is mirrored — proactively push it to every session frozen on the
+    // changed org: a native RE-LOGIN revokes the old token, so a session still
+    // replaying it in its KA would 401 and, if idle, never self-heal (re-login-
+    // revoke incident 2026-07-23, session ab787846). Reconciling here turns
+    // thousands of reactive per-session 401 recoveries (4712 `recovered-peer`
+    // that day, many too late) into ONE proactive push.
     void this.snapshotCurrentAccount('credentials-changed')
+      .then(() => { this.reconcileFrozenSessionsForChangedOrg() })
+      .catch(() => { /* fail-soft — the KA-401 frozen-replay fall-through remains the backstop */ })
+  }
+
+  /**
+   * Proactive re-login/refresh reconcile (re-login-revoke incident 2026-07-23).
+   * The fresh disk credential belongs to org X; a native RE-LOGIN to X revokes
+   * X's previous token. Every session SERVED BY X that is currently frozen on an
+   * org-switch-pending snapshot token is replaying that now-revoked token in its
+   * KA — and an idle one issues no real request to discover the rotation, so it
+   * 401s until `auth_retry_exhausted` → disarm → its warm cache ages out and dies.
+   *
+   * Unfreeze those sessions here so their KA re-arms with X's CURRENT token on the
+   * next tick — proactively, not reactively per-401. This is a token SWAP only
+   * (the pin / served org is unchanged; `getTokenForSession` still resolves X) —
+   * never a cross-org migration. Best-effort by design: a session this org
+   * resolution misses (e.g. multi-process `.claude.json` org oscillation) is
+   * still caught by the KA-401 frozen-replay fall-through (the guaranteed backstop).
+   */
+  private reconcileFrozenSessionsForChangedOrg(): void {
+    // "Which org did the fresh disk credential belong to?" has no single reliable
+    // signal at fs.watch time (the account file's org can lag / oscillate under
+    // multiple CC processes), so consider BOTH — the active resolver AND the
+    // account-file org — as candidate changed orgs. A frozen session whose served
+    // org is either is thawed. Anything this misses (rare oscillation) is still
+    // caught reactively by the KA-401 frozen-replay fall-through.
+    const candidates = new Set<string>()
+    const active = this.orgIdResolver.current()
+    if (active) candidates.add(active)
+    const cfgOrg = readOrgInfoFromConfig().orgId
+    if (cfgOrg) candidates.add(cfgOrg)
+    if (candidates.size === 0) return
+    let thawedSessions = 0
+    let thawedLineages = 0
+    for (const s of this.store.list()) {
+      const served = this.resolveServedOrg(s.sessionId)
+      if (!served || !candidates.has(served)) continue
+      const n = s.engine.clearAllOrgSwitchPending()
+      if (n > 0) { thawedSessions++; thawedLineages += n }
+    }
+    if (thawedSessions > 0) {
+      this.events.emit({
+        level: 'info', kind: 'ORG_TOKEN_REFRESHED',
+        orgId: [...candidates].join(','), reason: 'relogin-reconcile',
+        sessions: thawedSessions, lineages: thawedLineages,
+        msg: `credentials changed (org ${[...candidates].map(o => o.slice(0, 8)).join('/')}) — `
+          + `proactively thawed ${thawedLineages} frozen KA lineage(s) across ${thawedSessions} `
+          + `served session(s) so their KA adopts the fresh token before any 401`,
+      })
+    }
+  }
+
+  /** Test seam — run the credentials-change frozen-session reconcile directly. */
+  _reconcileFrozenSessionsForChangedOrg(): void { this.reconcileFrozenSessionsForChangedOrg() }
+
+  /** Test seam — how many KA lineages a session is currently frozen (org-switch-pending) on. */
+  _sessionFrozenLineages(sessionId: string): number {
+    const s = this.store.list().find(x => x.sessionId === sessionId)
+    return s ? s.engine._orgSwitchPending.size : 0
   }
 
   /**

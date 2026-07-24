@@ -82,6 +82,32 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     samplingParams: false,
     cost: { input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
   },
+  // Opus 5 — released 2026-07-24; replaces Opus 4.8 as the flagship Opus tier.
+  // Same adaptive-only class as Fable 5 / Opus 4.7-4.8: sampling params
+  // (temperature/top_p/top_k) and budget_tokens are REMOVED (400 if sent);
+  // adaptive thinking is the only on-mode (effort defaults to high).
+  'claude-opus-5': {
+    name: 'Claude Opus 5',
+    context: 1_000_000,
+    defaultOutput: 64_000,   // flagship happy-path cap (mirrors opus-4-8)
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  },
+  // Sonnet 5 — released 2026-07-24; near-Opus quality in the Sonnet tier.
+  // Adaptive thinking on by default; sampling params + budget_tokens REMOVED
+  // (400 if sent). Standard price $3/$15 (intro $2/$10 through 2026-08-31 —
+  // NOT encoded here to avoid a time-bomb in the savings display).
+  'claude-sonnet-5': {
+    name: 'Claude Sonnet 5',
+    context: 1_000_000,
+    defaultOutput: 64_000,   // Opus-tier quality now → generous cap vs 4.6's 32k
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    cost: { input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 },
+  },
   'claude-opus-4-8': {
     name: 'Claude Opus 4.8',
     context: 1_000_000,
@@ -201,6 +227,8 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
   // Legacy fuzzy checks for models not in the table (e.g. preview variants)
   const lower = modelId.toLowerCase()
   return (
+    lower.includes('opus-5') ||
+    lower.includes('sonnet-5') ||
     lower.includes('fable-5') ||
     lower.includes('opus-4-8') ||
     lower.includes('opus-4-7') ||
@@ -222,6 +250,8 @@ export function supportsSamplingParams(modelId: string): boolean {
   const lower = modelId.toLowerCase()
   // Unknown model: deny only for known sampling-removed families
   return !(
+    lower.includes('opus-5') ||
+    lower.includes('sonnet-5') ||
     lower.includes('fable-5') ||
     lower.includes('opus-4-8') ||
     lower.includes('opus-4-7')

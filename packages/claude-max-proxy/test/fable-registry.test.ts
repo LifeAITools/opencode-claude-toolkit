@@ -110,3 +110,64 @@ describe('translateToAnthropicBody — 400-safety on sampling-removed models', (
     expect(body.thinking?.budget_tokens).toBeGreaterThan(0)
   })
 })
+
+describe('5-series launch — opus-5 / sonnet-5 (2026-07-24)', () => {
+  const baseReq = (model: string, extra: Partial<OAIChatRequest> = {}): OAIChatRequest => ({
+    model,
+    messages: [{ role: 'user', content: 'hi' }],
+    temperature: 0.7,
+    top_p: 0.9,
+    ...extra,
+  } as OAIChatRequest)
+
+  test('both reachable by direct id and proxy-style alias', () => {
+    expect(resolveModel('claude-opus-5')).toBe('claude-opus-5')
+    expect(resolveModel('claude-v5-opus')).toBe('claude-opus-5')
+    expect(resolveModel('claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(resolveModel('claude-v5-sonnet')).toBe('claude-sonnet-5')
+    expect(SUPPORTED_MODELS.some(m => m.id === 'claude-opus-5')).toBe(true)
+    expect(SUPPORTED_MODELS.some(m => m.id === 'claude-sonnet-5')).toBe(true)
+  })
+
+  test('opus-5 registry entry: adaptive-only, sampling removed, 5/25 pricing, 1M/128k', () => {
+    const meta = MAX_MODELS['claude-opus-5']
+    expect(meta).toBeDefined()
+    expect(meta.adaptiveThinking).toBe(true)
+    expect(meta.samplingParams).toBe(false)
+    expect(meta.context).toBe(1_000_000)
+    expect(meta.maxOutput).toBe(128_000)
+    expect(meta.cost).toEqual({ input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 })
+  })
+
+  test('sonnet-5 registry entry: adaptive-only, sampling removed, 3/15 pricing, 1M/128k', () => {
+    const meta = MAX_MODELS['claude-sonnet-5']
+    expect(meta).toBeDefined()
+    expect(meta.adaptiveThinking).toBe(true)
+    expect(meta.samplingParams).toBe(false)
+    expect(meta.context).toBe(1_000_000)
+    expect(meta.maxOutput).toBe(128_000)
+    expect(meta.cost).toEqual({ input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 })
+  })
+
+  test('capability gates resolve correctly for both (incl. dated snapshot variant)', () => {
+    for (const id of ['claude-opus-5', 'claude-sonnet-5', 'claude-opus-5-20260724']) {
+      expect(supportsAdaptiveThinking(id), `${id} must be adaptive`).toBe(true)
+      expect(supportsSamplingParams(id), `${id} must reject sampling params`).toBe(false)
+    }
+  })
+
+  test('400-safety: temperature/top_p dropped on opus-5 and sonnet-5 (would 400 upstream)', () => {
+    for (const id of ['claude-opus-5', 'claude-sonnet-5']) {
+      const body = JSON.parse(translateToAnthropicBody(baseReq(id)).body)
+      expect(body.temperature, `${id} temperature must be dropped`).toBeUndefined()
+      expect(body.top_p, `${id} top_p must be dropped`).toBeUndefined()
+    }
+  })
+
+  test('reasoning_effort on opus-5/sonnet-5 → adaptive thinking, never budget_tokens', () => {
+    for (const id of ['claude-opus-5', 'claude-sonnet-5']) {
+      const body = JSON.parse(translateToAnthropicBody(baseReq(id, { reasoning_effort: 'high' })).body)
+      expect(body.thinking).toEqual({ type: 'adaptive' })
+    }
+  })
+})

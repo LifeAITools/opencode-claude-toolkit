@@ -2505,21 +2505,50 @@ export class ProxyClient {
       // (which keep the same lineageKey) never trip it. Read-only (purity).
       let warmSiblingExists = false
       let siblingKey: string | undefined
+      let warmSiblingKind: 'tools' | 'system' | undefined
       if (isFirstRequest) {
-        const sysHash = lineageKey.slice(0, lineageKey.indexOf(':'))
-        const siblingPrefix = `${sessionId}:${sysHash}:`
+        const sep = lineageKey.indexOf(':')
+        const sysHash = lineageKey.slice(0, sep)
+        const toolsHash = lineageKey.slice(sep + 1)
+        // Look BOTH ways. The original search matched a shared system hash only — it saw a
+        // tool flick and was blind to its mirror image, a system move with a stable tool
+        // set. Measured 2026-07-26 (session 8420a526): entering a git worktree rewrote
+        // `Primary working directory` inside the CACHED system block, so the same 163 tools
+        // produced a new lineage; the predecessor had completed 1.011s earlier — the prefix
+        // was hot — and the turn was still called `expected:cold-start` at ~370k tokens and
+        // blocked. Half a detector reports half the drift.
         let bestWarm = -1
         for (const [k, e] of this.prefixHistory) {
-          if (k === key || !k.startsWith(siblingPrefix)) continue
+          if (k === key || !k.startsWith(`${sessionId}:`)) continue
+          const rest = k.slice(sessionId.length + 1)
+          const kSep = rest.indexOf(':')
+          if (kSep < 0) continue
+          const sameSystem = rest.slice(0, kSep) === sysHash
+          const sameTools = rest.slice(kSep + 1) === toolsHash
+          // Exactly ONE half must match: sharing neither is an unrelated lineage, and
+          // sharing both is impossible (that would be this very key).
+          if (sameSystem === sameTools) continue
           const warmAt = Math.max(e.lastReqAt, e.lastKaAt ?? 0)
-          if (now - warmAt <= ttlMs && warmAt > bestWarm) { warmSiblingExists = true; siblingKey = k; bestWarm = warmAt }
+          if (now - warmAt <= ttlMs && warmAt > bestWarm) {
+            warmSiblingExists = true
+            siblingKey = k
+            // Name the half that MOVED, not the half that matched — the reader needs to know
+            // what changed. Same system ⇒ the tools moved; same tools ⇒ the system moved.
+            warmSiblingKind = sameSystem ? 'tools' : 'system'
+            bestWarm = warmAt
+          }
         }
       }
       // Observability (NOT enforcement): when the tool set changed vs a still-warm
       // sibling, compute the exact tool diff so the user sees WHAT changed and
       // ~how much re-caches — once per flick (isFirstRequest), no per-request storm.
       let toolDrift = ''
-      if (warmSiblingExists && siblingKey) {
+      if (warmSiblingExists && siblingKey && warmSiblingKind === 'system') {
+        // A SYSTEM move: say so plainly, and say what it costs. This is the line whose
+        // absence made "entering a worktree re-caches your whole context" unknowable.
+        toolDrift = ` [system-prompt drift, same tool set → ~${Math.round(bodyBytes / 4)} tok re-cache`
+          + ` — e.g. a cwd/worktree switch or a CLI upgrade rewrites the cached system block]`
+      } else if (warmSiblingExists && siblingKey) {
         const sib = toolNameSet(this.lineagePrefix.get(siblingKey)?.tools)
         const now2 = toolNameSet(body.tools)
         const removed = [...sib].filter((t) => !now2.has(t))
@@ -2547,7 +2576,7 @@ export class ProxyClient {
         return { commit, assessment: null }
       }
 
-      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart, kaRevivalDropped, warmSiblingExists })
+      const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart, kaRevivalDropped, warmSiblingExists, warmSiblingKind })
       // When the cacheable prefix diverges or expires, ~the whole context
       // re-caches. bodyBytes/4 is a rough token estimate — adequate for a
       // threshold check (the guard) and a human-readable log figure.

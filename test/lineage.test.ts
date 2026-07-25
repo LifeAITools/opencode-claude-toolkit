@@ -221,6 +221,36 @@ describe('classifyRewrite', () => {
     expect(classifyRewrite({ isFirstRequest: true }).class).toBe('expected:cold-start')
   })
 
+  test('a warm sibling sharing the TOOL SET → expected:system-changed, not a cold start', () => {
+    // The mirror image of the tool flick, and it was invisible until it cost something.
+    // Measured 2026-07-26 (session 8420a526): entering a git worktree rewrites `Primary
+    // working directory` inside the CACHED system block, so the SAME 163 tools produced a
+    // new lineage. Its predecessor had completed 1.011 SECONDS earlier — the prefix was
+    // demonstrably hot — and the turn was still called `expected:cold-start` at ~370k tokens
+    // and blocked for consent. "Cold start" means nothing of this session is cached; here
+    // almost everything was.
+    const v = classifyRewrite({ isFirstRequest: true, warmSiblingExists: true, warmSiblingKind: 'system' })
+    expect(v.class).toBe('expected:system-changed')
+    expect(v.expected).toBe(true)  // the client moved it; the proxy could not have prevented it
+  })
+
+  test('the two drifts are told apart, because their causes and cures differ', () => {
+    // A tool flick is transient (MCP connect/disconnect). A system move is usually
+    // deliberate — a worktree switch, a CLI upgrade — and its price is the whole context.
+    // Reporting both as "tools-changed" sends the reader hunting a tool that never moved.
+    expect(classifyRewrite({ isFirstRequest: true, warmSiblingExists: true, warmSiblingKind: 'tools' }).class)
+      .toBe('expected:tools-changed')
+    expect(classifyRewrite({ isFirstRequest: true, warmSiblingExists: true, warmSiblingKind: 'system' }).class)
+      .toBe('expected:system-changed')
+  })
+
+  test('an unspecified sibling kind still reads as the tool flick (back-compat)', () => {
+    // Older callers pass no kind; they must keep their previous verdict rather than fall
+    // into the new class by accident.
+    expect(classifyRewrite({ isFirstRequest: true, warmSiblingExists: true }).class)
+      .toBe('expected:tools-changed')
+  })
+
   test('warmSiblingExists is IGNORED when NOT a first request (same lineage)', () => {
     const v = classifyRewrite({ isFirstRequest: false, warmSiblingExists: true })
     expect(v.expected).toBe(true)  // never a problem-class from a sibling on a continuing request

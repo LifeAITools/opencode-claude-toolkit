@@ -111,7 +111,7 @@ export declare const DEFAULT_ROLE_WEIGHTS: RoleWeights;
  * candidate (cost asymmetry: under-KA is expensive, over-KA is cheap).
  */
 export declare function classifyRole(body: unknown, headers: unknown, hints?: RoleHints, weights?: RoleWeights): RoleClassification;
-export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'expected:proxy-restart' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
+export type RewriteClass = 'expected:cold-start' | 'expected:compact' | 'expected:tools-changed' | 'expected:system-changed' | 'expected:proxy-restart' | 'avoidable:ttl-expiry' | 'anomalous:stale-ka-snapshot' | 'anomalous:org-switch' | 'unknown';
 export interface RewriteContext {
     /** This is the first request observed for the lineage. */
     isFirstRequest?: boolean;
@@ -151,6 +151,24 @@ export interface RewriteContext {
      *  Detected purely from the stable head (system+tools via the lineageKey),
      *  never the volatile message tail. Only meaningful with `isFirstRequest`. */
     warmSiblingExists?: boolean;
+    /** WHICH half of the lineage key the warm sibling shares — i.e. which half MOVED.
+     *
+     *  `'tools'` (the original case): same system, different tool set → the tool set flicked.
+     *  `'system'`: same tool set, different system → the SYSTEM prompt moved mid-session.
+     *
+     *  🔴 WHY THE SECOND CASE EXISTS (measured 2026-07-26, session 8420a526). The sibling
+     *  search only ever looked for a shared SYSTEM hash, so it saw tool drift and was blind to
+     *  system drift — the mirror image of the same event. A session entered a git worktree,
+     *  which rewrites `Primary working directory` inside the CACHED system block: same 163
+     *  tools, new system hash, new lineage. Its predecessor had completed a request **1.011
+     *  seconds earlier** — the prefix was demonstrably hot — yet the turn was classified
+     *  `expected:cold-start` at ~370k tokens and blocked for consent.
+     *
+     *  A cold start means "nothing of this session is cached". Here almost everything was.
+     *  The verdict was not merely noisy, it was false, and it hid the fact worth knowing:
+     *  entering a worktree mid-session re-caches the entire context. Nobody could learn that
+     *  from a message saying "cold start". */
+    warmSiblingKind?: 'tools' | 'system';
 }
 export interface RewriteVerdict {
     class: RewriteClass;

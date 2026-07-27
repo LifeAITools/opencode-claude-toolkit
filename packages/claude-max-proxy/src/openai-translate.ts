@@ -1007,6 +1007,8 @@ const OAUTH_BETA = 'oauth-2025-04-20'
 const CLAUDE_CODE_BETA = 'claude-code-20250219'
 const INTERLEAVED_THINKING_BETA = 'interleaved-thinking-2025-05-14'
 const EFFORT_BETA = 'effort-2025-11-24'
+/** Effort levels the API refuses while thinking is disabled ("use 'high' or below"). */
+const EFFORT_ABOVE_HIGH = new Set(['xhigh', 'max'])
 const CONTEXT_MANAGEMENT_BETA = 'context-management-2025-06-27'
 const TASK_BUDGETS_BETA = 'task-budgets-2026-03-13'
 const REDACT_THINKING_BETA = 'redact-thinking-2026-02-12'
@@ -1056,7 +1058,37 @@ export function enrichAnthropicRequest(
   betas.push(REDACT_THINKING_BETA)
   betas.push(PROMPT_CACHING_SCOPE_BETA)
   betas.push(FINE_GRAINED_TOOL_STREAMING_BETA)
-  if (body.thinking) betas.push(EFFORT_BETA)
+  if (body.thinking || body.output_config) betas.push(EFFORT_BETA)
+
+  // ── Effort must not outrank thinking ────────────────────────────
+  // A request carrying `output_config.effort` ABOVE 'high' while `thinking` is disabled is
+  // rejected outright: "output_config.effort 'xhigh' is not supported when thinking is
+  // disabled on this model." The client composes exactly that pair for its server-side
+  // tool calls — WebSearch spawns a sub-request with `thinking: {type:'disabled'}` that
+  // still INHERITS the session's effort — so on this machine every WebSearch issued by
+  // any agent running at xhigh returned 400, twice (the client retries once), and the
+  // tool simply did not work. Not "limited access": none, and only for high-effort
+  // sessions, which is why it read as intermittent.
+  //
+  // Measured, not inferred: proxy body dumps of the failing 880-byte requests carry
+  // `{"thinking":{"type":"disabled"},"output_config":{"effort":"xhigh"},"messages":[{...
+  // "Perform a web search for the query: ..."}]}`.
+  //
+  // Clamping is the remedy the API itself names, and the alternative — switching thinking
+  // on — would change the shape and cost of a request the client did not ask to think.
+  // The repair is LOGGED rather than silent: a proxy that quietly rewrites requests is the
+  // next invisible defect, and a rewrite nobody can see is one nobody can disprove.
+  const effortCarrier = body.output_config as { effort?: string } | undefined
+  const thinkingOff =
+    !body.thinking || (body.thinking as { type?: string } | null)?.type === 'disabled'
+  if (effortCarrier?.effort && thinkingOff && EFFORT_ABOVE_HIGH.has(effortCarrier.effort)) {
+    const was = effortCarrier.effort
+    effortCarrier.effort = 'high'
+    console.warn(
+      `WARN EFFORT_CLAMPED effort=${was}->high reason=thinking_disabled model=${body.model} ` +
+      `— the API rejects '${was}' without thinking; clamped so the call succeeds`,
+    )
+  }
 
   // Merge with any betas the consumer already sent
   const existingBeta = consumerHeaders['anthropic-beta'] ?? ''

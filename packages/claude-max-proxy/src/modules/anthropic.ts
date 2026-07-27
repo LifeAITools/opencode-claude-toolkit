@@ -7,7 +7,7 @@
  */
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
-import { enrichAnthropicRequest } from '../openai-translate.js'
+import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
 import { captureBody } from '../body-capture.js'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
 
@@ -38,6 +38,22 @@ export function createAnthropicModule(): ProxyModule {
           const enriched = enrichAnthropicRequest(rawBodyStr, headers, sessionId)
           forwardBody = enriched.body
           forwardHeaders = enriched.headers
+        } else {
+          // 🔴 REQUEST-VALIDITY REPAIR — must reach NATIVE Claude Code too.
+          // Enrichment above is subscription-compat and is deliberately skipped for the
+          // native CLI, which forwards its body untouched. But the effort/thinking clamp is
+          // not compat: the API REJECTS `output_config.effort: xhigh` when thinking is
+          // disabled, and the client composes exactly that pair for its server-side tool
+          // calls — so every web search from a native agent at xhigh returned 400 while the
+          // clamp sat on the branch those agents never take. It shipped "verified" because
+          // the verifying curl had no `claude-cli/` user-agent and took the enriched path.
+          try {
+            const parsed = JSON.parse(rawBodyStr) as Record<string, unknown>
+            if (clampEffortIfThinkingDisabled(parsed)) forwardBody = JSON.stringify(parsed)
+          } catch {
+            // Not JSON (or malformed) — forward untouched; this repair must never be able
+            // to break a request it does not understand.
+          }
         }
 
         captureBody(rawBody, headers, { sessionId, sourcePid, srcPort })

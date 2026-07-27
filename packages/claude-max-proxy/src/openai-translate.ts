@@ -1043,6 +1043,40 @@ export interface AnthropicEnrichResult {
  * The consumer sends a standard `anthropic` SDK request; we make it
  * indistinguishable from a native Claude Code CLI request.
  */
+
+/**
+ * Lower `output_config.effort` to 'high' when thinking is disabled. Mutates `body`.
+ * Returns the previous value when it clamped, else null.
+ *
+ * 🔴 MUST RUN ON EVERY REQUEST, INCLUDING NATIVE CLAUDE CODE. The first version of this
+ * lived inside `enrichAnthropicRequest`, which `modules/anthropic.ts` calls only for
+ * NON-native clients (`if (!isNativeCC)`). Native Claude Code forwards its raw body
+ * untouched — and native Claude Code agents are exactly who run at xhigh and lose every
+ * web search. So the clamp ran for nobody who had the bug, while my own curl (no
+ * `claude-cli/` user-agent) took the enriched path and "verified" the fix.
+ *
+ * That is the fourth instance in one day of fixing a function the affected caller does not
+ * call. This is a REQUEST-VALIDITY repair, not subscription enrichment: the API rejects the
+ * pair outright, so it belongs on the shared path, unconditionally.
+ */
+export function clampEffortIfThinkingDisabled(body: Record<string, unknown>): string | null {
+  const carrier = body.output_config as { effort?: string } | undefined
+  const thinkingOff =
+    !body.thinking || (body.thinking as { type?: string } | null)?.type === 'disabled'
+  if (!carrier?.effort || !thinkingOff || !EFFORT_ABOVE_HIGH.has(carrier.effort)) return null
+  const was = carrier.effort
+  carrier.effort = 'high'
+  emit({
+    level: 'info',
+    kind: 'EFFORT_CLAMPED',
+    msg: `effort ${was}->high (thinking disabled) — the API rejects '${was}' without thinking; clamped so the call succeeds`,
+    model: String(body.model ?? ''),
+    from: was,
+    to: 'high',
+  })
+  return was
+}
+
 export function enrichAnthropicRequest(
   rawBody: string,
   consumerHeaders: Record<string, string>,
@@ -1088,29 +1122,7 @@ export function enrichAnthropicRequest(
   // on — would change the shape and cost of a request the client did not ask to think.
   // The repair is LOGGED rather than silent: a proxy that quietly rewrites requests is the
   // next invisible defect, and a rewrite nobody can see is one nobody can disprove.
-  const effortCarrier = body.output_config as { effort?: string } | undefined
-  const thinkingOff =
-    !body.thinking || (body.thinking as { type?: string } | null)?.type === 'disabled'
-  if (effortCarrier?.effort && thinkingOff && EFFORT_ABOVE_HIGH.has(effortCarrier.effort)) {
-    const was = effortCarrier.effort
-    effortCarrier.effort = 'high'
-    // Through the BUS, not console.*. Verified the hard way: the first cut of this used
-    // `console.warn`, the clamp demonstrably fired (the replayed request that used to 400
-    // came back with search results), and the warning appeared in NEITHER log — the file
-    // sink and stdout are both fed by the event bus, so anything written straight to the
-    // console is invisible to every reader. A rewrite nobody can see is one nobody can
-    // disprove, which is the whole reason this line exists.
-    emit({
-      level: 'info',
-      kind: 'EFFORT_CLAMPED',
-      msg:
-        `effort ${was}->high (thinking disabled) — the API rejects '${was}' without ` +
-        `thinking; clamped so the call succeeds`,
-      model: String(body.model ?? ''),
-      from: was,
-      to: 'high',
-    })
-  }
+  clampEffortIfThinkingDisabled(body)
 
   // Merge with any betas the consumer already sent
   const existingBeta = consumerHeaders['anthropic-beta'] ?? ''

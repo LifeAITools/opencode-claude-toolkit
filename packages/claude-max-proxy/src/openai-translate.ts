@@ -12,6 +12,7 @@
  */
 
 import { supportsAdaptiveThinking, supportsSamplingParams } from '@life-ai-tools/claude-code-sdk'
+import { emit } from './event-bus'
 
 // ═══ OpenAI Types ═══════════════════════════════════════════════════
 
@@ -141,7 +142,16 @@ export function resolveModel(model: string): string {
   if (resolved) return resolved
   if (!warnedUnknownModels.has(model)) {
     warnedUnknownModels.add(model)
-    console.error(`WARN  UNKNOWN_MODEL_PASSTHROUGH model=${model} — not in any model map; passing through as-is. Add it to models.ts + openai-translate.ts (see docs/adding-a-model.md)`)
+    // Bus, not console: this project's CLAUDE.md instructs the reader to "watch the proxy
+    // log for WARN UNKNOWN_MODEL_PASSTHROUGH — that's the day-1 signal a model shipped",
+    // and a console write reaches neither log (both sinks are fed by the bus). The
+    // day-1 signal could not have fired. Found while fixing the identical mistake below.
+    emit({
+      level: 'info',
+      kind: 'UNKNOWN_MODEL_PASSTHROUGH',
+      msg: `model=${model} not in any model map; passing through as-is. Add it to models.ts + openai-translate.ts (see docs/adding-a-model.md)`,
+      model,
+    })
   }
   return model
 }
@@ -1084,10 +1094,22 @@ export function enrichAnthropicRequest(
   if (effortCarrier?.effort && thinkingOff && EFFORT_ABOVE_HIGH.has(effortCarrier.effort)) {
     const was = effortCarrier.effort
     effortCarrier.effort = 'high'
-    console.warn(
-      `WARN EFFORT_CLAMPED effort=${was}->high reason=thinking_disabled model=${body.model} ` +
-      `— the API rejects '${was}' without thinking; clamped so the call succeeds`,
-    )
+    // Through the BUS, not console.*. Verified the hard way: the first cut of this used
+    // `console.warn`, the clamp demonstrably fired (the replayed request that used to 400
+    // came back with search results), and the warning appeared in NEITHER log — the file
+    // sink and stdout are both fed by the event bus, so anything written straight to the
+    // console is invisible to every reader. A rewrite nobody can see is one nobody can
+    // disprove, which is the whole reason this line exists.
+    emit({
+      level: 'info',
+      kind: 'EFFORT_CLAMPED',
+      msg:
+        `effort ${was}->high (thinking disabled) — the API rejects '${was}' without ` +
+        `thinking; clamped so the call succeeds`,
+      model: String(body.model ?? ''),
+      from: was,
+      to: 'high',
+    })
   }
 
   // Merge with any betas the consumer already sent

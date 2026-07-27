@@ -9,8 +9,10 @@
   `PRPs/fable-5-support/evolution.md`).
 - **New Anthropic model → follow `docs/adding-a-model.md`** (registry entry +
   openai-translate maps + registry-completeness test + deploy + live-verify).
-  Watch the proxy log for `WARN UNKNOWN_MODEL_PASSTHROUGH` — that's the day-1
-  signal a model shipped.
+  Watch the proxy log for `UNKNOWN_MODEL_PASSTHROUGH` — that's the day-1
+  signal a model shipped. (It is emitted on the event bus at `info`; the bus has
+  no `warn` level, and until 1.0.21 this went to `console.error`, which reaches
+  neither log sink — so the day-1 signal could not actually fire.)
 
 ## 🔴 Per-org OAuth token freshness
 

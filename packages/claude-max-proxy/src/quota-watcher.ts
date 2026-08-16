@@ -42,7 +42,7 @@
  *      - Emit TOKEN_FILE_CHANGED to event-bus (so it appears in
  *        proxy.log + heartbeat).
  *
- * 4. Threshold detection: util5h ≥ 0.98 OR util7d ≥ 0.99 → critical.
+ * 4. Threshold detection: util5h ≥ 0.90 OR util7d ≥ 0.99 → critical.
  *    Per-pid critical state is reported to ~/.claude-local/
  *    quota-status.json (atomic write tmp+rename).
  *
@@ -123,7 +123,11 @@ import {
 const STATS_POLL_INTERVAL_MS = 1_000          // tail polling cadence
 const QUOTA_WRITE_THROTTLE_MS = 5_000         // min interval between SSOT writes
 const PID_STATE_PRUNE_AFTER_MS = 30 * 60_000  // forget pids silent >30min
-const UTIL5H_CRITICAL = 0.98
+// 0.98 → 0.90 (2026-08-16, founder directive): agents given the critical signal at
+// 98% could not finish their current step in the remaining 2% and ran into 100%
+// and a 429 storm. 10% headroom buys a lossless wrap-up. Mirrors the engine-side
+// stop wall (signal-wire quota-critical-5h, also 0.90).
+const UTIL5H_CRITICAL = 0.90
 const UTIL7D_CRITICAL = 0.99
 const UTIL5H_WARNING = 0.85
 const UTIL7D_WARNING = 0.95

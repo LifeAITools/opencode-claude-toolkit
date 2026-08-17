@@ -397,7 +397,13 @@ export interface HandleRequestContext {
 
 export interface RateLimitSnapshot {
   status: string | null
+  /** Когда сбрасывается ПЯТИЧАСОВОЕ окно, epoch-секунды. Это то окно, которое останавливает
+   * работу, и то, что человек имеет в виду, спрашивая «когда отпустит». */
   resetAt: number | null
+  /** Когда сбрасывается НЕДЕЛЬНОЕ окно, epoch-секунды. Отдельное поле, потому что часы разные:
+   * замерено в один момент — пятичасовое через 13 минут, недельное через 142 часа. Одно число не
+   * может стоять за оба, и потребитель, показывающий «сброс в …», обязан сказать, какое именно. */
+  resetAt7d?: number | null
   claim: string | null
   retryAfter: number | null
   utilization5h: number | null
@@ -443,7 +449,7 @@ export class ProxyClient {
 
   private readonly reaperTimer: ReturnType<typeof setInterval>
   private lastRateLimit: RateLimitSnapshot = {
-    status: null, resetAt: null, claim: null, retryAfter: null,
+    status: null, resetAt: null, resetAt7d: null, claim: null, retryAfter: null,
     utilization5h: null, utilization7d: null,
   }
 
@@ -2691,11 +2697,40 @@ const NETWORK_ERROR_CODES = new Set([
   'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
 ])
 
-function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
+/** Epoch-seconds out of the FIRST header that carries one. Anthropic sends the reset PER WINDOW —
+ * `…unified-5h-reset` and `…unified-7d-reset` — and never the bare `…unified-reset` this parser used
+ * to ask for. So the field was `null` for as long as it has existed, and the proxy's own critical
+ * message printed «Reset in nullmin. STOP NEW WORK» to every agent that hit the wall.
+ *
+ * 🔴 MEASURED, NOT INFERRED (2026-08-17): a live request through the proxy returned
+ * `anthropic-ratelimit-unified-5h-reset: 1786998000` and `…-7d-reset: 1787508000`, and this code's
+ * OWN header log (`~/.claude/claude-max-headers.log`) shows the same per-window names as far back as
+ * 26 July. The bare name appears in no response, in no log line — the neighbouring `utilization`
+ * reads got the window suffix right, and only this one was written without it. */
+function firstEpochSeconds(headers: Headers, names: readonly string[]): number | null {
+  for (const n of names) {
+    const raw = headers.get(n)
+    if (!raw) continue
+    const v = Number(raw)
+    if (Number.isFinite(v)) return v
+  }
+  return null
+}
+
+export function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
   return {
     status: headers.get('anthropic-ratelimit-unified-status'),
-    resetAt: headers.get('anthropic-ratelimit-unified-reset')
-      ? Number(headers.get('anthropic-ratelimit-unified-reset')) : null,
+    // The 5h window first: it is the one that actually stops work, and the one every consumer means
+    // by «when does the quota reset». The bare name is kept LAST rather than dropped — it costs one
+    // lookup and covers an upstream that goes back to a single unified reset.
+    resetAt: firstEpochSeconds(headers, [
+      'anthropic-ratelimit-unified-5h-reset',
+      'anthropic-ratelimit-unified-reset',
+    ]),
+    /** The 7d window's own reset, alongside the 5h one — they are different clocks (measured the
+     * same day: 5h reset 13 minutes out, 7d reset 142 hours out), so one number cannot stand for
+     * both and a consumer showing «quota resets at …» must say WHICH. */
+    resetAt7d: firstEpochSeconds(headers, ['anthropic-ratelimit-unified-7d-reset']),
     claim: headers.get('anthropic-ratelimit-unified-representative-claim'),
     retryAfter: headers.get('retry-after')
       ? parseFloat(headers.get('retry-after')!) : null,

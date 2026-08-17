@@ -234,7 +234,13 @@ export interface HandleRequestContext {
 }
 export interface RateLimitSnapshot {
     status: string | null;
+    /** Когда сбрасывается ПЯТИЧАСОВОЕ окно, epoch-секунды. Это то окно, которое останавливает
+     * работу, и то, что человек имеет в виду, спрашивая «когда отпустит». */
     resetAt: number | null;
+    /** Когда сбрасывается НЕДЕЛЬНОЕ окно, epoch-секунды. Отдельное поле, потому что часы разные:
+     * замерено в один момент — пятичасовое через 13 минут, недельное через 142 часа. Одно число не
+     * может стоять за оба, и потребитель, показывающий «сброс в …», обязан сказать, какое именно. */
+    resetAt7d?: number | null;
     claim: string | null;
     retryAfter: number | null;
     utilization5h: number | null;
@@ -617,6 +623,7 @@ export declare class ProxyClient {
     private commitPrefixHistory;
     private handleNetworkError;
 }
+export declare function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot;
 /**
  * Extract the Claude Code session id from a request body's `metadata.user_id`.
  *

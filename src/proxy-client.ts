@@ -2388,6 +2388,17 @@ export class ProxyClient {
           util5h: reqRateLimit.utilization5h,
           util7d: reqRateLimit.utilization7d,
           status: reqRateLimit.status,
+          // 🔴 ИСТОК ПОТЕРИ ВРЕМЕНИ СБРОСА. Заголовок приходит на КАЖДОМ ответе и разбирается
+          // строкой выше (`parseRateLimitHeaders`), но в событие клались три поля из четырёх — а
+          // дальше по цепочке взять его уже неоткуда. Итог был виден всем: `resetAt: null` во всех
+          // аккаунтах и предупреждение «Reset in nullmin. STOP NEW WORK», то есть механизм, который
+          // пытается назвать время и печатает пустоту.
+          //
+          // Замерено 2026-08-17: `anthropic-ratelimit-unified-reset: 1787016000` вместе с
+          // `unified-5h-reset` того же значения; в собственном логе заголовков обе формы по 12054
+          // раза. Ни один шов ниже не был виноват — терялось здесь, при сборке события.
+          resetAt: reqRateLimit.resetAt,
+          resetAt7d: reqRateLimit.resetAt7d ?? null,
         },
       })
     } catch (err: any) {
@@ -2697,16 +2708,17 @@ const NETWORK_ERROR_CODES = new Set([
   'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
 ])
 
-/** Epoch-seconds out of the FIRST header that carries one. Anthropic sends the reset PER WINDOW —
- * `…unified-5h-reset` and `…unified-7d-reset` — and never the bare `…unified-reset` this parser used
- * to ask for. So the field was `null` for as long as it has existed, and the proxy's own critical
- * message printed «Reset in nullmin. STOP NEW WORK» to every agent that hit the wall.
+/** Epoch-seconds out of the FIRST header that carries one.
  *
- * 🔴 MEASURED, NOT INFERRED (2026-08-17): a live request through the proxy returned
- * `anthropic-ratelimit-unified-5h-reset: 1786998000` and `…-7d-reset: 1787508000`, and this code's
- * OWN header log (`~/.claude/claude-max-headers.log`) shows the same per-window names as far back as
- * 26 July. The bare name appears in no response, in no log line — the neighbouring `utilization`
- * reads got the window suffix right, and only this one was written without it. */
+ * 🔴 ЗДЕСЬ ЖЕ ЗАПИСАНА ОШИБКА, С КОТОРОЙ ЭТА ПРАВКА НАЧАЛАСЬ, — она дороже самой правки. Сначала
+ * было заявлено: «заголовка `…unified-reset` не существует, парсер спрашивает пустоту». НЕВЕРНО.
+ * Живой запрос 2026-08-17 вернул ОБА имени с одинаковым значением (`unified-reset: 1787016000` и
+ * `unified-5h-reset: 1787016000`), и в собственном логе заголовков обе формы встречаются по 12054
+ * раза. Вывод был сделан по списку, обрезанному на двенадцатой строке.
+ *
+ * Настоящая потеря была НЕ ЗДЕСЬ, а при сборке события REAL_REQUEST_COMPLETE, которое клало три
+ * поля из четырёх (починено там же). Эта функция остаётся полезной по другой причине: окна — разные
+ * часы, и недельное время не читалось вовсе. */
 function firstEpochSeconds(headers: Headers, names: readonly string[]): number | null {
   for (const n of names) {
     const raw = headers.get(n)

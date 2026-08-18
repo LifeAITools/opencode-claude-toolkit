@@ -391,6 +391,29 @@ export interface HandleRequestContext {
    * re-send with an override marker. Default true (preserves native-CC behavior).
    */
   interactive?: boolean
+
+  /**
+   * WHICH DOOR named this session — the header (`x-claude-code-session-id`),
+   * the body (`metadata.user_id`), or nothing at all.
+   *
+   * `'none'` means the caller could not be named and `sessionId` is a synthetic
+   * `anon-*` label minted for THIS request only. Such a request is served
+   * normally, but it must never arm keepalive: the slot it would create can
+   * never be matched by a later request, so KA would warm a cache nobody will
+   * ever read.
+   *
+   * MEASURED 2026-08-18 on the live proxy (research/cache-accounting-remeasure-
+   * 2026-08-18.md): 463 of 521 persisted prefixes were such one-shot `anon-*`
+   * keys — EVERY ONE of them with exactly one entry, i.e. never matched again.
+   * 428 were still being warmed a median of 8.7h (max 24.8h) after their single
+   * request, and in one 29-minute window 70 of 89 KA fires (79%) and 6 592 380
+   * cache-read tokens (36%) were spent on sessions that could not return.
+   *
+   * Recorded on every `REAL_REQUEST_START` so "this session never reached the
+   * proxy" and "this session reached it unnamed" stay distinguishable in the
+   * journal. Default `'header'` (back-compat for callers that pre-date this).
+   */
+  idSource?: 'header' | 'body' | 'none'
 }
 
 // ═══ Rate limit snapshot (exposed for introspection) ═══════════════
@@ -848,6 +871,16 @@ export class ProxyClient {
   _sessionFrozenLineages(sessionId: string): number {
     const s = this.store.list().find(x => x.sessionId === sessionId)
     return s ? s.engine._orgSwitchPending.size : 0
+  }
+
+  /** Test seam — how many cache lineages this session's KA engine has been
+   *  PRIMED with. Zero is the whole invariant for an UNIDENTIFIED request
+   *  (`idSource:'none'`): with no lineage primed there is no pending snapshot
+   *  to commit, so the KA registry can never fill and tick() finds nothing to
+   *  fire. Unknown session → 0. */
+  _sessionPrimedLineages(sessionId: string): number {
+    const s = this.store.list().find(x => x.sessionId === sessionId)
+    return s ? s.engine._lineageStats.size : 0
   }
 
   /**
@@ -1367,6 +1400,11 @@ export class ProxyClient {
   ): Promise<Response> {
     const sessionId = ctx.sessionId
     const sourcePid = ctx.sourcePid ?? null
+    // An UNNAMED caller is served, but never warmed — its sessionId is minted
+    // per request, so a keepalive slot opened under it is unreachable forever
+    // after. See HandleRequestContext.idSource for the measurement.
+    const idSource = ctx.idSource ?? 'header'
+    const unidentified = idSource === 'none'
 
     // Get or create session with KA engine
     const session = this.store.getOrCreate(
@@ -1695,9 +1733,27 @@ export class ProxyClient {
     // prime the engine (aborts any in-flight KA, records the pending snapshot)
     // and advance prefix history. A blocked request returned above without
     // reaching here, so it never disturbs keepalive's warming of the OLD cache.
-    this.events.emit({ level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes })
-    session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
-    if (assessed) this.commitPrefixHistory(assessed.commit)
+    this.events.emit({ level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes, idSource })
+    if (unidentified) {
+      // Serve it — do not warm it. Skipping notifyRealRequestStart is what
+      // makes this airtight rather than cosmetic: no pending snapshot is
+      // recorded, so notifyRealRequestComplete has nothing to commit, the KA
+      // registry stays empty for this session and tick() finds nothing to
+      // fire. Prefix history is skipped for the same reason — an entry keyed
+      // by a one-shot id can only ever accumulate, never match.
+      this.events.emit({
+        level: 'info',
+        kind: 'REQUEST_UNIDENTIFIED',
+        sessionId,
+        model,
+        bodyBytes,
+        msg: 'no x-claude-code-session-id header and no session id in metadata.user_id — '
+          + 'request forwarded, keepalive NOT armed (a one-shot id can never be matched again)',
+      })
+    } else {
+      session.engine.notifyRealRequestStart(model, parsedBody, upstreamHeaders)
+      if (assessed) this.commitPrefixHistory(assessed.commit)
+    }
 
     // Pre-request rewrite-burst guard
     try {

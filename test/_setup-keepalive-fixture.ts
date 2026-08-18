@@ -32,3 +32,10 @@ writeFileSync(FIXTURE_PATH, JSON.stringify({
   },
 }))
 process.env.CLAUDE_KEEPALIVE_CONFIG_PATH = FIXTURE_PATH
+
+// KA snapshot store — point every test at a throwaway file. A ProxyClient that
+// falls back to the default path reads the LIVE daemon's snapshot file (~70 MB,
+// the whole fleet), revives all of it inside the test process, and writes it
+// back on stop(). Measured 2026-08-18: a fresh test suite revived 30+ live
+// sessions before the first assertion ran.
+process.env.CLAUDE_KA_SNAPSHOT_PATH = '/tmp/__test_ka_snapshots_global.json'

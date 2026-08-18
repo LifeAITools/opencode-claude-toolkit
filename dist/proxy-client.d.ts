@@ -231,6 +231,28 @@ export interface HandleRequestContext {
      * re-send with an override marker. Default true (preserves native-CC behavior).
      */
     interactive?: boolean;
+    /**
+     * WHICH DOOR named this session — the header (`x-claude-code-session-id`),
+     * the body (`metadata.user_id`), or nothing at all.
+     *
+     * `'none'` means the caller could not be named and `sessionId` is a synthetic
+     * `anon-*` label minted for THIS request only. Such a request is served
+     * normally, but it must never arm keepalive: the slot it would create can
+     * never be matched by a later request, so KA would warm a cache nobody will
+     * ever read.
+     *
+     * MEASURED 2026-08-18 on the live proxy (research/cache-accounting-remeasure-
+     * 2026-08-18.md): 463 of 521 persisted prefixes were such one-shot `anon-*`
+     * keys — EVERY ONE of them with exactly one entry, i.e. never matched again.
+     * 428 were still being warmed a median of 8.7h (max 24.8h) after their single
+     * request, and in one 29-minute window 70 of 89 KA fires (79%) and 6 592 380
+     * cache-read tokens (36%) were spent on sessions that could not return.
+     *
+     * Recorded on every `REAL_REQUEST_START` so "this session never reached the
+     * proxy" and "this session reached it unnamed" stay distinguishable in the
+     * journal. Default `'header'` (back-compat for callers that pre-date this).
+     */
+    idSource?: 'header' | 'body' | 'none';
 }
 export interface RateLimitSnapshot {
     status: string | null;
@@ -402,6 +424,12 @@ export declare class ProxyClient {
     _reconcileFrozenSessionsForChangedOrg(): void;
     /** Test seam — how many KA lineages a session is currently frozen (org-switch-pending) on. */
     _sessionFrozenLineages(sessionId: string): number;
+    /** Test seam — how many cache lineages this session's KA engine has been
+     *  PRIMED with. Zero is the whole invariant for an UNIDENTIFIED request
+     *  (`idSource:'none'`): with no lineage primed there is no pending snapshot
+     *  to commit, so the KA registry can never fill and tick() finds nothing to
+     *  fire. Unknown session → 0. */
+    _sessionPrimedLineages(sessionId: string): number;
     /**
      * Snapshot the system credential file's current token into the per-org
      * vault, keyed by the org that owns it. Fail-soft, never throws — the vault

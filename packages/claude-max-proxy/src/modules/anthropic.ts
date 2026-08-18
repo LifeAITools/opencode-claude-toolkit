@@ -7,6 +7,7 @@
  */
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
+import { extractSessionIdFromBody } from '@life-ai-tools/claude-code-sdk'
 import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
 import { captureBody } from '../body-capture.js'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
@@ -19,8 +20,6 @@ export function createAnthropicModule(): ProxyModule {
       method: 'POST',
       path: '/v1/messages',
       handler: async (req, server) => {
-        const sessionId = req.headers.get('x-claude-code-session-id') ?? 'anon-' + Date.now().toString(36)
-
         const peer = server.requestIP(req)
         const srcPort = peer?.port ?? null
         const sourcePid = srcPort ? resolvePidFromPeerPort(srcPort) : null
@@ -30,6 +29,28 @@ export function createAnthropicModule(): ProxyModule {
 
         const rawBody = await req.arrayBuffer()
         const rawBodyStr = new TextDecoder().decode(rawBody)
+
+        // ── WHO IS ASKING — two doors, then honesty ──────────────────
+        // The header is the front door. An Agent-SDK-spawned agent has no
+        // header but still carries its session UUID inside `metadata.user_id`,
+        // so the body is the second door — `extractSessionIdFromBody` was
+        // written and tested for exactly this and then sat with no caller,
+        // because the wiring only ever existed as a hand-edit in the DEPLOYED
+        // copy and the first manifest deploy erased it (Rule #15).
+        //
+        // When BOTH doors are shut the request is genuinely unnamed — a
+        // stateless one-shot call, not a lost agent (measured: of the anon
+        // requests whose bodies were captured, not one carried a recoverable
+        // id). It is forwarded, and `idSource: 'none'` tells the client to
+        // serve it WITHOUT arming keepalive: an id minted per request can
+        // never be matched again, so its cache slot would be warmed forever
+        // for nobody.
+        const headerSession = req.headers.get('x-claude-code-session-id')
+        const bodySession = headerSession ? null : extractSessionIdFromBody(rawBodyStr)
+        const resolvedSession = headerSession ?? bodySession
+        const idSource: 'header' | 'body' | 'none' =
+          headerSession ? 'header' : bodySession ? 'body' : 'none'
+        const sessionId = resolvedSession ?? 'anon-' + Date.now().toString(36)
 
         const isNativeCC = headers['user-agent']?.includes('claude-cli/') || !!headers['x-claude-code-agent-id']
         let forwardBody: string | ArrayBuffer = rawBody
@@ -61,6 +82,7 @@ export function createAnthropicModule(): ProxyModule {
         return ctx.proxyClient.handleRequest(forwardBody, forwardHeaders, {
           sessionId,
           sourcePid,
+          idSource,
           signal: req.signal,
           // Native Claude Code = interactive human (can see a 400 + re-send with
           // marker). Any other Anthropic-API consumer is programmatic → the

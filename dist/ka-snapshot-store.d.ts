@@ -35,7 +35,16 @@
  */
 /** Schema version — a mismatch on load discards the file (clean upgrade). */
 export declare const KA_SNAPSHOT_SCHEMA_VERSION = 1;
-/** Default persistence location. */
+/**
+ * Default persistence location.
+ *
+ * `CLAUDE_KA_SNAPSHOT_PATH` overrides it — same escape hatch as
+ * `CLAUDE_KEEPALIVE_CONFIG_PATH`, and the test preload sets it. Without one, a
+ * ProxyClient built in a test reads the LIVE fleet's 70-MB snapshot file,
+ * revives every session in it inside the test process, and writes the file back
+ * on `stop()` — an accident that only stays harmless while nobody's test
+ * happens to hold a shorter view of the fleet than the daemon does.
+ */
 export declare const DEFAULT_KA_SNAPSHOT_PATH: string;
 /** Entries older than this (since last warm-up) are never revived — bounds
  *  file growth and discards anything that cannot be a live 5m/1h cache. */

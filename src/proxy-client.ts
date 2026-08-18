@@ -1670,6 +1670,25 @@ export class ProxyClient {
           // Dump the blocked request + prefix diff for offline analysis.
           let dumpPath: string | null = null
           if (guard.dumpBlocked) {
+            // Snapshot what we KNEW about this session, before anything prunes
+            // it. A dump that says only `noBaseline: true` cannot distinguish a
+            // genuine first turn from a baseline that was swept — and the sweep
+            // happens on session death and by age on load, i.e. long before a
+            // person opens the file.
+            const sessionPrefix = `${sessionId}:`
+            const siblingLineages: Array<{ lineageKey: string; lastReqAgeMs: number | null }> = []
+            const nowMs = Date.now()
+            for (const [key, entry] of this.prefixHistory) {
+              if (!key.startsWith(sessionPrefix)) continue
+              siblingLineages.push({
+                lineageKey: key.slice(sessionPrefix.length),
+                lastReqAgeMs: entry.lastReqAt ? nowMs - entry.lastReqAt : null,
+              })
+            }
+            const thisEntry = this.prefixHistory.get(`${sessionId}:${reqLineageKey}`)
+            const lastSeenAt = thisEntry
+              ? Math.max(thisEntry.lastReqAt ?? 0, thisEntry.lastKaAt ?? 0)
+              : 0
             dumpPath = writeRewriteBlockDump(this.rewriteBlockDumpDir, {
               sessionId,
               lineageKey: reqLineageKey,
@@ -1678,6 +1697,15 @@ export class ProxyClient {
               signals: rewriteAssessment.signals,
               blockedRequest: parsedBody,
               previousPrefix: rewriteAssessment.prevPrefix,
+              sessionState: {
+                sessionOnRecord: siblingLineages.length > 0,
+                lineageOnRecord: !!thisEntry,
+                siblingLineages,
+                historyEntriesTotal: this.prefixHistory.size,
+                proxyStartedAt: this.proxyStartedAt || null,
+                spansProxyRestart: !!this.proxyStartedAt && lastSeenAt > 0
+                  && lastSeenAt < this.proxyStartedAt,
+              },
             })
           }
           // TWO DIFFERENT EVENTS, and the word "rewrite" hid the difference.

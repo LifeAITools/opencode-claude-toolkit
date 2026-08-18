@@ -837,3 +837,59 @@ describe('rewrite guard: a FIRST write is not a REwrite', () => {
     c.stop()
   })
 })
+
+/**
+ * A dump must say what the proxy KNEW, not only what it saw — 2026-08-18.
+ *
+ * `noBaseline: true` alone is ambiguous: prefix history is pruned on session
+ * death and by age on load, so a person opening the file days later cannot tell
+ * a genuine first turn from a baseline that had been swept. Those are different
+ * bugs with different fixes, and the dump used to be silent on which one it
+ * witnessed — the live example was
+ * 2026-08-18T13-45-58-418Z-55832329-expected_cold-start.json, systemLen.prev=0
+ * with ~90 tools all listed as "added".
+ */
+describe('block dump carries the session record at block time', () => {
+  test('a genuine first turn: nothing on record, nothing swept', async () => {
+    const dumps = join(TMP, 'dumps-state-first')
+    const c = mkClient({ rewriteBlockDumpDir: dumps })
+    const huge = JSON.stringify({
+      model: 'claude-opus-4-8',
+      system: [{ type: 'text', text: 'sys fresh', cache_control: { type: 'ephemeral' } }],
+      tools: [],
+      messages: [{ role: 'user', content: 'first turn ' + 'z'.repeat(240_000) }],
+    })
+    const r = await c.handleRequest(huge, {}, { sessionId: 'dump-state-1' })
+    expect(r.status).toBe(400)
+
+    const files = readdirSync(dumps).filter((f) => f.endsWith('.json'))
+    expect(files.length).toBe(1)
+    const art = JSON.parse(readFileSync(join(dumps, files[0]!), 'utf8'))
+    expect(art.sessionState).toBeTruthy()
+    expect(art.sessionState.sessionOnRecord).toBe(false)
+    expect(art.sessionState.lineageOnRecord).toBe(false)
+    expect(art.sessionState.siblingLineages).toEqual([])
+    expect(art.sessionState.spansProxyRestart).toBe(false)
+    c.stop()
+  })
+
+  test('a lineage shift: the session IS on record, this lineage is not — and the sibling is named', async () => {
+    const dumps = join(TMP, 'dumps-state-shift')
+    const path = join(TMP, 'ph-state-shift.json')
+    // Seed a warm sibling lineage for the SAME session, idle past the wire TTL.
+    seedIdleFor(path, 'dump-state-2', reqBody(), 10 * 60_000)
+    const c = mkClient({ rewriteBlockDumpDir: dumps, prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'dump-state-2' })
+    expect(r.status).toBe(400)
+
+    const files = readdirSync(dumps).filter((f) => f.endsWith('.json'))
+    const art = JSON.parse(readFileSync(join(dumps, files[0]!), 'utf8'))
+    expect(art.sessionState.sessionOnRecord).toBe(true)
+    expect(art.sessionState.siblingLineages.length).toBeGreaterThan(0)
+    // Every sibling reports how stale it was — "on record" alone would not say
+    // whether the baseline was usable.
+    expect(art.sessionState.siblingLineages[0]).toHaveProperty('lastReqAgeMs')
+    c.stop()
+    rmSync(path, { force: true })
+  })
+})

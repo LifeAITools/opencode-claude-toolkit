@@ -51,6 +51,7 @@ export type EventKind =
   | 'REAL_REQUEST_START'
   | 'REAL_REQUEST_COMPLETE'
   | 'REAL_REQUEST_ERROR'
+  | 'REAL_REQUEST_ABORTED'    // client walked away mid-stream — a real outcome, not an error
 
   // Keepalive
   | 'KA_TICK_IDLE'          // timer ticked but not time to fire yet
@@ -110,6 +111,7 @@ export const EVENT = {
   REAL_REQUEST_START: 'REAL_REQUEST_START',
   REAL_REQUEST_COMPLETE: 'REAL_REQUEST_COMPLETE',
   REAL_REQUEST_ERROR: 'REAL_REQUEST_ERROR',
+  REAL_REQUEST_ABORTED: 'REAL_REQUEST_ABORTED',
   // Keepalive
   KA_TICK_IDLE: 'KA_TICK_IDLE',
   KA_FIRE_START: 'KA_FIRE_START',

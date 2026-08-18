@@ -1760,6 +1760,18 @@ export class ProxyClient {
       session.engine.checkRewriteGuard(model)
     } catch (err: any) {
       if (err?.code === 'CACHE_REWRITE_BLOCKED') {
+        // Outcome invariant: this request already emitted REAL_REQUEST_START, so
+        // it MUST emit exactly one terminal event — otherwise it vanishes from the
+        // log and every later count built on start-minus-outcome is wrong (2026-08-18:
+        // 591 of 6413 requests had no outcome at all, and an in-flight counter built
+        // that way produced a spurious 19x "concurrency causes 529" correlation).
+        this.events.emit({
+          level: 'error',
+          kind: 'REAL_REQUEST_ERROR',
+          sessionId,
+          status: 429,
+          msg: `cache_rewrite_blocked: ${err.message}`,
+        })
         return jsonResponse(429, {
           error: { type: 'cache_rewrite_blocked', message: err.message },
         })
@@ -1895,6 +1907,15 @@ export class ProxyClient {
         })
       } catch {
         // Client disconnected while we were backing off — stop retrying.
+        // Outcome invariant (see above): emit the terminal event before returning.
+        this.events.emit({
+          level: 'info',
+          kind: 'REAL_REQUEST_ABORTED',
+          sessionId,
+          phase: 'retry-backoff',
+          attempt: realAttempt,
+          msg: 'client disconnected during upstream retry backoff',
+        })
         return new Response('client disconnected during upstream retry', { status: 499 })
       }
     }
@@ -1946,6 +1967,14 @@ export class ProxyClient {
     }
 
     if (!upstream.body) {
+      // Outcome invariant (see above).
+      this.events.emit({
+        level: 'error',
+        kind: 'REAL_REQUEST_ERROR',
+        sessionId,
+        status: 502,
+        msg: 'upstream returned no body',
+      })
       return new Response('No upstream body', { status: 502 })
     }
 
@@ -1976,11 +2005,60 @@ export class ProxyClient {
       })
     })
 
-    // Return byte-for-byte stream to caller
+    // Return byte-for-byte stream to caller — WRAPPED so a client that walks
+    // away mid-stream is observable. Claude Code aborts a turn on Esc, on its
+    // own timeout, or when the harness cancels; the tee'd client branch is then
+    // cancelled and, unguarded, that abort left NO trace at all: the request had
+    // already emitted REAL_REQUEST_START and never emitted any terminal event,
+    // and in Bun the discarded stream surfaced only as an anonymous
+    // `unhandledRejection: null is not an object`. Measured 2026-08-18 over 4.5h:
+    // 591 of 6413 requests (9%, and 51% of the worst session's) had no outcome
+    // event, against 576 such rejections — close enough that they are almost
+    // certainly the same event seen from two sides. The cost was not cosmetic: an
+    // in-flight counter built as start-minus-outcome drifts upward for ever and
+    // manufactured a 19x "concurrency causes 529" correlation that survived until
+    // it was cross-checked against a window-density count.
+    //
+    // The wrapper never alters the bytes. It only names the abort, once, and
+    // cancels the upstream reader so the connection is released instead of being
+    // dropped on the floor.
+    const clientReader = toClient.getReader()
+    let abortNamed = false
+    const nameAbort = (why: string) => {
+      if (abortNamed) return
+      abortNamed = true
+      this.events.emit({
+        level: 'info',
+        kind: 'REAL_REQUEST_ABORTED',
+        sessionId,
+        phase: 'streaming',
+        durationMs: Date.now() - t0,
+        msg: why,
+      })
+    }
+    const guardedToClient = new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        try {
+          const { done, value } = await clientReader.read()
+          if (done) { controller.close(); return }
+          controller.enqueue(value)
+        } catch (streamErr: any) {
+          nameAbort(`upstream stream failed mid-response: ${streamErr?.message ?? streamErr}`)
+          try { controller.error(streamErr) } catch { /* already errored */ }
+        }
+      },
+      cancel: (reason) => {
+        nameAbort(`client stopped reading the response${reason ? `: ${String(reason)}` : ''}`)
+        // Release the upstream connection; a rejection here is the very thing
+        // this wrapper exists to stop from escaping as an unhandled rejection.
+        void clientReader.cancel(reason).catch(() => { /* best-effort */ })
+      },
+    })
+
     const responseHeaders = new Headers(upstream.headers)
     responseHeaders.delete('content-encoding')
     responseHeaders.delete('content-length')
-    return new Response(toClient, {
+    return new Response(guardedToClient, {
       status: upstream.status,
       headers: responseHeaders,
     })

@@ -56,7 +56,7 @@ import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateF
 import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
 import { startStatsEmitter } from './stats-emitter.js'
-import { checkDeployDrift } from './deploy-drift.js'
+import { checkDeployDrift, resolveInstallDir } from './deploy-drift.js'
 // OpenAI translate imports moved to modules/openai-compat.ts and modules/anthropic.ts
 
 import { readFileSync as _readPkgFs } from 'fs'
@@ -105,9 +105,23 @@ const stopLogger = startLogger(cfg)
 // ($INSTALLED/src/server.ts -> $INSTALLED). Catches the silent-drift failure
 // mode that once killed the quota pipeline for 27h.
 {
-  const drift = checkDeployDrift(_joinPkg(import.meta.dir, '..'))
+  const installDir = resolveInstallDir(_joinPkg(import.meta.dir, '..'))
+  const drift = checkDeployDrift(installDir)
   if (drift.manifestMissing) {
-    emit({ level: 'info', kind: 'DEPLOY_DRIFT_CHECK', msg: 'no deploy manifest — deployed by hand? use deploy-from-source.sh so drift is detectable' })
+    // A compiled binary sitting next to no manifest is NOT the benign
+    // "deployed by hand" case — it means the drift check cannot run at all, and
+    // saying so quietly is how it stayed blind for months. Name the directory
+    // it looked in, so the next reader can tell "hand-deployed" from "looking
+    // in the wrong place".
+    const compiled = !!process.env.CLAUDE_MAX_PROXY_BUILD_VERSION
+    emit({
+      level: compiled ? 'error' : 'info',
+      kind: 'DEPLOY_DRIFT_CHECK',
+      installDir,
+      msg: compiled
+        ? `drift check CANNOT RUN: no .deploy-manifest.json in ${installDir} — a compiled binary should always sit beside one; re-deploy via deploy-from-source.sh`
+        : `no deploy manifest in ${installDir} — deployed by hand? use deploy-from-source.sh so drift is detectable`,
+    })
   } else if (drift.drifted.length > 0) {
     emit({ level: 'error', kind: 'DEPLOY_DRIFT', msg: `${drift.drifted.length} live src file(s) hand-edited since deploy (source ${drift.sourceCommit}, ${drift.deployedAt}): ${drift.drifted.join(', ')} — re-deploy from source`, drifted: drift.drifted })
   } else {

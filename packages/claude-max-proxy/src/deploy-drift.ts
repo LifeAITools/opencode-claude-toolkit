@@ -13,7 +13,41 @@
 
 import { readFileSync, existsSync } from 'fs'
 import { createHash } from 'crypto'
-import { join } from 'path'
+import { join, dirname } from 'path'
+
+/**
+ * Where the deploy manifest actually lives, for a process that may be running
+ * EITHER from source (TS, `import.meta.dir` = <install>/src) OR as a compiled
+ * binary (<install>/bin/claude-max-proxy, where `import.meta.dir` is a virtual
+ * path inside the bundle and resolves to nothing on disk).
+ *
+ * 🔴 This is the same trap the version string already fell into and worked
+ * around with a build-time define — and the drift check fell into it too, in
+ * silence. Measured 2026-08-18: every start since the binary runtime landed
+ * emitted "no deploy manifest — deployed by hand?", including starts made BY
+ * deploy-from-source.sh, which had just written that very manifest. So the one
+ * check whose job is to say what is running had been blind for its whole life,
+ * and it announced that blindness in a reassuring voice — which is why nothing
+ * spoke up the day a hand-built binary really did diverge from the manifest.
+ *
+ * Order matters: the binary's own location is the strongest evidence of which
+ * install this process IS, so it is consulted first.
+ */
+export function resolveInstallDir(fallbackDir: string): string {
+  const candidates: string[] = []
+  const envDir = process.env.CLAUDE_MAX_PROXY_INSTALL_DIR
+  if (envDir) candidates.push(envDir)
+  const exec = process.execPath
+  if (exec) {
+    candidates.push(dirname(dirname(exec)))   // <install>/bin/<binary>
+    candidates.push(dirname(exec))            // <install>/<binary>
+  }
+  candidates.push(fallbackDir)                // running from source: <install>/src/..
+  for (const dir of candidates) {
+    if (dir && existsSync(join(dir, '.deploy-manifest.json'))) return dir
+  }
+  return fallbackDir
+}
 
 export interface DeployDriftResult {
   /** No manifest found — deployed by hand / pre-manifest. */

@@ -14,6 +14,14 @@ export interface ProxyConfig {
   logFormat: 'human' | 'json' | 'both'
   logFile: string
   logJsonl: string
+  // High-frequency heartbeat kinds (PROXY_KA_TICK, HEALTH_HEARTBEAT) go to their
+  // OWN jsonl instead of the request journal. Measured 2026-08-18: 71 284 of
+  // 91 595 lines (77.8%) were KA ticks, so the request journal — the one that
+  // answers "did this session pass through, and how did it end" — covered only
+  // ~4.5h before rotation dropped it. Splitting buys ~4.5x the depth for the
+  // same disk budget. The HUMAN log is deliberately left whole: proxy-doctor
+  // reads it for per-session tick liveness.
+  logJsonlHeartbeat: string
   // Size-based rotation for the append-only human + JSONL streams.
   // logMaxMb = per-stream byte cap before rotating (0 = unbounded, never rotate).
   // logKeep  = number of rotated backups to retain (.1 … .<logKeep>).
@@ -128,6 +136,12 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     logFormat: ['human', 'json', 'both'].includes(logFormat) ? logFormat : 'human',
     logFile: expandHome(read('LOG_FILE', '~/.claude/claude-max-proxy.log', fileEnv)),
     logJsonl: expandHome(read('LOG_JSONL', '~/.claude/claude-max-proxy.jsonl', fileEnv)),
+    logJsonlHeartbeat: expandHome(read(
+      'LOG_JSONL_HEARTBEAT',
+      read('LOG_JSONL', '~/.claude/claude-max-proxy.jsonl', fileEnv)
+        .replace(/\.jsonl$/, '') + '-heartbeat.jsonl',
+      fileEnv,
+    )),
     // Default 100 MB × 5 backups per stream (~600 MB ceiling for the JSONL,
     // which was observed unbounded at ~196 MB). 0 disables rotation.
     logMaxMb: readInt('LOG_MAX_MB', 100, fileEnv),

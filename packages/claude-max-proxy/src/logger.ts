@@ -231,6 +231,17 @@ function writeRotating(sink: RotatingSink, line: string): void {
 // public logger API — startLogger is the only intended runtime entry point.
 export const __rotationInternals = { makeSink, rotateSink, writeRotating }
 
+/**
+ * Kinds that fire on a timer for every tracked session, not on anything a
+ * person or an agent did. They drown the request journal: measured 2026-08-18,
+ * 77.8% of its lines were PROXY_KA_TICK, which is why a journal rotating at
+ * 100 MB held only ~4.5h of request history — and 4.5h was not enough to answer
+ * "did this session pass through yesterday" when it was actually asked.
+ * They keep ALL their diagnostic value in their own file, which rotates on the
+ * same terms.
+ */
+const HEARTBEAT_KINDS = new Set(['PROXY_KA_TICK', 'HEALTH_HEARTBEAT'])
+
 export function startLogger(cfg: ProxyConfig): () => void {
   const minRank = LEVEL_RANK[cfg.logLevel] ?? 1
 
@@ -239,6 +250,8 @@ export function startLogger(cfg: ProxyConfig): () => void {
 
   const humanSink = makeSink(cfg.logFile, cfg.logMaxMb, cfg.logKeep, cfg.logGzip)
   const jsonlSink = makeSink(cfg.logJsonl, cfg.logMaxMb, cfg.logKeep, cfg.logGzip)
+  ensureDir(cfg.logJsonlHeartbeat)
+  const heartbeatSink = makeSink(cfg.logJsonlHeartbeat, cfg.logMaxMb, cfg.logKeep, cfg.logGzip)
 
   const unsub = bus.onEvent((e) => {
     const rank = LEVEL_RANK[e.level] ?? 1
@@ -251,9 +264,11 @@ export function startLogger(cfg: ProxyConfig): () => void {
       writeRotating(humanSink, formatHuman(e, false) + '\n')
     }
 
-    // Structured JSONL — rotated
+    // Structured JSONL — rotated. Timer-driven heartbeat goes to its own file so
+    // the request journal keeps depth (see HEARTBEAT_KINDS).
     if (cfg.logFormat === 'json' || cfg.logFormat === 'both') {
-      writeRotating(jsonlSink, JSON.stringify(e) + '\n')
+      writeRotating(HEARTBEAT_KINDS.has(e.kind as string) ? heartbeatSink : jsonlSink,
+        JSON.stringify(e) + '\n')
     }
   })
 

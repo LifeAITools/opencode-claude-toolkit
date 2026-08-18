@@ -422,7 +422,7 @@ if (PROXY_MODE === 'global') {
     parentPid: process.ppid,
     node: process.version,
     consumer: 'native-claude-code-cli (NOT opencode-plugin)',
-    logFiles: { human: cfg.logFile, jsonl: cfg.logJsonl },
+    logFiles: { human: cfg.logFile, jsonl: cfg.logJsonl, jsonlHeartbeat: cfg.logJsonlHeartbeat },
     versionEndpoint: `http://${RUNTIME_HOST}:${RUNTIME_PORT}/version`,
   })
 
@@ -464,7 +464,7 @@ if (PROXY_MODE === 'global') {
     parentPid: PARENT_PID,
     node: process.version,
     consumer: `parent-pid=${PARENT_PID} (typically native CC CLI spawned us)`,
-    logFiles: { human: cfg.logFile, jsonl: cfg.logJsonl },
+    logFiles: { human: cfg.logFile, jsonl: cfg.logJsonl, jsonlHeartbeat: cfg.logJsonlHeartbeat },
     versionEndpoint: `http://${RUNTIME_HOST}:${RUNTIME_PORT}/version`,
   })
 

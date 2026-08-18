@@ -26,6 +26,7 @@ const cfg: ProxyConfig = {
   credentialsPath: '/dev/null',
   logFile: '/dev/null',
   logJsonl: '/dev/null',
+  logJsonlHeartbeat: '/dev/null',
   logFormat: 'json',
   logLevel: 'error',
 } as unknown as ProxyConfig

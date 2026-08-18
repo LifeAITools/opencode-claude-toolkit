@@ -10,6 +10,22 @@ import { SignalWire } from './signal-wire'
 import { translateLegacyRules, getBundledRulesPath } from '@kiberos/signal-wire-core'
 import { readFileSync } from 'node:fs'
 
+/**
+ * 🔴 Mute the rules' `exec` actions BEFORE anything constructs an engine.
+ *
+ * These tests run the REAL bundled rule set, and twenty of its rules carry
+ * `exec` actions that launch actual scripts — memory writes, session
+ * reconciliation, mirror syncs. Without this flag the suite was not merely slow,
+ * it was DOING those things on every run: measured 2026-08-18, one evaluation
+ * cost 7138 ms with exec on and 14 ms with it off. A test that mutates real
+ * state as a side effect is a defect regardless of its colour, and the 500× is
+ * only how it announced itself.
+ *
+ * (The flag and the fact that live sessions go through a resident daemon rather
+ * than this in-process path both come from packages-signal-wire-core-owner.)
+ */
+process.env.SW_EXEC_OFF = '1'
+
 // SSOT — lives inside @kiberos/signal-wire-core, resolved at runtime.
 const PROD_RULES_PATH = getBundledRulesPath()
 
@@ -132,11 +148,7 @@ describe('SignalWire adapter — legacy API', () => {
     })
     expect(result).not.toBeNull()
     expect(result?.hint).toBeTruthy()
-    // 🔴 30s, not the 5s default. Measured 2026-08-18 on the bundled production
-    // rules with no network reachable: the FIRST pipeline.process costs ~7.3s
-    // (subsequent ones ~0.5s). That cost lives in @kiberos/signal-wire-core, not
-    // here, and it is reported to its owner — this test must not go red for it.
-  }, 30_000)
+  })
 
   test('trackTokens does not throw and updates context position', () => {
     const sw = new SignalWire({
@@ -219,7 +231,7 @@ describe('SignalWire adapter — legacy API', () => {
     //    which holds either way.
     const fromAsync = await sw.evaluateAsync(ctx)
     expect(sw.evaluate(ctx)).toEqual(fromAsync)
-  }, 30_000)
+  })
 })
 
 describe('SignalWire adapter — wake event path', () => {

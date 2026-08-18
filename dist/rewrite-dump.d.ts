@@ -76,6 +76,35 @@ export interface RewriteBlockDumpInput {
     blockedRequest: unknown;
     /** Previous cacheable prefix of this lineage, or null if none on record. */
     previousPrefix: CachePrefix | null;
+    /**
+     * What the proxy KNEW about this session at the moment it blocked.
+     *
+     * 🔴 Without it a dump cannot answer the first question a reader asks. A
+     * person opens `…-expected_cold-start.json` days later, sees
+     * `noBaseline: true, systemLen.prev = 0` and ~90 tools listed as "added", and
+     * cannot tell "there was never a baseline" from "there was one and the history
+     * had already been swept" — prefix history is pruned on session death and by
+     * age on load, so by the time anyone reads the dump the evidence is gone.
+     * Those are different bugs with different fixes, and the dump was silent on
+     * which one it witnessed.
+     */
+    sessionState?: {
+        /** Did ANY lineage of this session have a prefix on record? */
+        sessionOnRecord: boolean;
+        /** Did THIS lineage have one? (false + sessionOnRecord = lineage shift.) */
+        lineageOnRecord: boolean;
+        /** Every lineage of this session on record, with how stale each was. */
+        siblingLineages: Array<{
+            lineageKey: string;
+            lastReqAgeMs: number | null;
+        }>;
+        /** Total entries in the store — context for "was it pruned or never there". */
+        historyEntriesTotal: number;
+        /** Proxy start time; a record older than this could not have survived it. */
+        proxyStartedAt: number | null;
+        /** True when the proxy restarted after this lineage was last seen. */
+        spansProxyRestart: boolean;
+    };
 }
 /**
  * Write one guard-block dump artifact. Returns the file path, or null on any

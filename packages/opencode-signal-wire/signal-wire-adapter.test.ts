@@ -7,7 +7,7 @@
 
 import { describe, test, expect } from 'bun:test'
 import { SignalWire } from './signal-wire'
-import { translateLegacyRules, getBundledRulesPath } from '@kiberos/signal-wire-core'
+import { translateLegacyRules, getBundledRulesPath, execSuppressionReason } from '@kiberos/signal-wire-core'
 import { readFileSync } from 'node:fs'
 
 /**
@@ -39,8 +39,9 @@ import { readFileSync } from 'node:fs'
  *
  * So the line is no longer the ONLY protection — it is the protection that does
  * not depend on someone else's build reaching us, which is precisely the failure
- * we just lived through. Keep it (the owner asks the same). Anyone removing it
- * inherits the duty of re-measuring those four poles first.
+ * we just lived through. Keep it (the owner asks the same). Those four poles are
+ * no longer a stopwatch ritual: the suite below asks the core directly, so a
+ * lagging build or a removed flag goes red here instead of hiding in a slow run.
  */
 process.env.SW_EXEC_OFF = '1'
 
@@ -68,6 +69,50 @@ function promptMatching(ruleId: string): string | null {
     return 'help me with a task'   // no keyword filter → any prompt matches
   } catch { return null }
 }
+
+/**
+ * The four poles of exec suppression, asked instead of timed.
+ *
+ * Yesterday this same defect announced itself with a stopwatch — 7292 ms where
+ * we expected milliseconds — and it took a day and an accident to notice. The
+ * core now answers the question directly (`execSuppressionReason`, its commit
+ * 28e0f8a), so the check costs no seconds and cannot be missed.
+ *
+ * Deliberately NOT asserting the core's exact wording: these strings belong to
+ * signal-wire-core and change without us, and a test that pins someone else's
+ * prose goes red on their copy-edit while staying green on a real regression.
+ * We assert the SHAPE — suppressed and able to say why, or honestly null.
+ */
+describe('exec-suppression (contract with @kiberos/signal-wire-core)', () => {
+  test('the question is reachable from the package entry at all', () => {
+    // The core re-exports this from its public entry; a dropped re-export is
+    // how we would silently lose the only door that tells us their build
+    // reached us. Their own guard watches the same line from their side.
+    expect(typeof execSuppressionReason).toBe('function')
+  })
+
+  test('this suite really runs with exec muted, and the reason is our own flag', () => {
+    // Guards the line at the top of this file: if it is ever removed, the fleet
+    // scripts start running for real on `bun test` and this goes red first.
+    expect(execSuppressionReason()).toContain('SW_EXEC_OFF')
+  })
+
+  test("the core's own test-runner default reaches us as a LIBRARY consumer", () => {
+    // The pole that was broken on 2026-08-18: their source and binaries carried
+    // this default while the library build — where `main`/`exports` point — was
+    // a day old. Red here means their build lagged again.
+    const reason = execSuppressionReason({ NODE_ENV: 'test' })
+    expect(typeof reason).toBe('string')
+    expect((reason as string).length).toBeGreaterThan(0)
+  })
+
+  test('production is NOT suppressed — the fleet still gets its exec actions', () => {
+    // The opposite failure, which nobody watches from our side: suppression
+    // leaking into a real run would silently disable every exec rule in the
+    // fleet, and it would look exactly like a quiet day.
+    expect(execSuppressionReason({})).toBeNull()
+  })
+})
 
 describe('signal-wire-translate', () => {
   test('translateLegacyRules maps UserPromptSubmit → chat.message', () => {

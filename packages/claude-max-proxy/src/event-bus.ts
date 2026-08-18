@@ -51,6 +51,8 @@ export type EventKind =
   | 'REAL_REQUEST_START'
   | 'REAL_REQUEST_COMPLETE'
   | 'REAL_REQUEST_ERROR'
+  | 'KA_FIRE_START'
+  | 'KA_FIRE_ERROR'
   | 'REAL_REQUEST_ABORTED'    // client walked away mid-stream — a real outcome, not an error
 
   // Keepalive
@@ -111,6 +113,8 @@ export const EVENT = {
   REAL_REQUEST_START: 'REAL_REQUEST_START',
   REAL_REQUEST_COMPLETE: 'REAL_REQUEST_COMPLETE',
   REAL_REQUEST_ERROR: 'REAL_REQUEST_ERROR',
+  KA_FIRE_START: 'KA_FIRE_START',
+  KA_FIRE_ERROR: 'KA_FIRE_ERROR',
   REAL_REQUEST_ABORTED: 'REAL_REQUEST_ABORTED',
   // Keepalive
   KA_TICK_IDLE: 'KA_TICK_IDLE',
@@ -205,6 +209,37 @@ export interface RealRequestCompleteEvent extends BaseEvent {
     util7d: number | null
     status: string | null
   }
+}
+
+/**
+ * A keepalive fire STARTED / FAILED.
+ *
+ * Added 2026-08-19 because only the SUCCESS was ever announced: 363
+ * KA_FIRE_COMPLETE in a day's log and not one record of an attempt that did
+ * not complete. Counting successes alone answers "keepalive was quiet" even in
+ * the world where every fire is failing — which is exactly the reading the open
+ * question about quota-reset storms hangs on.
+ */
+export interface KaFireStartEvent extends BaseEvent {
+  kind: 'KA_FIRE_START'
+  sessionId: string
+  org?: string | null
+  lineageKey: string
+  idleMs: number
+}
+
+export interface KaFireErrorEvent extends BaseEvent {
+  kind: 'KA_FIRE_ERROR'
+  sessionId: string
+  org?: string | null
+  lineageKey: string
+  idleMs: number
+  /** HTTP status when the upstream named one; null for network/parse faults. */
+  status: number | null
+  /** Engine's own classification: network | server_transient | auth | ... */
+  category: string
+  msg: string
+  durationMs: number
 }
 
 export interface KaFireCompleteEvent extends BaseEvent {

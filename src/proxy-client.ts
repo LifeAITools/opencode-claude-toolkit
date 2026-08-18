@@ -2143,6 +2143,33 @@ export class ProxyClient {
         rewriteWarnTokens: cfg.kaRewriteWarnTokens,
         rewriteBlockIdleMs: cfg.kaRewriteBlockIdleSec > 0 ? cfg.kaRewriteBlockIdleSec * 1000 : Infinity,
         rewriteBlockEnabled: cfg.kaRewriteBlockEnabled,
+        // Outcome invariant for keepalive — the pair of KA_FIRE_COMPLETE below.
+        // Wired the same way onHeartbeat is: the engine owns no bus, the client
+        // does.
+        onFireStart: (info) => {
+          this.events.emit({
+            level: 'info',
+            kind: 'KA_FIRE_START',
+            sessionId,
+            org: this.sessionPins.get(sessionId)?.orgId ?? null,
+            lineageKey: info.lineageKey,
+            idleMs: info.idleMs,
+          })
+        },
+        onFireError: (info) => {
+          this.events.emit({
+            level: 'error',
+            kind: 'KA_FIRE_ERROR',
+            sessionId,
+            org: this.sessionPins.get(sessionId)?.orgId ?? null,
+            lineageKey: info.lineageKey,
+            idleMs: info.idleMs,
+            status: info.status,
+            category: info.category,
+            msg: info.message,
+            durationMs: info.durationMs,
+          })
+        },
         onHeartbeat: (stats) => {
           // A successful KA fire just refreshed this lineage's Anthropic-side
           // cache prefix — record the warm-up so predictCacheMiss does not

@@ -518,6 +518,32 @@ export class KeepaliveEngine {
     onTick?: (tick: KeepaliveTick) => void
     onDisarmed?: (info: { reason: string; at: number; errStatus?: number | null; errMessage?: string | null }) => void
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
+    /**
+     * A keepalive fire BEGAN / FAILED.
+     *
+     * 🔴 Until 2026-08-19 only a SUCCESSFUL fire was ever announced
+     * (`onHeartbeat` → KA_FIRE_COMPLETE). A fire that failed was handled in
+     * full — classified, retried, quota-paused, disarmed — and left NOTHING in
+     * the event stream, so from outside it was indistinguishable from a fire
+     * that never happened. Measured that day: 363 KA_FIRE_COMPLETE in the log
+     * and not one record of an attempt that did not complete.
+     *
+     * That hole is not academic. The open dispute about what the 529 storms
+     * ARE turns on exactly this: whether the traffic at a quota reset is the
+     * fleet's keepalive or the fleet resuming. Counting only successful fires
+     * answers "keepalive was quiet" even in the world where every fire was
+     * failing — the same failures-only blindness that made the request_id
+     * question unanswerable (fixed the same day in the real-request path).
+     */
+    onFireStart?: (info: { lineageKey: string; idleMs: number; at: number }) => void
+    onFireError?: (info: {
+      lineageKey: string
+      idleMs: number
+      status: number | null
+      category: string
+      message: string
+      durationMs: number
+    }) => void
     onNetworkStateChange?: (info: { from: string; to: string; at: number }) => void
     onTtlScan?: (info: { minTtlMs: number | null; previousTtlMs: number | null; hasAnyCacheControl: boolean; at: number }) => void
     onRegistryChange?: () => void
@@ -704,6 +730,8 @@ export class KeepaliveEngine {
       rewriteBlockIdleMs: ka.rewriteBlockIdleMs ?? Infinity,
       rewriteBlockEnabled: ka.rewriteBlockEnabled ?? ssot.rewriteBlockEnabled,
       onHeartbeat: ka.onHeartbeat,
+      onFireStart: ka.onFireStart,
+      onFireError: ka.onFireError,
       onTick: ka.onTick,
       onDisarmed: ka.onDisarmed,
       onRewriteWarning: ka.onRewriteWarning,
@@ -1472,6 +1500,13 @@ export class KeepaliveEngine {
     this.inFlight = true
     this.inFlightLineageKey = best.lineageKey
 
+    // Outcome invariant for keepalive, mirroring the real-request path: every
+    // fire that STARTS emits exactly one of COMPLETE / ERROR. Observability must
+    // never break the fire path, hence the swallow (same rule as the callbacks
+    // around it).
+    const fireStartedAt = Date.now()
+    try { this.config.onFireStart?.({ lineageKey: best.lineageKey, idleMs: idle, at: fireStartedAt }) } catch {}
+
     try {
       const body = JSON.parse(JSON.stringify(best.body))
       const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
@@ -1595,6 +1630,20 @@ export class KeepaliveEngine {
     } catch (err: unknown) {
       this.noteKaError(err)
       const category = classifyError(err)
+
+      // The other half of the invariant — see onFireStart above. Emitted BEFORE
+      // the branch below, so a fire that ends in a disarm, a quota pause or a
+      // retry chain is counted the same as one that ends in a plain error.
+      try {
+        this.config.onFireError?.({
+          lineageKey: best.lineageKey,
+          idleMs: idle,
+          status: (err as any)?.status ?? null,
+          category,
+          message: String((err as any)?.message ?? err),
+          durationMs: Date.now() - fireStartedAt,
+        })
+      } catch {}
 
       if (category === 'network') {
         // Network fault: don't bang HTTPS against a dead link — wastes time

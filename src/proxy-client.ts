@@ -1964,6 +1964,21 @@ export class ProxyClient {
       }
     }
 
+    // 🔴 ANTHROPIC'S OWN ID FOR THIS REQUEST — RECORDED ON SUCCESSES, NOT ONLY FAILURES.
+    //
+    // Every response carries `request-id`, and a REFUSAL additionally repeats it
+    // inside its error body — which is the only reason we had any at all. Measured
+    // 2026-08-18 over the whole 13:40–20:35Z window: 536 request_ids in the log,
+    // and every single one belongs to a failure (265 from REAL_REQUEST_ERROR, 270
+    // from HEALTH_HEARTBEAT — and all 270 of those are echoes of the same failures).
+    // A successful request left no id anywhere.
+    //
+    // So the last open question of the 529 investigation — "do the refusals' ids
+    // carry any structure?" — was unanswerable, not for want of a storm but for
+    // want of a control group: with failures only, ANY pattern found is a pattern
+    // of the whole population, and there is nothing to contrast it against.
+    const upstreamRequestId = upstream.headers.get('request-id')
+
     if (!upstream.ok) {
       const errText = await upstream.text().catch(() => '')
       if (upstream.status === 401) {
@@ -2040,7 +2055,7 @@ export class ProxyClient {
     }
 
     // Parse in background — extract usage + notify engine. Never crashes.
-    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0, reqLineageKey, reqRateLimit).catch((e) => {
+    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0, reqLineageKey, reqRateLimit, upstreamRequestId).catch((e) => {
       this.events.emit({
         level: 'error',
         kind: 'REAL_REQUEST_ERROR',
@@ -2422,6 +2437,10 @@ export class ProxyClient {
     // shared this.lastRateLimit here would race with concurrent other-org
     // requests (cross-org quota contamination). See handleRequest's reqRateLimit.
     reqRateLimit: RateLimitSnapshot,
+    // Anthropic's id for this request, from the `request-id` response header —
+    // frozen at call time like reqRateLimit. See the capture site in
+    // handleRequest for why a SUCCESS carrying it is the point.
+    upstreamRequestId: string | null,
   ): Promise<void> {
     try {
       let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
@@ -2552,6 +2571,8 @@ export class ProxyClient {
         level: 'info',
         kind: 'REAL_REQUEST_COMPLETE',
         sessionId,
+        // See the capture site above: the control group the failure-only ids lacked.
+        requestId: upstreamRequestId,
         // lineageKey lets offline analysis attribute a cache hit/rewrite to a
         // specific agent (main vs each sub-agent) — needed to verify the main
         // agent's cache survives a sub-agent (Task-tool) excursion.

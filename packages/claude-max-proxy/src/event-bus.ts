@@ -189,6 +189,11 @@ export interface UsageEventPayload {
 export interface RealRequestCompleteEvent extends BaseEvent {
   kind: 'REAL_REQUEST_COMPLETE'
   sessionId: string
+  /** Anthropic's own id for this request, from the `request-id` response
+   *  header. Present on SUCCESSES too — that is the whole point: failures
+   *  already carried it inside their error body, so a storm's ids had no
+   *  control group and no question about them could be answered. */
+  requestId?: string | null
   /** Organization that served this request (multi-org proxy: the session's
    *  pinned org). null/absent on pre-multi-org SDK builds. */
   org?: string | null

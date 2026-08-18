@@ -36,3 +36,4 @@ packages/claude-max-proxy/dist/
 
 # smart-toc generated sidecars
 *.toc
+.env.synqtask

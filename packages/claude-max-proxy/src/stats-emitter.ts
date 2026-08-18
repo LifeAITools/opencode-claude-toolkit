@@ -173,6 +173,19 @@ export function startStatsEmitter(): () => void {
         status: (ev.rateLimit as any)?.status ?? null,
         util5h,
         util7d,
+        // 🔴 ВРЕМЯ СБРОСА ТЕРЯЛОСЬ ИМЕННО ЗДЕСЬ, И ЭТОТ ЖЕ ФАЙЛ ОБЕЩАЛ ЕГО ДВАЖДЫ.
+        //
+        // Тип строки выше объявляет `resetAt?`, шапка модуля описывает его словами («present only
+        // when upstream gave a reset hint»), потребитель (quota-watcher) ждёт его в той же форме —
+        // а сборка события клала три поля из четырёх. Заголовок при этом приходит на КАЖДОМ ответе
+        // (замерено 2026-08-17: `anthropic-ratelimit-unified-reset: 1787016000` вместе с
+        // `unified-5h-reset` того же значения, 12054 раза в собственном логе заголовков), и SDK
+        // читал его верно.
+        //
+        // Цена молчания видна была всем: `resetAt: null` во всех аккаунтах и предупреждение прокси
+        // «Reset in nullmin. STOP NEW WORK» — механизм пытался назвать время и печатал пустоту.
+        // Фаундер спросил прямо: «показывает ли 5h квота, во сколько она будет сброшена».
+        ...((ev.rateLimit as any)?.resetAt != null ? { resetAt: (ev.rateLimit as any).resetAt } : {}),
       },
     }
     appendStatsLine(line)

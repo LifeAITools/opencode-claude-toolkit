@@ -506,13 +506,43 @@ if (PROXY_MODE === 'embedded' && PARENT_PID > 0) {
 
 // ═══ Shutdown ═══════════════════════════════════════════════════
 
-function shutdown(): void {
+/** Сколько ждать уже идущие запросы, прежде чем оборвать их. Ноль возвращает прежнее поведение. */
+const DRAIN_MS = Number(process.env.PROXY_DRAIN_MS ?? 20_000)
+
+/**
+ * 🔴 ПЕРЕЗАПУСК НЕ ДОЛЖЕН РВАТЬ ТЕХ, КТО СЕЙЧАС ГОВОРИТ. Требование фаундера, 2026-08-17:
+ * «перезапуск должен подхватить всё, что сейчас активное, и продолжить с них».
+ *
+ * До этого здесь стояло `server.stop(true)`, а `true` в Bun — это дословно «Immediately terminate
+ * in-flight requests» (его собственные типы, serve.d.ts:841). То есть каждый перезапуск обрывал
+ * ход любого агента, который в этот момент ждал ответ модели, — а ходы бывают минутами, и
+ * оборванный выглядит для агента ошибкой API, неотличимой от настоящей.
+ *
+ * Теперь: перестаём принимать НОВЫЕ соединения и даём идущим договорить. Потолок нужен, потому что
+ * стриминг бывает и очень длинным, а systemd ждать вечно не станет: после него — прежний обрыв,
+ * названный в журнале, а не тихий.
+ */
+async function shutdown(): Promise<void> {
   if (parentWatcher) clearInterval(parentWatcher)
   stopStatsEmitter()
   stopHeartbeat()
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.
   proxyClient.stop()
-  server.stop(true)
+  if (DRAIN_MS > 0) {
+    // stop(false) — «не принимать новые, дать текущим закончиться». Обещание Bun возвращается
+    // промисом, поэтому гонка с потолком, а не слепое ожидание.
+    const drained = server.stop(false)
+    const finished = await Promise.race([
+      Promise.resolve(drained).then(() => true),
+      new Promise<false>((r) => setTimeout(() => r(false), DRAIN_MS)),
+    ])
+    if (!finished) {
+      console.error(`[shutdown] идущие запросы не закончились за ${DRAIN_MS}ms — обрываю`)
+      server.stop(true)
+    }
+  } else {
+    server.stop(true)
+  }
   // Only clear discovery if WE wrote it (global mode only)
   if (PROXY_MODE === 'global') clearDiscoveryState()
   stopLogger()

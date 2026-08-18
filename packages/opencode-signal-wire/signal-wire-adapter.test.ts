@@ -23,6 +23,17 @@ import { readFileSync } from 'node:fs'
  *
  * (The flag and the fact that live sessions go through a resident daemon rather
  * than this in-process path both come from packages-signal-wire-core-owner.)
+ *
+ * 🔴 KEEP THIS LINE even though the core now suppresses exec under a test runner
+ * by itself (its commit 3356654). Measured here the same evening, after that
+ * commit: with the flag removed and NODE_ENV=test set, one evaluation still cost
+ * 7292 ms — identical to production. The reason is not that the new default is
+ * wrong but that it had not reached us: the core's compiled binaries carry it
+ * while `dist/emitters/builtin/exec.js` and `dist/index.js` were still a day old
+ * and carry no trace of it — and `main`/`exports` of that package point at
+ * exactly those files. So for a LIBRARY consumer this line is not redundancy,
+ * it is the only thing standing between `bun test` and the fleet's scripts.
+ * Reported to the owner; re-measure the three poles before removing it.
  */
 process.env.SW_EXEC_OFF = '1'
 

@@ -115,21 +115,53 @@ function resolveMemberHints(cwd: string): {
  * If a test-runner marker (NODE_ENV/BUN_ENV=test) reaches a real opencode
  * process, every `exec` action in the fleet's rules goes silent — memory
  * writes, session reconciliation, mirror syncs — and nothing in the visible
- * output says so. The core announces it too (its commit ef7623a), but into
- * `~/.claude/signal-wire-debug.log`, a file no operator tails; here we say it
- * on stderr, which is where an opencode operator actually looks.
+ * output says so.
+ *
+ * The core announces this too, on stderr, since its commit 9310c35 — so why
+ * keep ours? Because the two say DIFFERENT things. Theirs fires at the first
+ * suppressed ACTION, so a session where no exec rule ever matched hears
+ * nothing at all; ours fires at engine construction, unconditionally, before
+ * a single event. Earlier and always — that is what an operator needs from
+ * the process they are actually sitting in front of.
+ *
+ * ONCE PER PROCESS, not per engine. `server:` is invoked per SESSION (see
+ * `input.sessionID`), so the first version of this line — shipped 2026-08-18
+ * without a guard — would have repeated for every session an opencode process
+ * served. That is precisely the noise that gets a warning muted. Same idiom as
+ * `adapterBannerEmitted` in signal-wire.ts, which exists for the same reason.
  *
  * `SW_EXEC_OFF` is deliberately NOT reported: it is set knowingly, by our own
  * test suite. Only the default nobody asked for is worth shouting about.
  */
-function warnIfExecSuppressedInLiveSession(): void {
+/**
+ * The DECISION, split out from the guard so both halves can be tested with a
+ * real red path: what (if anything) this process should say about exec
+ * suppression right now. Returns null when there is nothing to say.
+ *
+ * Exported for its test. Keeping it fused with the once-per-process guard made
+ * the "explicit switch stays silent" case untestable — the guard, already
+ * tripped by the previous test, would have swallowed the call and the test
+ * would have passed no matter what this function decided. A test that cannot
+ * fail is worse than no test; that is the same principle this whole file exists
+ * to defend.
+ */
+export function execSuppressionAnnouncement(): string | null {
   const reason = execSuppressionReason()
-  if (reason === null || reason.startsWith('SW_EXEC_OFF')) return
-  console.error(
-    `[SW] ⚠️ exec actions are SUPPRESSED in this live session — ${reason}. ` +
-    `Rule scripts (memory writes, session sync, mirrors) will NOT run. ` +
-    `In a real session this is an environment error, not a mode.`,
-  )
+  if (reason === null || reason.startsWith('SW_EXEC_OFF')) return null
+  return `[SW] ⚠️ exec actions are SUPPRESSED in this process — ${reason}. `
+    + `Rule scripts (memory writes, session sync, mirrors) will NOT run for any `
+    + `session it serves. In a real session this is an environment error, not a mode.`
+}
+
+let execSuppressionAnnounced = false
+/** Exported for its test only — the once-per-process guard is the whole point,
+ *  and a guard nobody can observe is the class of defect this file is closing. */
+export function warnIfExecSuppressedInLiveSession(): void {
+  if (execSuppressionAnnounced) return
+  const line = execSuppressionAnnouncement()
+  if (line === null) return
+  execSuppressionAnnounced = true
+  console.error(line)
 }
 
 function createSignalWire(serverUrl: string, sessionId: string, sdkClient: any): SignalWire {

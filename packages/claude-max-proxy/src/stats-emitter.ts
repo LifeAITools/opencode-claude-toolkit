@@ -19,11 +19,17 @@
  *
  *   { v, ts, pid, type:"stream", model,
  *     usage:    { in, out, cacheRead, cacheWrite },
- *     rateLimit:{ status, util5h, util7d, resetAt? } }
+ *     rateLimit:{ status, util5h, util7d, resetAt?, resetAt7d? } }
  *
  *   - pid       : the proxy process pid (single writer).
  *   - type      : always "stream" — the processor filters on this.
- *   - resetAt   : unix-SECONDS, present only when upstream gave a reset hint.
+ *   - resetAt   : the FIVE-HOUR window's reset, unix-SECONDS, present only when
+ *                 upstream gave the hint.
+ *   - resetAt7d : the SEVEN-DAY window's own reset, unix-SECONDS. A SEPARATE
+ *                 clock, not a copy: measured 2026-08-17, at one and the same
+ *                 moment the 5h window reset in 13 minutes and the 7d window in
+ *                 142 hours. One number cannot stand for both, and a consumer
+ *                 that shows «quota resets at …» must say WHICH window.
  *
  * ─── Failure policy ──────────────────────────────────────────────────
  *
@@ -81,7 +87,8 @@ interface StatsLine {
     status: string | null
     util5h: number | null
     util7d: number | null
-    resetAt?: number // unix-seconds; omitted when unknown
+    resetAt?: number   // 5h window, unix-seconds; omitted when unknown
+    resetAt7d?: number // 7d window, unix-seconds; a different clock, see header
   }
 }
 
@@ -186,6 +193,11 @@ export function startStatsEmitter(): () => void {
         // «Reset in nullmin. STOP NEW WORK» — механизм пытался назвать время и печатал пустоту.
         // Фаундер спросил прямо: «показывает ли 5h квота, во сколько она будет сброшена».
         ...((ev.rateLimit as any)?.resetAt != null ? { resetAt: (ev.rateLimit as any).resetAt } : {}),
+        // И ВТОРОЕ ОКНО — ровно тем же способом. Вчерашняя починка довезла пятичасовое и оставила
+        // недельное лежать в SDK: `resetAt7d` читается в proxy-client.ts:2801 из собственного
+        // заголовка `anthropic-ratelimit-unified-7d-reset`, но во всём claude-max-proxy/src/ не
+        // встречался ни разу. Потребитель (реестр присутствия, подвал сообщений фаундера) ждёт оба.
+        ...((ev.rateLimit as any)?.resetAt7d != null ? { resetAt7d: (ev.rateLimit as any).resetAt7d } : {}),
       },
     }
     appendStatsLine(line)

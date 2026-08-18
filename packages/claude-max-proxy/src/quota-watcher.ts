@@ -153,7 +153,8 @@ interface StatsLine {
   rateLimit?: {
     status?: string
     claim?: string
-    resetAt?: number       // unix-seconds
+    resetAt?: number       // 5h window, unix-seconds
+    resetAt7d?: number     // 7d window, unix-seconds — a SEPARATE clock (see below)
     util5h?: number | null
     util7d?: number | null
   }
@@ -165,6 +166,7 @@ interface PidState {
   util5h: number | null
   util7d: number | null
   resetAt: number | null
+  resetAt7d: number | null
   lastSeenAt: number          // ms
   lastUtil5hChange: number    // ms — when util5h last changed value
   level: 'ok' | 'warning' | 'critical'
@@ -180,6 +182,22 @@ interface AccountState {
    *  expectation from an earlier observation of the SAME account (re-tuned on
    *  every fresh observation, dropped once it expires). */
   resetAtSource?: 'observed' | 'carried'
+  /**
+   * ДВА ОКНА, ДВА ЧАСА, ДВА ПОЛЯ — И СРАЗУ В ISO.
+   *
+   * `resetAt` выше — пятичасовое окно в МИЛЛИСЕКУНДАХ, и оно остаётся ради тех, кто уже его
+   * читает. Но одну и ту же отметку по дороге меряют по-разному: Anthropic шлёт СЕКУНДЫ, после
+   * этого коллектора она едет МИЛЛИСЕКУНДАМИ, и угадывание по величине однажды напечатало
+   * «год 58598». Поэтому конверсия живёт здесь — в единственном месте, где известно, из какого
+   * заголовка пришло число и в чём оно измерено, — а наружу идёт ISO, у которого единицы нет.
+   *
+   * И это ДВА поля, а не одно: замер 2026-08-17 показал, что в один и тот же миг пятичасовое
+   * окно сбрасывалось через 13 минут, а семидневное — через 142 часа. Совпадение обоих
+   * заголовков, которое видно в логе, говорит лишь о том, что ОДИН источник кладёт одно
+   * значение в оба, а не о том, что окна сбрасываются вместе.
+   */
+  reset5hAt: string | null
+  reset7dAt: string | null
   level: 'ok' | 'warning' | 'critical'
   message: string
   issuedAt: string
@@ -244,6 +262,10 @@ const sessionStates = new Map<string, SessionState>()
  *  expires, and every fresh observation re-tunes it. Seeded from the previous
  *  quota-status.json at boot so a watcher restart doesn't forget expectations. */
 const expectedResetAt = new Map<string, { resetAt: number; observedAt: number }>()
+/** То же самое для НЕДЕЛЬНОГО окна — отдельной картой, а не вторым полем в первой: часы разные,
+ *  и семидневная отметка переживает пятичасовую. Общая запись истекала бы по более раннему из
+ *  двух сроков и уносила бы с собой ещё живое недельное ожидание. */
+const expectedReset7dAt = new Map<string, { resetAt: number; observedAt: number }>()
 let lastWriteAt = 0
 let pendingWrite = false
 let lastCreds: CredsSnapshot = { expiresAt: null, hint: null, orgKey: null }
@@ -291,6 +313,12 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): () => void {
     for (const [hint, acc] of Object.entries(prev.accounts ?? {})) {
       if (typeof acc?.resetAt === 'number' && acc.resetAt > now) {
         expectedResetAt.set(hint, { resetAt: acc.resetAt, observedAt: now })
+      }
+      // Недельную отметку прежний снимок хранит уже в ISO — разбираем обратно в мс. Она живёт
+      // днями, поэтому пережить перезапуск вотчера для неё важнее, чем для пятичасовой.
+      const prev7d = acc?.reset7dAt ? Date.parse(acc.reset7dAt) : NaN
+      if (Number.isFinite(prev7d) && prev7d > now) {
+        expectedReset7dAt.set(hint, { resetAt: prev7d, observedAt: now })
       }
     }
   } catch {
@@ -427,6 +455,11 @@ function onCredsChange(path: string): void {
       expectedResetAt.set(newOrg, exp)
       expectedResetAt.delete(prevOrg)
     }
+    const exp7 = expectedReset7dAt.get(prevOrg)
+    if (exp7) {
+      expectedReset7dAt.set(newOrg, exp7)
+      expectedReset7dAt.delete(prevOrg)
+    }
     const acct = accountStates.get(prevOrg)
     if (acct) {
       accountStates.set(newOrg, { ...acct, accountHint: newOrg })
@@ -545,6 +578,9 @@ function ingestStatsLine(line: StatsLine): void {
   const resetAt = line.rateLimit?.resetAt
     ? line.rateLimit.resetAt * 1000
     : null
+  const resetAt7d = line.rateLimit?.resetAt7d
+    ? line.rateLimit.resetAt7d * 1000
+    : null
   const ts = line.ts ? Date.parse(line.ts) : Date.now()
 
   // skip rows with no rate-limit info (KA fires sometimes lack it)
@@ -580,6 +616,7 @@ function ingestStatsLine(line: StatsLine): void {
     util5h,
     util7d,
     resetAt,
+    resetAt7d,
     lastSeenAt: ts,
     lastUtil5hChange: utilChanged ? ts : (prev?.lastUtil5hChange ?? ts),
     level: classifyLevel(util5h, util7d),
@@ -649,6 +686,7 @@ function recomputeAccountFromPids(accountHint: string): void {
   let util5h: number | null = null
   let util7d: number | null = null
   let resetAt: number | null = null
+  let resetAt7d: number | null = null
   const pids: string[] = []
 
   for (const [pidKey, s] of pidStates.entries()) {
@@ -657,6 +695,7 @@ function recomputeAccountFromPids(accountHint: string): void {
     if (s.util5h != null && (util5h == null || s.util5h > util5h)) util5h = s.util5h
     if (s.util7d != null && (util7d == null || s.util7d > util7d)) util7d = s.util7d
     if (s.resetAt != null && (resetAt == null || s.resetAt > resetAt)) resetAt = s.resetAt
+    if (s.resetAt7d != null && (resetAt7d == null || s.resetAt7d > resetAt7d)) resetAt7d = s.resetAt7d
   }
   if (pids.length === 0) {
     accountStates.delete(accountHint)
@@ -678,6 +717,18 @@ function recomputeAccountFromPids(accountHint: string): void {
       } else {
         expectedResetAt.delete(accountHint)
       }
+    }
+  }
+
+  // Ровно тот же перенос для недельного окна: заголовок приходит не на каждом ответе, а окно от
+  // этого не перестаёт идти. Своя карта — потому что истекают эти две отметки в разное время.
+  if (resetAt7d != null) {
+    expectedReset7dAt.set(accountHint, { resetAt: resetAt7d, observedAt: Date.now() })
+  } else {
+    const exp7 = expectedReset7dAt.get(accountHint)
+    if (exp7) {
+      if (exp7.resetAt > Date.now()) resetAt7d = exp7.resetAt
+      else expectedReset7dAt.delete(accountHint)
     }
   }
 
@@ -705,6 +756,10 @@ function recomputeAccountFromPids(accountHint: string): void {
     util7d,
     resetAt,
     ...(resetAtSource ? { resetAtSource } : {}),
+    // Наружу — ISO по обоим окнам. Единицы кончаются здесь: дальше по цепи никто уже не должен
+    // гадать, секунды это или миллисекунды (однажды угадали и напечатали «год 58598»).
+    reset5hAt: isoFromMs(resetAt),
+    reset7dAt: isoFromMs(resetAt7d),
     level,
     message,
     issuedAt,
@@ -714,6 +769,18 @@ function recomputeAccountFromPids(accountHint: string): void {
 
 function levelRank(l: 'ok' | 'warning' | 'critical'): number {
   return l === 'critical' ? 2 : l === 'warning' ? 1 : 0
+}
+
+/** Отметка времени наружу: миллисекунды → ISO. `null` остаётся `null` — «не знаем» должно
+ *  выглядеть как «не знаем», а не как эпоха. Заведомо невозможная величина тоже даёт `null`:
+ *  секунды, принятые за миллисекунды, дают 1970-й, а обратная ошибка — пятьдесят восьмой век,
+ *  и обе лучше показать пустотой, чем правдоподобной ложью. */
+function isoFromMs(ms: number | null): string | null {
+  if (ms == null || !Number.isFinite(ms)) return null
+  // 2001-09-09 (1e12 мс) .. 2286-11-20 (1e13 мс) — окно, в которое попадает любая настоящая
+  // отметка в миллисекундах и не попадает ни одна в секундах.
+  if (ms < 1e12 || ms > 1e13) return null
+  try { return new Date(ms).toISOString() } catch { return null }
 }
 
 function pct(v: number | null): string {
@@ -750,6 +817,12 @@ function applyResetPassed(): void {
   for (const [hint, exp] of expectedResetAt.entries()) {
     if (exp.resetAt <= now) {
       expectedResetAt.delete(hint)
+      touched.add(hint)
+    }
+  }
+  for (const [hint, exp7] of expectedReset7dAt.entries()) {
+    if (exp7.resetAt <= now) {
+      expectedReset7dAt.delete(hint)
       touched.add(hint)
     }
   }
@@ -891,6 +964,7 @@ export const __testing = {
     accountStates.clear()
     sessionStates.clear()
     expectedResetAt.clear()
+    expectedReset7dAt.clear()
   },
 }
 

@@ -1680,17 +1680,32 @@ export class ProxyClient {
               previousPrefix: rewriteAssessment.prevPrefix,
             })
           }
+          // TWO DIFFERENT EVENTS, and the word "rewrite" hid the difference.
+          // A cold start WRITES a large cache for the FIRST time — nothing is
+          // being re-cached, there was no cache, and the spend is repaid by
+          // every later read. A ttl-expiry or org-switch THROWS AWAY a cache we
+          // already paid for and buys it again. Both need consent (founder,
+          // 2026-06-12), but calling them the same thing made the log unreadable:
+          // a dump named `expected_cold-start` with 448 104 tokens sat in a
+          // directory called rewrite-guard-blocks and read as a rewrite, while
+          // its own prefixDiff said `noBaseline: true, systemLen.prev = 0`.
+          const isFirstWrite = rewriteAssessment.rewriteClass === 'expected:cold-start'
+          const spendPhrase = isFirstWrite
+            ? `write ~${rewriteAssessment.predictedTokens} tokens of NEW cache (first write for this lineage — nothing is being discarded)`
+            : `re-cache ~${rewriteAssessment.predictedTokens} tokens (a cache already paid for is discarded and bought again)`
           this.events.emit({
             level: 'error',
             kind: 'CACHE_REWRITE_BLOCKED',
             sessionId,
             lineageKey: reqLineageKey,
             rewriteClass: rewriteAssessment.rewriteClass,
+            // Machine-readable form of the distinction above, so a consumer
+            // never has to parse prose or re-derive it from the class name.
+            spendKind: isFirstWrite ? 'first-write' : 'rewrite',
             predictedTokens: rewriteAssessment.predictedTokens,
             continuation: lastMsg.isContinuation,
             dumpPath,
-            msg: `rewrite guard blocked ${rewriteAssessment.rewriteClass} `
-              + `(~${rewriteAssessment.predictedTokens} tok) — awaiting consent `
+            msg: `guard blocked ${rewriteAssessment.rewriteClass} — would ${spendPhrase}; awaiting consent `
               + `(${guard.overrideMarker} or: context cache-rewrite-ok ${sessionId})`
               + (dumpPath ? ` — dump: ${dumpPath}` : ''),
           })
@@ -1698,6 +1713,7 @@ export class ProxyClient {
             error: {
               type: 'cache_rewrite_guard',
               rewriteClass: rewriteAssessment.rewriteClass,
+              spendKind: isFirstWrite ? 'first-write' : 'rewrite',
               predictedTokens: rewriteAssessment.predictedTokens,
               minRewriteTokens: guard.minRewriteTokens,
               minColdStartTokens: guard.minColdStartTokens,
@@ -1709,8 +1725,8 @@ export class ProxyClient {
                 cli: `context cache-rewrite-ok ${sessionId}`,
                 disable: 'keepalive.json → rewriteGuard.enabled=false',
               },
-              message: `Cache-rewrite guard: this turn would re-cache `
-                + `~${rewriteAssessment.predictedTokens} tokens (${rewriteAssessment.rewriteClass}) — `
+              message: `Cache guard: this turn would ${spendPhrase} `
+                + `(${rewriteAssessment.rewriteClass}) — `
                 + `an unconfirmed quota spend, blocked for all consumers. To proceed, either include `
                 + `${guard.overrideMarker} in your next message (/cache-rewrite-ok), or grant out-of-band: `
                 + `context cache-rewrite-ok ${sessionId}. Consent is single-use. `
@@ -2745,7 +2761,13 @@ export class ProxyClient {
         predictedTokens,
         idleMs: idleMs ?? null,
         ttlMs,
-        msg: `predicted cache rewrite — ${verdict.class} (~${predictedTokens} tok)`
+        // Same distinction as the guard message: a cold start is a FIRST write,
+        // not a re-write. Saying "rewrite" for both is what made a 448 104-token
+        // first write read as discarded work in the log.
+        spendKind: verdict.class === 'expected:cold-start' ? 'first-write' : 'rewrite',
+        msg: `predicted `
+          + (verdict.class === 'expected:cold-start' ? 'FIRST cache write' : 'cache REwrite')
+          + ` — ${verdict.class} (~${predictedTokens} tok)`
           + (systemChanged ? ' [system changed]' : '')
           + (toolsChanged ? ' [tools changed]' : '')
           + (orgChanged ? ' [org switched]' : '')

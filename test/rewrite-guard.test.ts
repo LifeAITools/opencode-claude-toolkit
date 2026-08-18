@@ -785,3 +785,55 @@ describe('assessCacheMiss is pure (does not advance prefix history)', () => {
     c.stop()
   })
 })
+
+/**
+ * The guard names WHICH spend it is blocking — 2026-08-18.
+ *
+ * One word covered two events with opposite meanings. A cold start WRITES a
+ * large cache for the first time and every later read repays it; a ttl-expiry
+ * or org-switch THROWS AWAY a cache already paid for and buys it again. Both
+ * need consent (founder directive 2026-06-12), but calling both "re-cache" made
+ * the record unreadable: a dump named `expected_cold-start` carrying 448 104
+ * tokens sat in a directory called rewrite-guard-blocks and read as discarded
+ * work — while its own prefixDiff said `noBaseline: true, systemLen.prev = 0`.
+ */
+describe('rewrite guard: a FIRST write is not a REwrite', () => {
+  const hugeCold = () => JSON.stringify({
+    model: 'claude-opus-4-8',
+    system: [{ type: 'text', text: 'system prompt (fresh lineage)', cache_control: { type: 'ephemeral' } }],
+    tools: [],
+    messages: [{ role: 'user', content: 'first turn ' + 'y'.repeat(240_000) }],
+  })
+
+  test('a blocked cold start is called a first write, never a re-cache', async () => {
+    const c = mkClient()
+    const r = await c.handleRequest(hugeCold(), {}, { sessionId: 'rg-word-cold' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { spendKind?: string; message?: string } }
+    expect(j.error?.spendKind).toBe('first-write')
+    expect(j.error?.message).toContain('NEW cache')
+    expect(j.error?.message).not.toContain('re-cache')
+    c.stop()
+  })
+
+  test('a blocked ttl-expiry IS called a re-cache — the cache was already paid for', async () => {
+    const events: any[] = []
+    // Seed a 10-min-idle lineage — past the 5m wire TTL of reqBody()'s ephemeral
+    // markers — so the next turn is a genuine avoidable:ttl-expiry, the same
+    // setup the older idle-past-TTL test uses.
+    const path = join(TMP, 'rg-word-ttl.json')
+    seedIdleFor(path, 'rg-word-ttl', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path, eventEmitter: { emit: (e: any) => events.push(e) } })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-word-ttl' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { spendKind?: string; rewriteClass?: string; message?: string } }
+    expect(j.error?.rewriteClass).toBe('avoidable:ttl-expiry')
+    expect(j.error?.spendKind).toBe('rewrite')
+    expect(j.error?.message).toContain('re-cache')
+    expect(j.error?.message).toContain('discarded and bought again')
+
+    const blocked = events.find((e) => e.kind === 'CACHE_REWRITE_BLOCKED')
+    expect(blocked?.spendKind).toBe('rewrite')
+    c.stop()
+  })
+})

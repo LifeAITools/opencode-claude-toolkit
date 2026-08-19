@@ -1,0 +1,73 @@
+/**
+ * What is committed is what is built.
+ *
+ * 🔴 THIS PACKAGE SHIPS A BUILT BUNDLE, AND CONSUMERS READ IT, NOT THE SOURCE.
+ * `package.json` says `main: dist/index.js` and points `exports` at the same
+ * file, and four sibling packages in this repo depend on it — `opencode-claude`
+ * resolves it by a symlink straight to this repo root, so whatever sits in
+ * `dist/` at that moment is the code it actually runs.
+ *
+ * 🔴 WHY THERE IS A TEST AND NOT JUST A HABIT. Measured 2026-08-19, on this very
+ * repository, one commit after the fact: `dist/index.js` as committed at
+ * af7de7e did NOT contain the change that commit was about, because the bundle
+ * was rebuilt by the deploy AFTER the commit was made. Anyone checking out that
+ * commit and importing the package would have run the previous day's code while
+ * the source beside it said otherwise.
+ *
+ * That is not a novel failure — it is the same one that cost this fleet a day
+ * the evening before, in a NEIGHBOUR's package: its source and its compiled
+ * binaries carried a fix while the library build that `main`/`exports` pointed
+ * at was a day old, so every library consumer kept running the old behaviour
+ * and the owner's "already shipped" was true only of the half he could see.
+ * The lesson was theirs first; this test is that lesson applied here, where the
+ * same shape had been sitting unguarded the whole time.
+ *
+ * WHAT IT COMPARES, AND WHY THAT IS EXACT. The build is deterministic — the
+ * same source produces the same bytes, verified before this test was written —
+ * so it rebuilds into a scratch directory and compares byte for byte. No hash
+ * to trust, no marker to keep in sync: if the bundle in `dist/` was not built
+ * from the source beside it, the bytes differ and this goes red.
+ *
+ * WHEN IT GOES RED, THE FIX IS ONE COMMAND: `bun run build`, then commit the
+ * result together with the source change that caused it.
+ */
+
+import { describe, test, expect } from 'bun:test'
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+
+const ROOT = join(import.meta.dir, '..')
+
+describe('the shipped bundle matches the source beside it', () => {
+  test('dist/index.js is what a build of src produces right now', async () => {
+    const committed = join(ROOT, 'dist', 'index.js')
+    expect(existsSync(committed)).toBe(true)
+
+    const scratch = mkdtempSync(join(tmpdir(), 'sdk-dist-check-'))
+    try {
+      const proc = Bun.spawn(['bun', 'run', 'scripts/build-sdk.ts'], {
+        cwd: ROOT,
+        env: { ...process.env, SDK_BUILD_OUTDIR: scratch },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const code = await proc.exited
+      if (code !== 0) {
+        const err = await new Response(proc.stderr).text()
+        throw new Error(`the build itself failed (exit ${code}) — fix that first:\n${err.slice(0, 2000)}`)
+      }
+
+      const fresh = readFileSync(join(scratch, 'index.js'))
+      const shipped = readFileSync(committed)
+
+      // Sizes first: a mismatch here is the common case and the message is
+      // readable, where a byte-buffer diff would print megabytes of minified JS.
+      expect({ builtBytes: fresh.length, shippedBytes: shipped.length })
+        .toEqual({ builtBytes: fresh.length, shippedBytes: fresh.length })
+      expect(Buffer.compare(fresh, shipped)).toBe(0)
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  }, 120_000)
+})

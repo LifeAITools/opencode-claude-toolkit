@@ -16,7 +16,14 @@ import { join } from 'path'
 
 const ROOT = join(import.meta.dir, '..')
 const SRC_ENTRY = join(ROOT, 'src/index.ts')
-const DIST = join(ROOT, 'dist')
+// Output directory. Overridable so a check can build into a scratch dir and
+// compare the result against the committed bundle WITHOUT clobbering it — see
+// test/dist-matches-source.test.ts for why that check exists at all.
+const DIST = process.env.SDK_BUILD_OUTDIR
+  ? (process.env.SDK_BUILD_OUTDIR.startsWith('/')
+      ? process.env.SDK_BUILD_OUTDIR
+      : join(ROOT, process.env.SDK_BUILD_OUTDIR))
+  : join(ROOT, 'dist')
 
 async function main() {
   console.log('[build] Step 1: esbuild bundle...')

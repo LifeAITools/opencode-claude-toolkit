@@ -34,15 +34,53 @@
 
 import { describe, test, expect } from 'bun:test'
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
 const ROOT = join(import.meta.dir, '..')
 
+/**
+ * Is anything the bundle is built FROM edited but not yet committed?
+ *
+ * 🔴 This distinction is the difference between a guard and a nuisance, and it
+ * was handed to me by packages-signal-wire-core-owner within the hour, from his
+ * own version of this check: while you are mid-edit in `src/`, the bundle on
+ * disk legitimately does not match the source beside it, and a byte comparison
+ * would go red for everyone on every ordinary edit — which is how a warning
+ * gets muted, exactly the failure this file exists to prevent elsewhere.
+ *
+ * The narrowness matters: a dirty `dist/` alone must NOT skip the check, because
+ * that is precisely the defect that started this — a bundle rebuilt AFTER the
+ * commit, leaving what is committed one step behind what is built.
+ */
+function bundleSourceIsDirty(): boolean {
+  try {
+    const out = execFileSync('git', ['status', '--porcelain', '--', 'src'], {
+      cwd: ROOT, encoding: 'utf8',
+    })
+    return out.trim().length > 0
+  } catch {
+    // No git, no verdict — better to run the check than to skip it silently.
+    return false
+  }
+}
+
 describe('the shipped bundle matches the source beside it', () => {
   test('dist/index.js is what a build of src produces right now', async () => {
     const committed = join(ROOT, 'dist', 'index.js')
     expect(existsSync(committed)).toBe(true)
+
+    if (bundleSourceIsDirty()) {
+      // Said out loud rather than passing quietly: a check that skips in silence
+      // reads exactly like a check that ran.
+      console.log(
+        '[dist-matches-source] SKIPPED — src/ has uncommitted edits, so the bundle '
+        + 'is expected to differ. Run `bun run build` and commit dist together with '
+        + 'the source change; this check runs again on a clean tree.',
+      )
+      return
+    }
 
     const scratch = mkdtempSync(join(tmpdir(), 'sdk-dist-check-'))
     try {

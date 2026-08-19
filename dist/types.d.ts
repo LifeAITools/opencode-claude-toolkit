@@ -150,6 +150,25 @@ export interface KeepaliveConfig {
         blocked: boolean;
         model: string;
     }) => void;
+    /**
+     * A keepalive fire BEGAN / FAILED — the pair of `onHeartbeat`, which fires
+     * only on success. Without them a failed fire leaves no trace at all, and
+     * "keepalive was quiet" reads the same whether it was quiet or was failing
+     * on every attempt. See the full note on the engine's own config type.
+     */
+    onFireStart?: (info: {
+        lineageKey: string;
+        idleMs: number;
+        at: number;
+    }) => void;
+    onFireError?: (info: {
+        lineageKey: string;
+        idleMs: number;
+        status: number | null;
+        category: string;
+        message: string;
+        durationMs: number;
+    }) => void;
     /** Fired when network health probe transitions (degraded ↔ healthy). Reserved for Layer 2. */
     onNetworkStateChange?: (info: {
         from: string;

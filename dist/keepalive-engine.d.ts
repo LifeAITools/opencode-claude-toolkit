@@ -476,6 +476,36 @@ export declare class KeepaliveEngine {
             blocked: boolean;
             model: string;
         }) => void;
+        /**
+         * A keepalive fire BEGAN / FAILED.
+         *
+         * 🔴 Until 2026-08-19 only a SUCCESSFUL fire was ever announced
+         * (`onHeartbeat` → KA_FIRE_COMPLETE). A fire that failed was handled in
+         * full — classified, retried, quota-paused, disarmed — and left NOTHING in
+         * the event stream, so from outside it was indistinguishable from a fire
+         * that never happened. Measured that day: 363 KA_FIRE_COMPLETE in the log
+         * and not one record of an attempt that did not complete.
+         *
+         * That hole is not academic. The open dispute about what the 529 storms
+         * ARE turns on exactly this: whether the traffic at a quota reset is the
+         * fleet's keepalive or the fleet resuming. Counting only successful fires
+         * answers "keepalive was quiet" even in the world where every fire was
+         * failing — the same failures-only blindness that made the request_id
+         * question unanswerable (fixed the same day in the real-request path).
+         */
+        onFireStart?: (info: {
+            lineageKey: string;
+            idleMs: number;
+            at: number;
+        }) => void;
+        onFireError?: (info: {
+            lineageKey: string;
+            idleMs: number;
+            status: number | null;
+            category: string;
+            message: string;
+            durationMs: number;
+        }) => void;
         onNetworkStateChange?: (info: {
             from: string;
             to: string;

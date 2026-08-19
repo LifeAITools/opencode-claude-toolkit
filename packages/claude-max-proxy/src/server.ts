@@ -52,6 +52,7 @@ import { startLogger } from './logger.js'
 import { processAlive } from './session-tracker.js'
 import { ProxyConfigCredentialsAdapter } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
+import { startStormWatch } from './storm-watch.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
@@ -339,6 +340,15 @@ const stopHeartbeat = startHeartbeat(
   () => proxyClient.orgTokenHealth(),
 )
 
+// ═══ Storm watch ═════════════════════════════════════════════════════
+// Notices for itself when refusals start clustering and says so once, with the
+// keepalive-vs-resume split. Lives here rather than in an agent's session
+// because a watcher that dies with its session is worse than none — twice it
+// did exactly that on 2026-08-19 while everyone believed something was
+// watching. See storm-watch.ts.
+
+const stopStormWatch = startStormWatch()
+
 // ═══ Module System ═══════════════════════════════════════════════
 //
 // Each endpoint family is a self-contained module with its own routes.
@@ -540,6 +550,7 @@ async function shutdown(): Promise<void> {
   if (parentWatcher) clearInterval(parentWatcher)
   stopStatsEmitter()
   stopHeartbeat()
+  stopStormWatch()
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.
   proxyClient.stop()
   if (DRAIN_MS > 0) {

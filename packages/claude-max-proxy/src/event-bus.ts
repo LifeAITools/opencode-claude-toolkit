@@ -61,6 +61,7 @@ export type EventKind =
   | 'KA_FIRE_COMPLETE'
   | 'KA_FIRE_ERROR'
   | 'KA_DISARM'
+  | 'KA_HOLD'            // fleet breaker tripped: fires suspended, snapshot KEPT
   | 'KA_RESUMED'
 
   // Guards
@@ -122,6 +123,7 @@ export const EVENT = {
   KA_FIRE_COMPLETE: 'KA_FIRE_COMPLETE',
   KA_FIRE_ERROR: 'KA_FIRE_ERROR',
   KA_DISARM: 'KA_DISARM',
+  KA_HOLD: 'KA_HOLD',
   KA_RESUMED: 'KA_RESUMED',
   // Guards
   REWRITE_WARN: 'REWRITE_WARN',
@@ -255,6 +257,22 @@ export interface KaFireCompleteEvent extends BaseEvent {
     util5h: number | null
     util7d: number | null
   }
+}
+
+/**
+ * A HOLD is not a disarm: fires are suspended for a bounded wait and the cache
+ * snapshot is KEPT, so the session resumes warm on its own. Reported as its own
+ * kind precisely because reporting it as a disarm — or not at all — is what made
+ * the 2026-08-19 fleet-wide loss of warmth unreadable while it was happening.
+ */
+export interface KaHoldEvent extends BaseEvent {
+  kind: 'KA_HOLD'
+  sessionId: string
+  reason: string
+  /** How long fires are suspended, including the anti-stampede jitter. */
+  holdMs: number
+  /** Lineages still held in the registry — the warmth being preserved. */
+  regSize: number
 }
 
 export interface KaDisarmEvent extends BaseEvent {

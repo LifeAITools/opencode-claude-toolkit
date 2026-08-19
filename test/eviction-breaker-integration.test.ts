@@ -1,14 +1,21 @@
 /**
  * EvictionCircuitBreaker ↔ KeepaliveEngine wiring (integration).
  *
- * Proves the consumption side end-to-end through the real tick() path:
- * a tripped shared breaker makes an armed engine HOLD at Layer 0c — it returns
- * BEFORE the onTick hook (which only fires at the later idle-gate) and never
- * calls doFetch, while leaving the registry armed (hold, not disarm).
+ * Proves the consumption side end-to-end through the real tick() path: a
+ * tripped shared breaker stops an armed engine at Layer 0c — it returns BEFORE
+ * the onTick hook (which only fires at the later idle-gate) and never calls
+ * doFetch.
  *
- * Distinguishing the hold-gate from the idle-gate: onTick is emitted at the
- * idle-gate but NOT at the eviction hold-gate (which returns earlier). So
- * "onTick called" ⇒ tick passed the hold-gate; "onTick not called" ⇒ held.
+ * These engines run on the DEFAULT 5-minute cache TTL, which against a
+ * 5-minute cooldown means the prefix cannot survive the wait — so the correct
+ * outcome here is a disarm, and that is what is asserted. The other pole, where
+ * an hour-long cache easily outlives the cooldown and the engine must HOLD its
+ * snapshot instead, lives in test/eviction-breaker-hold.test.ts. Read the two
+ * together: neither alone states the rule.
+ *
+ * Distinguishing the stop-gate from the idle-gate: onTick is emitted at the
+ * idle-gate but NOT at the eviction gate (which returns earlier). So
+ * "onTick called" ⇒ tick passed the gate; "onTick not called" ⇒ stopped there.
  */
 
 import { describe, test, expect } from 'bun:test'

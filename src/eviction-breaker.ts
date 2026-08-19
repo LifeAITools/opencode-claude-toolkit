@@ -20,14 +20,29 @@
  * request hands them a fresh, known-good snapshot. An N-session rewrite cascade
  * collapses into one rewrite + lazy re-warm on return.
  *
- * WHY DISARM, NOT HOLD: once the server has evicted a prefix, the warm cache is
- * already gone — there is nothing to "keep warm" by holding. Staying armed just
- * assumes the snapshot will be valid again after a cooldown, which the eviction
- * itself disproves: the next fire would be another cold rewrite, for an *idle*
- * session the user may never return to. Disarming stops guessing — KA resumes
- * cleanly when the next real request proves the user is back AND supplies a
- * current snapshot. Idle sessions thus re-warm lazily on return, not by
- * stampeding into N cold rewrites mid-storm.
+ * WHY A SIBLING HOLDS AND DOES NOT DISARM (corrected 2026-08-19): the engine
+ * that DETECTED the eviction knows its own prefix is gone and retires that
+ * lineage locally (Layer 5) — that part is right and unchanged. But the breaker
+ * speaks to every OTHER engine, and about them nothing was observed at all:
+ * their prefixes may be perfectly warm. The earlier reasoning here ("the warm
+ * cache is already gone, there is nothing to keep warm by holding") is true of
+ * the detector and false of the siblings, and dropping their snapshots on a
+ * suspicion turned a five-minute precaution into a permanent loss of warmth.
+ *
+ * MEASURED, 2026-08-19 07:14-07:19Z: one genuine eviction tripped the breaker
+ * and 26 sessions were disarmed within five minutes. Twelve were actively
+ * working and re-armed on their next real request; the other FOURTEEN were idle
+ * — an idle agent makes no requests, that is what idle means — so nothing ever
+ * re-armed them. Five and a half hours later their caches had long passed the
+ * 1h TTL, and the first turn each of them was woken for had to re-cache ~450k
+ * tokens: exactly the cold rewrite this breaker exists to prevent, merely
+ * deferred and multiplied. One of the fourteen was the session investigating it.
+ *
+ * So a sibling HOLDS: keeps its snapshot, stops its tick timer, and wakes on a
+ * timer when the cooldown expires (see decideBreakerAction + the engine's
+ * eviction-hold, mirroring the quota-pause idiom in the same file). It DISARMS
+ * only when the cache provably cannot survive the cooldown — then there is
+ * genuinely nothing left to save.
  *
  * FALSE-POSITIVE GUARD (see isServerSideEviction): a cold write is only a fleet
  * signal when it has NO local cause. A recent REAL request — including a
@@ -107,6 +122,27 @@ export interface EvictionTripMeta {
 interface TripRecord {
   at: number
   meta: EvictionTripMeta
+}
+
+/**
+ * What a SIBLING engine should do when it meets a tripped fleet breaker.
+ *
+ * Pure so the choice can be proven without timers: HOLD while the cache
+ * outlives the wait (keep the snapshot, come back when the cooldown expires),
+ * DISARM when it does not (nothing survives the wait, so there is nothing to
+ * keep). `cacheAgeMs < 0` means "no snapshot at all" — also nothing to keep.
+ */
+export function decideBreakerAction(p: {
+  /** ms until the breaker auto-clears. */
+  cooldownRemainingMs: number
+  /** age of this engine's cache snapshot; negative when there is none. */
+  cacheAgeMs: number
+  cacheTtlMs: number
+  safetyMarginMs: number
+}): 'hold' | 'disarm' {
+  if (p.cacheAgeMs < 0) return 'disarm'
+  const survivesForMs = p.cacheTtlMs - p.safetyMarginMs - p.cacheAgeMs
+  return survivesForMs > p.cooldownRemainingMs ? 'hold' : 'disarm'
 }
 
 export class EvictionCircuitBreaker {

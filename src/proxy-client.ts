@@ -2247,6 +2247,15 @@ export class ProxyClient {
             })
           }
         },
+        onHeld: (info) => this.events.emit({
+          level: 'info',
+          kind: 'KA_HOLD',
+          sessionId,
+          reason: info.reason,
+          holdMs: info.holdMs,
+          regSize: info.regSize,
+          msg: `KA held for session ${sessionId.slice(0, 8)} — reason=${info.reason}, snapshot kept, resuming in ${Math.round(info.holdMs / 1000)}s`,
+        }),
         onDisarmed: (info) => this.events.emit({
           level: 'error',
           kind: 'KA_DISARM',

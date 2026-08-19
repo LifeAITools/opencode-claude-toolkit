@@ -119,7 +119,7 @@ import { loadKeepaliveConfig } from './keepalive-config.js'
 import { lineageKey, classifyRole, type AgentRole, type RoleHints } from './lineage.js'
 import type { PersistedEngineState } from './ka-snapshot-store.js'
 import type { EvictionCircuitBreaker } from './eviction-breaker.js'
-import { isServerSideEviction } from './eviction-breaker.js'
+import { isServerSideEviction, decideBreakerAction } from './eviction-breaker.js'
 
 // ============================================================
 // Per-lineage KA state shapes
@@ -134,6 +134,20 @@ interface RegistryEntry {
   role: AgentRole
   inputTokens: number
   hasCacheControl: boolean
+  /**
+   * Did a REAL request in THIS process hand us this snapshot, or did we
+   * resurrect it from the shared snapshot file at startup?
+   *
+   * It decides whether a cold write on this lineage is evidence about the
+   * SERVER. A snapshot a live request just gave us is known-current, so a cold
+   * write on it means the server dropped the prefix — a real fleet signal. A
+   * resurrected one carries no such proof: the process that wrote it may still
+   * be warming it elsewhere, its TTL may have been down-locked since, and its
+   * prefix may be long dead. A cold write there says only that WE fired at a
+   * corpse, and must never be reported to the fleet as an upstream storm
+   * (2026-08-19: exactly that mistake disarmed 26 healthy sessions).
+   */
+  provenByRealRequest: boolean
 }
 
 /** A snapshot primed by notifyRealRequestStart, awaiting its completion. */
@@ -517,6 +531,11 @@ export class KeepaliveEngine {
     onHeartbeat?: (stats: KeepaliveStats) => void
     onTick?: (tick: KeepaliveTick) => void
     onDisarmed?: (info: { reason: string; at: number; errStatus?: number | null; errMessage?: string | null }) => void
+    /** A fleet-wide hold began: fires are suspended but the snapshot is KEPT
+     *  and a timer will resume them. Distinct from onDisarmed on purpose — a
+     *  hold that reported itself as a disarm would read as lost warmth, and a
+     *  hold that reported nothing at all would read as a healthy engine. */
+    onHeld?: (info: { reason: string; at: number; holdMs: number; regSize: number }) => void
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
     /**
      * A keepalive fire BEGAN / FAILED.
@@ -662,6 +681,14 @@ export class KeepaliveEngine {
   private quotaPauseTimer: ReturnType<typeof setTimeout> | null = null
   private quotaPauseUntil: number | null = null
 
+  // Eviction-hold state (set when the SHARED fleet breaker is tripped by a
+  // sibling's genuine server-side eviction). Same shape as the quota pause and
+  // for the same reason: the condition clears on its own, so the snapshot is
+  // kept and a timer brings the engine back. Wake triggers: scheduled timer
+  // (cooldown + jitter) OR notifyRealRequestStart.
+  private evictionHoldTimer: ReturnType<typeof setTimeout> | null = null
+  private evictionHoldUntil: number | null = null
+
   // Debug counter
   private snapshotCallCount = 0
 
@@ -734,6 +761,7 @@ export class KeepaliveEngine {
       onFireError: ka.onFireError,
       onTick: ka.onTick,
       onDisarmed: ka.onDisarmed,
+      onHeld: ka.onHeld,
       onRewriteWarning: ka.onRewriteWarning,
       onNetworkStateChange: ka.onNetworkStateChange,
       onTtlScan: ka.onTtlScan,
@@ -754,6 +782,10 @@ export class KeepaliveEngine {
     // reachable from the consumer's perspective — wake immediately. If their
     // request also gets 429'd we'll re-enter pause on the next KA attempt.
     this.wakeFromQuotaPause()
+
+    // Same for an eviction hold: a real request hands us a current snapshot and
+    // proves this session is live, so there is nothing left to wait for.
+    this.wakeFromEvictionHold()
 
     // ── Lineage identity + per-lineage history ──────────────────────
     // Pure, never-throws. The lineageKey identifies a distinct cache prefix
@@ -949,6 +981,9 @@ export class KeepaliveEngine {
         const entry = {
           body, headers, model, lineageKey: key, role,
           inputTokens: totalTokens, hasCacheControl: hasAnyCacheControl,
+          // A real request just handed us this snapshot — from here on a cold
+          // write on it IS evidence the server dropped the prefix.
+          provenByRealRequest: true,
         }
         this.registry.set(key, entry)
         this.lastSnapshots.set(key, entry) // retain for self-heal re-prime
@@ -1112,6 +1147,11 @@ export class KeepaliveEngine {
       this.quotaPauseTimer = null
     }
     this.quotaPauseUntil = null
+    if (this.evictionHoldTimer) {
+      clearTimeout(this.evictionHoldTimer)
+      this.evictionHoldTimer = null
+    }
+    this.evictionHoldUntil = null
     this.abortController?.abort()
     this.clearRegistry()
     this.inFlight = false
@@ -1267,21 +1307,17 @@ export class KeepaliveEngine {
     // ── Layer 0c: cross-engine eviction-storm disarm ───────────────
     // A sibling engine detected a GENUINE server-side cold-write eviction (no
     // local cause) and tripped the SHARED breaker. The server is evicting
-    // prefixes unpredictably right now: our snapshot's warmth is no longer
-    // trustworthy (the prefix may already be gone here too), and firing would
-    // just pay a full cold rewrite for an IDLE session the user may not return
-    // to. DISARM — drop the stale snapshot and stop. KA re-arms cleanly when the
-    // next REAL request proves the user is back and hands us a current snapshot,
-    // so idle sessions re-warm lazily on return instead of stampeding into N
-    // cold rewrites mid-storm. (Mirrors Layer 5's self-disarm of the detector.)
+    // prefixes unpredictably right now, so firing INTO that would risk paying a
+    // cold rewrite — we stop firing for the cooldown. But we do NOT throw the
+    // snapshot away: nothing was observed about THIS session's prefix, and an
+    // idle session has no "next real request" to re-arm it, so a disarm here is
+    // permanent in practice (measured 2026-08-19: 14 of 26 disarmed sessions
+    // never came back, each later paying the ~450k cold rewrite this breaker
+    // exists to prevent). HOLD instead — keep the snapshot, stop the timer, wake
+    // on a timer when the cooldown expires. Disarm only when the cache cannot
+    // survive the wait. See decideBreakerAction in eviction-breaker.ts.
     if (this.evictionBreaker?.isTripped(Date.now())) {
-      try {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
-          `[${new Date().toISOString()}] KA_DISARM_EVICTION_BREAKER pid=${process.pid} regSize=${this.registry.size} cooldownRemainingSec=${Math.round(this.evictionBreaker.cooldownRemainingMs(Date.now()) / 1000)} — sibling detected server-side eviction; disarming until next real request\n`)
-      } catch { /* logging best-effort */ }
-      this.clearRegistry()
-      this.stop()
-      try { this.config.onDisarmed?.({ reason: 'eviction_breaker_tripped', at: Date.now() }) } catch {}
+      this.handleEvictionBreakerTripped()
       return
     }
 
@@ -1452,6 +1488,39 @@ export class KeepaliveEngine {
       })
     if (eligible.length === 0) return  // nothing due yet — onTick already emitted
 
+    // ── Last gate before spending: is the cache we are about to refresh still
+    // alive AT ALL? ──────────────────────────────────────────────────────
+    // The tick's earlier expiry branch (Layer 0b) runs before this, but it only
+    // sees the state it was handed; a snapshot restored by another process, or
+    // a TTL that was down-locked to a shorter value after the snapshot was
+    // taken, arrives here already dead. Firing then is not a refresh — it is a
+    // guaranteed full cold WRITE of a prefix nobody will ever read, and it
+    // looks exactly like a server-side eviction to the fleet breaker.
+    //
+    // MEASURED 2026-08-19: the same body was replayed by six different
+    // processes across the day, each burning ~1.65M cache-write tokens
+    // (915579 + 4x182781, byte-identical every time), and only AFTER the fires
+    // did the engine announce cacheAgeSec=10800 against cacheTtlSec=300. The
+    // check has to stand in front of the spend, not behind it.
+    if (this.cacheWrittenAt > 0) {
+      const ageAtFire = Date.now() - this.cacheWrittenAt
+      if (ageAtFire >= this.cacheTtlMs - this.safetyMarginMs) {
+        try {
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] KA_FIRE_SKIPPED_CACHE_DEAD pid=${process.pid} cacheAgeSec=${Math.round(ageAtFire / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} regSize=${this.registry.size} — refusing to cold-write a dead prefix\n`)
+        } catch { /* logging best-effort */ }
+        this.logClearDiag('cache_dead_at_fire_gate', {
+          cacheAgeMs: ageAtFire,
+          cacheTtlMs: this.cacheTtlMs,
+          overMs: ageAtFire - (this.cacheTtlMs - this.safetyMarginMs),
+        })
+        this.clearRegistry()
+        this.stop()
+        try { this.config.onDisarmed?.({ reason: 'cache_dead_at_fire_gate', at: Date.now() }) } catch {}
+        return
+      }
+    }
+
     // Cap fires per tick — protects quota on fat multi-lineage sessions. Ticks
     // run every ≤30s while the threshold is ~interval*0.9 (~27m for a 30m
     // interval), so any overflow is warmed on the next few ticks, long before
@@ -1601,7 +1670,9 @@ export class KeepaliveEngine {
         // the prefix locally (user-authorized rewrite) → also not a fleet signal.
         try {
           const msSinceLastRealRequest = firedStat ? Date.now() - firedStat.lastSeenAt : Infinity
-          if (best.role === 'main' && isServerSideEviction({ cacheWrite: cw, cacheRead: cr, msSinceLastRealRequest, intervalMs: this.config.intervalMs })) {
+          if (best.provenByRealRequest
+              && best.role === 'main'
+              && isServerSideEviction({ cacheWrite: cw, cacheRead: cr, msSinceLastRealRequest, intervalMs: this.config.intervalMs })) {
             this.evictionBreaker?.trip(Date.now(), {
               lineageKey: best.lineageKey,
               cacheWrite: cw,
@@ -1861,6 +1932,95 @@ export class KeepaliveEngine {
     if (this.quotaPauseTimer && typeof this.quotaPauseTimer === 'object' && 'unref' in this.quotaPauseTimer) {
       (this.quotaPauseTimer as any).unref()
     }
+  }
+
+  /**
+   * Meet a tripped fleet breaker: HOLD if this session's cache outlives the
+   * cooldown, DISARM if it does not.
+   *
+   * The hold mirrors the quota pause a few methods below — same problem shape
+   * (an upstream condition that clears on its own), so the same answer: keep
+   * the snapshot, stop the tick timer, come back on a timer. What it must NOT
+   * do is what it used to: drop the snapshot and wait for a real request that
+   * an idle session will never make.
+   */
+  private handleEvictionBreakerTripped(): void {
+    const now = Date.now()
+    const cooldownRemainingMs = this.evictionBreaker?.cooldownRemainingMs(now) ?? 0
+    const cacheAgeMs = this.cacheWrittenAt > 0 ? now - this.cacheWrittenAt : -1
+    const action = decideBreakerAction({
+      cooldownRemainingMs,
+      cacheAgeMs,
+      cacheTtlMs: this.cacheTtlMs,
+      safetyMarginMs: this.safetyMarginMs,
+    })
+
+    if (action === 'disarm') {
+      try {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] KA_DISARM_EVICTION_BREAKER pid=${process.pid} regSize=${this.registry.size} cooldownRemainingSec=${Math.round(cooldownRemainingMs / 1000)} cacheAgeSec=${Math.round(cacheAgeMs / 1000)} — cache cannot survive the hold; disarming\n`)
+      } catch { /* logging best-effort */ }
+      this.logClearDiag('eviction_breaker_tripped', {
+        cooldownRemainingMs,
+        cacheAgeMs,
+        cacheTtlMs: this.cacheTtlMs,
+      })
+      this.clearRegistry()
+      this.stop()
+      try { this.config.onDisarmed?.({ reason: 'eviction_breaker_tripped', at: now }) } catch {}
+      return
+    }
+
+    // Already holding — the timer owns the wake; do not restack it every tick.
+    if (this.evictionHoldUntil !== null) return
+
+    // Jitter 0-30s so N sessions do not all resume in the same second (same
+    // reason the quota pause jitters).
+    const jitterMs = Math.floor(Math.random() * 30_000)
+    const holdMs = cooldownRemainingMs + jitterMs
+
+    if (this.timer) { clearInterval(this.timer); this.timer = null }
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+    this.abortController?.abort()
+    this.inFlight = false
+    this.evictionHoldUntil = now + holdMs
+
+    try {
+      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        `[${new Date().toISOString()}] KA_HOLD_EVICTION_BREAKER pid=${process.pid} regSize=${this.registry.size} holdSec=${Math.round(holdMs / 1000)} cacheAgeSec=${Math.round(cacheAgeMs / 1000)} — snapshot KEPT, resuming by timer\n`)
+    } catch { /* logging best-effort */ }
+    this.logClearDiag('eviction_hold_began', { holdMs, cacheAgeMs, jitterMs, regSize: this.registry.size })
+    try { this.config.onHeld?.({ reason: 'eviction_breaker_tripped', at: now, holdMs, regSize: this.registry.size }) } catch {}
+
+    this.evictionHoldTimer = setTimeout(() => {
+      this.evictionHoldTimer = null
+      this.evictionHoldUntil = null
+      // Resume normal cadence. The next tick re-evaluates everything: if the
+      // breaker is still tripped we hold again, and if the cache aged past TTL
+      // meanwhile the tick's own expiry branch disarms cleanly.
+      this.logClearDiag('eviction_hold_resumed_by_timer', {
+        cacheAgeMs: this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1,
+      })
+      this.startTimer()
+    }, holdMs)
+    if (this.evictionHoldTimer && typeof this.evictionHoldTimer === 'object' && 'unref' in this.evictionHoldTimer) {
+      (this.evictionHoldTimer as any).unref()
+    }
+  }
+
+  /** Wake from an eviction hold early — a real request supersedes the wait. */
+  private wakeFromEvictionHold(): void {
+    if (!this.evictionHoldTimer && this.evictionHoldUntil === null) return
+    if (this.evictionHoldTimer) {
+      clearTimeout(this.evictionHoldTimer)
+      this.evictionHoldTimer = null
+    }
+    const heldUntil = this.evictionHoldUntil
+    this.evictionHoldUntil = null
+    this.logClearDiag('eviction_hold_resumed_by_real_request', {
+      holdRemainingMs: heldUntil ? heldUntil - Date.now() : -1,
+    })
+    this.startTimer()
   }
 
   /**
@@ -2488,7 +2648,25 @@ export class KeepaliveEngine {
   /** @internal — mutable internal state getters/setters for test inspection */
   _setLastRealActivityAt(v: number): void { this.lastRealActivityAt = v }
   _setCacheWrittenAt(v: number): void { this.cacheWrittenAt = v }
+  /** @internal — for tests: pin a registry entry's role. Role classification is
+   *  not what a provenance test is about, and letting it decide silently is how
+   *  such a test passes for the wrong reason. */
+  _setLineageRole(key: string, role: AgentRole): void {
+    const e = this.registry.get(key)
+    if (e) e.role = role
+  }
+
+  /** @internal — for tests: age every lineage's warm clock by `ms`, the only
+   *  way to make a lineage fire-eligible without faking wall time. */
+  _ageLineages(ms: number): void {
+    for (const st of this.lineageStats.values()) {
+      st.lastWarmedAt -= ms
+      st.lastSeenAt -= ms
+    }
+    this.lastActivityAt -= ms
+  }
   get _cacheWrittenAt(): number { return this.cacheWrittenAt }
+  get _safetyMarginMs(): number { return this.safetyMarginMs }
   _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
     const key = lineageKey(body)
     this.pendingSnapshots.set(key, { model, body, headers, role: 'main' })
@@ -2597,6 +2775,7 @@ export class KeepaliveEngine {
           role: e.role as AgentRole,
           inputTokens: e.inputTokens,
           hasCacheControl: e.hasCacheControl,
+          provenByRealRequest: false,   // resurrected — nothing has proven it yet
         })
       }
       if (this.registry.size > 0) {

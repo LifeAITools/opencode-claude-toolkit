@@ -88,6 +88,20 @@ interface RegistryEntry {
     role: AgentRole;
     inputTokens: number;
     hasCacheControl: boolean;
+    /**
+     * Did a REAL request in THIS process hand us this snapshot, or did we
+     * resurrect it from the shared snapshot file at startup?
+     *
+     * It decides whether a cold write on this lineage is evidence about the
+     * SERVER. A snapshot a live request just gave us is known-current, so a cold
+     * write on it means the server dropped the prefix — a real fleet signal. A
+     * resurrected one carries no such proof: the process that wrote it may still
+     * be warming it elsewhere, its TTL may have been down-locked since, and its
+     * prefix may be long dead. A cold write there says only that WE fired at a
+     * corpse, and must never be reported to the fleet as an upstream storm
+     * (2026-08-19: exactly that mistake disarmed 26 healthy sessions).
+     */
+    provenByRealRequest: boolean;
 }
 /**
  * Scan an Anthropic request body for ALL cache_control markers and return
@@ -206,6 +220,8 @@ export declare class KeepaliveEngine {
     private jitterMs;
     private quotaPauseTimer;
     private quotaPauseUntil;
+    private evictionHoldTimer;
+    private evictionHoldUntil;
     private snapshotCallCount;
     /** The bearer token used by the most recent fire — fed to onAuthError on 401. */
     private lastFireToken;
@@ -378,6 +394,19 @@ export declare class KeepaliveEngine {
      */
     private handleQuotaRateLimit;
     /**
+     * Meet a tripped fleet breaker: HOLD if this session's cache outlives the
+     * cooldown, DISARM if it does not.
+     *
+     * The hold mirrors the quota pause a few methods below — same problem shape
+     * (an upstream condition that clears on its own), so the same answer: keep
+     * the snapshot, stop the tick timer, come back on a timer. What it must NOT
+     * do is what it used to: drop the snapshot and wait for a real request that
+     * an idle session will never make.
+     */
+    private handleEvictionBreakerTripped;
+    /** Wake from an eviction hold early — a real request supersedes the wait. */
+    private wakeFromEvictionHold;
+    /**
      * Wake from quota-pause early. Called from notifyRealRequestStart: if a real
      * user request arrived, upstream is reachable from the consumer side, so
      * either quota has recovered or the consumer will get a fresh 429 themselves
@@ -470,6 +499,16 @@ export declare class KeepaliveEngine {
             errStatus?: number | null;
             errMessage?: string | null;
         }) => void;
+        /** A fleet-wide hold began: fires are suspended but the snapshot is KEPT
+         *  and a timer will resume them. Distinct from onDisarmed on purpose — a
+         *  hold that reported itself as a disarm would read as lost warmth, and a
+         *  hold that reported nothing at all would read as a healthy engine. */
+        onHeld?: (info: {
+            reason: string;
+            at: number;
+            holdMs: number;
+            regSize: number;
+        }) => void;
         onRewriteWarning?: (info: {
             idleMs: number;
             estimatedTokens: number;
@@ -528,7 +567,15 @@ export declare class KeepaliveEngine {
     /** @internal — mutable internal state getters/setters for test inspection */
     _setLastRealActivityAt(v: number): void;
     _setCacheWrittenAt(v: number): void;
+    /** @internal — for tests: pin a registry entry's role. Role classification is
+     *  not what a provenance test is about, and letting it decide silently is how
+     *  such a test passes for the wrong reason. */
+    _setLineageRole(key: string, role: AgentRole): void;
+    /** @internal — for tests: age every lineage's warm clock by `ms`, the only
+     *  way to make a lineage fire-eligible without faking wall time. */
+    _ageLineages(ms: number): void;
     get _cacheWrittenAt(): number;
+    get _safetyMarginMs(): number;
     _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void;
     /** @internal — for test inspection (smart-pause state) */
     get _quotaPauseTimer(): ReturnType<typeof setTimeout> | null;

@@ -143,6 +143,16 @@ export interface KeepaliveConfig {
         errStatus?: number | null;
         errMessage?: string | null;
     }) => void;
+    /** A fleet-wide HOLD began: fires suspended for a bounded wait, snapshot
+     *  KEPT, a timer will resume them. Deliberately distinct from onDisarmed —
+     *  reporting a hold as a disarm reads as lost warmth, and reporting nothing
+     *  reads as a healthy engine. */
+    onHeld?: (info: {
+        reason: string;
+        at: number;
+        holdMs: number;
+        regSize: number;
+    }) => void;
     /** Fired on next real stream after long idle — surfaces potential cache_write cost */
     onRewriteWarning?: (info: {
         idleMs: number;

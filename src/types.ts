@@ -145,6 +145,11 @@ export interface KeepaliveConfig {
    *  errStatus/errMessage carry the upstream error of the current fault episode
    *  (e.g. 401 during a token-rotation wave) — null when the disarm had none. */
   onDisarmed?: (info: { reason: string; at: number; errStatus?: number | null; errMessage?: string | null }) => void
+  /** A fleet-wide HOLD began: fires suspended for a bounded wait, snapshot
+   *  KEPT, a timer will resume them. Deliberately distinct from onDisarmed —
+   *  reporting a hold as a disarm reads as lost warmth, and reporting nothing
+   *  reads as a healthy engine. */
+  onHeld?: (info: { reason: string; at: number; holdMs: number; regSize: number }) => void
   /** Fired on next real stream after long idle — surfaces potential cache_write cost */
   onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
   /**

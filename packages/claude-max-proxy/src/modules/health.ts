@@ -44,6 +44,11 @@ function statsJson() {
         registrySize: (s.engine as any)?._registry?.size ?? 0,
         timerRunning: (s.engine as any)?._timer !== null,
       },
+      // Turns refused in a row by the cache guard, 0 when the last one went
+      // through. Read this instead of counting files in the dump directory:
+      // that count is derived, and two readers already derived it differently.
+      rewriteBlockStreak: (s as any).rewriteBlockStreak?.count ?? 0,
+      rewriteBlockClass: (s as any).rewriteBlockStreak?.lastClass ?? null,
     })),
     rateLimit: ctx.proxyClient.rateLimitSnapshot,
     config: {

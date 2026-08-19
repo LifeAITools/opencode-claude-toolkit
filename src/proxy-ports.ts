@@ -155,6 +155,26 @@ export interface Session<EngineT = unknown> {
     cacheCreation1hInputTokens?: number
     cacheDeletedInputTokens?: number
   } | null
+  /**
+   * How many turns IN A ROW this session has just been refused by the cache
+   * guard, reset the moment one is actually forwarded.
+   *
+   * 🔴 It exists because ONE refusal and EIGHT IN A ROW are different events for
+   * the person sitting there, and until now they looked identical. Measured by
+   * vibe-telegram-mcp-service-owner over 2026-08-12..19: 98 refusals, and 13 of
+   * them came in runs of three to five inside ten minutes on ONE session. On
+   * 2026-08-16 that shape cost a real conversation — an agent answered nothing
+   * for eight minutes because every turn died in its first second on the same
+   * wall, looked busy from outside (a dying turn still fires hooks), and the
+   * founder was about to order a hard restart that would have thrown away 61%
+   * of its working context for nothing.
+   *
+   * The count is kept HERE, by the thing that does the refusing, rather than
+   * derived by each reader from the dump directory: two careful readers already
+   * counted those runs as 11 and as 13 from the same 98 files, because they
+   * windowed them differently.
+   */
+  rewriteBlockStreak?: { count: number; lastAt: number; lastClass: string } | null
 }
 
 export interface ISessionStore<EngineT = unknown> {

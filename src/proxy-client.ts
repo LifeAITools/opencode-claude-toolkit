@@ -1717,6 +1717,18 @@ export class ProxyClient {
           // a dump named `expected_cold-start` with 448 104 tokens sat in a
           // directory called rewrite-guard-blocks and read as a rewrite, while
           // its own prefixDiff said `noBaseline: true, systemLen.prev = 0`.
+          // Nth-in-a-row, counted by the thing that does the refusing. One
+          // refusal is a question the caller can answer; a run of them is a wall
+          // that answering will not move, and until now the two looked the same
+          // from every side. See Session.rewriteBlockStreak for the measurement.
+          const prevStreak = session.rewriteBlockStreak?.count ?? 0
+          const streak = prevStreak + 1
+          session.rewriteBlockStreak = {
+            count: streak,
+            lastAt: Date.now(),
+            lastClass: rewriteAssessment.rewriteClass,
+          }
+
           const isFirstWrite = rewriteAssessment.rewriteClass === 'expected:cold-start'
           const spendPhrase = isFirstWrite
             ? `write ~${rewriteAssessment.predictedTokens} tokens of NEW cache (first write for this lineage — nothing is being discarded)`
@@ -1731,6 +1743,7 @@ export class ProxyClient {
             // never has to parse prose or re-derive it from the class name.
             spendKind: isFirstWrite ? 'first-write' : 'rewrite',
             predictedTokens: rewriteAssessment.predictedTokens,
+            consecutiveBlocks: streak,
             continuation: lastMsg.isContinuation,
             dumpPath,
             msg: `guard blocked ${rewriteAssessment.rewriteClass} — would ${spendPhrase}; awaiting consent `
@@ -1743,6 +1756,10 @@ export class ProxyClient {
               rewriteClass: rewriteAssessment.rewriteClass,
               spendKind: isFirstWrite ? 'first-write' : 'rewrite',
               predictedTokens: rewriteAssessment.predictedTokens,
+              // The caller's own turn counter: 1 means "answer the question",
+              // 3 means "you are hitting the same wall and retrying will not
+              // clear it". Nobody could tell those apart before.
+              consecutiveBlocks: streak,
               minRewriteTokens: guard.minRewriteTokens,
               minColdStartTokens: guard.minColdStartTokens,
               // Machine-parseable consent affordances so a programmatic client
@@ -1753,7 +1770,10 @@ export class ProxyClient {
                 cli: `context cache-rewrite-ok ${sessionId}`,
                 disable: 'keepalive.json → rewriteGuard.enabled=false',
               },
-              message: `Cache guard: this turn would ${spendPhrase} `
+              message: (streak >= 2
+                ? `Cache guard (${streak} turns IN A ROW now — retrying will not clear this; `
+                  + `grant consent or change what the turn sends): this turn would ${spendPhrase} `
+                : `Cache guard: this turn would ${spendPhrase} `)
                 + `(${rewriteAssessment.rewriteClass}) — `
                 + `an unconfirmed quota spend, blocked for all consumers. To proceed, either include `
                 + `${guard.overrideMarker} in your next message (/cache-rewrite-ok), or grant out-of-band: `
@@ -1777,6 +1797,11 @@ export class ProxyClient {
     // prime the engine (aborts any in-flight KA, records the pending snapshot)
     // and advance prefix history. A blocked request returned above without
     // reaching here, so it never disturbs keepalive's warming of the OLD cache.
+    // The run is over the moment a turn actually goes through — reset HERE, on
+    // the forward path, not on a timer: what makes a streak a streak is that
+    // nothing got through in between.
+    session.rewriteBlockStreak = null
+
     this.events.emit({ level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes, idSource })
     if (unidentified) {
       // Serve it — do not warm it. Skipping notifyRealRequestStart is what

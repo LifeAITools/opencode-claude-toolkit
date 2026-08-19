@@ -168,6 +168,78 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     rmSync(path, { force: true })
   })
 
+  test('the refusal counts itself: 1, 2, 3 in a row, and says so from the second', async () => {
+    // 🔴 ONE refusal and EIGHT IN A ROW are different events for the person
+    // sitting there, and they used to look identical. Measured by
+    // vibe-telegram-mcp-service-owner over 2026-08-12..19: 98 refusals, 13 of
+    // them in runs of 3–5 within ten minutes on ONE session. On 2026-08-16 that
+    // shape cost eight minutes of a real conversation — every turn died in its
+    // first second on the same wall while the agent looked busy from outside,
+    // and a hard restart was nearly ordered that would have discarded 61% of
+    // its working context for nothing.
+    const path = join(TMP, 'rg-streak.json')
+    seedIdleFor(path, 'rg-streak', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+
+    const counts: number[] = []
+    let secondMessage = ''
+    for (let i = 0; i < 3; i++) {
+      const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-streak' })
+      expect(r.status).toBe(400)
+      const j = await r.json() as { error?: { consecutiveBlocks?: number; message?: string } }
+      counts.push(j.error?.consecutiveBlocks ?? -1)
+      if (i === 1) secondMessage = j.error?.message ?? ''
+    }
+    expect(counts).toEqual([1, 2, 3])
+    // From the second one the wording must stop reading like a fresh question:
+    // retrying is exactly what the agent did for eight minutes.
+    expect(secondMessage).toContain('IN A ROW')
+
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('a turn that gets through ends the run — the count is consecutive, not cumulative', async () => {
+    // 🔴 The whole point is the RESET, so it must happen on the SAME client: a
+    // fresh one starts from zero anyway and would make this test pass no matter
+    // what the code does. (It did, in the first draft — caught by removing the
+    // reset line and watching the suite stay green.) Ageing the in-memory
+    // history is the house idiom for driving a second block on a live client.
+    const path = join(TMP, 'rg-streak-reset.json')
+    seedIdleFor(path, 'rg-streak-reset', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+
+    const ageHistory = () => {
+      const t = Date.now() - 10 * 60_000
+      for (const e of ((c as any).prefixHistory as Map<string, any>).values()) {
+        e.lastReqAt = t
+        e.lastKaAt = t
+      }
+    }
+
+    const first = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-streak-reset' })
+    expect(first.status).toBe(400)
+    expect(((await first.json()) as any).error.consecutiveBlocks).toBe(1)
+
+    const second = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-streak-reset' })
+    expect(second.status).toBe(400)
+    expect(((await second.json()) as any).error.consecutiveBlocks).toBe(2)
+
+    // Consent in the message → this turn is forwarded, so the run is over.
+    const through = await c.handleRequest(reqBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-streak-reset' })
+    expect(through.status).not.toBe(400)
+
+    // Age the SAME client's history and block again: the count must start over
+    // at one. Without the reset on the forward path it would come back as three.
+    ageHistory()
+    const again = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-streak-reset' })
+    expect(again.status).toBe(400)
+    expect(((await again.json()) as any).error.consecutiveBlocks).toBe(1)
+
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
   test('same idle-past-TTL rewrite WITH the override marker → passes the guard', async () => {
     const path = join(TMP, 'rg-sess-3.json')
     seedIdleFor(path, 'rg-sess-3', reqBody(), 10 * 60_000)

@@ -54,17 +54,49 @@ const ROOT = join(import.meta.dir, '..')
  * that is precisely the defect that started this — a bundle rebuilt AFTER the
  * commit, leaving what is committed one step behind what is built.
  */
+export function skipsBecauseSourceIsDirty(gitPorcelainForSrc: string): boolean {
+  return gitPorcelainForSrc.trim().length > 0
+}
+
 function bundleSourceIsDirty(): boolean {
   try {
+    // `-- src` narrows git's answer to the bundle's own inputs: a dirty dist/
+    // must NOT reach this predicate, or the check would skip exactly the case it
+    // was built for.
     const out = execFileSync('git', ['status', '--porcelain', '--', 'src'], {
       cwd: ROOT, encoding: 'utf8',
     })
-    return out.trim().length > 0
+    return skipsBecauseSourceIsDirty(out)
   } catch {
     // No git, no verdict — better to run the check than to skip it silently.
     return false
   }
 }
+
+/**
+ * The skip rule on its own, because a skip that quietly became unconditional
+ * would leave this whole file green for ever — the exact shape of "honest in
+ * the happy case, mute in the one it exists for" that it was written against.
+ * Testing the decision separately is what makes both halves able to go red.
+ */
+describe('when the check steps aside', () => {
+  test('a clean src means the comparison RUNS', () => {
+    expect(skipsBecauseSourceIsDirty('')).toBe(false)
+    expect(skipsBecauseSourceIsDirty('\n')).toBe(false)
+  })
+
+  test('an edited source file makes it step aside', () => {
+    expect(skipsBecauseSourceIsDirty(' M src/proxy-client.ts\n')).toBe(true)
+    expect(skipsBecauseSourceIsDirty('?? src/new-thing.ts\n')).toBe(true)
+  })
+
+  test('a dirty dist alone never reaches this rule — git is asked about src only', () => {
+    // Guarded by the `-- src` pathspec in the caller: were it dropped, a bundle
+    // rebuilt after the commit (the very defect) would silence the check.
+    const gitAnswerWhenOnlyDistIsDirty = ''
+    expect(skipsBecauseSourceIsDirty(gitAnswerWhenOnlyDistIsDirty)).toBe(false)
+  })
+})
 
 describe('the shipped bundle matches the source beside it', () => {
   test('dist/index.js is what a build of src produces right now', async () => {

@@ -29,16 +29,35 @@
  * happening, is the whole answer; reconstructing it afterwards is what nobody
  * got round to twice.
  *
- * A storm is DECLARED, not guessed: STORM_MIN refusals inside STORM_WINDOW_MS.
- * A single refusal is a blip and stays one. It is declared OVER after
- * STORM_QUIET_MS with none, so a long storm is one pair of events and not a
- * stream of them.
+ * A storm is DECLARED, not guessed: STORM_MIN refusals inside STORM_WINDOW_MS,
+ * spread over at least STORM_MIN_SESSIONS DIFFERENT sessions. A single refusal
+ * is a blip and stays one. It is declared OVER after STORM_QUIET_MS with none,
+ * so a long storm is one pair of events and not a stream of them.
+ *
+ * 🔴 WHY BREADTH AND NOT JUST A COUNT — measured 2026-08-19, four hours after
+ * this file shipped, by the very first thing it declared. Eight refusals inside
+ * ten minutes, and the declaration was true to its own rule — but all eight sat
+ * on ONE session, every one of them a 429, while keepalive fired fourteen times
+ * beside them without a single failure and 465 ordinary requests went through.
+ * That is not the upstream in trouble; that is one session out of budget, which
+ * is an ordinary and correct thing that happens to somebody every day.
+ *
+ * Declaring it a storm would teach the reader to distrust the word by the second
+ * week. The rule this follows was written the same morning by
+ * packages-lat-context-owner, out of a check of his own that punished a user for
+ * doing the RIGHT thing: a guard is proven by two runs, not one — red on the
+ * violation AND silent on the correct move — and the second run is the one
+ * people skip, though it costs more, because a guard that gets in the way is
+ * removed together with the check it stood for.
  */
 
 import { bus, emit } from './event-bus.js'
 
 /** Refusals inside the window needed to call it a storm rather than a blip. */
 const STORM_MIN = Number(process.env.PROXY_STORM_MIN ?? 8)
+/** Distinct sessions the refusals must touch — one session out of budget is not
+ *  a storm, however many times it is refused. See the note above. */
+const STORM_MIN_SESSIONS = Number(process.env.PROXY_STORM_MIN_SESSIONS ?? 3)
 /** The window those refusals must fall inside. */
 const STORM_WINDOW_MS = Number(process.env.PROXY_STORM_WINDOW_SEC ?? 600) * 1000
 /** Silence after which a declared storm is called over. */
@@ -49,6 +68,7 @@ type Refusal = {
   /** 'real' = a request from a live session; 'ka' = a keepalive fire. */
   stream: 'real' | 'ka'
   status: number
+  sessionId: string
 }
 
 let refusals: Refusal[] = []
@@ -63,6 +83,9 @@ function tally(rows: Refusal[]): Record<string, number> {
     const k = `${r.stream}_${r.status}`
     out[k] = (out[k] ?? 0) + 1
   }
+  // How many DIFFERENT sessions were hit — the number that separates "the
+  // upstream is in trouble" from "one session is out of budget".
+  out.sessions = new Set(rows.map(r => r.sessionId)).size
   return out
 }
 
@@ -91,7 +114,7 @@ function armQuietTimer(): void {
   ;(quietTimer as any).unref?.()
 }
 
-function record(stream: 'real' | 'ka', status: unknown): void {
+function record(stream: 'real' | 'ka', status: unknown, sessionId: unknown): void {
   const st = Number(status)
   // 429 = quota, 529 = overloaded. Other failures (502, network) are real
   // faults but not the thing this watch is about, and mixing them in would
@@ -99,7 +122,7 @@ function record(stream: 'real' | 'ka', status: unknown): void {
   if (st !== 429 && st !== 529) return
 
   const now = Date.now()
-  const row: Refusal = { ts: now, stream, status: st }
+  const row: Refusal = { ts: now, stream, status: st, sessionId: String(sessionId ?? 'unknown') }
   refusals.push(row)
   const cutoff = now - STORM_WINDOW_MS
   refusals = refusals.filter(r => r.ts >= cutoff)
@@ -110,7 +133,8 @@ function record(stream: 'real' | 'ka', status: unknown): void {
     return
   }
 
-  if (refusals.length >= STORM_MIN) {
+  const distinctSessions = new Set(refusals.map(r => r.sessionId)).size
+  if (refusals.length >= STORM_MIN && distinctSessions >= STORM_MIN_SESSIONS) {
     stormSince = refusals[0]!.ts
     stormRefusals = [...refusals]
     emit({
@@ -119,6 +143,7 @@ function record(stream: 'real' | 'ka', status: unknown): void {
       since: new Date(stormSince).toISOString(),
       refusals: refusals.length,
       windowSec: Math.round(STORM_WINDOW_MS / 1000),
+      sessions: distinctSessions,
       breakdown: tally(refusals),
     } as never)
     armQuietTimer()
@@ -129,8 +154,8 @@ function record(stream: 'real' | 'ka', status: unknown): void {
  * Subscribe to the bus. Returns a stop function (tests and shutdown use it).
  */
 export function startStormWatch(): () => void {
-  const offReal = bus.onKind('REAL_REQUEST_ERROR', (e: any) => record('real', e?.status))
-  const offKa = bus.onKind('KA_FIRE_ERROR', (e: any) => record('ka', e?.status))
+  const offReal = bus.onKind('REAL_REQUEST_ERROR', (e: any) => record('real', e?.status, e?.sessionId))
+  const offKa = bus.onKind('KA_FIRE_ERROR', (e: any) => record('ka', e?.status, e?.sessionId))
   return () => {
     try { offReal?.() } catch { /* best-effort */ }
     try { offKa?.() } catch { /* best-effort */ }
@@ -142,6 +167,11 @@ export function startStormWatch(): () => void {
 }
 
 /** Test seam — current state without reaching into module internals. */
-export function _stormState(): { open: boolean; recent: number; sinceMs: number | null } {
-  return { open: stormSince !== null, recent: refusals.length, sinceMs: stormSince }
+export function _stormState(): { open: boolean; recent: number; sessions: number; sinceMs: number | null } {
+  return {
+    open: stormSince !== null,
+    recent: refusals.length,
+    sessions: new Set(refusals.map(r => r.sessionId)).size,
+    sinceMs: stormSince,
+  }
 }

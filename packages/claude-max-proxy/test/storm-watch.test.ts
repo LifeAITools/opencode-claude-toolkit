@@ -31,8 +31,11 @@ afterEach(() => {
   stop = null; offBegan = null; offEnded = null
 })
 
-const refuse = (kind: 'REAL_REQUEST_ERROR' | 'KA_FIRE_ERROR', status: number) =>
-  emit({ level: 'error', kind, sessionId: 's', status, msg: 'x' } as never)
+/** Default spreads across sessions — a storm is many sessions, and most tests
+ *  are about the count, not the breadth. Pass a fixed id to test breadth. */
+let seq = 0
+const refuse = (kind: 'REAL_REQUEST_ERROR' | 'KA_FIRE_ERROR', status: number, sessionId?: string) =>
+  emit({ level: 'error', kind, sessionId: sessionId ?? `s${seq++}`, status, msg: 'x' } as never)
 
 describe('storm watch', () => {
   test('a single refusal is a blip and is NOT announced', () => {
@@ -74,6 +77,37 @@ describe('storm watch', () => {
     // events and a single total would hide which one the storm was made of.
     expect(b.real_529).toBe(5)
     expect(b.ka_429).toBe(3)
+  })
+
+  test('ONE session out of budget is not a storm, however many times it is refused', () => {
+    // 🔴 MEASURED LIVE 2026-08-19, four hours after this file shipped, by the
+    // first thing it ever declared: eight refusals in ten minutes, all of them
+    // 429, ALL ON ONE SESSION — while keepalive fired fourteen times beside them
+    // without one failure and 465 ordinary requests went through. That is not
+    // the upstream in trouble, it is one session out of budget, which happens to
+    // somebody every day and is entirely correct behaviour.
+    //
+    // This is the run that proves a guard, and the one people skip: not "does it
+    // fire on the violation" but "does it stay quiet on the correct move".
+    arm()
+    for (let i = 0; i < 20; i++) refuse('REAL_REQUEST_ERROR', 429, 'the-one-session')
+    expect(seen.length).toBe(0)
+    expect(_stormState().sessions).toBe(1)
+  })
+
+  test('two sessions are still not enough — breadth is three', () => {
+    arm()
+    for (let i = 0; i < 10; i++) refuse('REAL_REQUEST_ERROR', 529, 'sess-a')
+    for (let i = 0; i < 10; i++) refuse('REAL_REQUEST_ERROR', 529, 'sess-b')
+    expect(seen.length).toBe(0)
+  })
+
+  test('the announcement says how many sessions were hit', () => {
+    arm()
+    for (let i = 0; i < 8; i++) refuse('REAL_REQUEST_ERROR', 529)
+    expect(seen.length).toBe(1)
+    expect(seen[0].sessions).toBe(8)
+    expect(seen[0].breakdown.sessions).toBe(8)
   })
 
   test('failures that are NOT quota or overload do not inflate the count', () => {

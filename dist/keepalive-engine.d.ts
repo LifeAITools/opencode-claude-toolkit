@@ -79,6 +79,21 @@ export interface KeepaliveEngineOptions {
 import { type AgentRole } from './lineage.js';
 import type { PersistedEngineState } from './ka-snapshot-store.js';
 import type { EvictionCircuitBreaker } from './eviction-breaker.js';
+/**
+ * WHO is running this engine — stamped into every diagnostic line beside the pid.
+ *
+ * A pid alone answers nothing after the process is gone, and on 2026-08-19 that
+ * cost a whole investigation: six short-lived processes had been firing
+ * keepalives against dead prefixes all day, and the only thing the log said
+ * about them was a number that no longer existed. Their identity had to be
+ * inferred, argued about, and was still not settled. So the line now carries the
+ * program that is running, its parent, and whether it pinned its own cache
+ * lifetime — the three facts that would have named them in one read.
+ *
+ * Computed once: it cannot change within a process, and a diagnostic must never
+ * cost more than the thing it describes.
+ */
+export declare const RUNTIME_IDENTITY: string;
 /** One KA registry entry — keyed by cache lineage, not by model. */
 interface RegistryEntry {
     body: Record<string, unknown>;

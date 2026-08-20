@@ -254,7 +254,9 @@ describe('KeepaliveEngine: onTtlScan change detection', () => {
   test('first observation fires with previousTtlMs=null', () => {
     const scans: Scan[] = []
     const e = mkEngine({ onTtlScan: (i) => scans.push(i) })
-    e.notifyRealRequestStart('m', sys('1h'), {})
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+    }, {})
     expect(scans).toHaveLength(1)
     expect(scans[0]).toMatchObject({ minTtlMs: 3_600_000, previousTtlMs: null, hasAnyCacheControl: true })
   })
@@ -315,15 +317,20 @@ describe('KeepaliveEngine: onTtlScan change detection', () => {
     expect(scans[1]).toMatchObject({ minTtlMs: 300_000, previousTtlMs: 3_600_000, hasAnyCacheControl: true })
   })
 
-  test('scan runs even when cacheTtlMs is pinned (override active)', () => {
+  test('scan runs when cacheTtlMs is pinned — and now LOWERS the pin too', () => {
+    // Policy changed 2026-08-20 on the founder's question: a pin says what this
+    // consumer's cache lifetime is, which is useful while the wire agrees, but
+    // it may not claim MORE life than the wire proves. A request carrying
+    // 5-minute markers means the cache dies in five minutes whatever we pinned,
+    // and an hour-long cadence then re-buys the whole prefix on every fire.
     const scans: Scan[] = []
     const e = mkEngine({ cacheTtlMs: 3_600_000, onTtlScan: (i) => scans.push(i) })
     expect(e._cacheTtlOverridden).toBe(true)
     e.notifyRealRequestStart('m', sys(), {})  // 5m wire marker under 1h pin
-    // Observability still fires despite pin; downlock stays disabled.
     expect(scans).toHaveLength(1)
     expect(scans[0]).toMatchObject({ minTtlMs: 300_000, previousTtlMs: null })
-    expect(e._cacheTtlObservedLocked).toBe(false)
+    expect(e._cacheTtlMs).toBe(300_000)
+    expect(e._cacheTtlObservedLocked).toBe(true)
   })
 
   test('a throwing onTtlScan observer never breaks the request path', () => {
@@ -333,17 +340,47 @@ describe('KeepaliveEngine: onTtlScan change detection', () => {
 })
 
 describe('KeepaliveEngine: wire-autoscan monotonic lock-down', () => {
-  test('observing 5m marker on 1h engine → locks TTL to 5m', () => {
+  test('observing 5m marker on a 1h-PINNED engine → locks TTL to 5m', () => {
+    // The wire wins downward, even over an explicit pin. What the pin still
+    // shields is the SSOT config file (see the test below): that file may
+    // describe a DIFFERENT consumer's contract, and honouring it over a pin is
+    // the 2026-05-17 incident that burned 906K tokens. A request body is not a
+    // config file — it is what this session is actually sending.
     const e = mkEngine({ cacheTtlMs: 3_600_000 })  // start at 1h
     expect(e._cacheTtlMs).toBe(3_600_000)
     expect(e._cacheTtlOverridden).toBe(true)
-    // BUT cacheTtlOverridden takes precedence — autoscan skipped when overridden.
     e.notifyRealRequestStart('m', {
       system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
     }, {})
-    // Stays at 1h because override is explicit.
-    expect(e._cacheTtlMs).toBe(3_600_000)
-    expect(e._cacheTtlObservedLocked).toBe(false)
+    expect(e._cacheTtlMs).toBe(300_000)
+    expect(e._cacheTtlObservedLocked).toBe(true)
+  })
+
+  test('a pin still shields the SSOT config — the 2026-05-17 protection is intact', async () => {
+    // The guard that matters lives on the LIVE-RELOAD path inside tick(), not
+    // on the wire scan, and the two must never be confused: the config file may
+    // describe a different consumer's contract (honouring it over a pin burned
+    // 906K tokens on 2026-05-17), while a request body is what this session is
+    // actually sending.
+    //
+    // So this drives a real tick — the first version of this test only read the
+    // constructor's value, which is true whether the guard exists or not, and a
+    // mutation removing the guard left it green.
+    const e = mkEngine({ cacheTtlMs: 3_600_000 })   // SSOT fixture says 5m
+    expect(e._cacheTtlOverridden).toBe(true)
+    // ARM it first: tick() returns early on an empty registry, so an unarmed
+    // engine never reaches the live-reload at all — the second version of this
+    // test did exactly that and stayed green under the mutation as well.
+    // The body carries a 1h marker so the WIRE agrees with the pin and only the
+    // config file could move it.
+    e.notifyRealRequestStart('m', {
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+    }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5_000, outputTokens: 1 } as any)
+    expect(e._registry.size).toBeGreaterThan(0)
+    await (e as any).tick()                          // live-reload runs here
+    expect(e._cacheTtlMs).toBe(3_600_000)            // the pin holds against the file
+    e.stop()
   })
 
   test('no override + 5m marker observed → engine locks down from SSOT', () => {

@@ -918,9 +918,27 @@ export class KeepaliveEngine {
     } catch { /* scan failure → keep prior observation state, defensive */ }
 
     // ── Layer 1+2: wire-format TTL autoscan + monotonic lock-down ──
-    // Skip when admin explicitly pinned TTL via constructor config (Layer 0).
-    // Reuses the scan result above — no second body walk.
-    if (!this.cacheTtlOverridden) {
+    // Lowering applies EVEN WHEN the consumer pinned a TTL at construction.
+    //
+    // A pin says "this consumer's cache lives N" — a useful override while the
+    // wire agrees. It must never be allowed to claim a LONGER life than the
+    // wire proves, because the wire is the ground truth: if the request carries
+    // 5-minute markers, the cache dies in 5 minutes no matter what we pinned,
+    // and a 30-minute cadence then buys the whole prefix again on every single
+    // fire. Asked for by the founder 2026-08-20 in exactly those words — "what
+    // if the session switches its marker to 5 minutes and we keep waiting an
+    // hour". Measured the same day: every one of 260 wire observations said an
+    // hour and no session ever changed, so this is a guard, not a live wound.
+    //
+    // The cost of being wrong in each direction is what settles it: firing too
+    // often on a still-warm cache costs a handful of cheap READS, while firing
+    // too late costs a full cold WRITE of the whole prefix every time. Roughly
+    // a hundred to one, in favour of the shorter cadence.
+    //
+    // RAISING is still refused (the inner comparison only ever lowers): once a
+    // short-TTL block has been seen it may still be alive upstream, so we keep
+    // the faster cadence until the engine is rebuilt. Reuses the scan above.
+    {
       try {
         const minTtlMs = scannedMinTtlMs
         if (minTtlMs !== null && minTtlMs < this.cacheTtlMs) {

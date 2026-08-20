@@ -167,19 +167,29 @@ interface RegistryEntry {
   inputTokens: number
   hasCacheControl: boolean
   /**
-   * Did a REAL request in THIS process hand us this snapshot, or did we
-   * resurrect it from the shared snapshot file at startup?
+   * Has anything PROVEN this lineage's prefix is really alive upstream?
    *
-   * It decides whether a cold write on this lineage is evidence about the
-   * SERVER. A snapshot a live request just gave us is known-current, so a cold
-   * write on it means the server dropped the prefix — a real fleet signal. A
-   * resurrected one carries no such proof: the process that wrote it may still
-   * be warming it elsewhere, its TTL may have been down-locked since, and its
-   * prefix may be long dead. A cold write there says only that WE fired at a
-   * corpse, and must never be reported to the fleet as an upstream storm
-   * (2026-08-19: exactly that mistake disarmed 26 healthy sessions).
+   * It decides whether a cold write here is evidence about the SERVER. Two
+   * things can prove it, and only these two:
+   *   - a REAL request in this process handed us the snapshot, so it is current;
+   *   - a keepalive fire READ the cache back, which is direct proof the prefix
+   *     exists — arguably the stronger of the two.
+   *
+   * A snapshot merely resurrected from the shared file has neither: the process
+   * that wrote it may still be warming it elsewhere, its TTL may have been
+   * lowered since, its prefix may be long dead. A cold write there says only
+   * that WE fired at a corpse, and must never be reported to the fleet as an
+   * upstream storm (2026-08-19: exactly that mistake disarmed 26 healthy
+   * sessions).
+   *
+   * The read clause was added 2026-08-20 after the opposite failure: three idle
+   * sessions, revived hours earlier and warmed by keepalive alone, read their
+   * caches five times each and then all cold-wrote inside four minutes — a
+   * textbook server-side eviction that the fleet was never told about, because
+   * "revived" had been treated as unproven for ever, however much evidence the
+   * lineage had produced since.
    */
-  provenByRealRequest: boolean
+  provenAlive: boolean
 }
 
 /** A snapshot primed by notifyRealRequestStart, awaiting its completion. */
@@ -1015,7 +1025,7 @@ export class KeepaliveEngine {
           inputTokens: totalTokens, hasCacheControl: hasAnyCacheControl,
           // A real request just handed us this snapshot — from here on a cold
           // write on it IS evidence the server dropped the prefix.
-          provenByRealRequest: true,
+          provenAlive: true,
         }
         this.registry.set(key, entry)
         this.lastSnapshots.set(key, entry) // retain for self-heal re-prime
@@ -1654,6 +1664,17 @@ export class KeepaliveEngine {
       const firedStat = this.lineageStats.get(best.lineageKey)
       if (firedStat) firedStat.lastWarmedAt = Date.now()
 
+      // A fire that READ its cache back is direct proof this prefix exists
+      // upstream — stronger evidence than the real request that first handed us
+      // the snapshot. Without this, a lineage revived after a restart stayed
+      // "unproven" for its whole life and could never tell the fleet about a
+      // genuine eviction, no matter how many successful reads it had behind it.
+      {
+        const rCr = usage.cacheReadInputTokens ?? 0
+        const rCw = usage.cacheCreationInputTokens ?? 0
+        if (rCr > 0 && rCr > rCw) best.provenAlive = true
+      }
+
       const rl = this.getRateLimitInfo()
       this.config.onHeartbeat?.({
         usage,
@@ -1702,7 +1723,7 @@ export class KeepaliveEngine {
         // the prefix locally (user-authorized rewrite) → also not a fleet signal.
         try {
           const msSinceLastRealRequest = firedStat ? Date.now() - firedStat.lastSeenAt : Infinity
-          if (best.provenByRealRequest
+          if (best.provenAlive
               && best.role === 'main'
               && isServerSideEviction({ cacheWrite: cw, cacheRead: cr, msSinceLastRealRequest, intervalMs: this.config.intervalMs })) {
             this.evictionBreaker?.trip(Date.now(), {
@@ -2832,7 +2853,7 @@ export class KeepaliveEngine {
           role: e.role as AgentRole,
           inputTokens: e.inputTokens,
           hasCacheControl: e.hasCacheControl,
-          provenByRealRequest: false,   // resurrected — nothing has proven it yet
+          provenAlive: false,   // resurrected — nothing has proven it yet
         })
       }
       if (this.registry.size > 0) {

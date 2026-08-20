@@ -137,3 +137,49 @@ describe('who may speak for the fleet', () => {
     e.stop()
   })
 })
+
+describe('a revived lineage that has PROVED itself', () => {
+  test('after a fire reads its cache back, its cold write DOES reach the fleet', async () => {
+    // The opposite failure to the one above, measured live 2026-08-20: three
+    // idle sessions, revived hours earlier and kept warm by keepalive alone,
+    // read their caches five times each and then all cold-wrote inside four
+    // minutes. That is a textbook server-side eviction — and the fleet was
+    // never told, because "revived" counted as unproven for ever, however much
+    // the lineage had since demonstrated.
+    const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
+
+    // A fire that READS first, then cold-writes — exactly the live sequence.
+    let call = 0
+    const readThenEvict = async function* (): AsyncGenerator<StreamEvent> {
+      call++
+      yield call === 1
+        ? { type: 'message_stop', usage: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 900_000, cacheCreationInputTokens: 0 }, stopReason: 'end_turn' } as any
+        : { type: 'message_stop', usage: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 900_000 }, stopReason: 'end_turn' } as any
+    }
+
+    const donor = mkEngine({ n: 0 }, { reasons: [] }, breaker)
+    arm(donor)
+    const state = donor.serializeState()!
+    donor.stop()
+
+    const revived = new KeepaliveEngine({
+      evictionBreaker: breaker,
+      config: { cacheTtlMs: 3_600_000, intervalMs: 60_000 },
+      getToken: async () => 'tok',
+      doFetch: readThenEvict,
+      getRateLimitInfo: () => rl,
+    })
+    revived.revive({ ...state, cacheWrittenAt: Date.now() - 120_000 })
+    for (const k of revived._registry.keys()) revived._setLineageRole(k, 'main')
+
+    revived._ageLineages(120_000)
+    await revived._tick()                       // fire 1: reads → proves the prefix
+    expect(breaker.tripCount(Date.now())).toBe(0)
+
+    revived._setCacheWrittenAt(Date.now() - 120_000)
+    revived._ageLineages(120_000)
+    await revived._tick()                       // fire 2: cold write on a PROVEN lineage
+    expect(breaker.tripCount(Date.now())).toBe(1)   // THE POINT: the fleet hears it
+    revived.stop()
+  })
+})

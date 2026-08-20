@@ -104,19 +104,29 @@ interface RegistryEntry {
     inputTokens: number;
     hasCacheControl: boolean;
     /**
-     * Did a REAL request in THIS process hand us this snapshot, or did we
-     * resurrect it from the shared snapshot file at startup?
+     * Has anything PROVEN this lineage's prefix is really alive upstream?
      *
-     * It decides whether a cold write on this lineage is evidence about the
-     * SERVER. A snapshot a live request just gave us is known-current, so a cold
-     * write on it means the server dropped the prefix — a real fleet signal. A
-     * resurrected one carries no such proof: the process that wrote it may still
-     * be warming it elsewhere, its TTL may have been down-locked since, and its
-     * prefix may be long dead. A cold write there says only that WE fired at a
-     * corpse, and must never be reported to the fleet as an upstream storm
-     * (2026-08-19: exactly that mistake disarmed 26 healthy sessions).
+     * It decides whether a cold write here is evidence about the SERVER. Two
+     * things can prove it, and only these two:
+     *   - a REAL request in this process handed us the snapshot, so it is current;
+     *   - a keepalive fire READ the cache back, which is direct proof the prefix
+     *     exists — arguably the stronger of the two.
+     *
+     * A snapshot merely resurrected from the shared file has neither: the process
+     * that wrote it may still be warming it elsewhere, its TTL may have been
+     * lowered since, its prefix may be long dead. A cold write there says only
+     * that WE fired at a corpse, and must never be reported to the fleet as an
+     * upstream storm (2026-08-19: exactly that mistake disarmed 26 healthy
+     * sessions).
+     *
+     * The read clause was added 2026-08-20 after the opposite failure: three idle
+     * sessions, revived hours earlier and warmed by keepalive alone, read their
+     * caches five times each and then all cold-wrote inside four minutes — a
+     * textbook server-side eviction that the fleet was never told about, because
+     * "revived" had been treated as unproven for ever, however much evidence the
+     * lineage had produced since.
      */
-    provenByRealRequest: boolean;
+    provenAlive: boolean;
 }
 /**
  * Scan an Anthropic request body for ALL cache_control markers and return

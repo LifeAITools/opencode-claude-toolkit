@@ -21,9 +21,10 @@
  */
 
 import { spawnSync, spawn } from 'bun'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync, rmdirSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname, resolve as pathResolve } from 'path'
+import { withInstallLock } from './install-lock.ts'
 
 // ═══ Paths ════════════════════════════════════════════════════════════
 
@@ -311,12 +312,74 @@ const step = (m: string) => console.error('\n' + c(C.bold + C.cyan, '▸ ' + m))
 
 // ═══ Utility — command exists, run + capture ═══════════════════════
 
+/**
+ * Where a tool lives when PATH does not mention it.
+ *
+ * A bootstrap started detached (systemd, a wake-router, a cron) inherits a bare
+ * PATH — measured 2026-08-20 on this machine: `/usr/bin:/bin`, which contains
+ * neither `~/.local/bin` nor the npm global bin. Everything below is a real
+ * install location on such a machine.
+ */
+const KNOWN_BIN_DIRS: readonly string[] = [
+  join(HOME, '.local', 'bin'),
+  join(HOME, '.npm-global', 'bin'),
+  join(HOME, '.bun', 'bin'),
+  '/usr/local/bin',
+  '/opt/homebrew/bin',
+]
+
+/** npm's global bin, asked of npm itself. Resolved at most once per process. */
+let npmGlobalBinCache: string | null | undefined
+function npmGlobalBin(): string | null {
+  if (npmGlobalBinCache !== undefined) return npmGlobalBinCache
+  npmGlobalBinCache = null
+  try {
+    const r = spawnSync(['sh', '-c', 'command -v npm >/dev/null 2>&1 && npm prefix -g'])
+    if (r.success) {
+      const prefix = new TextDecoder().decode(r.stdout).trim()
+      if (prefix) npmGlobalBinCache = join(prefix, 'bin')
+    }
+  } catch { /* npm absent or broken — the PATH answer stands */ }
+  return npmGlobalBinCache
+}
+
+/**
+ * Find a tool. PATH first, then the places tools actually live.
+ *
+ * WHY THE FALLBACK EXISTS — measured 2026-08-20, reported by the lat-context
+ * owner from the founder's screen: a detached bootstrap could not see the
+ * perfectly healthy `claude` (2.1.237, installed and working) because its PATH
+ * was `/usr/bin:/bin`. Reading "not found" as "not installed", the bootstrap
+ * reinstalled the global npm package on EVERY start — five times inside two
+ * minutes, and two of those collided mid-rename and failed with ENOTEMPTY.
+ * That package is the binary all twenty-six agents on this machine launch from,
+ * so a collision at the wrong instant leaves the machine with no `claude` at all.
+ */
 function which(cmd: string): string | null {
   const r = spawnSync(['sh', '-c', `command -v ${cmd}`])
-  if (!r.success) return null
-  const out = new TextDecoder().decode(r.stdout).trim()
-  return out || null
+  if (r.success) {
+    const out = new TextDecoder().decode(r.stdout).trim()
+    if (out) return out
+  }
+  for (const dir of KNOWN_BIN_DIRS) {
+    const candidate = join(dir, cmd)
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch { /* unreadable dir — try the next */ }
+  }
+  // Last resort only: asking npm where its global bin is costs a subprocess AND
+  // writes an npm log file, and `which` is called many times per bootstrap. The
+  // usual layouts are already covered above; this catches an unusual prefix.
+  const npmBin = npmGlobalBin()
+  if (npmBin && !KNOWN_BIN_DIRS.includes(npmBin)) {
+    const candidate = join(npmBin, cmd)
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch { /* unreadable — fall through */ }
+  }
+  return null
 }
+
 
 function run(cmd: string[], opts: { quiet?: boolean; input?: string } = {}): { ok: boolean; stdout: string; stderr: string; code: number } {
   const r = spawnSync({
@@ -764,11 +827,11 @@ async function ensureInstalled(): Promise<{ d: DocReport; bunBin: string; claude
   }
 
   // 1. bun
-  if (!d.bun) await installBun()
+  if (!d.bun) await withInstallLock('bun', () => !which('bun'), installBun)
 
   // 2. Claude Code CLI
   d = await doctor()
-  if (!d.claude) await installClaudeCLI()
+  if (!d.claude) await withInstallLock('claude-cli', () => !which('claude'), installClaudeCLI)
 
   // 3. Proxy files
   d = await doctor()

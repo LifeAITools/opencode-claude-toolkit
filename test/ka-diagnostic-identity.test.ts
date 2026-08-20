@@ -13,7 +13,7 @@ import { RUNTIME_IDENTITY } from '../src/keepalive-engine.js'
 
 describe('runtime identity stamp', () => {
   test('names the program and its parent, so a dead pid is still identifiable', () => {
-    expect(RUNTIME_IDENTITY).toMatch(/^prog=\S+ ppid=\S+$/)
+    expect(RUNTIME_IDENTITY).toMatch(/^prog=\S+ exec=\S+ ppid=\S+$/)
     expect(RUNTIME_IDENTITY).not.toContain('prog= ')
   })
 
@@ -21,5 +21,14 @@ describe('runtime identity stamp', () => {
     // A newline here would split every stamped line in two and silently break
     // every log reader that counts events.
     expect(RUNTIME_IDENTITY).not.toContain('\n')
+  })
+
+  test('a process with no script still says WHAT it is', () => {
+    // `bun -e`, a compiled binary and a worker all have no argv[1]. The first
+    // version of this stamp printed `prog=unknown` for them and named nothing —
+    // the very gap it was written to close. The runtime name always resolves,
+    // so the line is never fully anonymous.
+    expect(RUNTIME_IDENTITY).toMatch(/exec=[^ ]+/)
+    expect(RUNTIME_IDENTITY).not.toMatch(/exec=(na|unknown)\b/)
   })
 })

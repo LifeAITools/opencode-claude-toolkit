@@ -145,6 +145,50 @@ export function decideBreakerAction(p: {
   return survivesForMs > p.cooldownRemainingMs ? 'hold' : 'disarm'
 }
 
+/** What to do with a lineage whose keepalive fire just cold-wrote its cache. */
+export type PostEvictionFate = 'keep-warm' | 'retire'
+
+/**
+ * A keepalive fire came back as a full cold WRITE: the cached prefix was gone,
+ * and we have just paid to create it again. Keep warming this lineage, or let
+ * it go?
+ *
+ * The old answer was always "let it go", and it was right in the world it was
+ * written for. 2026-05-18: the same 915k write repeated every 13 minutes,
+ * because the cache lived 5 minutes and the fire came 13 minutes later — every
+ * fire was a fresh full-price purchase, and warming was a leak.
+ *
+ * That is no longer the world. The fleet caches for an hour and fires every
+ * half hour, so the next fire lands inside the cache's life and READS what we
+ * just bought. Retiring there throws away a paid-for cache the session will
+ * want when it comes back — the founder's objection, twice made and correct:
+ * "we already paid for it, so switch it back on rather than off".
+ *
+ * So the question is not whether a cold write happened, but whether this
+ * engine's cadence can KEEP the thing it just bought: if the next fire arrives
+ * before the cache dies, warming preserves a real asset; if it arrives after,
+ * warming is buying the same cache over and over and letting it rot in between.
+ */
+export function decidePostEvictionFate(p: {
+  /** how long until this engine fires again. */
+  intervalMs: number
+  /** how long the cache lives. */
+  cacheTtlMs: number
+  /** how early we treat the cache as gone. */
+  safetyMarginMs: number
+  /** true when this lineage is the session's MAIN agent. */
+  isMain: boolean
+}): PostEvictionFate {
+  // Only the MAIN lineage is worth keeping. A session's main cache is the one
+  // that resumes — that is what makes it main — so the cache we just paid for
+  // will be read again. A delegated worker's prefix that went cold usually has
+  // nobody left to read it, and the old structural cleanup of such abandoned
+  // prefixes stays exactly as it was (2026-06-04 eb9b8fcd).
+  if (!p.isMain) return 'retire'
+  const liveUntilMs = p.cacheTtlMs - p.safetyMarginMs
+  return p.intervalMs < liveUntilMs ? 'keep-warm' : 'retire'
+}
+
 export class EvictionCircuitBreaker {
   private readonly cooldownMs: number
   private readonly minTripsToEngage: number

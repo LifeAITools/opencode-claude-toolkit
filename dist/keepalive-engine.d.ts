@@ -591,6 +591,8 @@ export declare class KeepaliveEngine {
     _ageLineages(ms: number): void;
     get _cacheWrittenAt(): number;
     get _safetyMarginMs(): number;
+    /** @internal — the CLAMPED fire interval actually in force. */
+    get _intervalMs(): number;
     _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void;
     /** @internal — for test inspection (smart-pause state) */
     get _quotaPauseTimer(): ReturnType<typeof setTimeout> | null;

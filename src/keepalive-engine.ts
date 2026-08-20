@@ -119,7 +119,7 @@ import { loadKeepaliveConfig } from './keepalive-config.js'
 import { lineageKey, classifyRole, type AgentRole, type RoleHints } from './lineage.js'
 import type { PersistedEngineState } from './ka-snapshot-store.js'
 import type { EvictionCircuitBreaker } from './eviction-breaker.js'
-import { isServerSideEviction, decideBreakerAction } from './eviction-breaker.js'
+import { isServerSideEviction, decideBreakerAction, decidePostEvictionFate } from './eviction-breaker.js'
 
 /**
  * WHO is running this engine — stamped into every diagnostic line beside the pid.
@@ -136,12 +136,19 @@ import { isServerSideEviction, decideBreakerAction } from './eviction-breaker.js
  * cost more than the thing it describes.
  */
 export const RUNTIME_IDENTITY: string = (() => {
+  const base = (p: string) => p.split('/').pop() || p
   try {
     const argv1 = process.argv[1] ?? ''
-    const prog = argv1 ? argv1.split('/').pop() || argv1 : 'unknown'
-    return `prog=${prog} ppid=${process.ppid ?? 'na'}`
+    const prog = argv1 ? base(argv1) : 'unknown'
+    // A process started WITHOUT a script — `bun -e`, a compiled binary, a
+    // worker — has no argv[1], and `prog=unknown` is exactly the uselessness
+    // this stamp exists to end (caught 2026-08-20 by the watch armed for it,
+    // on the first line it printed). The runtime's own name still says which
+    // family of process this was, so it rides alongside.
+    const exec = process.execPath ? base(process.execPath) : 'na'
+    return `prog=${prog} exec=${exec} ppid=${process.ppid ?? 'na'}`
   } catch {
-    return 'prog=unknown ppid=na'
+    return 'prog=unknown exec=na ppid=na'
   }
 })()
 
@@ -1705,13 +1712,34 @@ export class KeepaliveEngine {
             })
           }
         } catch { /* breaker is best-effort; never let it break a fire path */ }
-        // Retire ONLY the evicted lineage — a stale/secondary prefix going cold
-        // must NOT kill keepalive for the session's healthy primary cache. The
-        // old whole-session clearRegistry() caused the 2026-06-04 eb9b8fcd
-        // incident: a secondary stale lineage cold-wrote, the disarm killed the
-        // warm 476k primary, which then expired overnight → morning 400. Dropping
-        // the one lineage also structurally retires abandoned prefixes instead of
-        // re-cold-writing them every interval.
+        // Keep this lineage, or let it go? The answer is not "a cold write
+        // happened" but "can this engine's cadence KEEP what it just bought".
+        // We have paid for a fresh cache; if the next fire lands inside its
+        // life, warming preserves a real asset the session will read when it
+        // returns. If the next fire lands after it dies, warming is buying the
+        // same cache again every interval — which is what made retiring right
+        // in the 5-minute-TTL world of 2026-05-18. See decidePostEvictionFate.
+        //
+        // Whole-session teardown is NOT on the table either way: a stale
+        // secondary prefix going cold must never kill the session's healthy
+        // primary (the 2026-06-04 eb9b8fcd incident — a disarm there killed a
+        // warm 476k primary, which expired overnight into a morning 400).
+        const fate = decidePostEvictionFate({
+          intervalMs: this.config.intervalMs,
+          cacheTtlMs: this.cacheTtlMs,
+          safetyMarginMs: this.safetyMarginMs,
+          isMain: best.role === 'main',
+        })
+        if (fate === 'keep-warm') {
+          try {
+            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+              `[${new Date().toISOString()}] KA_EVICTION_KEEP_WARM pid=${process.pid} ${RUNTIME_IDENTITY} lineage=${best.lineageKey.slice(0, 12)} cw=${cw} intervalSec=${Math.round(this.config.intervalMs / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} — cache just paid for, next fire lands inside its life\n`)
+          } catch { /* logging best-effort */ }
+          // The write refreshed this prefix — treat it as warmed now, so the
+          // next fire is measured from this moment like any other refresh.
+          this.cacheWrittenAt = Date.now()
+          return 'stop'   // end THIS tick: one eviction episode per tick is enough
+        }
         this.registry.delete(best.lineageKey)
         this.lastSnapshots.delete(best.lineageKey)  // don't let self-heal re-prime the stale snapshot
         if (this.registry.size === 0) {
@@ -2692,6 +2720,8 @@ export class KeepaliveEngine {
   }
   get _cacheWrittenAt(): number { return this.cacheWrittenAt }
   get _safetyMarginMs(): number { return this.safetyMarginMs }
+  /** @internal — the CLAMPED fire interval actually in force. */
+  get _intervalMs(): number { return this.config.intervalMs }
   _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
     const key = lineageKey(body)
     this.pendingSnapshots.set(key, { model, body, headers, role: 'main' })

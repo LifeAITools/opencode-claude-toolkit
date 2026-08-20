@@ -807,6 +807,40 @@ describe('proxy — CC_VERSION_CHANGED detection', () => {
     expect(events.filter((e) => e.kind === 'CC_VERSION_CHANGED').length).toBe(before)
     c.stop()
   })
+
+  test('two sessions on DIFFERENT versions never report a change to each other', async () => {
+    // The version memory used to be ONE field for the whole proxy: whichever
+    // session sent the last request overwrote it, so the next session's request
+    // looked like a change to a version it had never left. Measured on this
+    // machine 2026-08-20, with six CLI versions in use at once — 3676 such
+    // events in a day across 157 sessions, one flip-flopping 457 times.
+    //
+    // The event says "the cacheable prefix changed", so each of those pointed
+    // a reader chasing a rewrite spike at an innocent session, and buried the
+    // real version change of a real agent in the noise.
+    const events: any[] = []
+    const c = mkClient({ eventEmitter: { emit: (e: any) => events.push(e) } })
+    for (let i = 0; i < 5; i++) {
+      await c.handleRequest(bodyV('2.1.197.1'), {}, { sessionId: 'ccv-A' })
+      await c.handleRequest(bodyV('2.1.237.2'), {}, { sessionId: 'ccv-B' })
+    }
+    expect(events.filter((e) => e.kind === 'CC_VERSION_CHANGED').length).toBe(0)
+    c.stop()
+  })
+
+  test('and a session that really upgrades is still reported, by name', async () => {
+    const events: any[] = []
+    const c = mkClient({ eventEmitter: { emit: (e: any) => events.push(e) } })
+    await c.handleRequest(bodyV('2.1.197.1'), {}, { sessionId: 'ccv-A' })
+    await c.handleRequest(bodyV('2.1.237.2'), {}, { sessionId: 'ccv-B' })   // neighbour noise
+    await c.handleRequest(bodyV('2.1.237.3'), {}, { sessionId: 'ccv-A' })   // A really upgrades
+    const ch = events.filter((e) => e.kind === 'CC_VERSION_CHANGED')
+    expect(ch.length).toBe(1)
+    expect(ch[0].sessionId).toBe('ccv-A')
+    expect(ch[0].previousVersion).toBe('2.1.197')
+    expect(ch[0].version).toBe('2.1.237')
+    c.stop()
+  })
 })
 
 describe('rewrite guard — a TTL expiry spanning a proxy restart is NOT blocked', () => {

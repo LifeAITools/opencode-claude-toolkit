@@ -494,7 +494,23 @@ export class ProxyClient {
 
   /** Last Claude Code version seen in a request's billing header — a change
    *  churns the cacheable prefix; tracked to emit CC_VERSION_CHANGED. */
-  private lastCcVersion: string | null = null
+  /**
+   * Claude Code version last seen PER SESSION.
+   *
+   * It used to be one field for the whole fleet, and that was fine while every
+   * agent on a machine ran the same CLI. It stopped being fine when several
+   * versions started living side by side: whichever session sent the last
+   * request overwrote the field, so the next session's request looked like a
+   * version change to a version it had never left. Measured 2026-08-20: SIX
+   * versions in use at once (2.1.177, .197, .234, .235, .236, .237) and 3676
+   * "version changed" events across 157 sessions in a day — one session alone
+   * flip-flopped 457 times between two versions it was never actually on.
+   *
+   * The event claims "the cacheable prefix changed", so a reader chasing a
+   * rewrite spike was being pointed at innocent sessions thousands of times a
+   * day, and a REAL version change for one agent was unfindable in the noise.
+   */
+  private lastCcVersionBySession = new Map<string, string>()
 
   /** Where the KA snapshot registry is persisted (configurable for tests). */
   private readonly kaSnapshotPath: string
@@ -616,6 +632,7 @@ export class ProxyClient {
           if (k.startsWith(sid + ':')) this.kaReviveDropped.delete(k)
         }
         this.sessionPins.delete(sid)  // drop the per-session org/token pin
+        this.lastCcVersionBySession.delete(sid)
         this.kaSnapshotDirty = true   // a reaped session must leave the KA file
       }
       // Session-pin GC (T4.3): age out vault pins for long-dead sessions so the
@@ -1443,9 +1460,10 @@ export class ProxyClient {
     // spike attributable instead of a silent mystery.
     {
       const ccVersion = extractCcVersion(parsedBody)
-      if (ccVersion && ccVersion !== this.lastCcVersion) {
-        const prev = this.lastCcVersion
-        this.lastCcVersion = ccVersion
+      const prevForSession = this.lastCcVersionBySession.get(sessionId) ?? null
+      if (ccVersion && ccVersion !== prevForSession) {
+        const prev = prevForSession
+        this.lastCcVersionBySession.set(sessionId, ccVersion)
         if (prev !== null) {
           this.events.emit({
             level: 'info',

@@ -295,7 +295,23 @@ export declare class ProxyClient {
     private readonly proxyStartedAt;
     /** Last Claude Code version seen in a request's billing header — a change
      *  churns the cacheable prefix; tracked to emit CC_VERSION_CHANGED. */
-    private lastCcVersion;
+    /**
+     * Claude Code version last seen PER SESSION.
+     *
+     * It used to be one field for the whole fleet, and that was fine while every
+     * agent on a machine ran the same CLI. It stopped being fine when several
+     * versions started living side by side: whichever session sent the last
+     * request overwrote the field, so the next session's request looked like a
+     * version change to a version it had never left. Measured 2026-08-20: SIX
+     * versions in use at once (2.1.177, .197, .234, .235, .236, .237) and 3676
+     * "version changed" events across 157 sessions in a day — one session alone
+     * flip-flopped 457 times between two versions it was never actually on.
+     *
+     * The event claims "the cacheable prefix changed", so a reader chasing a
+     * rewrite spike was being pointed at innocent sessions thousands of times a
+     * day, and a REAL version change for one agent was unfindable in the noise.
+     */
+    private lastCcVersionBySession;
     /** Where the KA snapshot registry is persisted (configurable for tests). */
     private readonly kaSnapshotPath;
     /** True while the snapshot file cannot be written — dedupes the alarm. */

@@ -34,7 +34,7 @@
  * must never break a request or a fire.
  */
 
-import { readFileSync, writeFileSync } from 'fs'
+import { chmodSync, readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
@@ -192,6 +192,11 @@ export function saveKaSnapshots(
     // other users of the machine. It sat at 0664 in a 0777 directory until
     // 2026-08-20.
     writeFileSync(path, JSON.stringify(file), { mode: 0o600 })
+    // The mode argument only applies when the file is CREATED. An existing file
+    // keeps whatever it had — which is how the deploy on 2026-08-20 left a file
+    // that had lived at 0664 exactly as it was, tokens removed but still open to
+    // every user of the machine. Set it explicitly on every write.
+    try { chmodSync(path, 0o600) } catch { /* a mode we cannot set must not break the write */ }
     return { ok: true }
   } catch (e) {
     // Still never breaks the request path — the caller decides what to say.

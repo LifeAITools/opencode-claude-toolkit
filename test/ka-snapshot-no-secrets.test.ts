@@ -11,7 +11,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { stripCredentials, KeepaliveEngine } from '../src/keepalive-engine.js'
 import { saveKaSnapshots } from '../src/ka-snapshot-store.js'
-import { mkdtempSync, rmSync, statSync } from 'fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -65,5 +65,17 @@ describe('what may be written down', () => {
     const p = join(dir, 'snap.json')
     saveKaSnapshots({}, p)
     expect(statSync(p).mode & 0o077).toBe(0)   // nothing for group or others
+  })
+
+  test('an ALREADY-OPEN file is closed on the next write, not left as it was', () => {
+    // The mode argument only applies when the file is created, so the first
+    // version of this fix removed the tokens and left the old permissions
+    // untouched — measured live on 2026-08-20, the deployed file stayed 0664.
+    // A test that only ever created a fresh file could not see it.
+    const p = join(dir, 'snap.json')
+    writeFileSync(p, '{}', { mode: 0o664 })
+    expect(statSync(p).mode & 0o077).not.toBe(0)   // starts open
+    saveKaSnapshots({}, p)
+    expect(statSync(p).mode & 0o077).toBe(0)       // and is closed by the write
   })
 })

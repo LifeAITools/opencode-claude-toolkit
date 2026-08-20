@@ -24,7 +24,7 @@ import { spawnSync, spawn } from 'bun'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync, rmdirSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname, resolve as pathResolve } from 'path'
-import { withInstallLock } from './install-lock.ts'
+import { withInstallLock, decideInstallOutcome } from './install-lock.ts'
 
 // ═══ Paths ════════════════════════════════════════════════════════════
 
@@ -490,9 +490,16 @@ async function installBun(): Promise<void> {
   step('Installing bun (required runtime)')
   // bun's official installer: curl -fsSL https://bun.sh/install | bash
   // This writes to ~/.bun/bin/bun and prints PATH export line.
-  const r = run(['bash', '-c', 'curl -fsSL https://bun.sh/install | bash'])
-  if (!r.ok) {
+  const r = run(['bash', '-c', 'curl -fsSL https://bun.sh/install | bash'], { quiet: true })
+  const outcome = decideInstallOutcome({ installSucceeded: r.ok, presentAfter: !!which('bun') })
+  if (outcome === 'already-present') {
+    warn('bun installer reported an error, but bun is present — continuing with it')
+    process.env.PATH = `${join(HOME, '.bun', 'bin')}:${process.env.PATH}`
+    return
+  }
+  if (outcome === 'fatal') {
     err('bun install failed. Install manually: curl -fsSL https://bun.sh/install | bash')
+    if (r.stderr) err(r.stderr.slice(0, 300))
     process.exit(1)
   }
   // Update PATH for this process — bun lives at ~/.bun/bin/bun
@@ -508,9 +515,15 @@ async function installClaudeCLI(): Promise<void> {
     err('npm not found. Install Node.js first: https://nodejs.org')
     process.exit(1)
   }
-  const r = run(['npm', 'install', '-g', '@anthropic-ai/claude-code'])
-  if (!r.ok) {
+  const r = run(['npm', 'install', '-g', '@anthropic-ai/claude-code'], { quiet: true })
+  const outcome = decideInstallOutcome({ installSucceeded: r.ok, presentAfter: !!which('claude') })
+  if (outcome === 'already-present') {
+    warn('npm install reported an error, but the claude CLI is present — continuing with it')
+    return
+  }
+  if (outcome === 'fatal') {
     err('claude CLI install failed. Try: npm install -g @anthropic-ai/claude-code')
+    if (r.stderr) err(r.stderr.slice(0, 300))
     process.exit(1)
   }
   ok('Claude Code CLI installed')

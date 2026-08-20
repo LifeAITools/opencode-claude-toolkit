@@ -1,5 +1,6 @@
 /**
- * An exclusive, cross-process lock for one-time installs.
+ * Install plumbing for the launcher: an exclusive cross-process lock, and the
+ * rule for what a failed install actually means.
  *
  * Lives in its own file for one reason: a guard nobody can run in a test is a
  * guard nobody can prove. The launcher script executes on import, so anything
@@ -70,4 +71,28 @@ export async function withInstallLock(
       try { rmdirSync(lockPath) } catch { /* already gone */ }
     }
   }
+}
+
+/** What a bootstrap should do after an install attempt. */
+export type InstallOutcome = 'installed' | 'already-present' | 'fatal'
+
+/**
+ * Decide what a FAILED install means — and it does not always mean "stop".
+ *
+ * Measured 2026-08-20, reported by the lat-context owner from the founder's
+ * screen: an install of the Claude CLI collided with another installer, failed
+ * with ENOTEMPTY, and the bootstrap called `process.exit(1)`. The agent never
+ * came up. What the founder saw in the panel was an empty shell — no error he
+ * could act on, just a window in which nothing had happened — and the agent had
+ * to be raised by hand.
+ *
+ * The CLI was on the machine the whole time. So the question a failed install
+ * must ask is not "did npm succeed" but "is the tool there now": another
+ * process may have installed it, or it may never have been missing. Only a tool
+ * that is still absent afterwards is worth ending a bootstrap over.
+ */
+export function decideInstallOutcome(p: { installSucceeded: boolean; presentAfter: boolean }): InstallOutcome {
+  if (p.installSucceeded && p.presentAfter) return 'installed'
+  if (p.presentAfter) return 'already-present'   // install failed, tool is there anyway — carry on
+  return 'fatal'                                  // genuinely absent: stopping is the honest answer
 }

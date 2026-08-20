@@ -15,7 +15,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { withInstallLock } from '../bin/install-lock.ts'
+import { withInstallLock, decideInstallOutcome } from '../bin/install-lock.ts'
 import { mkdtempSync, rmSync, existsSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -60,5 +60,28 @@ describe('withInstallLock', () => {
     let installs = 0
     await withInstallLock('tool', () => false, async () => { installs++ }, root, 5_000)
     expect(installs).toBe(0)
+  })
+})
+
+describe('what a failed install means', () => {
+  test('a failed install with the tool PRESENT must not end the bootstrap', () => {
+    // The 2026-08-20 case exactly: npm collided with another installer and
+    // failed, the CLI had been on the machine all along, and exiting there left
+    // the founder looking at an empty shell with no agent in it.
+    expect(decideInstallOutcome({ installSucceeded: false, presentAfter: true })).toBe('already-present')
+  })
+
+  test('a failed install with the tool ABSENT is worth stopping for', () => {
+    expect(decideInstallOutcome({ installSucceeded: false, presentAfter: false })).toBe('fatal')
+  })
+
+  test('a succeeded install that produced nothing is still fatal — success is the tool being there', () => {
+    // npm can exit 0 and leave nothing usable behind (wrong prefix, partial
+    // write). The bootstrap needs the tool, not the exit code.
+    expect(decideInstallOutcome({ installSucceeded: true, presentAfter: false })).toBe('fatal')
+  })
+
+  test('the ordinary success', () => {
+    expect(decideInstallOutcome({ installSucceeded: true, presentAfter: true })).toBe('installed')
   })
 })

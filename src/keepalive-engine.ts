@@ -1733,7 +1733,7 @@ export class KeepaliveEngine {
         if (fate === 'keep-warm') {
           try {
             appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
-              `[${new Date().toISOString()}] KA_EVICTION_KEEP_WARM pid=${process.pid} ${RUNTIME_IDENTITY} lineage=${best.lineageKey.slice(0, 12)} cw=${cw} intervalSec=${Math.round(this.config.intervalMs / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} — cache just paid for, next fire lands inside its life\n`)
+              `[${new Date().toISOString()}] KA_EVICTION_KEEP_WARM pid=${process.pid} ${RUNTIME_IDENTITY} lineage=${best.lineageKey} cw=${cw} intervalSec=${Math.round(this.config.intervalMs / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} — cache just paid for, next fire lands inside its life\n`)
           } catch { /* logging best-effort */ }
           // No bookkeeping needed here: the fire SUCCEEDED (it wrote), so the
           // warm clocks — engine-wide cacheWrittenAt and this lineage's own

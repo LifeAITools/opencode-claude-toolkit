@@ -32,3 +32,19 @@ describe('runtime identity stamp', () => {
     expect(RUNTIME_IDENTITY).not.toMatch(/exec=(na|unknown)\b/)
   })
 })
+
+describe('identifiers in diagnostics', () => {
+  test('the keep-warm line prints the WHOLE lineage key', async () => {
+    // The key is composite (`<systemHash>:<toolsHash>`), and two DIFFERENT
+    // lineages of one session can share its first half — measured 2026-08-20
+    // in a live registry: 44433d8e10db:d7e7ba4a2fe9 and 44433d8e10db:39586a31d6ee.
+    // The first version of this line cut the key at 12 characters, i.e. exactly
+    // where it stops being unique, so the log named a lineage that could be
+    // either of two. A truncated identifier cannot be searched or acted on.
+    const src = await Bun.file(new URL('../src/keepalive-engine.ts', import.meta.url)).text()
+    const line = src.split('\n').find((l) => l.includes('KA_EVICTION_KEEP_WARM'))
+    expect(line).toBeDefined()
+    expect(line).toContain('lineage=${best.lineageKey}')
+    expect(line).not.toMatch(/lineageKey\.slice\(/)
+  })
+})

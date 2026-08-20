@@ -188,7 +188,10 @@ export function saveKaSnapshots(
       savedAt: Date.now(),
       sessions,
     }
-    writeFileSync(path, JSON.stringify(file))
+    // 0600: the file describes every live session and must not be readable by
+    // other users of the machine. It sat at 0664 in a 0777 directory until
+    // 2026-08-20.
+    writeFileSync(path, JSON.stringify(file), { mode: 0o600 })
     return { ok: true }
   } catch (e) {
     // Still never breaks the request path — the caller decides what to say.

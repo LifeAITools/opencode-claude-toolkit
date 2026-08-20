@@ -406,6 +406,23 @@ function ttlFromCacheControl(cc: unknown): number | null {
  *
  * @public for testing; used by KeepaliveEngine.notifyRealRequestStart.
  */
+/**
+ * Drop anything that authenticates from a header set about to be written down.
+ *
+ * A keepalive snapshot needs the SHAPE of the request, never the credential:
+ * every fire rebuilds Authorization from getToken(). Named and exported so the
+ * rule is testable on its own rather than buried in a serializer.
+ */
+export function stripCredentials(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(headers ?? {})) {
+    const lower = k.toLowerCase()
+    if (lower === 'authorization' || lower === 'x-api-key' || lower === 'cookie') continue
+    out[k] = v
+  }
+  return out
+}
+
 export function detectCacheTtlFromBody(body: unknown): { minTtlMs: number | null; hasAnyCacheControl: boolean } {
   if (!body || typeof body !== 'object') return { minTtlMs: null, hasAnyCacheControl: false }
   const observed: number[] = []
@@ -2977,7 +2994,13 @@ export class KeepaliveEngine {
         lastKnownCacheTokensByModel: Object.fromEntries(this.lastKnownCacheTokensByModel),
         registry: Array.from(this.registry.values()).map((e) => ({
           body: e.body,
-          headers: e.headers,
+          // Credentials are NEVER written to disk. The header is rebuilt from
+          // getToken() on every fire anyway, so persisting it bought nothing and
+          // cost this: measured 2026-08-20, 31 lineages held a live
+          // `Bearer sk-ant-…` in ~/.claude-local/proxy-ka-snapshots.json, a
+          // 47 MB file readable by every user on the machine, inside a
+          // world-writable directory.
+          headers: stripCredentials(e.headers),
           model: e.model,
           lineageKey: e.lineageKey,
           role: e.role,

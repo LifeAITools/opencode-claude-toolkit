@@ -151,6 +151,14 @@ interface RegistryEntry {
  *
  * @public for testing; used by KeepaliveEngine.notifyRealRequestStart.
  */
+/**
+ * Drop anything that authenticates from a header set about to be written down.
+ *
+ * A keepalive snapshot needs the SHAPE of the request, never the credential:
+ * every fire rebuilds Authorization from getToken(). Named and exported so the
+ * rule is testable on its own rather than buried in a serializer.
+ */
+export declare function stripCredentials(headers: Record<string, string>): Record<string, string>;
 export declare function detectCacheTtlFromBody(body: unknown): {
     minTtlMs: number | null;
     hasAnyCacheControl: boolean;

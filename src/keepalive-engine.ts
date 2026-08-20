@@ -1735,9 +1735,11 @@ export class KeepaliveEngine {
             appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
               `[${new Date().toISOString()}] KA_EVICTION_KEEP_WARM pid=${process.pid} ${RUNTIME_IDENTITY} lineage=${best.lineageKey.slice(0, 12)} cw=${cw} intervalSec=${Math.round(this.config.intervalMs / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} — cache just paid for, next fire lands inside its life\n`)
           } catch { /* logging best-effort */ }
-          // The write refreshed this prefix — treat it as warmed now, so the
-          // next fire is measured from this moment like any other refresh.
-          this.cacheWrittenAt = Date.now()
+          // No bookkeeping needed here: the fire SUCCEEDED (it wrote), so the
+          // warm clocks — engine-wide cacheWrittenAt and this lineage's own
+          // lastWarmedAt — were both stamped a few lines above, on the success
+          // path every fire takes. An extra assignment here would re-set the
+          // same value milliseconds later while implying it does something.
           return 'stop'   // end THIS tick: one eviction episode per tick is enough
         }
         this.registry.delete(best.lineageKey)

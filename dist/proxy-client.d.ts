@@ -298,6 +298,8 @@ export declare class ProxyClient {
     private lastCcVersion;
     /** Where the KA snapshot registry is persisted (configurable for tests). */
     private readonly kaSnapshotPath;
+    /** True while the snapshot file cannot be written — dedupes the alarm. */
+    private kaSnapshotPersistFailing;
     /** Set when a KA registry mutated since the last persist — bounds writes
      *  to "only when something changed" (bodies are large; no blind 10s saves). */
     private kaSnapshotDirty;
@@ -603,7 +605,14 @@ export declare class ProxyClient {
     private createEngine;
     /** Serialise every armed engine's KA registry into a persistable map. */
     private collectKaSnapshots;
-    /** Persist the KA snapshot registry. Best-effort — never throws. */
+    /**
+     * Persist the KA snapshot registry. Never throws — and never fails quietly.
+     *
+     * The file is what every session revives from after a restart, so a failure
+     * that nobody hears costs the whole fleet its warmth the next time the proxy
+     * comes up. Reported ONCE per failure episode (and once again on recovery),
+     * because this runs every ten seconds and a repeated alarm is an ignored one.
+     */
     private persistKaSnapshots;
     /**
      * Startup: revive KA engines for sessions whose cache is provably still

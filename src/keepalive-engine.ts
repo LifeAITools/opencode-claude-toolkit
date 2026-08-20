@@ -2839,8 +2839,20 @@ export class KeepaliveEngine {
         this.notifyRegistryChanged()
         this.startTimer()
       }
-    } catch {
-      /* revive is best-effort — a failure just means no KA until a real request */
+    } catch (e) {
+      // "No KA until a real request" is not the harmless sentence it looks
+      // like: an IDLE session makes no requests — that is what idle means — so
+      // for the population keepalive exists to serve, a failure here means no
+      // keepalive EVER, and the agent wakes hours later into a full cold
+      // rewrite. Measured 2026-08-19, the same shape from a different cause:
+      // 14 sessions disarmed at once, none of them ever came back.
+      //
+      // So a failed revive says so. It still never throws — the caller's other
+      // sessions must revive regardless.
+      try {
+        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          `[${new Date().toISOString()}] KA_REVIVE_FAILED pid=${process.pid} ${RUNTIME_IDENTITY} lineages=${state?.registry?.length ?? 'na'} err=${e instanceof Error ? e.message : String(e)} — this session will NOT be kept warm until a real request arrives\n`)
+      } catch { /* logging best-effort */ }
     }
   }
 

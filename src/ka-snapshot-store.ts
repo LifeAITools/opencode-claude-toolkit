@@ -146,7 +146,24 @@ export function loadKaSnapshots(path: string): KaSnapshotFile {
  * Persist the KA snapshot file. Best-effort — a write failure is swallowed so
  * it can never break the request path. The `version`/`savedAt` are stamped here.
  */
-export function saveKaSnapshots(sessions: Record<string, PersistedSession>, path: string): void {
+/**
+ * Persist the KA registry. Never throws — but it now SAYS when it failed.
+ *
+ * A silent failure here is invisible until the next restart, and then it costs
+ * the whole fleet its warmth at once: every session revives from this file, so
+ * an unwritten file means every idle agent wakes into a full cold rewrite. A
+ * full disk, a permission change or a bad path produced exactly the same
+ * nothing as a healthy write — the same shape of blindness that cost a morning
+ * on 2026-08-19, when a keepalive fire recorded only its successes.
+ *
+ * Returns true on a written file, false on a swallowed failure, so the caller
+ * can report it once per episode instead of writing every 10 seconds into the
+ * void. The error itself rides along for the report.
+ */
+export function saveKaSnapshots(
+  sessions: Record<string, PersistedSession>,
+  path: string,
+): { ok: true } | { ok: false; error: string } {
   try {
     const file: KaSnapshotFile = {
       version: KA_SNAPSHOT_SCHEMA_VERSION,
@@ -154,8 +171,10 @@ export function saveKaSnapshots(sessions: Record<string, PersistedSession>, path
       sessions,
     }
     writeFileSync(path, JSON.stringify(file))
-  } catch {
-    /* best-effort — never break the request path */
+    return { ok: true }
+  } catch (e) {
+    // Still never breaks the request path — the caller decides what to say.
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
 

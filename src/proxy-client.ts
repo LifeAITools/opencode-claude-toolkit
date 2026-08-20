@@ -498,6 +498,8 @@ export class ProxyClient {
 
   /** Where the KA snapshot registry is persisted (configurable for tests). */
   private readonly kaSnapshotPath: string
+  /** True while the snapshot file cannot be written — dedupes the alarm. */
+  private kaSnapshotPersistFailing = false
 
   /** Set when a KA registry mutated since the last persist — bounds writes
    *  to "only when something changed" (bodies are large; no blind 10s saves). */
@@ -2330,9 +2332,38 @@ export class ProxyClient {
     return out
   }
 
-  /** Persist the KA snapshot registry. Best-effort — never throws. */
+  /**
+   * Persist the KA snapshot registry. Never throws — and never fails quietly.
+   *
+   * The file is what every session revives from after a restart, so a failure
+   * that nobody hears costs the whole fleet its warmth the next time the proxy
+   * comes up. Reported ONCE per failure episode (and once again on recovery),
+   * because this runs every ten seconds and a repeated alarm is an ignored one.
+   */
   private persistKaSnapshots(): void {
-    saveKaSnapshots(this.collectKaSnapshots(), this.kaSnapshotPath)
+    const r = saveKaSnapshots(this.collectKaSnapshots(), this.kaSnapshotPath)
+    if (!r.ok) {
+      if (!this.kaSnapshotPersistFailing) {
+        this.kaSnapshotPersistFailing = true
+        this.events.emit({
+          level: 'error',
+          kind: 'KA_SNAPSHOT_PERSIST_FAILED',
+          path: this.kaSnapshotPath,
+          error: r.error,
+          msg: `KA snapshot file could not be written (${r.error}) — every session would lose its warm cache on the next restart`,
+        })
+      }
+      return
+    }
+    if (this.kaSnapshotPersistFailing) {
+      this.kaSnapshotPersistFailing = false
+      this.events.emit({
+        level: 'info',
+        kind: 'KA_SNAPSHOT_PERSIST_RECOVERED',
+        path: this.kaSnapshotPath,
+        msg: 'KA snapshot file is writable again',
+      })
+    }
   }
 
   /**

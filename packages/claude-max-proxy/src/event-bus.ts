@@ -62,6 +62,8 @@ export type EventKind =
   | 'KA_FIRE_ERROR'
   | 'KA_DISARM'
   | 'KA_HOLD'            // fleet breaker tripped: fires suspended, snapshot KEPT
+  | 'KA_SNAPSHOT_PERSIST_FAILED'      // the file every session revives from could not be written
+  | 'KA_SNAPSHOT_PERSIST_RECOVERED'
   | 'KA_RESUMED'
 
   // Guards
@@ -124,6 +126,8 @@ export const EVENT = {
   KA_FIRE_ERROR: 'KA_FIRE_ERROR',
   KA_DISARM: 'KA_DISARM',
   KA_HOLD: 'KA_HOLD',
+  KA_SNAPSHOT_PERSIST_FAILED: 'KA_SNAPSHOT_PERSIST_FAILED',
+  KA_SNAPSHOT_PERSIST_RECOVERED: 'KA_SNAPSHOT_PERSIST_RECOVERED',
   KA_RESUMED: 'KA_RESUMED',
   // Guards
   REWRITE_WARN: 'REWRITE_WARN',
@@ -265,6 +269,24 @@ export interface KaFireCompleteEvent extends BaseEvent {
  * kind precisely because reporting it as a disarm — or not at all — is what made
  * the 2026-08-19 fleet-wide loss of warmth unreadable while it was happening.
  */
+/**
+ * The KA snapshot file could not be written. Every session revives from it, so
+ * an unheard failure here costs the whole fleet its warm caches at the next
+ * restart — which is why this is an error kind and not a debug line. Emitted
+ * ONCE per failure episode: the write runs every ten seconds, and an alarm that
+ * repeats every ten seconds is an alarm nobody reads.
+ */
+export interface KaSnapshotPersistFailedEvent extends BaseEvent {
+  kind: 'KA_SNAPSHOT_PERSIST_FAILED'
+  path: string
+  error: string
+}
+
+export interface KaSnapshotPersistRecoveredEvent extends BaseEvent {
+  kind: 'KA_SNAPSHOT_PERSIST_RECOVERED'
+  path: string
+}
+
 export interface KaHoldEvent extends BaseEvent {
   kind: 'KA_HOLD'
   sessionId: string

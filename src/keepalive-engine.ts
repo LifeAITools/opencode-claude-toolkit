@@ -190,6 +190,17 @@ interface RegistryEntry {
    * lineage had produced since.
    */
   provenAlive: boolean
+  /**
+   * Did this lineage's PREVIOUS fire come back as a cold write?
+   *
+   * It is what separates "we just lost a cache" from "buying is being wasted".
+   * Losing one is normal and the answer is to buy: measured 2026-08-20, nine
+   * lineages cold-wrote during the day and all nine had their purchase READ
+   * back on the very next fire — buying during an eviction paid off every
+   * single time. Only a lineage that writes AGAIN, having bought moments
+   * earlier, shows a provider that is throwing purchases away.
+   */
+  lastFireColdWrote: boolean
 }
 
 /** A snapshot primed by notifyRealRequestStart, awaiting its completion. */
@@ -1044,6 +1055,7 @@ export class KeepaliveEngine {
           // A real request just handed us this snapshot — from here on a cold
           // write on it IS evidence the server dropped the prefix.
           provenAlive: true,
+          lastFireColdWrote: false,
         }
         this.registry.set(key, entry)
         this.lastSnapshots.set(key, entry) // retain for self-heal re-prime
@@ -1690,7 +1702,7 @@ export class KeepaliveEngine {
       {
         const rCr = usage.cacheReadInputTokens ?? 0
         const rCw = usage.cacheCreationInputTokens ?? 0
-        if (rCr > 0 && rCr > rCw) best.provenAlive = true
+        if (rCr > 0 && rCr > rCw) { best.provenAlive = true; best.lastFireColdWrote = false }
       }
 
       const rl = this.getRateLimitInfo()
@@ -1741,7 +1753,21 @@ export class KeepaliveEngine {
         // the prefix locally (user-authorized rewrite) → also not a fleet signal.
         try {
           const msSinceLastRealRequest = firedStat ? Date.now() - firedStat.lastSeenAt : Infinity
-          if (best.provenAlive
+          // A RE-BUY is the signal, not a single loss. Losing a cache is
+          // ordinary and the right answer is to buy it back — measured
+          // 2026-08-20: nine lineages cold-wrote across the day and every one
+          // of the nine had its purchase read back on the next fire, so buying
+          // during an eviction worked every time. Holding the fleet on a single
+          // loss therefore bought nothing and only delayed warmth, which is the
+          // objection the founder raised the same evening and which the numbers
+          // upheld. What WOULD justify a hold is a lineage writing again having
+          // just paid — that is a provider throwing purchases away, and it has
+          // not been seen once. The backstop stays; its bar is now the evidence
+          // that would actually warrant it.
+          const isRebuy = best.lastFireColdWrote
+          best.lastFireColdWrote = true
+          if (isRebuy
+              && best.provenAlive
               && best.role === 'main'
               && isServerSideEviction({ cacheWrite: cw, cacheRead: cr, msSinceLastRealRequest, intervalMs: this.config.intervalMs })) {
             this.evictionBreaker?.trip(Date.now(), {
@@ -2872,6 +2898,7 @@ export class KeepaliveEngine {
           inputTokens: e.inputTokens,
           hasCacheControl: e.hasCacheControl,
           provenAlive: false,   // resurrected — nothing has proven it yet
+          lastFireColdWrote: false,
         })
       }
       if (this.registry.size > 0) {

@@ -127,6 +127,17 @@ interface RegistryEntry {
      * lineage had produced since.
      */
     provenAlive: boolean;
+    /**
+     * Did this lineage's PREVIOUS fire come back as a cold write?
+     *
+     * It is what separates "we just lost a cache" from "buying is being wasted".
+     * Losing one is normal and the answer is to buy: measured 2026-08-20, nine
+     * lineages cold-wrote during the day and all nine had their purchase READ
+     * back on the very next fire — buying during an eviction paid off every
+     * single time. Only a lineage that writes AGAIN, having bought moments
+     * earlier, shows a provider that is throwing purchases away.
+     */
+    lastFireColdWrote: boolean;
 }
 /**
  * Scan an Anthropic request body for ALL cache_control markers and return

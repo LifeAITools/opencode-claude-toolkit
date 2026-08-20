@@ -122,7 +122,24 @@ describe('who may speak for the fleet', () => {
     revived.stop()
   })
 
-  test('a lineage a real request handed us DOES trip it', async () => {
+  test('ONE cold write does not trip it — losing a cache is ordinary, and buying back works', async () => {
+    // Measured 2026-08-20: nine lineages cold-wrote during the day and every
+    // one had its purchase READ back on the next fire. Holding the whole fleet
+    // on a single loss bought nothing and only delayed warmth.
+    const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
+    const fires = { n: 0 }
+    const disarmed = { reasons: [] as string[] }
+    const e = mkEngine(fires, disarmed, breaker)
+    const key = arm(e)
+    e._setCacheWrittenAt(Date.now() - 120_000)
+    e._ageLineages(120_000)
+    await e._tick()
+    expect(fires.n).toBe(1)
+    expect(breaker.tripCount(Date.now())).toBe(0)
+    e.stop()
+  })
+
+  test('a SECOND cold write in a row does trip it — that is a purchase being thrown away', async () => {
     const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
     const fires = { n: 0 }
     const disarmed = { reasons: [] as string[] }
@@ -130,10 +147,14 @@ describe('who may speak for the fleet', () => {
     arm(e)
     e._setCacheWrittenAt(Date.now() - 120_000)
     e._ageLineages(120_000)
-    await e._tick()
+    await e._tick()                          // bought it
+    expect(breaker.tripCount(Date.now())).toBe(0)
 
-    expect(fires.n).toBe(1)
-    expect(breaker.tripCount(Date.now())).toBe(1)
+    e._setCacheWrittenAt(Date.now() - 120_000)
+    e._ageLineages(120_000)
+    await e._tick()                          // and lost it again straight away
+    expect(fires.n).toBe(2)
+    expect(breaker.tripCount(Date.now())).toBe(1)   // THE POINT: this is worth a hold
     e.stop()
   })
 })
@@ -148,7 +169,8 @@ describe('a revived lineage that has PROVED itself', () => {
     // the lineage had since demonstrated.
     const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
 
-    // A fire that READS first, then cold-writes — exactly the live sequence.
+    // Reads first, then cold-writes twice — the live sequence plus the re-buy
+    // that is now the bar for telling the fleet anything.
     let call = 0
     const readThenEvict = async function* (): AsyncGenerator<StreamEvent> {
       call++
@@ -178,8 +200,13 @@ describe('a revived lineage that has PROVED itself', () => {
 
     revived._setCacheWrittenAt(Date.now() - 120_000)
     revived._ageLineages(120_000)
-    await revived._tick()                       // fire 2: cold write on a PROVEN lineage
-    expect(breaker.tripCount(Date.now())).toBe(1)   // THE POINT: the fleet hears it
+    await revived._tick()                       // fire 2: lost it — buy it back
+    expect(breaker.tripCount(Date.now())).toBe(0)
+
+    revived._setCacheWrittenAt(Date.now() - 120_000)
+    revived._ageLineages(120_000)
+    await revived._tick()                       // fire 3: lost the purchase too
+    expect(breaker.tripCount(Date.now())).toBe(1)   // THE POINT: revived-but-proven CAN speak
     revived.stop()
   })
 })

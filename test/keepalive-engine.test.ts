@@ -1131,7 +1131,12 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     e.stop()
   })
 
-  test('Fix2: PRIMARY cold-write (genuine server eviction) DOES trip the fleet breaker', async () => {
+  test('Fix2: a PRIMARY cold-write trips the fleet breaker only on the RE-BUY', async () => {
+    // Bar raised 2026-08-20 on the founder's objection, upheld by measurement:
+    // nine lineages cold-wrote that day and every one had its purchase read
+    // back on the next fire, so a single loss is ordinary and buying back
+    // works. Holding the fleet on it bought nothing. A lineage writing AGAIN
+    // right after paying is the thing worth holding for.
     const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
     const e = mkEng(coldFetch, () => {}, breaker)
     const a = e.notifyRealRequestStart('m', bodyA, {})
@@ -1139,7 +1144,33 @@ describe('KeepaliveEngine: per-lineage eviction retirement + transient re-arm', 
     const aEntry = e._registry.get(a)!; (aEntry as any).role = 'main'
     const st = e._lineageStats.get(a); if (st) (st as any).lastSeenAt = Date.now() - 200_000
     await (e as any).fireLineage(aEntry, 70_000)
-    expect(breaker.isTripped(Date.now())).toBe(true)
+    expect(breaker.isTripped(Date.now())).toBe(false)   // lost it once — buy it back
+    await (e as any).fireLineage(aEntry, 70_000)
+    expect(breaker.isTripped(Date.now())).toBe(true)    // lost the purchase too
+    e.stop()
+  })
+
+  test('Fix2b: a successful read RESETS the memory, so two losses hours apart are not a re-buy', async () => {
+    // Without the reset every lineage eventually accumulates two writes over
+    // its life and trips the fleet for nothing. The mutation that removes the
+    // reset is invisible to every other test here — this is the one that sees it.
+    const breaker = new EvictionCircuitBreaker({ cooldownMs: 300_000 })
+    let call = 0
+    const coldWarmCold = async function* (): AsyncGenerator<StreamEvent> {
+      call++
+      yield call === 2
+        ? { type: 'message_stop', usage: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 500_000, cacheCreationInputTokens: 0 }, stopReason: 'end_turn' } as StreamEvent
+        : { type: 'message_stop', usage: { inputTokens: 504, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 182781 }, stopReason: 'end_turn' } as StreamEvent
+    }
+    const e = mkEng(coldWarmCold, () => {}, breaker)
+    const a = e.notifyRealRequestStart('m', bodyA, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    const aEntry = e._registry.get(a)!; (aEntry as any).role = 'main'
+    const st = e._lineageStats.get(a); if (st) (st as any).lastSeenAt = Date.now() - 200_000
+    await (e as any).fireLineage(aEntry, 70_000)   // cold
+    await (e as any).fireLineage(aEntry, 70_000)   // read — the loss is forgotten
+    await (e as any).fireLineage(aEntry, 70_000)   // cold again, but NOT a re-buy
+    expect(breaker.isTripped(Date.now())).toBe(false)
     e.stop()
   })
 

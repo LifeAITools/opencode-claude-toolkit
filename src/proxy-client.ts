@@ -2196,7 +2196,13 @@ export class ProxyClient {
             level: 'info',
             kind: 'KA_FIRE_START',
             sessionId,
-            org: this.sessionPins.get(sessionId)?.orgId ?? null,
+            // The account that ACTUALLY served this fire — the pin when the session has
+            // one, otherwise whichever account the pool is currently serving. The
+            // narrower `sessionPins` alone left this null on 88 of 91 paid warm-ups
+            // over the week of 2026-08-13..20, which is exactly the field needed to
+            // test whether a restart re-serves a session from the OTHER account —
+            // whose cache is worthless to it. Same source the auth path already uses.
+            org: this.resolveServedOrg(sessionId),
             lineageKey: info.lineageKey,
             idleMs: info.idleMs,
           })
@@ -2206,7 +2212,13 @@ export class ProxyClient {
             level: 'error',
             kind: 'KA_FIRE_ERROR',
             sessionId,
-            org: this.sessionPins.get(sessionId)?.orgId ?? null,
+            // The account that ACTUALLY served this fire — the pin when the session has
+            // one, otherwise whichever account the pool is currently serving. The
+            // narrower `sessionPins` alone left this null on 88 of 91 paid warm-ups
+            // over the week of 2026-08-13..20, which is exactly the field needed to
+            // test whether a restart re-serves a session from the OTHER account —
+            // whose cache is worthless to it. Same source the auth path already uses.
+            org: this.resolveServedOrg(sessionId),
             lineageKey: info.lineageKey,
             idleMs: info.idleMs,
             status: info.status,
@@ -2238,7 +2250,13 @@ export class ProxyClient {
             sessionId,
             lineageKey: stats.lineageKey,
             // Org of the session's pinned token (multi-org quota attribution).
-            org: this.sessionPins.get(sessionId)?.orgId ?? null,
+            // The account that ACTUALLY served this fire — the pin when the session has
+            // one, otherwise whichever account the pool is currently serving. The
+            // narrower `sessionPins` alone left this null on 88 of 91 paid warm-ups
+            // over the week of 2026-08-13..20, which is exactly the field needed to
+            // test whether a restart re-serves a session from the OTHER account —
+            // whose cache is worthless to it. Same source the auth path already uses.
+            org: this.resolveServedOrg(sessionId),
             model: stats.model,
             durationMs: stats.durationMs,
             idleMs: stats.idleMs,
@@ -2689,7 +2707,13 @@ export class ProxyClient {
         lineageKey,
         // Organization that actually served this request (multi-org: the
         // session's pinned org) — the quota pipeline attributes per-org by it.
-        org: this.sessionPins.get(sessionId)?.orgId ?? null,
+        // The account that ACTUALLY served this fire — the pin when the session has
+            // one, otherwise whichever account the pool is currently serving. The
+            // narrower `sessionPins` alone left this null on 88 of 91 paid warm-ups
+            // over the week of 2026-08-13..20, which is exactly the field needed to
+            // test whether a restart re-serves a session from the OTHER account —
+            // whose cache is worthless to it. Same source the auth path already uses.
+            org: this.resolveServedOrg(sessionId),
         model,
         durationMs: Date.now() - t0,
         usage,

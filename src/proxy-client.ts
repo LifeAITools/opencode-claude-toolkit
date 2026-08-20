@@ -2363,6 +2363,8 @@ export class ProxyClient {
         sessionId: s.sessionId,
         ownerPid: s.pid ?? null,
         model: s.model ?? null,
+        // Whose cache this is. See PersistedSession.orgId.
+        orgId: this.resolveServedOrg(s.sessionId),
       }
     }
     return out
@@ -2443,6 +2445,7 @@ export class ProxyClient {
         const session = this.store.getOrCreate(sid, ps.ownerPid, () => this.createEngine(sid))
         session.model = ps.model
         session.engine.revive(ps)
+        this.restorePinForRevivedSession(sid, ps.orgId)
         this.kaSnapshotDirty = true
         this.events.emit({
           level: 'info',
@@ -2458,6 +2461,42 @@ export class ProxyClient {
         this.recordReviveDrop(sid, ps, 'revive-error')
       }
     }
+  }
+
+  /**
+   * Give a revived session back the account its cache belongs to.
+   *
+   * Anthropic caches per account. Until now the binding was restored only on
+   * the session's next REAL request — and the sessions that keepalive exists
+   * for are precisely the ones that send none, so a revived warm-up fired
+   * against whatever account happened to be active and bought the whole prefix
+   * again. The same shape of error as the disarm that could only be undone by a
+   * request an idle agent never makes.
+   *
+   * Measured 2026-08-13..20: 21.8% of fires in the first ten minutes after a
+   * restart paid a full rewrite against 0.12% three hours later — about a
+   * million tokens per restart across 27 restarts.
+   *
+   * No token is minted here: the pin carries the vault's current token and the
+   * fire path still goes through withFreshOrgToken, which is the only place
+   * allowed to check-and-refresh.
+   */
+  private restorePinForRevivedSession(sessionId: string, orgId: string | null): void {
+    try {
+      if (!orgId) return
+      if (this.sessionPins.has(sessionId)) return           // a live binding wins
+      if (orgId === this.orgIdResolver.current()) return    // already the right account
+      const ve = this.orgVault.get(orgId)
+      if (!ve || (ve.expiresAt !== null && ve.expiresAt <= Date.now())) return
+      this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })
+      this.events.emit({
+        level: 'info',
+        kind: 'ORG_PIN_RESTORED',
+        sessionId,
+        msg: `revived session re-bound to the account its cache belongs to (${orgId.slice(0, 8)}) `
+          + `— without it the warm-up would have paid for the whole prefix again`,
+      })
+    } catch { /* best-effort: a failed re-bind must not stop the other revivals */ }
   }
 
   /** Record a dropped KA snapshot: tag its lineages (so the guard surfaces the

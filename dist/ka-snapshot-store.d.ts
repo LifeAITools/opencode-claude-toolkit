@@ -78,6 +78,24 @@ export interface PersistedSession extends PersistedEngineState {
     sessionId: string;
     ownerPid: number | null;
     model: string | null;
+    /**
+     * The ACCOUNT this session's cache belongs to.
+     *
+     * Anthropic caches per account, so a prefix bought under one account is worth
+     * nothing to the other. Without this field the registry could say which
+     * session a snapshot belonged to but not whose cache it was, and a revived
+     * keepalive fired against whatever account happened to be active — buying the
+     * whole prefix again.
+     *
+     * Measured 2026-08-13..20: 21.8% of keepalive fires in the first ten minutes
+     * after a proxy restart paid for a full rewrite, against 0.12% three hours
+     * later — about a million tokens per restart, 27 restarts in the week. The
+     * founder named this cause before the code was read; the field is what lets a
+     * revived session be warmed on the account that owns its cache.
+     *
+     * Null when the session had no account resolved at save time.
+     */
+    orgId: string | null;
 }
 export interface KaSnapshotFile {
     version: number;

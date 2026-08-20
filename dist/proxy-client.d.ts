@@ -638,6 +638,25 @@ export declare class ProxyClient {
      * is surfaced as a genuine rewrite, not silently passed as proxy-restart.
      */
     private reviveKaSnapshots;
+    /**
+     * Give a revived session back the account its cache belongs to.
+     *
+     * Anthropic caches per account. Until now the binding was restored only on
+     * the session's next REAL request — and the sessions that keepalive exists
+     * for are precisely the ones that send none, so a revived warm-up fired
+     * against whatever account happened to be active and bought the whole prefix
+     * again. The same shape of error as the disarm that could only be undone by a
+     * request an idle agent never makes.
+     *
+     * Measured 2026-08-13..20: 21.8% of fires in the first ten minutes after a
+     * restart paid a full rewrite against 0.12% three hours later — about a
+     * million tokens per restart across 27 restarts.
+     *
+     * No token is minted here: the pin carries the vault's current token and the
+     * fire path still goes through withFreshOrgToken, which is the only place
+     * allowed to check-and-refresh.
+     */
+    private restorePinForRevivedSession;
     /** Record a dropped KA snapshot: tag its lineages (so the guard surfaces the
      *  next real request as a real rewrite) and emit KA_REVIVE_DROP.
      *

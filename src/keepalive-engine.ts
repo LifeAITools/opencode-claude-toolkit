@@ -589,6 +589,9 @@ export class KeepaliveEngine {
      *  hold that reported itself as a disarm would read as lost warmth, and a
      *  hold that reported nothing at all would read as a healthy engine. */
     onHeld?: (info: { reason: string; at: number; holdMs: number; regSize: number }) => void
+    /** A fire kept the shared head of its prefix and paid for the tail again —
+     *  invisible to the eviction test, and 57% of the spend it exists to catch. */
+    onPartialRewrite?: (info: { lineageKey: string; cacheRead: number; cacheWrite: number; msSinceLastRealRequest: number; at: number }) => void
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
     /**
      * A keepalive fire BEGAN / FAILED.
@@ -815,6 +818,7 @@ export class KeepaliveEngine {
       onTick: ka.onTick,
       onDisarmed: ka.onDisarmed,
       onHeld: ka.onHeld,
+      onPartialRewrite: ka.onPartialRewrite,
       onRewriteWarning: ka.onRewriteWarning,
       onNetworkStateChange: ka.onNetworkStateChange,
       onTtlScan: ka.onTtlScan,
@@ -1737,6 +1741,39 @@ export class KeepaliveEngine {
       const cr = usage.cacheReadInputTokens ?? 0
       const EVICTION_CW_THRESHOLD = 10_000
       const EVICTION_CR_RATIO_MAX = 0.1  // cache_read should be at least 10× cache_write for healthy refresh
+
+      // ── A rewrite the eviction test does NOT catch ────────────────────
+      // The test above asks for a LARGE write next to a NEAR-ZERO read, which
+      // is a prefix that vanished whole. A prefix can also lose only its TAIL:
+      // the shared head still reads back, and everything after it is written
+      // again. The ratio test sees a big read and stays quiet.
+      //
+      // Measured 2026-08-20 across a full day of fleet traffic: keepalive wrote
+      // 8.95M cache tokens, of which 3.87M were caught by the test above and
+      // 5.08M — FIFTY-SEVEN PER CENT — went through with no event of any kind.
+      // Eleven fires, and in each one the snapshot had not changed and the
+      // session had sent no request in between: the tail was dropped upstream,
+      // not grown by us.
+      //
+      // This only REPORTS, deliberately. Making the spend visible is what lets
+      // the next decision rest on numbers; today it rests on none, because the
+      // instrument built to notice this cannot see more than half of it.
+      if (cw > EVICTION_CW_THRESHOLD && !(cr < cw * EVICTION_CR_RATIO_MAX)) {
+        const msSinceReal = firedStat ? Date.now() - firedStat.lastSeenAt : Infinity
+        try {
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] KA_FIRE_PARTIAL_REWRITE pid=${process.pid} ${RUNTIME_IDENTITY} lineage=${best.lineageKey} cr=${cr} cw=${cw} keptHead=${cr} rewroteTail=${cw} msSinceRealRequest=${msSinceReal === Infinity ? 'never' : Math.round(msSinceReal / 1000) + 's'} — head survived, tail paid for again\n`)
+        } catch { /* logging best-effort */ }
+        try {
+          this.config.onPartialRewrite?.({
+            lineageKey: best.lineageKey,
+            cacheRead: cr,
+            cacheWrite: cw,
+            msSinceLastRealRequest: msSinceReal,
+            at: Date.now(),
+          })
+        } catch { /* observer best-effort */ }
+      }
       if (cw > EVICTION_CW_THRESHOLD && cr < cw * EVICTION_CR_RATIO_MAX) {
         try {
           appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),

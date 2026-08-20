@@ -545,6 +545,15 @@ export declare class KeepaliveEngine {
             holdMs: number;
             regSize: number;
         }) => void;
+        /** A fire kept the shared head of its prefix and paid for the tail again —
+         *  invisible to the eviction test, and 57% of the spend it exists to catch. */
+        onPartialRewrite?: (info: {
+            lineageKey: string;
+            cacheRead: number;
+            cacheWrite: number;
+            msSinceLastRealRequest: number;
+            at: number;
+        }) => void;
         onRewriteWarning?: (info: {
             idleMs: number;
             estimatedTokens: number;

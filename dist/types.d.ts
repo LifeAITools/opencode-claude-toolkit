@@ -153,6 +153,16 @@ export interface KeepaliveConfig {
         holdMs: number;
         regSize: number;
     }) => void;
+    /** A keepalive fire kept the shared head of its prefix and paid for the tail
+     *  again. Distinct from an eviction: the ratio test misses it entirely, and
+     *  it accounted for 57% of all keepalive cache-write spend on 2026-08-20. */
+    onPartialRewrite?: (info: {
+        lineageKey: string;
+        cacheRead: number;
+        cacheWrite: number;
+        msSinceLastRealRequest: number;
+        at: number;
+    }) => void;
     /** Fired on next real stream after long idle — surfaces potential cache_write cost */
     onRewriteWarning?: (info: {
         idleMs: number;

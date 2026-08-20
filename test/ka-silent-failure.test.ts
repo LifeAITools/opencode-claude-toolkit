@@ -11,6 +11,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { saveKaSnapshots } from '../src/ka-snapshot-store.js'
+import { ProxyClient } from '../src/proxy-client.js'
 import { mkdtempSync, rmSync, chmodSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -37,5 +38,43 @@ describe('persisting the snapshot registry', () => {
 
   test('it still never throws — the request path must not break for a log file', () => {
     expect(() => saveKaSnapshots({}, '/proc/definitely/not/writable/snap.json')).not.toThrow()
+  })
+})
+
+describe('the service telling someone about it', () => {
+  function mkClient(snapshotPath: string) {
+    const events: any[] = []
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 3600 },
+      credentialsProvider: { getAccessToken: async () => 'tok', invalidate() {} },
+      upstreamFetcher: { fetch: async () => new Response('') },
+      eventEmitter: { emit: (e: any) => events.push(e) },
+      livenessChecker: { isAlive: () => true },
+      kaSnapshotPath: snapshotPath,
+      prefixHistoryPath: join(dir, 'ph.json'),
+      proxyStartedAt: 0,
+    } as any)
+    return { c, events }
+  }
+
+  test('an unwritable file is announced ONCE, not every ten seconds', () => {
+    const { c, events } = mkClient(join(dir, 'nope', 'snap.json'))
+    const persist = () => (c as any).persistKaSnapshots()
+    persist(); persist(); persist()
+    const failed = events.filter((e) => e.kind === 'KA_SNAPSHOT_PERSIST_FAILED')
+    expect(failed.length).toBe(1)                    // THE POINT: an alarm every
+    expect(failed[0].error.length).toBeGreaterThan(0) // 10s is an alarm nobody reads
+    ;(c as any).stop?.()
+  })
+
+  test('and recovery is announced too, so the alarm can be trusted to end', () => {
+    const { c, events } = mkClient(join(dir, 'nope', 'snap.json'))
+    ;(c as any).persistKaSnapshots()
+    ;(c as any).kaSnapshotPath = join(dir, 'snap.json')
+    ;(c as any).persistKaSnapshots()
+    ;(c as any).persistKaSnapshots()
+    expect(events.filter((e) => e.kind === 'KA_SNAPSHOT_PERSIST_FAILED').length).toBe(1)
+    expect(events.filter((e) => e.kind === 'KA_SNAPSHOT_PERSIST_RECOVERED').length).toBe(1)
+    ;(c as any).stop?.()
   })
 })

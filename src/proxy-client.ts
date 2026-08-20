@@ -2444,8 +2444,11 @@ export class ProxyClient {
       try {
         const session = this.store.getOrCreate(sid, ps.ownerPid, () => this.createEngine(sid))
         session.model = ps.model
+        if (this.restorePinForRevivedSession(sid, ps.orgId) === 'account-unavailable') {
+          this.recordReviveDrop(sid, ps, 'account-unavailable')
+          continue
+        }
         session.engine.revive(ps)
-        this.restorePinForRevivedSession(sid, ps.orgId)
         this.kaSnapshotDirty = true
         this.events.emit({
           level: 'info',
@@ -2481,13 +2484,20 @@ export class ProxyClient {
    * fire path still goes through withFreshOrgToken, which is the only place
    * allowed to check-and-refresh.
    */
-  private restorePinForRevivedSession(sessionId: string, orgId: string | null): void {
+  private restorePinForRevivedSession(sessionId: string, orgId: string | null): 'ok' | 'account-unavailable' {
     try {
-      if (!orgId) return
-      if (this.sessionPins.has(sessionId)) return           // a live binding wins
-      if (orgId === this.orgIdResolver.current()) return    // already the right account
+      if (!orgId) return 'ok'                               // old snapshot — nothing claimed
+      if (this.sessionPins.has(sessionId)) return 'ok'      // a live binding wins
+      if (orgId === this.orgIdResolver.current()) return 'ok'   // already the right account
       const ve = this.orgVault.get(orgId)
-      if (!ve || (ve.expiresAt !== null && ve.expiresAt <= Date.now())) return
+      if (!ve || (ve.expiresAt !== null && ve.expiresAt <= Date.now())) {
+        // The account that owns this cache cannot be spoken for right now.
+        // Warming on whatever account happens to be active is not a partial
+        // success — it is a guaranteed full-price purchase of a prefix that the
+        // session will never read, repeated every interval. Say so and let the
+        // caller drop the snapshot; the session re-warms honestly on its return.
+        return 'account-unavailable'
+      }
       this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })
       this.events.emit({
         level: 'info',
@@ -2496,7 +2506,13 @@ export class ProxyClient {
         msg: `revived session re-bound to the account its cache belongs to (${orgId.slice(0, 8)}) `
           + `— without it the warm-up would have paid for the whole prefix again`,
       })
-    } catch { /* best-effort: a failed re-bind must not stop the other revivals */ }
+      return 'ok'
+    } catch {
+      // A failed re-bind must not stop the other revivals — but it must not be
+      // read as success either: without the binding this session would warm the
+      // wrong account.
+      return 'account-unavailable'
+    }
   }
 
   /** Record a dropped KA snapshot: tag its lineages (so the guard surfaces the

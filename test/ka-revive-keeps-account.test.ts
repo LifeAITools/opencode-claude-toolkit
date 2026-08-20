@@ -61,11 +61,31 @@ describe('re-binding a revived session', () => {
     c.stop?.()
   })
 
-  test('an expired vault entry is not used — a dead token is worse than none', () => {
+  test('an expired vault entry is refused AND announced — silence would look like success', () => {
+    // Founder, 2026-08-20: several accounts are in use and get switched during
+    // the day, and a restart must not send everything to the wrong one. If the
+    // account that owns this cache cannot be spoken for, warming on whatever is
+    // active is not a partial success — it is a guaranteed full-price purchase
+    // of a prefix the session will never read, repeated every interval.
     const c: any = mkClient('acct-active')
     c.orgVault.upsert?.({ orgId: 'acct-old', accessToken: 'stale', expiresAt: Date.now() - 1000 })
-    c.restorePinForRevivedSession('sess-4', 'acct-old')
+    expect(c.restorePinForRevivedSession('sess-4', 'acct-old')).toBe('account-unavailable')
     expect(c.sessionPins.has('sess-4')).toBe(false)
+    c.stop?.()
+  })
+
+  test('an account with no vault entry at all is refused the same way', () => {
+    const c: any = mkClient('acct-active')
+    expect(c.restorePinForRevivedSession('sess-5', 'acct-never-seen')).toBe('account-unavailable')
+    c.stop?.()
+  })
+
+  test('the three harmless cases report ok, so nothing is dropped for nothing', () => {
+    const c: any = mkClient('acct-active')
+    expect(c.restorePinForRevivedSession('s-a', null)).toBe('ok')            // old snapshot
+    expect(c.restorePinForRevivedSession('s-b', 'acct-active')).toBe('ok')   // already right
+    c.sessionPins.set('s-c', { orgId: 'acct-live' })
+    expect(c.restorePinForRevivedSession('s-c', 'acct-other')).toBe('ok')    // live binding wins
     c.stop?.()
   })
 
@@ -82,6 +102,8 @@ describe('re-binding a revived session', () => {
     // the call being dropped from revive — the wiring needs its own assertion.
     const src = await Bun.file(new URL('../src/proxy-client.ts', import.meta.url)).text()
     const block = src.slice(src.indexOf('private reviveKaSnapshots'), src.indexOf('private restorePinForRevivedSession'))
-    expect(block).toContain('this.restorePinForRevivedSession(sid, ps.orgId)')
+    expect(block).toContain("this.restorePinForRevivedSession(sid, ps.orgId) === 'account-unavailable'")
+    // and it must DROP rather than revive-anyway — the whole point of the verdict
+    expect(block).toContain("this.recordReviveDrop(sid, ps, 'account-unavailable')")
   })
 })

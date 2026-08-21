@@ -999,3 +999,31 @@ describe('block dump carries the session record at block time', () => {
     rmSync(path, { force: true })
   })
 })
+
+describe('proxy — a block that names the cheaper way out', () => {
+  // Measured 2026-08-21: the morning after a re-login, five sessions were told
+  // "consent to re-cache ~476000 tokens" and nothing else — while the account
+  // that owned each cache still had a live token in the vault the whole time.
+  // Paying was never the only option; the block simply never said so.
+  test('an org-switch block points at the account that owns the cache', () => {
+    const msg = 'guard blocked anomalous:org-switch — would re-cache ~476327 tokens; awaiting consent'
+      + ' — CHEAPER: this cache belongs to account f9420373, whose token is still alive;'
+      + ' putting the session back on it makes this turn a free read instead of buying 476327 tokens'
+    // The shape a reader must be able to act on: which account, and that it is usable.
+    expect(msg).toContain('CHEAPER')
+    expect(msg).toContain('f9420373')
+    expect(msg).toContain('free read')
+  })
+
+  test('the hint is built from the vault and the previous org, not guessed', async () => {
+    // Asserted on the source: the value only appears in a live block, and a test
+    // that mocked its way there would prove its own mock (three guard tests fell
+    // into exactly that on 2026-08-20).
+    const src = await Bun.file(new URL('../src/proxy-client.ts', import.meta.url)).text()
+    const block = src.slice(src.indexOf('let freeReadHint'), src.indexOf('const isFirstWrite'))
+    expect(block).toContain('rewriteAssessment.signals?.prevOrgId')
+    expect(block).toContain('this.orgVault.get(owner)')
+    expect(block).toContain('ve.expiresAt > Date.now()')       // a dead token must not be offered
+    expect(block).toContain('signals?.orgChanged')             // only for an account change
+  })
+})

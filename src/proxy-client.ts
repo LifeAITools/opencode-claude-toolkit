@@ -1749,6 +1749,25 @@ export class ProxyClient {
             lastClass: rewriteAssessment.rewriteClass,
           }
 
+          // When the account changed, paying is not the only way out — and the
+          // block used to offer no other. The cache still exists on the account
+          // that built it, so if we can still speak for that account, binding
+          // the session back makes this very turn a free READ instead of a
+          // ~half-million-token purchase. Measured 2026-08-21: five sessions
+          // were asked to pay 476k each the morning after a re-login, while the
+          // previous account's token sat alive in the vault the whole time.
+          let freeReadHint = ''
+          try {
+            const owner = rewriteAssessment.signals?.prevOrgId
+            if (rewriteAssessment.signals?.orgChanged && owner) {
+              const ve = this.orgVault.get(owner)
+              if (ve && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
+                freeReadHint = ` — CHEAPER: this cache belongs to account ${owner.slice(0, 8)}, `
+                  + `whose token is still alive; putting the session back on it makes this turn a free read `
+                  + `instead of buying ${rewriteAssessment.predictedTokens} tokens`
+              }
+            }
+          } catch { /* a hint must never break the block path */ }
           const isFirstWrite = rewriteAssessment.rewriteClass === 'expected:cold-start'
           const spendPhrase = isFirstWrite
             ? `write ~${rewriteAssessment.predictedTokens} tokens of NEW cache (first write for this lineage — nothing is being discarded)`
@@ -1768,6 +1787,7 @@ export class ProxyClient {
             dumpPath,
             msg: `guard blocked ${rewriteAssessment.rewriteClass} — would ${spendPhrase}; awaiting consent `
               + `(${guard.overrideMarker} or: context cache-rewrite-ok ${sessionId})`
+              + freeReadHint
               + (dumpPath ? ` — dump: ${dumpPath}` : ''),
           })
           return jsonResponse(400, {
@@ -2839,7 +2859,7 @@ export class ProxyClient {
       rewriteClass: string
       expected: boolean
       predictedTokens: number
-      signals: { systemChanged: boolean; toolsChanged: boolean; orgChanged: boolean; idleMs: number | null; ttlMs: number }
+      signals: { systemChanged: boolean; toolsChanged: boolean; orgChanged: boolean; prevOrgId?: string | null; idleMs: number | null; ttlMs: number }
       /** Previous cacheable prefix of this lineage (for a guard-block dump). */
       prevPrefix: CachePrefix | null
     } | null
@@ -2996,6 +3016,10 @@ export class ProxyClient {
         systemChanged,
         toolsChanged,
         orgChanged,
+        // The account this lineage's cache was actually built under. Carried out
+        // so a block can tell the reader whether the expensive rewrite is
+        // avoidable — see the free-read hint below.
+        prevOrgId,
         predictedTokens,
         idleMs: idleMs ?? null,
         ttlMs,

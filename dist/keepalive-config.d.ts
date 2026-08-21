@@ -159,7 +159,19 @@ export interface RewriteGuardConfig {
      *  unconfirmed quota spend even when "expected" (e.g. a model switch maps the
      *  session to a fresh lineage and re-caches the whole context). Higher than
      *  minRewriteTokens so routine session starts and compacted resumes never
-     *  prompt. Same consent flow (marker / `context cache-rewrite-ok`). Default 150000. */
+     *  prompt. Same consent flow (marker / `context cache-rewrite-ok`). Default 200000.
+     *
+     *  RAISED 150000 -> 200000 on 2026-08-21 (founder directive): the "routine
+     *  starts sit far below" premise had quietly expired. A routine start now
+     *  costs 151931-163783 tokens (tool schemas alone are ~317k chars / 80% of
+     *  the head), so EVERY ordinary session start tripped the guard. Measured
+     *  over 37 cold-start blocks (19.08-21.08): 10 were routine starts in the
+     *  151931-163783 band; the 27 real ones start at 259756. The band between
+     *  163783 and 259756 is EMPTY, so 200000 sits mid-gap: it clears all 10
+     *  false prompts and keeps all 27 genuine ones. Re-measure this band before
+     *  changing it -- the right threshold is a property of the head size, and
+     *  ENABLE_TOOL_SEARCH=true (deferred tool schemas) would cut ~57k off every
+     *  start and move the whole distribution down. */
     readonly minColdStartTokens: number;
     /** Substring in the LATEST user message that overrides the block (fresh-consent:
      *  only the current turn's message is scanned, not history). Default below. */

@@ -171,6 +171,25 @@ describe('keepalive-config: rewriteGuard', () => {
     expect(c.rewriteGuard.enabled).toBe(false)
   })
 
+  // Guards the 2026-08-21 raise (founder directive). Measured over 37
+  // cold-start blocks (19.08-21.08): routine session starts cost 151931-163783
+  // tokens and were ALL being blocked, while the 27 genuine large rewrites
+  // start at 259756. 200000 sits in the empty band between the two families.
+  // Lowering this back to 150000 makes every ordinary session start prompt.
+  test('minColdStartTokens defaults to 200000 — routine starts must not prompt', () => {
+    expect(_resolve(null).rewriteGuard.minColdStartTokens).toBe(200_000)
+    // the routine-start band measured on 2026-08-21 must clear the guard
+    for (const routine of [151_931, 163_783]) {
+      expect(routine).toBeLessThan(_resolve(null).rewriteGuard.minColdStartTokens)
+    }
+    // the smallest genuine large rewrite measured must still be caught
+    expect(259_756).toBeGreaterThanOrEqual(_resolve(null).rewriteGuard.minColdStartTokens)
+  })
+
+  test('minColdStartTokens is file-overridable', () => {
+    expect(_resolve({ rewriteGuard: { minColdStartTokens: 300_000 } }).rewriteGuard.minColdStartTokens).toBe(300_000)
+  })
+
   test('reloadMarker defaults to [%reload-ok%]', () => {
     expect(_resolve(null).rewriteGuard.reloadMarker).toBe('[%reload-ok%]')
   })

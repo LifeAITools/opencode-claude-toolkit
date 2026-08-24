@@ -462,7 +462,20 @@ export class ProxyClient {
   // don't surface to Claude Code as a hard error requiring a manual re-resume.
   // Short by design; not a substitute for surviving a multi-minute outage.
   // Overridable in tests via (client as any).realRetryDelaysMs.
-  private readonly realRetryDelaysMs: readonly number[] = [1_000, 2_000, 4_000, 8_000]
+  //
+  // THREE RUNGS, NOT FOUR — measured 2026-08-24 over 8 days of the live log
+  // (claude-max-proxy.jsonl, 298 requests that took at least one retry):
+  //   rung 1 → 23 successes /  3 failures
+  //   rung 2 →  5 successes /  1 failure
+  //   rung 3 →  2 successes /  0 failures
+  //   rung 4 →  2 successes / 248 failures   ← 0.8%, and it cost 8s each time
+  // A capacity blip that outlives rung 3 is a MINUTES-long upstream window
+  // (05:04–05:56Z that morning: requests over 2 MB failed 152 of 153), which no
+  // backoff can outwait. Keeping the 4th rung bought 2 requests in 250 and spent
+  // one extra upstream call per failure at exactly the moment upstream is
+  // shedding load — plus 8s of a client whose measured patience is ~1.8s median
+  // (232 'client stopped reading' aborts), so the wait was usually thrown away.
+  private readonly realRetryDelaysMs: readonly number[] = [1_000, 2_000, 4_000]
   // Absolute ceiling for any single backoff wait (caps a large upstream
   // retry-after and the jittered baseline). Overridable in tests.
   private readonly retryCeilingMs: number = 10_000

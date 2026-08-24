@@ -2680,10 +2680,21 @@ export class ProxyClient {
           done = r.done
           value = r.value
         } catch (readErr: any) {
+          // An ABORT, not an error — and it must say so, because for a year it
+          // said the opposite. Measured 2026-08-24: this line emitted
+          // kind REAL_REQUEST_ERROR at level 'debug', so the logger (info)
+          // never wrote it while the bus still delivered it to every
+          // subscriber. The session-stuck alarm counted nine of these as
+          // refusals and announced "12 consecutive failures" where the log
+          // held three — a number no reader could reconcile, from events that
+          // by design leave no trace. A kind that lies to counters and hides
+          // from the journal is the worst of both; the abort family already
+          // exists, so this belongs in it.
           this.events.emit({
             level: 'debug',
-            kind: 'REAL_REQUEST_ERROR',
+            kind: 'REAL_REQUEST_ABORTED',
             sessionId,
+            phase: 'stream-read',
             msg: `stream read aborted: ${readErr?.message}`,
           })
           return

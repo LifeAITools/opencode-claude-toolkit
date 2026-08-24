@@ -207,13 +207,18 @@ function recordSessionOutcome(sessionId: unknown, status: unknown, ok: boolean):
   // 🔴 ONLY A FAILURE THAT NAMES ITS STATUS COUNTS, and that rule was bought on
   // the very first live firing (2026-08-24 06:19:33Z). The announcement said
   // twelve failures — nine of them with status 0 — while the log for that
-  // session and window held exactly THREE, all 529. Nine phantoms whose origin
-  // I could not find: the log has no status-less REAL_REQUEST_ERROR anywhere in
-  // the file, and a probe confirmed an ABORTED event does not reach an ERROR
-  // subscriber. Unexplained, and therefore not reportable: a number a reader
-  // cannot reconcile against the log teaches him to distrust the alarm, which
-  // is worse than a slightly late alarm. So the run counts refusals that carry
-  // a numeric status, and the count stays checkable line by line.
+  // session and window held exactly THREE, all 529.
+  //
+  // The nine were found: proxy-client.ts emitted a client-side stream abort as
+  // kind REAL_REQUEST_ERROR at level 'debug'. The logger runs at 'info', so it
+  // wrote none of them, while the bus delivered every one — a kind that lied to
+  // counters AND left no trace to check them against. That emission is now a
+  // REAL_REQUEST_ABORTED (phase 'stream-read'), which is what it always was.
+  //
+  // This guard stays anyway, and not as a belt: a number a reader cannot
+  // reconcile against the log teaches him to distrust the alarm, so the run
+  // counts only refusals that carry a numeric status and the count stays
+  // checkable line by line — whatever any future emitter decides to call itself.
   const st = Number(status)
   if (!Number.isFinite(st) || st <= 0) return
 

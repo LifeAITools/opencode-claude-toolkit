@@ -127,3 +127,82 @@ describe('storm watch', () => {
     expect(seen[0].breakdown.real).toBe(0)
   })
 })
+
+/**
+ * The alarm for the gap the breadth rule leaves — one session dead alone.
+ *
+ * The case it exists for, measured 2026-08-24: the upstream shed every large
+ * request for 52 minutes, and for the first forty of them the only victim was
+ * one session. The storm watch was right to stay quiet (one session is not a
+ * fleet) and therefore said nothing at all while an agent ground uselessly.
+ *
+ * Both runs are here on purpose: LOUD on a session whose every request has
+ * failed for minutes, SILENT on a session that is merely unlucky between
+ * successes. The second is the one that decides whether anyone keeps the alarm.
+ */
+describe('session stuck', () => {
+  let offStuck: (() => void) | null = null
+  let stuck: any[] = []
+
+  const armStuck = (spanSec = 0) => {
+    process.env.PROXY_STUCK_SPAN_SEC = String(spanSec)
+    stuck = []
+    offStuck = bus.onKind('SESSION_STUCK' as never, (e: any) => stuck.push(e))
+    stop = startStormWatch()
+  }
+  const complete = (sessionId: string) =>
+    emit({ level: 'info', kind: 'REAL_REQUEST_COMPLETE', sessionId } as never)
+
+  afterEach(() => {
+    try { offStuck?.() } catch { /* already off */ }
+    offStuck = null
+    delete process.env.PROXY_STUCK_SPAN_SEC
+  })
+
+  test('three failures in a row on ONE session are announced, with the status mix', () => {
+    armStuck()
+    for (let i = 0; i < 3; i++) refuse('REAL_REQUEST_ERROR', 529, 'stuck-1')
+    expect(stuck.length).toBe(1)
+    expect(stuck[0].sessionId).toBe('stuck-1')
+    expect(stuck[0].consecutiveFailures).toBe(3)
+    expect(stuck[0].byStatus['529']).toBe(3)
+  })
+
+  test('a success in between resets the run — an unlucky session stays silent', () => {
+    armStuck()
+    refuse('REAL_REQUEST_ERROR', 529, 'lucky')
+    refuse('REAL_REQUEST_ERROR', 529, 'lucky')
+    complete('lucky')
+    refuse('REAL_REQUEST_ERROR', 529, 'lucky')
+    refuse('REAL_REQUEST_ERROR', 529, 'lucky')
+    expect(stuck.length).toBe(0)
+  })
+
+  test('a run shorter than the span is a blip, not a stuck agent', () => {
+    armStuck(3600) // an hour: nothing that happens in this test can span it
+    for (let i = 0; i < 10; i++) refuse('REAL_REQUEST_ERROR', 529, 'blip')
+    expect(stuck.length).toBe(0)
+  })
+
+  test('the same session is announced once, not once per failure', () => {
+    armStuck()
+    for (let i = 0; i < 12; i++) refuse('REAL_REQUEST_ERROR', 529, 'noisy')
+    expect(stuck.length).toBe(1)
+  })
+
+  test('statuses the storm watch ignores still count as stuck — 503 is just as dead', () => {
+    armStuck()
+    for (let i = 0; i < 3; i++) refuse('REAL_REQUEST_ERROR', 503, 'infra')
+    expect(stuck.length).toBe(1)
+    expect(stuck[0].byStatus['503']).toBe(3)
+    expect(_stormState().recent).toBe(0) // and it did NOT inflate the storm count
+  })
+
+  test('while a fleet storm is open the per-session alarm keeps quiet', () => {
+    armStuck()
+    for (let i = 0; i < 8; i++) refuse('REAL_REQUEST_ERROR', 529) // declares a storm
+    stuck = []
+    for (let i = 0; i < 5; i++) refuse('REAL_REQUEST_ERROR', 529, 'during-storm')
+    expect(stuck.length).toBe(0)
+  })
+})

@@ -63,6 +63,45 @@ const STORM_WINDOW_MS = Number(process.env.PROXY_STORM_WINDOW_SEC ?? 600) * 1000
 /** Silence after which a declared storm is called over. */
 const STORM_QUIET_MS = Number(process.env.PROXY_STORM_QUIET_SEC ?? 600) * 1000
 
+/**
+ * 🔴 THE GAP THE BREADTH RULE LEAVES, AND WHY IT NEEDED ITS OWN ALARM.
+ *
+ * Measured 2026-08-24, from the founder asking why two agents "keep falling
+ * over": the upstream shed every request over 2 MB between 05:04 and 05:56Z
+ * (152 of 153 refused), and for the first FORTY MINUTES the only victim was one
+ * session — foody7, carrying 810k tokens. The breadth rule is right that one
+ * refused session is not a fleet storm, so the watch stayed silent by design
+ * and only declared at 05:50, on the 47th minute. The founder noticed before
+ * the instrument did.
+ *
+ * But "not a fleet storm" is not the same as "nothing to say". A session whose
+ * every request has failed for minutes is an agent standing dead — it will
+ * retry the same doomed turn until someone tells it otherwise. That is worth
+ * one line the moment it is true, whoever else is fine.
+ *
+ * So this alarm is deliberately NARROW, to keep the word trustworthy:
+ *  · CONSECUTIVE failures only — any success resets the run, so a session that
+ *    is merely unlucky never trips it;
+ *  · a SPAN, not just a count — three refusals in four seconds is a blip, three
+ *    spread over three minutes is a stuck agent;
+ *  · one announcement per session per cooldown, so a long outage is a heartbeat
+ *    and not a stream;
+ *  · SILENT while a fleet storm is open — the storm event already says the
+ *    upstream is in trouble, and this exists for what it cannot see.
+ * Simulated over the 8 days of log that were on disk: 0–1 per quiet day, and on
+ * 2026-08-24 it would have named foody7 at 05:09 — 41 minutes earlier.
+ *
+ * The three thresholds are read at CALL time, not at import: a guard whose
+ * limits freeze when the module loads cannot be exercised by a test at all, and
+ * this one has to be proven twice — loud on a stuck session AND silent on an
+ * unlucky one.
+ */
+const stuckMin = () => Number(process.env.PROXY_STUCK_MIN ?? 3)
+/** How long the unbroken run of failures must span before it means anything. */
+const stuckSpanMs = () => Number(process.env.PROXY_STUCK_SPAN_SEC ?? 180) * 1000
+/** Re-announce the same session no more often than this. */
+const stuckCooldownMs = () => Number(process.env.PROXY_STUCK_COOLDOWN_SEC ?? 600) * 1000
+
 type Refusal = {
   ts: number
   /** 'real' = a request from a live session; 'ka' = a keepalive fire. */
@@ -75,6 +114,11 @@ let refusals: Refusal[] = []
 let stormSince: number | null = null
 let stormRefusals: Refusal[] = []
 let quietTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Per session: the unbroken run of terminal failures since its last success. */
+const failRun = new Map<string, { statuses: number[]; firstTs: number }>()
+/** Per session: when we last announced it stuck, so a long outage is a heartbeat. */
+const stuckAnnouncedAt = new Map<string, number>()
 
 function tally(rows: Refusal[]): Record<string, number> {
   const out: Record<string, number> = { real: 0, ka: 0 }
@@ -151,18 +195,61 @@ function record(stream: 'real' | 'ka', status: unknown, sessionId: unknown): voi
 }
 
 /**
+ * One session's unbroken run of failures — the alarm the breadth rule cannot
+ * raise. Counts EVERY terminal status, not just 429/529: a session stuck on 403
+ * or 503 is just as dead, and the event names the mix so the reader knows which
+ * kind of stuck it is.
+ */
+function recordSessionOutcome(sessionId: unknown, status: unknown, ok: boolean): void {
+  const sid = String(sessionId ?? 'unknown')
+  if (ok) { failRun.delete(sid); stuckAnnouncedAt.delete(sid); return }
+
+  const now = Date.now()
+  const run = failRun.get(sid) ?? { statuses: [], firstTs: now }
+  run.statuses.push(Number(status) || 0)
+  failRun.set(sid, run)
+
+  // A declared fleet storm already told the reader the upstream is in trouble.
+  if (stormSince !== null) return
+  if (run.statuses.length < stuckMin()) return
+  if (now - run.firstTs < stuckSpanMs()) return
+  const announced = stuckAnnouncedAt.get(sid)
+  if (announced !== undefined && now - announced < stuckCooldownMs()) return
+
+  stuckAnnouncedAt.set(sid, now)
+  const byStatus: Record<string, number> = {}
+  for (const st of run.statuses) byStatus[String(st)] = (byStatus[String(st)] ?? 0) + 1
+  emit({
+    level: 'error',
+    kind: 'SESSION_STUCK',
+    sessionId: sid,
+    consecutiveFailures: run.statuses.length,
+    stuckForSec: Math.round((now - run.firstTs) / 1000),
+    lastStatus: run.statuses[run.statuses.length - 1],
+    byStatus,
+  } as never)
+}
+
+/**
  * Subscribe to the bus. Returns a stop function (tests and shutdown use it).
  */
 export function startStormWatch(): () => void {
-  const offReal = bus.onKind('REAL_REQUEST_ERROR', (e: any) => record('real', e?.status, e?.sessionId))
+  const offReal = bus.onKind('REAL_REQUEST_ERROR', (e: any) => {
+    record('real', e?.status, e?.sessionId)
+    recordSessionOutcome(e?.sessionId, e?.status, false)
+  })
+  const offOk = bus.onKind('REAL_REQUEST_COMPLETE', (e: any) => recordSessionOutcome(e?.sessionId, 200, true))
   const offKa = bus.onKind('KA_FIRE_ERROR', (e: any) => record('ka', e?.status, e?.sessionId))
   return () => {
     try { offReal?.() } catch { /* best-effort */ }
+    try { offOk?.() } catch { /* best-effort */ }
     try { offKa?.() } catch { /* best-effort */ }
     if (quietTimer) { clearTimeout(quietTimer); quietTimer = null }
     refusals = []
     stormSince = null
     stormRefusals = []
+    failRun.clear()
+    stuckAnnouncedAt.clear()
   }
 }
 

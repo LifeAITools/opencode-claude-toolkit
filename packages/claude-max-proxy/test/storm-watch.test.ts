@@ -206,3 +206,34 @@ describe('session stuck', () => {
     expect(stuck.length).toBe(0)
   })
 })
+
+/**
+ * The rule bought by the first live firing: a failure that does not name its
+ * status is not counted. The announcement said twelve, the log held three, and
+ * the nine phantoms were never explained — see the note in storm-watch.ts.
+ */
+describe('session stuck counts only what it can prove', () => {
+  let offStuck: (() => void) | null = null
+  let stuck: any[] = []
+
+  afterEach(() => {
+    try { offStuck?.() } catch { /* already off */ }
+    offStuck = null
+    delete process.env.PROXY_STUCK_SPAN_SEC
+  })
+
+  test('status-less failures neither count nor trip the alarm', () => {
+    process.env.PROXY_STUCK_SPAN_SEC = '0'
+    stuck = []
+    offStuck = bus.onKind('SESSION_STUCK' as never, (e: any) => stuck.push(e))
+    stop = startStormWatch()
+    for (let i = 0; i < 9; i++)
+      emit({ level: 'error', kind: 'REAL_REQUEST_ERROR', sessionId: 'phantom' } as never)
+    expect(stuck.length).toBe(0)
+    // …and once three REAL refusals arrive, the count is exactly three.
+    for (let i = 0; i < 3; i++) refuse('REAL_REQUEST_ERROR', 529, 'phantom')
+    expect(stuck.length).toBe(1)
+    expect(stuck[0].consecutiveFailures).toBe(3)
+    expect(stuck[0].byStatus['0']).toBeUndefined()
+  })
+})

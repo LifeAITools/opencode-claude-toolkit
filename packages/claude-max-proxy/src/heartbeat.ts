@@ -23,6 +23,64 @@ interface HeartbeatTracker {
 import { bus, emit } from './event-bus.js'
 import { readFileSync } from 'fs'
 
+/**
+ * Память процесса — два числа, и второе важнее первого.
+ *
+ * 🔴 ЗАЧЕМ (просьба владельца tixi-cold, 28.08.2026, и она куплена смертью).
+ * Их экземпляр прокси убило ядро за память (exit 137, потолок 1 ГБ), контейнер
+ * поднялся заново — и объяснять стало НЕЧЕМ: всё, что было до смерти, ушло
+ * вместе с процессом, а строка здоровья несла сессии, срабатывания и чтение
+ * кэша, но НЕ несла память. Две причины смерти — «течёт понемногу» и «один
+ * чудовищный запрос взял всё разом» — по такой строке неразличимы, а лечатся
+ * противоположно.
+ *
+ * Поэтому здесь ДВА числа: сколько занято сейчас и СКОЛЬКО БЫЛО ЗАНЯТО В ПИКЕ
+ * с момента подъёма. На Linux пик берётся у ядра (VmHWM — настоящий максимум
+ * за всю жизнь процесса), а не считается по нашим же замерам раз в полминуты:
+ * всплеск между двумя замерами выборка не увидит, а ядро помнит его точно.
+ * Где /proc нет (macOS), пик — максимум наших замеров, и это честно названо
+ * полем peakSource.
+ */
+interface MemorySample {
+  rssMb: number
+  peakRssMb: number
+  heapUsedMb: number
+  peakSource: 'kernel' | 'sampled'
+}
+
+let _sampledPeakRss = 0
+
+const mb = (bytes: number) => Math.round(bytes / 1024 / 1024)
+
+/** VmRSS/VmHWM из /proc/self/status, в байтах. null — если /proc недоступен. */
+function readProcMemory(): { rss: number; peak: number } | null {
+  try {
+    const status = readFileSync('/proc/self/status', 'utf8')
+    const kb = (field: string) => {
+      const m = status.match(new RegExp(`^${field}:\\s+(\\d+) kB`, 'm'))
+      return m ? Number(m[1]) * 1024 : null
+    }
+    const rss = kb('VmRSS')
+    const peak = kb('VmHWM')
+    if (rss === null || peak === null) return null
+    return { rss, peak }
+  } catch {
+    return null
+  }
+}
+
+export function sampleMemory(): MemorySample {
+  const usage = process.memoryUsage()
+  _sampledPeakRss = Math.max(_sampledPeakRss, usage.rss)
+  const proc = readProcMemory()
+  return {
+    rssMb: mb(proc?.rss ?? usage.rss),
+    peakRssMb: mb(proc?.peak ?? _sampledPeakRss),
+    heapUsedMb: mb(usage.heapUsed),
+    peakSource: proc ? 'kernel' : 'sampled',
+  }
+}
+
 // Rolling 1-hour window of KA fires
 const HOUR_MS = 60 * 60 * 1000
 const fireHistory: { ts: number; cacheRead: number; cacheWrite: number }[] = []
@@ -144,6 +202,8 @@ export function startHeartbeat(
       orgsTracked: org?.orgs ?? null,
       orgsExpired: org?.orgsExpired ?? null,
       orgsNeedRelogin: org?.orgsNeedRelogin ?? null,
+      // Память: занято сейчас и пик за жизнь процесса — см. sampleMemory().
+      ...sampleMemory(),
       networkState: _networkState,
       disarmsLastHour: _disarmsLastHour.length,
       lastDisarmReason: _lastDisarmReason,

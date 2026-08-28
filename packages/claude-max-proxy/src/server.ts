@@ -53,6 +53,7 @@ import { processAlive } from './session-tracker.js'
 import { ProxyConfigCredentialsAdapter } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
 import { startStormWatch } from './storm-watch.js'
+import { startIdentityWatch } from './identity-watch.js'
 import { startLocalAlert } from './local-alert.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup } from '@life-ai-tools/claude-code-sdk'
@@ -349,6 +350,7 @@ const stopHeartbeat = startHeartbeat(
 // watching. See storm-watch.ts.
 
 const stopStormWatch = startStormWatch()
+const stopIdentityWatch = startIdentityWatch()
 // And the alerts leave the log file: detecting a storm and writing it to disk
 // is what let a 52-minute outage reach the founder by feel instead of by
 // notification on 2026-08-24. See local-alert.ts.
@@ -556,6 +558,7 @@ async function shutdown(): Promise<void> {
   stopStatsEmitter()
   stopHeartbeat()
   stopStormWatch()
+  stopIdentityWatch()
   stopLocalAlert()
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.
   proxyClient.stop()

@@ -70,6 +70,8 @@ export type EventKind =
   | 'REWRITE_WARN'
   | 'REWRITE_BLOCK'
   | 'CACHE_REWRITE_BLOCKED'   // SDK: сторож остановил ход — согласие может дать только человек
+  | 'REQUEST_UNIDENTIFIED'    // SDK: запрос без имени сессии — подогрев по нему вооружить нечем
+  | 'PROXY_WARMS_NOTHING'     // весь поток безымянный и ни одной вооружённой сессии
 
   // Token
   | 'TOKEN_ROTATED'
@@ -132,6 +134,8 @@ export const EVENT = {
   REWRITE_WARN: 'REWRITE_WARN',
   REWRITE_BLOCK: 'REWRITE_BLOCK',
   CACHE_REWRITE_BLOCKED: 'CACHE_REWRITE_BLOCKED',
+  REQUEST_UNIDENTIFIED: 'REQUEST_UNIDENTIFIED',
+  PROXY_WARMS_NOTHING: 'PROXY_WARMS_NOTHING',
   // Token
   TOKEN_ROTATED: 'TOKEN_ROTATED',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',

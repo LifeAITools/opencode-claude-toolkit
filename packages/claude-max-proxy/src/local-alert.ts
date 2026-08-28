@@ -145,7 +145,19 @@ export function startLocalAlert(): () => void {
       + ` Разрешить: context cache-rewrite-ok ${sid}`,
     )
   })
+  // Прокси, который работает и ничего не греет, — это установленный и
+  // бесполезный продукт. Соседи нашли это у себя САМИ, спустя недели, потому
+  // что событие было, а голоса у него не было. См. identity-watch.ts.
+  const offWarmsNothing = bus.onKind('PROXY_WARMS_NOTHING' as never, (e: any) =>
+    fire(
+      'Прокси работает, но не греет ничего',
+      `за ${e?.windowMin ?? '?'} мин ${Math.round((e?.unidentifiedShare ?? 0) * 100)}% запросов пришли без имени сессии`
+      + ` (всего ${e?.requests ?? '?'}), вооружённых сессий нет.`
+      + ' Клиент должен слать заголовок x-claude-code-session-id с устойчивым id разговора —'
+      + ' иначе каждый ход покупает тёплый кэш заново.',
+    ))
   return () => {
+    try { offWarmsNothing?.() } catch { /* already off */ }
     try { offBegan?.() } catch { /* already off */ }
     try { offEnded?.() } catch { /* already off */ }
     try { offStuck?.() } catch { /* already off */ }

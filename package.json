@@ -16,7 +16,8 @@
     "build:dev": "tsc",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "echo 'dist/ already built'"
+    "prepublishOnly": "echo 'dist/ already built'",
+    "prepack": "rm -f README.md.toc"
   },
   "dependencies": {
     "proper-lockfile": "^4.1.2"

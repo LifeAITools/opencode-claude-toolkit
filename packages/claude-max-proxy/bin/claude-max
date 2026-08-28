@@ -21,7 +21,7 @@
  */
 
 import { spawnSync, spawn } from 'bun'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync, rmdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync, rmdirSync, cpSync, rmSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname, resolve as pathResolve } from 'path'
 import { withInstallLock, decideInstallOutcome } from './install-lock.ts'
@@ -542,8 +542,22 @@ function installProxyFiles(): void {
 
   // Copy package.json + node_modules (for @life-ai-tools/claude-code-sdk + blessed)
   run(['cp', join(PKG_ROOT, 'package.json'), INSTALL_DIR], { quiet: true })
-  // Copy entire node_modules (heavy but simplest — alternative is bun install in INSTALL_DIR)
-  run(['rsync', '-a', '--delete', join(PKG_ROOT, 'node_modules/'), join(INSTALL_DIR, 'node_modules/')], { quiet: true })
+  // 🔴 NO EXTERNAL COPY TOOL HERE (measured 2026-08-28 on a clean machine).
+  // This line used to be `rsync -a --delete`, and rsync is simply absent on a
+  // minimal Linux install: the public installer got as far as auto-healing,
+  // then died with `Executable not found in $PATH: "rsync"` and left the proxy
+  // files half-installed. A dependency the installer never declares is a
+  // dependency that fails at the worst moment — on someone else's machine.
+  // fs.cpSync ships inside the runtime we are already running on; wiping the
+  // destination first reproduces rsync's `--delete`.
+  const dstModules = join(INSTALL_DIR, 'node_modules')
+  try {
+    rmSync(dstModules, { recursive: true, force: true })
+    cpSync(join(PKG_ROOT, 'node_modules'), dstModules, { recursive: true, force: true, dereference: true })
+  } catch (e: any) {
+    err(`Failed to copy node_modules: ${e?.message}`)
+    process.exit(1)
+  }
 
   ok(`Proxy files installed at ${INSTALL_DIR}`)
 }
@@ -748,6 +762,15 @@ async function startProxyViaService(d: DocReport): Promise<boolean> {
 async function startProxyFallback(bunBin: string): Promise<boolean> {
   // Precondition: port is free. Caller must verify.
   info('Starting proxy as background process (no OS service configured)')
+
+  // 🔴 THE LOG FILE'S DIRECTORY MUST EXIST BEFORE THE SPAWN (measured 2026-08-28,
+  // clean machine, no systemd). stdout/stderr below are redirected into
+  // ~/.claude/claude-max-proxy.log; on a machine where the claude CLI has never
+  // run, ~/.claude does not exist yet, the redirect cannot be opened, and Bun
+  // reports it as `ENOENT ... posix_spawn '<path to bun>'` — a message that
+  // blames the interpreter and sends the reader hunting for a missing bun that
+  // is right there. One mkdir removes both the failure and the false trail.
+  try { mkdirSync(STATE_DIR, { recursive: true }) } catch { /* best-effort */ }
 
   // Prefer the compiled binary (self-contained — survives broken node_modules);
   // fall back to src-mode for installs without a local build.

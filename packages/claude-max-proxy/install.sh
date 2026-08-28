@@ -6,10 +6,12 @@
 #
 # What it does (idempotent — safe to re-run):
 #   1. Ensures Node.js + npm present (auto-installs via nvm if missing)
+#   1.5 Ensures bun present (the claude-max CLI itself runs on bun — without it
+#      nothing below can even start; `doctor` cannot bootstrap it, see step 1.5)
 #   2. Configures ~/.npmrc to resolve @kiberos/* and @life-ai-tools/*
 #      from https://npm.muid.io
 #   3. Installs (or upgrades) @kiberos/claude-max-proxy globally
-#   4. First invocation of `claude-max` auto-installs bun + claude CLI
+#   4. First invocation of `claude-max` auto-installs the claude CLI
 #      + launchd/systemd service, then launches Claude Code with warm cache
 #
 # Supported: macOS (Intel/ARM), Linux (x86_64/aarch64)
@@ -98,6 +100,39 @@ else
   ok "npm ${NPM_V} + node ${NODE_V} present"
 fi
 
+# ─── 1.5. Bun — the CLI itself runs on it ───────────────────────
+#
+# 🔴 WHY THIS STEP EXISTS (measured 2026-08-28 on a clean machine, in a container).
+# Step 5 below says "doctor will install bun", and that could never be true:
+# `bin/claude-max` starts with `#!/usr/bin/env bun`, so the doctor cannot install
+# bun — it cannot run without it. On a clean machine the install reached the end,
+# printed "Setup complete", and the first thing the user saw was
+# `/usr/bin/env: 'bun': No such file or directory` — after which no claude-max
+# command worked at all. The chicken-and-egg can only be broken here, in the step
+# that plain bash executes.
+if command -v bun >/dev/null 2>&1; then
+  ok "bun $(bun --version) present"
+else
+  step "Installing bun (the claude-max CLI runs on it)"
+  # bun's installer needs unzip; a bare image may not have it, and then it fails
+  # with a message about unzip rather than about the network — say so up front.
+  if ! command -v unzip >/dev/null 2>&1; then
+    warn "unzip not found — bun's installer needs it"
+    echo "    Debian/Ubuntu: ${DIM}sudo apt-get install -y unzip${RESET}"
+    echo "    Fedora/RHEL:   ${DIM}sudo dnf install -y unzip${RESET}"
+  fi
+  curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1 || true
+  export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+  if ! command -v bun >/dev/null 2>&1; then
+    err "bun could not be installed automatically."
+    echo "  Install it by hand, then re-run this installer:"
+    echo "    ${DIM}curl -fsSL https://bun.sh/install | bash${RESET}"
+    exit 1
+  fi
+  ok "bun $(bun --version) installed → ${BUN_INSTALL}/bin"
+fi
+
 # ─── 2. Configure private registry scopes ───────────────────────
 NPMRC="${HOME}/.npmrc"
 KIBEROS_LINE='@kiberos:registry=https://npm.muid.io/'
@@ -155,13 +190,14 @@ else
   ok "claude-max installed: ${CLAUDE_MAX_PATH}"
 fi
 
-# ─── 5. Run doctor (self-install bun/claude/service if missing) ─
+# ─── 5. Run doctor (self-install claude CLI / service if missing) ─
 step "Running claude-max doctor (auto-heal missing deps)"
 echo
 
 if command -v claude-max >/dev/null 2>&1; then
-  # doctor now auto-heals — will install bun, claude CLI, systemd/launchd unit,
-  # start proxy, and verify everything works.
+  # doctor auto-heals what it CAN reach from inside bun: the claude CLI, the
+  # systemd/launchd unit, starting the proxy. bun itself is step 1.5's job — see
+  # the note there.
   claude-max doctor || warn "doctor returned non-zero — check output above"
 fi
 

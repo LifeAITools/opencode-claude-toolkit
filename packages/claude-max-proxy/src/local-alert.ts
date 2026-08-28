@@ -33,9 +33,21 @@ import { bus } from './event-bus.js'
 /** Whether to deliver at all — off in tests, and a way out if it ever annoys. */
 const enabled = () => process.env.PROXY_LOCAL_ALERT !== '0'
 
+/**
+ * Test seam. Delivery goes out through two OS doors (journal + desktop), and a
+ * test cannot read either of them without spawning processes on the machine
+ * running the suite. Override to capture instead; `null` restores the real
+ * doors. Same underscore idiom as storm-watch's `_stormState`.
+ */
+let delivery: ((subject: string, body: string) => void) | null = null
+export function _setAlertDelivery(fn: ((subject: string, body: string) => void) | null): void {
+  delivery = fn
+}
+
 /** Never let a notifier hold the service open or crash it. */
 function fire(subject: string, body: string): void {
   if (!enabled()) return
+  if (delivery) { try { delivery(subject, body) } catch { /* a sink must not break the path */ } return }
   const line = `${subject} — ${body}`
   try {
     // Durable half: the system journal. `logger` is in coreutils-adjacent
@@ -56,6 +68,29 @@ function fire(subject: string, body: string): void {
     }).unref()
   } catch { /* no desktop is a normal state on a server */ }
 }
+
+/** 352954 → «352 954». Цена хода читается человеком, а не парсером. */
+const groupDigits = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+
+/** Имя класса — для журнала; человеку нужно, ЧТО случилось. */
+function rewriteReason(rewriteClass: unknown, spendKind: unknown): string {
+  if (rewriteClass === 'expected:cold-start' || spendKind === 'first-write') {
+    return 'первая запись кэша для этой родословной — ничего не выбрасывается'
+  }
+  if (rewriteClass === 'anomalous:org-switch') return 'сменился аккаунт, прежний кэш остался на нём'
+  if (rewriteClass === 'avoidable:ttl-expiry') return 'кэш остыл и будет куплен заново'
+  return `класс ${String(rewriteClass ?? 'неизвестен')}`
+}
+
+/**
+ * Сколько отказов подряд означает стену. Первый — вопрос, на который вызывающий
+ * ещё может ответить сам (маркером согласия в следующем сообщении); второй
+ * означает, что отвечать некому, и вот тогда зовут человека.
+ */
+const REWRITE_ALERT_MIN_STREAK = 2
+/** Одна тревога на сессию за окно: 29 отказов дали бы 29 уведомлений. */
+const REWRITE_ALERT_COOLDOWN_MS = 15 * 60 * 1000
+const rewriteAnnouncedAt = new Map<string, number>()
 
 /**
  * Subscribe the alert path to the events worth waking a human for. Returns a
@@ -78,9 +113,44 @@ export function startLocalAlert(): () => void {
       `сессия ${String(e?.sessionId ?? '?').slice(0, 8)}: ${e?.consecutiveFailures ?? '?'} отказов подряд`
       + ` за ${e?.stuckForSec ?? '?'} с, последний ${e?.lastStatus ?? '?'}. Ни одного успеха между ними.`,
     ))
+  // 🔴 СЕССИЯ, ОСТАНОВЛЕННАЯ СТОРОЖЕМ, САМА ПОЗВАТЬ НЕ МОЖЕТ — И В ЭТОМ ВСЁ ДЕЛО.
+  //
+  // Отказ сторожа уходит как HTTP 400 ДО того, как ход дойдёт до модели. Значит
+  // заблокированный агент физически не способен выполнить команду согласия,
+  // которую сторож ему же и называет: её набирает человек. У сессии, поднятой
+  // побудкой (письмо, крон, вотчер), человека рядом нет по определению.
+  //
+  // Замерено 28.08.2026 за трое суток: 71 отказ у 10 сессий, и 9 сессий из 10
+  // после последнего отказа не сделали ни одного успешного запроса. То есть
+  // сторож не тормозил ход, он заканчивал смену — молча, потому что
+  // SESSION_STUCK его блок не видит (тот считает только отказы с числовым
+  // статусом из REAL_REQUEST_ERROR, а здесь такого события нет вовсе).
+  //
+  // Отсюда порог по СЕРИИ, а не по одиночному отказу, и окно тишины на сессию.
+  const offRewrite = bus.onKind('CACHE_REWRITE_BLOCKED', (e: any) => {
+    const streak = Number(e?.consecutiveBlocks ?? 0)
+    if (!Number.isFinite(streak) || streak < REWRITE_ALERT_MIN_STREAK) return
+    const sid = String(e?.sessionId ?? '')
+    if (!sid) return
+    const now = Date.now()
+    const announced = rewriteAnnouncedAt.get(sid)
+    if (announced !== undefined && now - announced < REWRITE_ALERT_COOLDOWN_MS) return
+    rewriteAnnouncedAt.set(sid, now)
+    const tokens = Number(e?.predictedTokens ?? 0)
+    fire(
+      'Агент стоит у сторожа кэша и ждёт согласия',
+      `сессия ${sid}: ${streak} хода подряд отказано, ${rewriteReason(e?.rewriteClass, e?.spendKind)};`
+      + ` ход просит ${groupDigits(Number.isFinite(tokens) ? tokens : 0)} токенов.`
+      + ` Сама она этого сделать не может — ход не доходит до модели.`
+      + ` Разрешить: context cache-rewrite-ok ${sid}`,
+    )
+  })
   return () => {
     try { offBegan?.() } catch { /* already off */ }
     try { offEnded?.() } catch { /* already off */ }
     try { offStuck?.() } catch { /* already off */ }
+    try { offRewrite?.() } catch { /* already off */ }
+    // Перезапуск наблюдателя не должен молча съесть первую тревогу.
+    rewriteAnnouncedAt.clear()
   }
 }

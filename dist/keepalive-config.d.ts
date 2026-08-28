@@ -1,246 +1,73 @@
-/**
- * keepalive-config.ts — SSOT for cache TTL + keepalive parameters.
- *
- * Hot-reloads from `~/.claude/keepalive.json` on every read (mtime-cached).
- * Falls back to safe defaults if file missing or malformed.
- *
- * Why a single file:
- *   The 5m vs 1h cache TTL story is encoded in NINE different places in
- *   keepalive-engine.ts plus three consumer defaults (proxy-client,
- *   claude-max-proxy/config, opencode-claude/provider). Without this SSOT,
- *   bumping TTL means hunting hardcodes across 4 packages.
- *
- * Discovered evidence (2026-04-30):
- *   * Anthropic's `prompt-caching-scope-2026-01-05` beta now honors
- *     `cache_control: { type: 'ephemeral', ttl: '1h' }` on the OAuth
- *     subscription endpoint. Empirically validated: WRITE @ T+0 →
- *     READ @ T+5m30s and T+10m both return cache_read=39220 tokens.
- *   * 56.2% of MESSAGE_START events in claude-max-headers.log report
- *     ephemeral_1h_input_tokens > 0 — the SDK was writing 1h cache all
- *     along, but engine was tearing it down at 5m boundary.
- *
- * Backward-compat:
- *   If keepalive.json is absent or `cacheTtlSec` is unset, defaults to
- *   the legacy 5m TTL so existing deployments keep their proven behavior.
- *   Activate 1h by writing { "cacheTtlSec": 3600, ... } to keepalive.json.
- *   Hot-reload picks it up on the next mtime-check (next request or KA tick).
- */
-import { type RoleWeights } from './lineage.js';
+import { type RoleWeights } from "./lineage.js";
 export interface DumpConfig {
-    /** Master switch — disable all body dumps. Default: true. */
     readonly enabled: boolean;
-    /** Always dump first N calls of each PID (initial baseline). Default: 3. */
     readonly initialCalls: number;
-    /**
-     * Tier-1 rolling ring: keep recent body dumps for post-hoc analysis.
-     * After ringRetentionMs, oldest dumps are deleted. 0 = disabled.
-     * Default: 2*60*60*1000 (2 hours).
-     */
     readonly ringRetentionMs: number;
-    /**
-     * Tier-1 rolling ring: max disk size in MB. If reached, oldest dumps removed.
-     * Default: 300 MB. 0 = no cap (only retentionMs matters).
-     */
     readonly ringMaxMb: number;
-    /**
-     * Tier-2 suspicious archive: when a "suspicious" event happens (cold,
-     * sysHash drift, tool drift, large cw without proportional cr), preserve
-     * THIS dump + the previous N dumps from ring into a separate archive
-     * directory that survives ring rotation. Default: 5 (this + 4 previous).
-     */
     readonly suspiciousContextSize: number;
-    /**
-     * Tier-2 archive retention. Default: 24*60*60*1000 (24 hours).
-     */
     readonly suspiciousRetentionMs: number;
-    /**
-     * Tier-2 archive max disk size in MB. Default: 100 MB.
-     */
     readonly suspiciousMaxMb: number;
-    /**
-     * Detect cold-start events: cw > coldCwThreshold AND cr == 0 AND
-     * callNum > initialCalls (not the first few). Default: 10000 tokens.
-     */
     readonly coldCwThreshold: number;
-    /**
-     * Tier-3 metadata retention. Default: 7 days. (Was 24h via env;
-     * we extend it because metadata is tiny — ~440 B per call.)
-     */
     readonly metadataRetentionMs: number;
 }
 export interface ResolvedKeepaliveConfig {
-    /** Cache TTL in milliseconds. Default: 5*60*1000 (legacy). Recommend: 60*60*1000 (1h). */
     readonly cacheTtlMs: number;
-    /** Safety margin subtracted from TTL when scheduling fires/retries. Default: 60_000. */
     readonly safetyMarginMs: number;
-    /** Keepalive interval — how often KA fires when idle. Default: 1800_000 (30min) when 1h TTL active, else 120_000. */
     readonly intervalMs: number;
-    /** Lower clamp for intervalMs. Default: 60_000. */
     readonly intervalClampMin: number;
-    /** Upper clamp for intervalMs. Computed: cacheTtlMs - safetyMarginMs - 60_000. */
     readonly intervalClampMax: number;
-    /** Retry delays for transient KA failures, in ms. Cumulative budget should fit in (cacheTtlMs - safetyMarginMs). */
     readonly retryDelaysMs: readonly number[];
-    /** Idle threshold to emit a rewrite-warning event. Default: 300_000 (5min, unchanged). */
     readonly rewriteWarnIdleMs: number;
-    /** Token threshold for rewrite-warning. Default: 50_000 (unchanged). */
     readonly rewriteWarnTokens: number;
-    /** Network probe escalating intervals after a network-related disarm. */
     readonly healthProbeIntervalsMs: readonly number[];
-    /** TCP probe per-attempt timeout. Default: 3_000. */
     readonly healthProbeTimeoutMs: number;
-    /** Whether keepalive is enabled at all. */
     readonly enabled: boolean;
-    /** Idle timeout — stop KA if no real request for this long. 0 / Infinity = never stop. */
     readonly idleTimeoutMs: number;
-    /** Minimum input tokens for a request to register a snapshot. Default: 2000. */
     readonly minTokens: number;
-    /** Max cache lineages warmed per KA tick (multi-lineage keepalive cap).
-     *  Default: 8. Overflow is warmed on subsequent ticks (≤30s apart). */
     readonly maxFiresPerTick: number;
-    /** Max cache lineages KEPT WARM per session (registry bound). A session can
-     *  accumulate many lineages (model/tool churn + delegated sub-agents that may
-     *  be re-delegated). We keep the most-recently-warmed K and LRU-evict the
-     *  oldest NON-main lineage beyond K (main is never evicted). Default: 4
-     *  (main + ~3 recent workers). Reads are ~free for the Max quota window, so
-     *  this is registry/fire hygiene, not direct cost. */
     readonly maxWarmLineagesPerSession: number;
-    /** Block real requests with too-aggressive cache rewrites (rare safety net). Default: false. */
     readonly rewriteBlockEnabled: boolean;
-    /** Body-dump policy with rotation. See DumpConfig docs. */
     readonly dump: DumpConfig;
-    /** Agent-role detector weights + thresholds. Fully SSOT-tunable and
-     *  hot-reloaded — tune `~/.claude/keepalive.json` → `roleDetector` without
-     *  a rebuild. See RoleWeights (lineage.ts) for field semantics. */
     readonly roleDetector: RoleWeights;
-    /** Rewrite-guard policy — opt-in block-until-confirmed for uncontrolled
-     *  rewrites. SSOT-tunable + hot-reloaded via `~/.claude/keepalive.json`
-     *  → `rewriteGuard`. See RewriteGuardConfig. */
     readonly rewriteGuard: RewriteGuardConfig;
-    /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
     readonly tokenRotationContextThreshold: number;
-    /** Fallback mtime poll interval if fs.watch misses an event (REQ-02). Default 30000. */
     readonly tokenRotationPollIntervalMs: number;
-    /** How long an extracted org-id is cached to avoid per-request JWT decode overhead (REQ-14). Default 300000. */
     readonly orgIdCacheTtlMs: number;
-    /** Audit log rotation threshold (~10MB) (US-03 AC-3.4). Default 10485760. */
     readonly tokenRotationLogMaxBytes: number;
-    /** Audit log retention before cleanup (US-03 AC-3.4). Default 7. */
     readonly tokenRotationLogRetentionDays: number;
-    /** Source of truth — where we read this config from (for diagnostics). */
-    readonly _source: 'defaults' | 'file' | 'mixed';
+    readonly _source: "defaults" | "file" | "mixed";
 }
-/**
- * Rewrite-guard policy — opt-in protection against spontaneous, uncontrolled
- * cache rewrites. When `enabled`, a request predicted to incur an
- * avoidable/anomalous cache_creation above `minRewriteTokens` — and NOT the
- * first request of the session — is rejected with HTTP 400 until the user's
- * latest message contains `overrideMarker`.
- *
- * IMPORTANT — what this does and does NOT do:
- *   - It does NOT save the rewrite cost. The user still needs an answer, so
- *     they re-send (with the marker) and the SAME re-cache happens.
- *   - It DOES turn a silent quota spend into an explicit, consented one — a
- *     "confirm large spend" checkpoint. Cost: one rejected round-trip per block.
- *   - `expected:*` rewrites (compact / tools-changed) are never blocked.
- *     `expected:cold-start` is the one exception: a HUGE first write
- *     (≥ minColdStartTokens) blocks too — founder directive 2026-06-12, after a
- *     model switch on a 342k-context session re-cached ~272k with no consent
- *     step (the switch changed the system hash → new lineage → "cold start").
- * Default: disabled (opt-in).
- */
 export interface RewriteGuardConfig {
-    /** Master switch. Default false — must be explicitly opted into. */
     readonly enabled: boolean;
-    /** Only block when predicted cache_creation exceeds this many tokens. Default 50000. */
     readonly minRewriteTokens: number;
-    /** Block an `expected:cold-start` (first-request) write when its predicted
-     *  cache_creation exceeds this many tokens — a huge primary write is an
-     *  unconfirmed quota spend even when "expected" (e.g. a model switch maps the
-     *  session to a fresh lineage and re-caches the whole context). Higher than
-     *  minRewriteTokens so routine session starts and compacted resumes never
-     *  prompt. Same consent flow (marker / `context cache-rewrite-ok`). Default 200000.
-     *
-     *  RAISED 150000 -> 200000 on 2026-08-21 (founder directive): the "routine
-     *  starts sit far below" premise had quietly expired. A routine start now
-     *  costs 151931-163783 tokens (tool schemas alone are ~317k chars / 80% of
-     *  the head), so EVERY ordinary session start tripped the guard. Measured
-     *  over 37 cold-start blocks (19.08-21.08): 10 were routine starts in the
-     *  151931-163783 band; the 27 real ones start at 259756. The band between
-     *  163783 and 259756 is EMPTY, so 200000 sits mid-gap: it clears all 10
-     *  false prompts and keeps all 27 genuine ones. Re-measure this band before
-     *  changing it -- the right threshold is a property of the head size, and
-     *  ENABLE_TOOL_SEARCH=true (deferred tool schemas) would cut ~57k off every
-     *  start and move the whole distribution down. */
     readonly minColdStartTokens: number;
-    /** Substring in the LATEST user message that overrides the block (fresh-consent:
-     *  only the current turn's message is scanned, not history). Default below. */
     readonly overrideMarker: string;
-    /** Substring in the LATEST user message that switches THIS session to the
-     *  current org+token (per-session rebind). Distinct from overrideMarker: this
-     *  ends an org HOLD, overrideMarker only consents to a non-org rewrite.
-     *  Default below. */
     readonly reloadMarker: string;
-    /** On a block, write the rejected request + prefix diff to a JSON artifact
-     *  (rewrite-guard-blocks/) so it can be analysed offline. Default true. */
     readonly dumpBlocked: boolean;
-    /**
-     * @deprecated NO LONGER GATES BLOCKING. The guard now blocks an unconsented
-     * avoidable/anomalous rewrite for EVERY consumer (interactive human, automated
-     * agent, programmatic endpoint, tool-loop continuation) — silent expensive
-     * re-caches are never allowed through. Non-interactive consumers that cannot
-     * add the in-message `overrideMarker` consent via the session-scoped grant
-     * channel instead (see `consentGrantPath` + `context cache-rewrite-ok`).
-     * Field retained for back-compat config parsing only; its value is ignored.
-     */
     readonly interactiveOnly: boolean;
-    /** TTL (seconds) of a session-scoped consent grant written to
-     *  `consentGrantPath`. A grant is single-use (consumed on the next proceeding
-     *  rewrite) AND expires after this window. Default 180. */
     readonly consentGrantTtlSec: number;
-    /** Where session-scoped consent grants live — the actionable consent channel
-     *  for consumers that cannot carry `overrideMarker` in a message (agents,
-     *  continuations, programmatic clients). Default ~/.claude-local/cache-rewrite-grants.json. */
     readonly consentGrantPath: string;
 }
-/**
- * Recommended values when 1h cache is active.
- *
- * Activate by writing this to ~/.claude/keepalive.json:
- *   { "cacheTtlSec": 3600, "safetyMarginSec": 60, "intervalSec": 1800,
- *     "retryDelaysSec": [2,3,5,10,15,20,30,60,120,300] }
- */
 export declare const RECOMMENDED_1H_CONFIG: {
     readonly cacheTtlSec: 3600;
     readonly safetyMarginSec: 60;
     readonly intervalSec: 1800;
-    readonly retryDelaysSec: readonly [2, 3, 5, 10, 15, 20, 30, 60, 120, 300];
+    readonly retryDelaysSec: readonly [
+        2,
+        3,
+        5,
+        10,
+        15,
+        20,
+        30,
+        60,
+        120,
+        300
+    ];
 };
-/**
- * Resolve current keepalive config. Hot-reloads from ~/.claude/keepalive.json on every call.
- *
- * Behaviour:
- *   1. If file unchanged since last read → return cached config (cheap).
- *   2. If file missing → return LEGACY_DEFAULTS (5m TTL).
- *   3. If file present → merge with defaults, validate ranges, log warnings on bad values.
- *   4. NEVER throws. Bad config → falls back per-key.
- */
 export declare function loadKeepaliveConfig(): ResolvedKeepaliveConfig;
-/**
- * Force re-read (for tests or admin ops). Bypasses mtime cache.
- */
 export declare function reloadKeepaliveConfig(): ResolvedKeepaliveConfig;
-/**
- * Internal resolver — exported only for tests.
- */
 export declare function _resolve(raw: Record<string, unknown> | null): ResolvedKeepaliveConfig;
-/**
- * Path of the config file (for diagnostics / endpoints).
- */
 export declare function getConfigPath(): string;
-/**
- * Fast getter for the most relevant value — used in keepalive-engine 12+ places.
- */
 export declare function getCacheTtlMs(): number;
 export declare function getSafetyMarginMs(): number;
-//# sourceMappingURL=keepalive-config.d.ts.map

@@ -1,10 +1,9 @@
-import type { ClaudeCodeSDKOptions, CredentialStore, StoredCredentials, GenerateOptions, GenerateResponse, StreamEvent, RateLimitInfo } from './types.js';
+import type { ClaudeCodeSDKOptions, CredentialStore, StoredCredentials, GenerateOptions, GenerateResponse, StreamEvent, RateLimitInfo } from "./types.js";
 export declare class ClaudeCodeSDK {
     private accessToken;
     private refreshToken;
     private expiresAt;
     private credentialStore;
-    /** Token rotation deferred-apply state machine. See PRPs/token-rotation-deferred-apply. */
     private tokenRotation;
     private sessionId;
     private deviceId;
@@ -25,203 +24,66 @@ export declare class ClaudeCodeSDK {
     private keepalive;
     private _lastStreamUsage;
     constructor(options?: ClaudeCodeSDKOptions);
-    /**
-     * Release resources held by this client. Call when the client is no longer
-     * needed (e.g. test teardown). Currently closes the TokenRotationManager
-     * (fs.watch fd + poll timer). Idempotent.
-     */
     close(): void;
-    /** Non-streaming: send messages, get full response */
     generate(options: GenerateOptions): Promise<GenerateResponse>;
-    /** Streaming: yields events as they arrive from SSE */
     stream(options: GenerateOptions): AsyncGenerator<StreamEvent>;
     getRateLimitInfo(): RateLimitInfo;
     private doStreamRequest;
     private parseSSE;
-    /**
-     * Full KA shutdown — stops engine timers, registry, health probe.
-     * Also clears SDK-owned tokenRotationTimer (auth concern, not KA).
-     */
     stopKeepalive(): void;
-    /** HTTP headers — mimics getAnthropicClient() + getAuthHeaders() */
     private buildHeaders;
-    /** Request body — mirrors paramsFromContext() in claude.ts:1699 */
     private buildRequestBody;
-    /** Add cache_control markers to system + messages — anchor-based strategy for keepalive compatibility.
-     *
-     * Anthropic prompt cache is PREFIX-based: each cache_control breakpoint creates a cached prefix entry.
-     * A new request reads cache only if it has a breakpoint at the SAME position (same content prefix).
-     *
-     * Follows Claude Code's proven strategy (from claude.ts):
-     *   BP1: system prompt — stable across sessions
-     *   BP2: last tool definition — stable within session
-     *   BP3: messages[-1] — ONE message marker only
-     *
-     * Why only 1 message marker (from Claude Code source):
-     *   "Exactly one message-level cache_control marker per request. Mycro's
-     *    turn-to-turn eviction frees local-attention KV pages at any cached prefix
-     *    position NOT in cache_store_int_token_boundaries. With two markers the
-     *    second-to-last position is protected and its locals survive an extra turn
-     *    even though nothing will ever resume from there — with one marker they're
-     *    freed immediately."
-     *
-     * Why no anchor persistence needed:
-     *   Anthropic's cache AUTOMATICALLY reads ANY matching prefix, regardless of
-     *   where the NEW marker is placed. Markers only control where NEW entries are WRITTEN.
-     *   So: keepalive writes cache at msg[K]. Next real request has marker at msg[K+2].
-     *   API finds cached prefix [sys..msg[K]] → reads it → only processes msg[K+1..K+2].
-     */
     private addCacheMarkers;
-    /** Beta headers — mirrors getAllModelBetas() in betas.ts:234 */
     private buildBetas;
-    /**
-     * Ensure valid auth token before API call.
-     * Mirrors checkAndRefreshOAuthTokenIfNeeded() from auth.ts:1427.
-     *
-     * Quad-check pattern (Defect 1 fix completed 2026-04-30):
-     * 1. Check disk mtime FIRST — catches `claude /login` while session running
-     *    so the in-memory token doesn't pin the process to OLD account/org for
-     *    its remaining lifetime.
-     * 2. Check cached token in memory (fast path).
-     * 3. If expired, check store (another process may have refreshed).
-     * 4. If still expired, do the refresh.
-     *
-     * Why mtime-check is in fast path now: previously sat inside _doEnsureAuth
-     * which only ran on token expiry. Tokens live ~8h, so during a normal
-     * working day a re-login was completely invisible to running pids until
-     * natural expiry. Real cost of statSync from page-cache is sub-microsecond
-     * — bounded by the ENTIRE network round-trip cost, ~5 orders of magnitude
-     * cheaper. Negligible per-request overhead.
-     *
-     * Verified bug 2026-04-30T19:43Z: pid 3964910 stayed on OLD-org token
-     * (sk-ant-oat01-e2QfoE17R...) for 11+ minutes after `claude /login` to
-     * NEW org wrote sk-ant-oat01-FDdX0... to disk, while burning OLD-org
-     * quota at util5h=1.0 critical. This fix prevents that scenario.
-     */
     private ensureAuth;
     private _doEnsureAuth;
-    /** Load credentials from the credential store */
     private loadFromStore;
-    /** 5-minute buffer before actual expiry — from oauth/client.ts:344-353 */
     private isTokenExpired;
-    /**
-     * Force an immediate token refresh (like what happens automatically).
-     * Use when you know the token is stale or as a manual recovery.
-     * Returns true on success, false on failure.
-     */
     forceRefreshToken(): Promise<boolean>;
-    /**
-     * Trigger a full browser-based OAuth re-login flow.
-     * Use as last resort when refresh_token itself is dead.
-     * Imports and calls oauthLogin() from auth.ts.
-     * Returns true on success (new tokens saved), false on failure/timeout.
-     */
     forceReLogin(): Promise<boolean>;
-    /**
-     * Get current token health info — useful for UI status indicators.
-     * Note: if called immediately after construction, tokens may still be loading.
-     * Use the async version getTokenHealthAsync() for guaranteed data.
-     */
     getTokenHealth(): {
         expiresAt: number | null;
         expiresInMs: number;
         lifetimePct: number;
         failedRefreshes: number;
-        status: 'healthy' | 'warning' | 'critical' | 'expired' | 'unknown';
+        status: "healthy" | "warning" | "critical" | "expired" | "unknown";
     };
-    /** Async version — awaits initial token load before returning health. */
     getTokenHealthAsync(): Promise<{
         expiresAt: number | null;
         expiresInMs: number;
         lifetimePct: number;
         failedRefreshes: number;
-        status: 'healthy' | 'warning' | 'critical' | 'expired' | 'unknown';
+        status: "healthy" | "warning" | "critical" | "expired" | "unknown";
     }>;
-    /**
-     * Schedule a background refresh at ~50% of token lifetime.
-     * With ~11h tokens, fires at ~5.5h — leaving 5.5h for retries.
-     * Emits escalating warnings as token approaches expiry.
-     *
-     * OWNERSHIP BOUNDARY (T1.5, per-org-token-rotation). This timer owns refresh
-     * for the SINGLE active `.credentials.json` token of a direct-SDK / opencode
-     * consumer only — it is OrgVault-blind and multi-org-blind. The proxy
-     * (`ProxyClient`) does NOT instantiate this class; its per-org proactive loop
-     * (`proactiveOrgSweep` → `withFreshOrgToken`) is the sole owner of multi-org +
-     * active-org refresh in the proxy process, so the two never double-refresh
-     * within one process. Cross-process, a co-located ClaudeCodeSDK + the proxy +
-     * the native CLI coordinate their `.credentials.json` writes via the config-dir
-     * `proper-lockfile` lock (config-dir-lock.ts) — the proxy's active-org
-     * co-write takes that lock; the native CLI takes the same lock. (This SDK
-     * timer still uses its own `.token-refresh-lock`; unifying it onto the
-     * config-dir lock is a separate, higher-blast-radius change scoped away from
-     * this evolution to avoid regressing the opencode plugin.)
-     */
     private scheduleProactiveRotation;
-    /**
-     * Background refresh — runs silently, never throws.
-     * Emits escalating status events on failure.
-     * On permanent failure: emits 'expired' so UI can trigger re-login.
-     */
     private proactiveRefresh;
     private emitTokenStatus;
     private isRefreshOnCooldown;
     private setRefreshCooldown;
     private clearRefreshCooldown;
     private dbg;
-    /**
-     * Triple-check refresh — mirrors auth.ts:1472-1556.
-     * Check store again (race), then refresh, then check store on error.
-     */
     private refreshTokenWithTripleCheck;
-    /**
-     * Handle 401 error — mirrors handleOAuth401Error() from auth.ts:1338-1392.
-     * Deduplicates concurrent 401 handlers for the same failed token.
-     */
     handleAuth401(): Promise<void>;
-    /** POST to platform.claude.com/v1/oauth/token — from oauth/client.ts:146
-     *
-     * Retry with backoff on 429/5xx (mirrors Claude Code's lockfile + triple-check pattern).
-     * Multiple opencode sessions may try to refresh simultaneously — the first to succeed
-     * writes to the credential store, others detect the fresh token on retry.
-     *
-     * @param force — if true, skip "already fresh" checks and always call the token endpoint.
-     *   Used by proactive rotation to actually get a NEW token before the old one expires.
-     */
     private doTokenRefresh;
     private assembleResponse;
     private parseRateLimitHeaders;
     private getRetryDelay;
     private sleep;
-    /**
-     * Compute message fingerprint — matches CC's computeFingerprintFromMessages().
-     * Extracts chars at indices [4,7,20] from first user message, SHA256 with salt.
-     * Returns 3-char hex string used in cc_version billing header.
-     */
     private computeFingerprint;
     private readAccountUuid;
 }
-/**
- * File-based credential store with mtime detection.
- * Mirrors CLI's plainTextStorage.ts + invalidateOAuthCacheIfDiskChanged().
- */
 export declare class FileCredentialStore implements CredentialStore {
     readonly path: string;
     private lastMtimeMs;
     constructor(path: string);
     read(): Promise<StoredCredentials | null>;
     write(credentials: StoredCredentials): Promise<void>;
-    /** Detect cross-process changes via mtime — from auth.ts:1313-1336 */
     hasChanged(): Promise<boolean>;
     private getMtime;
 }
-/**
- * In-memory credential store for direct token injection.
- * No persistence — tokens live only in SDK instance.
- */
 export declare class MemoryCredentialStore implements CredentialStore {
     private credentials;
     constructor(initial: StoredCredentials);
     read(): Promise<StoredCredentials | null>;
     write(credentials: StoredCredentials): Promise<void>;
 }
-//# sourceMappingURL=sdk.d.ts.map

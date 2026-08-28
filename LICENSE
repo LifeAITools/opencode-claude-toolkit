@@ -1,21 +1,70 @@
-MIT License
+Kiberos Engine License 1.0
+(applies to @life-ai-tools/claude-code-sdk — the compiled engine)
 
-Copyright (c) 2025-2026 LifeAITools
+Copyright (c) 2025-2026 Kiberos / LifeAITools. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+WHAT YOU MAY DO — freely, at no charge, forever
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+  1. Run this software, on any number of machines, for any purpose,
+     including inside a company and including work you are paid for.
+  2. Install it as a dependency of an application you build for your own
+     use or for use inside your organization.
+  3. Rely on its published type declarations to integrate with it.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  No registration, no key, no reporting, no fee.
+
+WHAT YOU MAY NOT DO — without a separate written license from the copyright
+holder
+
+  1. Redistribute, republish, sell, rent, or sublicense this software, in
+     whole or in part, on its own or bundled inside another product you
+     distribute to third parties.
+  2. Reverse engineer, decompile, disassemble, deobfuscate, or otherwise
+     attempt to reconstruct the source code, algorithms, or internal
+     structure of the compiled bundle, except to the exact extent that such
+     an act cannot lawfully be prohibited under mandatory applicable law
+     (for example, statutory interoperability rights).
+  3. Modify the bundle or create derivative works from it.
+  4. Remove, obscure, or alter this license, the copyright notice, or the
+     header inside the distributed files.
+  5. Use the name "Kiberos", "LifeAITools", or the names of its products to
+     endorse or promote anything derived from or built on this software,
+     without prior written permission.
+
+WHY THE TWO HALVES DIFFER
+
+  The tool that most people install — @kiberos/claude-max-proxy — is
+  published as readable source under the MIT license and stays that way:
+  what you run, you can read. This package is the engine underneath it. It
+  is distributed as a compiled bundle because the decisions inside it (how a
+  prompt cache is kept warm, when a spend is stopped, how sessions and
+  tokens are kept apart) are the substance of the product, not its plumbing.
+  You may use it without paying and without asking. You may not take it
+  apart or hand it on.
+
+SOURCE ACCESS
+
+  Source access can be granted, under a separate agreement, to security
+  auditors, contributors, and organizations with a compliance requirement.
+  See REQUEST-SOURCE.md.
+
+RESERVATION OF RIGHTS
+
+  All rights not expressly granted above are reserved by the copyright
+  holder. No patent license is granted.
+
+TERMINATION
+
+  The permissions above end automatically if you breach any of the
+  restrictions. They resume if the breach is cured and the copyright holder
+  confirms so in writing.
+
+NO WARRANTY
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  DEALINGS IN THE SOFTWARE.

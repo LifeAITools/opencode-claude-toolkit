@@ -1,25 +1,6 @@
-/**
- * Default adapters for ProxyClient ports.
- *
- * These are the zero-config implementations that ship with SDK so that
- * the most common usage pattern is simply:
- *
- *   const client = new ProxyClient({
- *     config,
- *     credentialsProvider: new FileCredentialsProvider(),
- *   })
- *
- * Each adapter is:
- *   - Small (under 100 lines)
- *   - Single-responsibility (implements ONE port interface)
- *   - Reasonable default (works for 90% of cases out of the box)
- *   - Replaceable (consumers can swap for custom adapters)
- */
-import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, ProxyEvent, Session } from './proxy-ports.js';
+import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, ProxyEvent, Session } from "./proxy-ports.js";
 export interface FileCredentialsProviderOptions {
-    /** Path to credentials.json. Default: ~/.claude/.credentials.json */
     path?: string;
-    /** Buffer before actual expiry to count as "expired". Default: 5 min */
     expiryBufferMs?: number;
 }
 export declare class FileCredentialsProvider implements ICredentialsProvider {
@@ -30,10 +11,7 @@ export declare class FileCredentialsProvider implements ICredentialsProvider {
     constructor(opts?: FileCredentialsProviderOptions);
     getAccessToken(): Promise<string>;
     invalidate(): void;
-    /** Expiry (ms epoch) of the currently-cached token, or null if none cached.
-     *  Feeds the per-session pin's "is the held cross-org token still alive?" check. */
     currentExpiresAt(): number | null;
-    /** Refresh token of the cached credential — feeds the per-org vault. */
     currentRefreshToken(): string | null;
     private readFromDisk;
     private mtimeChanged;
@@ -41,11 +19,8 @@ export declare class FileCredentialsProvider implements ICredentialsProvider {
     private isExpired;
 }
 export interface ConsoleEventEmitterOptions {
-    /** Minimum level to emit. Default: 'info' */
-    minLevel?: 'error' | 'info' | 'debug';
-    /** Format: 'json' (JSONL) or 'human' (colored). Default: 'human' */
-    format?: 'json' | 'human';
-    /** Custom write target. Default: process.stderr */
+    minLevel?: "error" | "info" | "debug";
+    format?: "json" | "human";
     writeTarget?: (line: string) => void;
 }
 export declare class ConsoleEventEmitter implements IEventEmitter {
@@ -71,21 +46,13 @@ export declare class InMemorySessionStore<EngineT = unknown> implements ISession
     stopAll(): void;
 }
 export declare class DefaultLivenessChecker implements ILivenessChecker {
-    /**
-     * Answers ONLY the question: is this PID currently a running process?
-     * Does NOT filter by legitimacy (e.g. "is this a realistic owner PID")
-     * — that's ISessionStore's concern.
-     *
-     * Invalid inputs (0, negative) return false since there's no such PID.
-     */
     isAlive(pid: number): boolean;
 }
 export declare class NativeFetchUpstream implements IUpstreamFetcher {
     fetch(url: string, init: {
-        method: 'POST';
+        method: "POST";
         headers: Record<string, string>;
         body: string;
         signal?: AbortSignal;
     }): Promise<Response>;
 }
-//# sourceMappingURL=proxy-adapters.d.ts.map

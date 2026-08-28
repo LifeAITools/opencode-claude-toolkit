@@ -236,3 +236,17 @@ export type {
   VoiceStreamOptions,
   TranscribeFileOptions,
 } from './voice.js'
+
+// ═══ Subscription compatibility (закрытое знание, см. subscription-compat.ts) ══
+//
+// Набор признаков, делающих запрос действительным по подписке, и расстановка
+// меток кэша. Живёт в собранном движке намеренно: это знание, добытое опытом,
+// а не сантехника. Прокси зовёт эти функции и передаёт свою шину событий.
+export {
+  enrichAnthropicRequest,
+  clampEffortIfThinkingDisabled,
+  injectCacheMarkers,
+  hasAnyCacheControl,
+  setCompatVersion,
+} from './subscription-compat.js'
+export type { AnthropicEnrichResult, CompatEmit } from './subscription-compat.js'

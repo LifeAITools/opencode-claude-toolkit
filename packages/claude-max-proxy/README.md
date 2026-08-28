@@ -123,10 +123,19 @@ rather than silently running an old build.
 
 ## Source and license
 
-MIT, both packages. This package ships as **readable TypeScript source** — what you install is
-what runs (on bun). The keepalive engine underneath, `@life-ai-tools/claude-code-sdk`, ships as
-a **compiled bundle with complete type declarations**; its source is available on request (see
-REQUEST-SOURCE.md in that repository).
+The two halves are licensed differently, on purpose.
+
+**This package — MIT, readable source.** What you install is what runs (on bun): the HTTP
+server, the routes, the logging, the quota accounting, the dashboard. Read it, patch it, fork
+it, ship it — MIT means MIT.
+
+**The engine underneath — `@life-ai-tools/claude-code-sdk` — is a compiled bundle** with
+complete type declarations, under the Kiberos Engine License. In plain terms: use it freely,
+for anything, including paid work, on as many machines as you like, with no key and no fee;
+but do not redistribute it on its own or inside a product you hand to third parties, and do
+not take the bundle apart. The decisions inside it — how the prompt cache is kept warm, when
+a spend is stopped — are the substance of the product. Source access for auditors,
+contributors and compliance reviews is granted separately on request.
 
 ## Troubleshooting
 

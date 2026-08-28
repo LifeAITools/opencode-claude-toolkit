@@ -90,7 +90,9 @@ async function main() {
     // Add a header
     const header = `/**
  * claude-code-sdk — TypeScript SDK for Claude Code API
- * (c) ${new Date().getFullYear()} Kiberos. Compiled distribution.
+ * (c) ${new Date().getFullYear()} Kiberos / LifeAITools. All rights reserved.
+ * Compiled distribution under the Kiberos Engine License 1.0 — free to use,
+ * not to be redistributed, modified, or reverse engineered. See LICENSE.
  * Source access: see REQUEST-SOURCE.md in the GitHub repo.
  */\n`
     await writeFile(join(DIST, 'index.js'), header + minified.code)
@@ -115,6 +117,8 @@ async function main() {
     process.exit(1)
   }
 
+  await stripDeclarationComments()
+
   console.log('[build] Done!')
   
   // Show dist contents
@@ -122,6 +126,42 @@ async function main() {
   for (const f of files) {
     console.log(`  dist/${f}`)
   }
+}
+
+
+/**
+ * Убрать НАШИ комментарии из публикуемых описаний типов.
+ *
+ * 🔴 ЗАЧЕМ (решение фаундера 29.08.2026, после замера). Движок мы отдаём
+ * собранным, чтобы не раздавать реализацию, — но рядом с ним ехали описания
+ * типов, а в них 4806 строк, из которых 3175 наши комментарии: разбор
+ * семислойной защиты кэша, порядок вызовов, why-заметки о найденных ловушках.
+ * То есть КОД был спрятан, а ЗАМЫСЕЛ раздавался целиком. Тому, кто просто
+ * ставит инструмент, эти описания не нужны вовсе; тому, кто интегрируется,
+ * достаточно имён и типов.
+ *
+ * Режем не регулярками: описание типов — это код, и в нём есть строковые
+ * литералы, где `//` ничего не открывает. Разбираем настоящим разборщиком
+ * TypeScript и печатаем обратно без комментариев — синтаксис при этом не
+ * может поехать по построению.
+ */
+async function stripDeclarationComments(): Promise<void> {
+  const ts = await import('typescript')
+  const printer = ts.createPrinter({ removeComments: true })
+  const files = (await readdir(DIST, { recursive: true }))
+    .filter(f => typeof f === 'string' && f.endsWith('.d.ts')) as string[]
+  let before = 0
+  let after = 0
+  for (const rel of files) {
+    const path = join(DIST, rel)
+    const text = await Bun.file(path).text()
+    before += text.split('\n').length
+    const sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
+    const out = printer.printFile(sf)
+    await writeFile(path, out)
+    after += out.split('\n').length
+  }
+  console.log(`[build] Step 4: описания типов без комментариев — ${files.length} файлов, ${before} → ${after} строк`)
 }
 
 main().catch(err => {

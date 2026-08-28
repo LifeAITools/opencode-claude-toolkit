@@ -1,6 +1,9 @@
 # Request Source Code Access
 
-The `@life-ai-tools/claude-code-sdk` package is distributed as a compiled bundle on npm.
+The `@life-ai-tools/claude-code-sdk` package is distributed as a compiled bundle on npm,
+under the **Kiberos Engine License** (see LICENSE): free to use for any purpose including
+commercial work, but not to be redistributed, modified, or reverse engineered. Everything
+below is the route for the cases where reading the source is legitimately necessary.
 
 The **opencode-proxy** is fully open source in this repository.
 

@@ -326,7 +326,14 @@ opencode-claude-toolkit/
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+**Kiberos Engine License 1.0** — see [LICENSE](LICENSE). Free to use for any purpose,
+including commercial work, on any number of machines, with no key and no fee. Not to be
+redistributed on its own or inside a product you hand to third parties, and not to be
+reverse engineered or modified. Source access for auditors, contributors and compliance
+reviews: [REQUEST-SOURCE.md](REQUEST-SOURCE.md).
+
+The tool most people install — `@kiberos/claude-max-proxy` — remains MIT and ships as
+readable source. This package is the engine underneath it.
 
 ## Source Access
 

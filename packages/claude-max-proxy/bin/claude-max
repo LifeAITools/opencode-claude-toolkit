@@ -1200,6 +1200,31 @@ async function cmdWatch(): Promise<void> {
 
   const tuiPath = existsSync(INSTALL_TUI) ? INSTALL_TUI : TUI_PATH
   if (!existsSync(tuiPath)) { err('TUI file not found'); process.exit(1) }
+
+  // 🔴 ЖИВАЯ ПАНЕЛЬ СТАВИТСЯ ПО ЖЕЛАНИЮ, А НЕ ВСЕМ ПОДРЯД (решение фаундера 29.08.2026).
+  //
+  // Она рисуется библиотеками blessed/blessed-contrib, а те тянут за собой цепочку
+  // очень старых пакетов: пять из них не объявляют лицензию вовсе. Пока пакет ставили
+  // только свои, это никого не касалось; теперь его скачивает посторонний человек — и
+  // получает в своём дереве чужой код без внятных условий ради панели, которую, скорее
+  // всего, никогда не откроет. Поэтому они больше не обязательные.
+  //
+  // Здесь — честный отказ вместо невнятной ошибки резолвера: панель зовут руками, и
+  // человек должен получить одну команду, а не «Cannot find module 'blessed'».
+  try {
+    await import('blessed')
+  } catch {
+    err('живая панель не установлена')
+    console.log('')
+    console.log('  Она ставится отдельно — это необязательная часть:')
+    console.log(c(C.cyan, '    npm install -g blessed blessed-contrib'))
+    console.log('')
+    console.log(c(C.dim, '  Почему не сразу: панель тянет цепочку старых пакетов, часть которых'))
+    console.log(c(C.dim, '  не объявляет лицензию. Остальное в claude-max работает без неё.'))
+    console.log(c(C.dim, '  Состояние без панели: ') + c(C.cyan, 'claude-max status') + c(C.dim, ' или ') + c(C.cyan, 'claude-max logs -f'))
+    console.log('')
+    process.exit(1)
+  }
   const p = spawn({ cmd: [bunBin, 'run', tuiPath], stdio: ['inherit', 'inherit', 'inherit'] })
   await p.exited
 }

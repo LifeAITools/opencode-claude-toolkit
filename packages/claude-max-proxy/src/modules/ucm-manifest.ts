@@ -19,7 +19,40 @@
  *  - Действия (card): reload/disarm/status в одной панели, без sprawl;
  *  - Орг и сессии (split): org_switch + чистый список орг и список сессий.
  */
-import { validateManifest, type UcmManifest } from '@kiberos/ucm-schema'
+import { emit } from '../event-bus.js'
+import type { UcmManifest } from '@kiberos/ucm-schema'
+
+/**
+ * 🔴 СЛОВАРЬ ПУЛЬТА ЗАГРУЖАЕТСЯ ПО ФАКТУ НАЛИЧИЯ, А НЕ ЧИСЛИТСЯ ОБЯЗАТЕЛЬНЫМ.
+ *
+ * `@kiberos/ucm-schema` — часть Universal Control Board, нашего отдельного
+ * продукта, и он под НЕкоммерческой лицензией. Пока пакет ставили только свои,
+ * это никого не касалось; с 28.08.2026 claude-max раздают по публичной ссылке
+ * всем желающим — и человек, ставящий свободный MIT-инструмент, получал вместе
+ * с ним кирпич, запрещающий коммерческое использование, о котором не просил.
+ *
+ * Поэтому зависимость больше не обязательная. У нас на машине она стоит (она в
+ * devDependencies, и в собранный бинарь входит) — пульт видит проверенный
+ * манифест ровно как раньше. У постороннего её нет: манифест собирается и
+ * отдаётся, но НЕ проверяется схемой, и об этом говорится вслух один раз, а не
+ * замалчивается. Тип берётся только на время сборки (`import type` стирается),
+ * поэтому отсутствие пакета у потребителя ничего не ломает.
+ */
+type ManifestValidator = (m: unknown) => {
+  ok: boolean
+  errors: string[]
+  warnings: Array<{ code: string; path: string }>
+  manifest: UcmManifest
+}
+
+let validateManifest: ManifestValidator | null = null
+try {
+  ;({ validateManifest } = (await import('@kiberos/ucm-schema')) as unknown as {
+    validateManifest: ManifestValidator
+  })
+} catch {
+  validateManifest = null
+}
 
 /** Ревизия маппинга: bump при любом изменении контролов ниже. */
 const UCM_MANIFEST_REV = 8
@@ -223,6 +256,22 @@ export function buildControlManifest(proxyVersion: string): UcmManifest {
     ],
     apps: [],
     availability: { stream: '/mcp', snapshotKind: 'CONTROL_SNAPSHOT' },
+  }
+
+  if (!validateManifest) {
+    // Словаря нет — отдаём как есть. Ошибку тут поднимать нельзя: пульт для
+    // постороннего человека не главное, а вот прокси без панели работать обязан.
+    emit({
+      level: 'info',
+      kind: 'UCM_SCHEMA_ABSENT',
+      msg: 'манифест панели собран, но не проверен: @kiberos/ucm-schema не установлен '
+        + '(необязательная зависимость; поставьте его, если подключаете пульт)',
+    })
+    // Через unknown: без словаря манифест не только НЕ ПРОВЕРЕН, но и не
+    // дополнен значениями по умолчанию, которые обычно проставляет схема.
+    // Для постороннего это безразлично — у него нет пульта; для нас словарь
+    // на месте, и сюда мы не попадаем вовсе.
+    return manifest as unknown as UcmManifest
   }
 
   const result = validateManifest(manifest)

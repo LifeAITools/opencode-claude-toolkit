@@ -1,21 +1,8 @@
-/**
- * Pluggable credential storage interface.
- * Implement this to store tokens in a database, Redis, KV store, etc.
- * Mirrors CLI's SecureStorage pattern (plainTextStorage.ts).
- */
 export interface CredentialStore {
-    /** Read current credentials. Return null if not found. */
     read(): Promise<StoredCredentials | null>;
-    /** Write updated credentials after refresh. */
     write(credentials: StoredCredentials): Promise<void>;
-    /**
-     * Check if credentials changed externally (another process refreshed).
-     * Return true if stale → SDK will re-read.
-     * Optional: if not implemented, SDK always re-reads before refresh.
-     */
     hasChanged?(): Promise<boolean>;
 }
-/** Credentials as stored/retrieved by CredentialStore */
 export interface StoredCredentials {
     accessToken: string;
     refreshToken: string;
@@ -24,138 +11,53 @@ export interface StoredCredentials {
     subscriptionType?: string | null;
     rateLimitTier?: string | null;
 }
-/** SDK init options. Tokens can come from file OR be passed directly. */
 export interface ClaudeCodeSDKOptions {
-    /** Direct access token. If provided, skips file reading. */
     accessToken?: string;
-    /** Direct refresh token for auto-refresh. */
     refreshToken?: string;
-    /** Expiry timestamp (ms). Required with accessToken if you want auto-refresh. */
     expiresAt?: number;
-    /** Path to .credentials.json. Defaults to ~/.claude/.credentials.json */
     credentialsPath?: string;
-    /**
-     * Custom credential store (DB, Redis, etc.).
-     * If provided, overrides credentialsPath and direct token options.
-     */
     credentialStore?: CredentialStore;
-    /** device_id for metadata. If omitted, generates random 64-byte hex. */
     deviceId?: string;
-    /** account_uuid for metadata. If omitted, reads from ~/.claude/config.json. */
     accountUuid?: string;
-    /** SDK version string used in fingerprint + User-Agent. */
     version?: string;
-    /** Request timeout in ms. Default: 600_000 */
     timeout?: number;
-    /** Max retries for 5xx/529. Default: 3. Note: 429 is NEVER retried for subscribers. */
     maxRetries?: number;
-    /** Cache keepalive configuration. Keeps Claude's prompt cache warm between requests. */
     keepalive?: KeepaliveConfig;
-    /**
-     * Optional callback that returns the current Anthropic context token count
-     * for the active session. Used by TokenRotationManager to decide whether to
-     * defer token rotation when context is large (PRP token-rotation-deferred-apply
-     * REQ-03 + CR-09). Synchronous; returning null/undefined OR throwing →
-     * treated as "below threshold" (apply immediately).
-     *
-     * Typically wired by the platform adapter (e.g. opencode-signal-wire) to a
-     * snapshot reader of quota-watcher trackTokens.
-     */
     contextTokensProvider?: () => number | null;
-    /**
-     * Token rotation callback — fired when proactive refresh encounters issues.
-     * Levels escalate as token approaches expiry:
-     *   'rotated'  — silent success (informational)
-     *   'warning'  — first refresh failed, retrying (>25% lifetime left)
-     *   'critical' — multiple failures, token expiring soon (<10% lifetime left)
-     *   'expired'  — token expired, needs re-login
-     * Use this to show UI alerts or trigger re-login flows.
-     */
     onTokenStatus?: (event: TokenStatusEvent) => void;
 }
 export interface TokenStatusEvent {
-    level: 'rotated' | 'warning' | 'critical' | 'expired';
+    level: "rotated" | "warning" | "critical" | "expired";
     message: string;
-    /** Milliseconds until token expires (negative if already expired) */
     expiresInMs: number;
-    /** Number of consecutive failed refresh attempts */
     failedAttempts: number;
-    /** Whether a browser re-login is recommended */
     needsReLogin: boolean;
 }
 export interface KeepaliveConfig {
     enabled?: boolean;
-    /**
-     * Per-consumer cache TTL override in ms. If set, the engine uses THIS value
-     * instead of `loadKeepaliveConfig().cacheTtlMs` (SSOT ~/.claude/keepalive.json),
-     * AND the engine will NOT live-reload this field on keepalive.json mtime change.
-     *
-     * Why this exists: `~/.claude/keepalive.json` is a SHARED config consumed by
-     * BOTH the SDK (used by opencode → 1h cache contracts) AND the in-proxy
-     * KeepaliveEngine that intercepts native Claude Code traffic (which Anthropic
-     * caches with 5-min ephemeral TTL — CC client sends `cache_control: ephemeral`
-     * without explicit ttl). If proxy honors the SHARED 3600s value, it fires
-     * keepalives against caches that already died at 5 min → each fire pays full
-     * `cache_creation` instead of `cache_read` → token loss.
-     *
-     * Set `cacheTtlMs: 300_000` from the proxy adapter so its engine instance
-     * matches the actual wire TTL of native-CC traffic. opencode-style consumers
-     * leave this undefined → SSOT (1h) is used as before.
-     *
-     * Default: undefined → SSOT.
-     */
     cacheTtlMs?: number;
-    /**
-     * KA interval in ms. If undefined, engine reads from SSOT (~/.claude/keepalive.json).
-     * Auto-scaled by cacheTtlMs: legacy 5m TTL → 150s, 1h TTL → 1800s.
-     * Clamped to [intervalClampMin, intervalClampMax] where max = cacheTtlMs - safetyMarginMs - 60s.
-     */
     intervalMs?: number;
     idleTimeoutMs?: number;
     minTokens?: number;
-    /** Max cache lineages warmed per KA tick. Each registered (main/unknown)
-     *  lineage is an independent cache that TTL-expires on its own clock, so a
-     *  multi-lineage session needs every due lineage warmed — not just the
-     *  heaviest. Capped per tick to bound quota burst on fat sessions; overflow
-     *  is warmed on the next ticks (which run every ≤30s). Default: 8. */
     maxFiresPerTick?: number;
-    /** ── Rewrite burst protection ──────────────────────────────────────
-     * When a real stream() fires after long idle, the cache may be dead.
-     * The first call will silently cost `cacheWrite` (can be 100k+ tokens).
-     * Guard warns (or blocks) such calls to prevent accidental quota burn.
-     */
-    /** Idle threshold that triggers a warning on next real stream. Default: 300_000 (5 min — matches cache TTL) */
     rewriteWarnIdleMs?: number;
-    /** Only warn if estimated rewrite cost exceeds this. Default: 50_000 tokens */
     rewriteWarnTokens?: number;
-    /** Hard-block threshold. If idle > this AND block enabled, stream() throws. Default: Infinity (warn only) */
     rewriteBlockIdleMs?: number;
-    /** Enable hard block. Default: false */
     rewriteBlockEnabled?: boolean;
     onHeartbeat?: (stats: KeepaliveStats) => void;
     onTick?: (tick: KeepaliveTick) => void;
-    /** Fired when KA disarms (network/cache issues) but timer stays alive for auto-resume.
-     *  errStatus/errMessage carry the upstream error of the current fault episode
-     *  (e.g. 401 during a token-rotation wave) — null when the disarm had none. */
     onDisarmed?: (info: {
         reason: string;
         at: number;
         errStatus?: number | null;
         errMessage?: string | null;
     }) => void;
-    /** A fleet-wide HOLD began: fires suspended for a bounded wait, snapshot
-     *  KEPT, a timer will resume them. Deliberately distinct from onDisarmed —
-     *  reporting a hold as a disarm reads as lost warmth, and reporting nothing
-     *  reads as a healthy engine. */
     onHeld?: (info: {
         reason: string;
         at: number;
         holdMs: number;
         regSize: number;
     }) => void;
-    /** A keepalive fire kept the shared head of its prefix and paid for the tail
-     *  again. Distinct from an eviction: the ratio test misses it entirely, and
-     *  it accounted for 57% of all keepalive cache-write spend on 2026-08-20. */
     onPartialRewrite?: (info: {
         lineageKey: string;
         cacheRead: number;
@@ -163,19 +65,12 @@ export interface KeepaliveConfig {
         msSinceLastRealRequest: number;
         at: number;
     }) => void;
-    /** Fired on next real stream after long idle — surfaces potential cache_write cost */
     onRewriteWarning?: (info: {
         idleMs: number;
         estimatedTokens: number;
         blocked: boolean;
         model: string;
     }) => void;
-    /**
-     * A keepalive fire BEGAN / FAILED — the pair of `onHeartbeat`, which fires
-     * only on success. Without them a failed fire leaves no trace at all, and
-     * "keepalive was quiet" reads the same whether it was quiet or was failing
-     * on every attempt. See the full note on the engine's own config type.
-     */
     onFireStart?: (info: {
         lineageKey: string;
         idleMs: number;
@@ -189,30 +84,17 @@ export interface KeepaliveConfig {
         message: string;
         durationMs: number;
     }) => void;
-    /** Fired when network health probe transitions (degraded ↔ healthy). Reserved for Layer 2. */
     onNetworkStateChange?: (info: {
         from: string;
         to: string;
         at: number;
     }) => void;
-    /**
-     * Fired on every real request whose observed cache_control TTL differs from
-     * the previously-seen value for this session (first observation always fires).
-     * Lets operators detect when the wire-format cache TTL shifts (e.g. client
-     * switches 1h↔5m, or cache markers appear/disappear) — independent of whether
-     * the engine acts on it. Steady-state (unchanged TTL) does NOT fire.
-     */
     onTtlScan?: (info: {
         minTtlMs: number | null;
         previousTtlMs: number | null;
         hasAnyCacheControl: boolean;
         at: number;
     }) => void;
-    /**
-     * Fired whenever the KA snapshot registry is mutated (a snapshot registered,
-     * or the registry cleared on disarm/reload/evict). Lets a consumer persist
-     * the registry across a proxy restart without polling. Best-effort.
-     */
     onRegistryChange?: () => void;
 }
 export interface KeepaliveTick {
@@ -226,9 +108,6 @@ export interface KeepaliveStats {
     durationMs: number;
     idleMs: number;
     model: string;
-    /** Cache lineage this KA fire warmed. Lets a consumer attribute the
-     *  warm-up to the exact prefix family (e.g. the proxy's cache-miss
-     *  predictor, so it does not mistake a KA-kept-warm prefix for expired). */
     lineageKey?: string;
     rateLimit?: {
         status: string | null;
@@ -236,7 +115,6 @@ export interface KeepaliveStats {
         resetAt: number | null;
     };
 }
-/** What we read from ~/.claude/.credentials.json */
 export interface CredentialsFile {
     claudeAiOauth?: {
         accessToken: string;
@@ -247,86 +125,79 @@ export interface CredentialsFile {
         rateLimitTier?: string | null;
     };
 }
-/** Message param — mirrors Anthropic API */
 export interface MessageParam {
-    role: 'user' | 'assistant';
+    role: "user" | "assistant";
     content: string | ContentBlockParam[];
 }
 export type ContentBlockParam = TextBlockParam | {
-    type: 'image';
+    type: "image";
     source: {
-        type: 'base64';
+        type: "base64";
         media_type: string;
         data: string;
     };
 } | {
-    type: 'document';
+    type: "document";
     source: {
-        type: 'base64';
-        media_type: 'application/pdf';
+        type: "base64";
+        media_type: "application/pdf";
         data: string;
     };
 } | {
-    type: 'tool_use';
+    type: "tool_use";
     id: string;
     name: string;
     input: unknown;
 } | {
-    type: 'tool_result';
+    type: "tool_result";
     tool_use_id: string;
     content: string | ContentBlockParam[];
     is_error?: boolean;
 };
 export interface TextBlockParam {
-    type: 'text';
+    type: "text";
     text: string;
     cache_control?: {
-        type: 'ephemeral';
-        ttl?: '1h';
-        scope?: 'global';
+        type: "ephemeral";
+        ttl?: "1h";
+        scope?: "global";
     };
 }
-/** Tool definition */
 export interface ToolDef {
     name: string;
     description: string;
     input_schema: Record<string, unknown>;
 }
-/** System prompt blocks */
 export type SystemParam = string | {
-    type: 'text';
+    type: "text";
     text: string;
 }[];
-/** Tool choice — how the model selects tools */
-export type ToolChoice = 'auto' | 'any' | {
-    type: 'tool';
+export type ToolChoice = "auto" | "any" | {
+    type: "tool";
     name: string;
 };
-/** Options for a single generate/stream call */
 export interface GenerateOptions {
     model: string;
     messages: MessageParam[];
     system?: SystemParam;
     maxTokens?: number;
     thinking?: {
-        type: 'enabled';
+        type: "enabled";
         budgetTokens: number;
     } | {
-        type: 'disabled';
+        type: "disabled";
     };
     tools?: ToolDef[];
     toolChoice?: ToolChoice;
     temperature?: number;
     topP?: number;
-    effort?: 'low' | 'medium' | 'high';
+    effort?: "low" | "medium" | "high";
     signal?: AbortSignal;
     stopSequences?: string[];
     extraBetas?: string[];
     fast?: boolean;
-    /** Enable prompt caching. Default: true */
     caching?: boolean;
 }
-/** Options for Conversation class */
 export interface ConversationOptions {
     model: string;
     system?: SystemParam;
@@ -334,53 +205,49 @@ export interface ConversationOptions {
     toolChoice?: ToolChoice;
     maxTokens?: number;
     thinking?: {
-        type: 'enabled';
+        type: "enabled";
         budgetTokens: number;
     } | {
-        type: 'disabled';
+        type: "disabled";
     };
-    effort?: 'low' | 'medium' | 'high';
+    effort?: "low" | "medium" | "high";
     fast?: boolean;
     signal?: AbortSignal;
     extraBetas?: string[];
-    /** Enable prompt caching. Default: true */
     caching?: boolean;
 }
-/** Turn options — per-send overrides */
 export interface TurnOptions {
     signal?: AbortSignal;
-    /** Override tools for this turn */
     tools?: ToolDef[];
     toolChoice?: ToolChoice;
 }
-/** Normalized stream events */
 export type StreamEvent = {
-    type: 'text_delta';
+    type: "text_delta";
     text: string;
 } | {
-    type: 'thinking_delta';
+    type: "thinking_delta";
     text: string;
 } | {
-    type: 'thinking_end';
+    type: "thinking_end";
     signature?: string;
 } | {
-    type: 'tool_use_start';
+    type: "tool_use_start";
     id: string;
     name: string;
 } | {
-    type: 'tool_use_delta';
+    type: "tool_use_delta";
     partialInput: string;
 } | {
-    type: 'tool_use_end';
+    type: "tool_use_end";
     id: string;
     name: string;
     input: unknown;
 } | {
-    type: 'message_stop';
+    type: "message_stop";
     usage: TokenUsage;
     stopReason: string | null;
 } | {
-    type: 'error';
+    type: "error";
     error: Error;
 };
 export interface TokenUsage {
@@ -388,26 +255,8 @@ export interface TokenUsage {
     outputTokens: number;
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
-    /**
-     * Split of `cacheCreationInputTokens` for the 5-minute TTL ephemeral
-     * breakpoint. Populated from Anthropic response
-     * `usage.cache_creation.ephemeral_5m_input_tokens` when present. Absent
-     * (undefined) when the response did not include the `cache_creation`
-     * object (single-TTL caches), per Anthropic public docs (OQ-02).
-     */
     cacheCreation5mInputTokens?: number;
-    /**
-     * Split of `cacheCreationInputTokens` for the 1-hour TTL ephemeral
-     * breakpoint. Populated from Anthropic response
-     * `usage.cache_creation.ephemeral_1h_input_tokens` when present.
-     */
     cacheCreation1hInputTokens?: number;
-    /**
-     * Count of tokens evicted from cache due to `cache_edits.clear_at` /
-     * `compact_20260112` operations. Populated from Anthropic response
-     * `usage.cache_deleted_input_tokens` when present (Phase 6 telemetry —
-     * captured early so historical data is available without retro-fitting).
-     */
     cacheDeletedInputTokens?: number;
 }
 export interface RateLimitInfo {
@@ -427,18 +276,17 @@ export interface GenerateResponse {
     rateLimitInfo: RateLimitInfo;
     model: string;
 }
-/** Content blocks from API response */
 export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock;
 export interface TextBlock {
-    type: 'text';
+    type: "text";
     text: string;
 }
 export interface ThinkingBlock {
-    type: 'thinking';
+    type: "thinking";
     thinking: string;
 }
 export interface ToolUseBlock {
-    type: 'tool_use';
+    type: "tool_use";
     id: string;
     name: string;
     input: unknown;
@@ -460,10 +308,6 @@ export declare class RateLimitError extends ClaudeCodeSDKError {
     readonly status: number;
     constructor(message: string, rateLimitInfo: RateLimitInfo, status?: number, cause?: unknown);
 }
-/**
- * Thrown by stream() when rewriteBlockEnabled=true and idleMs exceeds blockIdleMs.
- * Prevents accidental cache_write bursts from long-idle / dormant sessions waking up.
- */
 export declare class CacheRewriteBlockedError extends ClaudeCodeSDKError {
     idleMs: number;
     estimatedTokens: number;
@@ -471,4 +315,3 @@ export declare class CacheRewriteBlockedError extends ClaudeCodeSDKError {
     readonly code = "CACHE_REWRITE_BLOCKED";
     constructor(idleMs: number, estimatedTokens: number, model: string);
 }
-//# sourceMappingURL=types.d.ts.map

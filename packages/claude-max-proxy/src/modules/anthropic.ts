@@ -12,6 +12,12 @@ import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../opena
 import { captureBody } from '../body-capture.js'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
 
+/**
+ * Единственная форма усилия, которую движок может понизить. Всё остальное
+ * разбирать незачем — см. развёрнутое обоснование на месте применения.
+ */
+export const EFFORT_ABOVE_HIGH_RE = /"effort"\s*:\s*"(xhigh|max)"/
+
 let ctx: ModuleContext
 
 export function createAnthropicModule(): ProxyModule {
@@ -68,9 +74,27 @@ export function createAnthropicModule(): ProxyModule {
           // calls — so every web search from a native agent at xhigh returned 400 while the
           // clamp sat on the branch those agents never take. It shipped "verified" because
           // the verifying curl had no `claude-cli/` user-agent and took the enriched path.
+          // 🔴 РАЗБИРАТЬ ДВУХМЕГАБАЙТНОЕ ТЕЛО РАДИ ПРОВЕРКИ, КОТОРАЯ ПОЧТИ НИКОГДА НЕ
+          // СРАБАТЫВАЕТ, — ЭТО ПАМЯТЬ НА КАЖДОМ ХОДУ. Замер 29.08.2026 по 200 самым
+          // крупным настоящим телам родного Claude Code (в среднем 1.98 МБ, максимум
+          // 3.3 МБ): ключ "effort" есть у ВСЕХ 200, а поправлять было нечего НИ В ОДНОМ
+          // — ни одного значения xhigh/max и ни одного выключенного размышления. То есть
+          // мы разбирали два мегабайта в объектное дерево, чтобы убедиться, что делать
+          // нечего.
+          //
+          // Поправка возможна ТОЛЬКО когда усилие выше 'high' (см. EFFORT_ABOVE_HIGH в
+          // движке), поэтому дешёвая проверка по тексту строго эквивалентна: нет xhigh
+          // и нет max — разбирать нечего. Пробел и перенос строки допускаются на случай
+          // чужого клиента, который печатает JSON с отступами.
+          //
+          // Повод: сосед из tixi-cold замерил у себя ~30 МБ пика на ход при потолке в
+          // гигабайт (их профиль — единицы сессий с огромным контекстом). Это первая
+          // работа, которую можно было убрать целиком, не потеряв поведения.
           try {
-            const parsed = JSON.parse(rawBodyStr) as Record<string, unknown>
-            if (clampEffortIfThinkingDisabled(parsed)) forwardBody = JSON.stringify(parsed)
+            if (EFFORT_ABOVE_HIGH_RE.test(rawBodyStr)) {
+              const parsed = JSON.parse(rawBodyStr) as Record<string, unknown>
+              if (clampEffortIfThinkingDisabled(parsed)) forwardBody = JSON.stringify(parsed)
+            }
           } catch {
             // Not JSON (or malformed) — forward untouched; this repair must never be able
             // to break a request it does not understand.

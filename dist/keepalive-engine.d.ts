@@ -13,7 +13,7 @@ import type { PersistedEngineState } from "./ka-snapshot-store.js";
 import type { EvictionCircuitBreaker } from "./eviction-breaker.js";
 export declare const RUNTIME_IDENTITY: string;
 interface RegistryEntry {
-    body: Record<string, unknown>;
+    body: string;
     headers: Record<string, string>;
     model: string;
     lineageKey: string;
@@ -117,6 +117,7 @@ export declare class KeepaliveEngine {
     private startHealthProbe;
     private stopHealthProbe;
     private logAsyncReject;
+    private buildSnapshotMeta;
     private writeSnapshotDebug;
     get _registry(): ReadonlyMap<string, RegistryEntry>;
     _tick(): Promise<void>;
@@ -199,7 +200,7 @@ export declare class KeepaliveEngine {
         timerArmed: boolean;
     };
     _testHandleQuotaRateLimit(entry: {
-        body: Record<string, unknown>;
+        body: string;
         headers: Record<string, string>;
         model: string;
         inputTokens: number;

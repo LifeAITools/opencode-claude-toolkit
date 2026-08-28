@@ -64,7 +64,13 @@ export const KA_SNAPSHOT_MAX_AGE_MS = 60 * 60 * 1000
 
 /** One KA registry entry — mirrors KeepaliveEngine's internal RegistryEntry. */
 export interface PersistedRegistryEntry {
-  body: Record<string, unknown>
+  /**
+   * Тело запроса. НОВЫЕ снимки пишут СТРОКУ (движок держит его строкой —
+   * неизменяемость по устройству вместо копирования); снимки прежних версий
+   * лежат ДЕРЕВОМ. Обе формы читаются при подъёме — иначе первая же выкатка
+   * стёрла бы прогрев у всех живых сессий разом.
+   */
+  body: Record<string, unknown> | string
   headers: Record<string, string>
   model: string
   lineageKey: string

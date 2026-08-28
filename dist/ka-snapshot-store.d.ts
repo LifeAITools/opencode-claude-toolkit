@@ -2,7 +2,7 @@ export declare const KA_SNAPSHOT_SCHEMA_VERSION = 1;
 export declare const DEFAULT_KA_SNAPSHOT_PATH: string;
 export declare const KA_SNAPSHOT_MAX_AGE_MS: number;
 export interface PersistedRegistryEntry {
-    body: Record<string, unknown>;
+    body: Record<string, unknown> | string;
     headers: Record<string, string>;
     model: string;
     lineageKey: string;

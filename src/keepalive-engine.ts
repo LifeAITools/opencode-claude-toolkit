@@ -159,7 +159,8 @@ export const RUNTIME_IDENTITY: string = (() => {
 
 /** One KA registry entry — keyed by cache lineage, not by model. */
 interface RegistryEntry {
-  body: Record<string, unknown>
+  /** Тело запроса СТРОКОЙ — неизменяемое по устройству, см. notifyRealRequestStart. */
+  body: string
   headers: Record<string, string>
   model: string
   lineageKey: string
@@ -206,9 +207,18 @@ interface RegistryEntry {
 /** A snapshot primed by notifyRealRequestStart, awaiting its completion. */
 interface PendingSnapshot {
   model: string
-  body: Record<string, unknown>
+  /** Тело запроса СТРОКОЙ — см. notifyRealRequestStart. */
+  body: string
   headers: Record<string, string>
   role: AgentRole
+  /**
+   * Два признака, снятые с ДЕРЕВА в момент приёма — там оно ещё в руках у
+   * вызывающего и разбирать ничего не надо. Раньше оба вычислялись при
+   * завершении из клона; хранить ради них целое дерево — это и была плата,
+   * от которой мы уходим.
+   */
+  hasAnyCacheControl: boolean
+  debugMeta: Record<string, unknown>
 }
 
 /** Observed per-lineage history — feeds the main-agent detector. */
@@ -902,11 +912,30 @@ export class KeepaliveEngine {
 
     // Snapshot for keepalive registry — keyed by lineage so a concurrent
     // sub-agent request cannot clobber the main agent's pending slot.
+    // 🔴 СНИМОК ХРАНИТСЯ СТРОКОЙ, А НЕ ДЕРЕВОМ — НЕИЗМЕНЯЕМОСТЬ ПО УСТРОЙСТВУ,
+    // А НЕ ПО КОПИРОВАНИЮ (замер 29.08.2026).
+    //
+    // Здесь стоял глубокий клон `JSON.parse(JSON.stringify(body))`, и он был
+    // нужен ровно затем, чтобы снимок не поехал следом за телом, которое
+    // вызывающий может изменить. Цена: на настоящем теле 3.4 МБ клон стоит
+    // 8.4 мс и всплеск в 3.7 МБ на КАЖДОМ реальном запросе, а разобранное
+    // дерево потом ещё и ДЕРЖИТСЯ в памяти — по 3.7 МБ на родословную.
+    //
+    // Строка неизменяема сама по себе: защищать её копированием не от чего.
+    // Разбор нужен только там, где снимок отправляют (там всё равно менялся
+    // max_tokens, то есть клон делался и без нас), и это раз в полчаса на
+    // родословную вместо каждого хода.
+    //
+    // Повод: у соседа из tixi-cold экземпляр убило ядро за память при потолке
+    // в гигабайт; их профиль — единицы сессий с огромными телами, то есть
+    // ровно тот случай, где эта работа стоила больше всего.
     this.pendingSnapshots.set(key, {
       model,
-      body: JSON.parse(JSON.stringify(body)),
+      body: JSON.stringify(body),
       headers: { ...headers },
       role,
+      hasAnyCacheControl: detectCacheTtlFromBody(body).hasAnyCacheControl,
+      debugMeta: this.buildSnapshotMeta(model, body),
     })
     this._legacyPendingLineage = key
 
@@ -1047,11 +1076,11 @@ export class KeepaliveEngine {
     // same-org), which is the single source of truth.
     const pending = key ? this.pendingSnapshots.get(key) : undefined
     if (pending) {
-      const { model, body, headers, role } = pending
+      const { model, body, headers, role, hasAnyCacheControl, debugMeta } = pending
       const totalTokens = (usage.inputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0)
       // Layer 3 input: does the snapshot carry any cache_control markers? If
       // not, a KA fire refreshes nothing on Anthropic's side — skipped in tick().
-      const { hasAnyCacheControl } = detectCacheTtlFromBody(body)
+      // hasAnyCacheControl снят при приёме с живого дерева — см. PendingSnapshot.
 
       // Register for KA — ALL roles, including sub-agents. Design evolution
       // (2026-06-13): the prior "an idle sub-agent is finished, not parked"
@@ -1115,8 +1144,10 @@ export class KeepaliveEngine {
       const prevMax = this.lastKnownCacheTokensByModel.get(model) ?? 0
       if (totalTokens > prevMax) this.lastKnownCacheTokensByModel.set(model, totalTokens)
 
-      // Snapshot metadata for debugging (rotate: keep last 24h).
-      this.writeSnapshotDebug(model, body, usage)
+      // Snapshot metadata for debugging (rotate: keep last 24h). Всё, что
+      // требовало дерева, снято при приёме; сюда доезжают готовые поля плюс
+      // расход, известный только теперь.
+      this.writeSnapshotDebug(debugMeta, usage, body)
 
       this.pendingSnapshots.delete(key)
     }
@@ -1670,7 +1701,7 @@ export class KeepaliveEngine {
     try { this.config.onFireStart?.({ lineageKey: best.lineageKey, idleMs: idle, at: fireStartedAt }) } catch {}
 
     try {
-      const body = JSON.parse(JSON.stringify(best.body))
+      const body = JSON.parse(best.body) as Record<string, unknown>
       const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
       body.max_tokens = budgetTokens > 0 ? budgetTokens + 1 : 1
 
@@ -2028,7 +2059,7 @@ export class KeepaliveEngine {
    *     server-side regression doesn't make things strictly worse.
    */
   private handleQuotaRateLimit(
-    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
+    entry: { body: string; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
     err: { resetAt?: number | null; retryAfterSec?: number | null },
   ): void {
     const now = Date.now()
@@ -2223,7 +2254,7 @@ export class KeepaliveEngine {
    * Uses setTimeout with exact delays from cacheWrittenAt — no drift.
    */
   private retryChain(
-    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
+    entry: { body: string; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
     attemptIndex = 0,
     // Max attempts for THIS chain. Defaults to the full retry budget (5xx/network
     // transients). Auth (401/403) passes KA_AUTH_MAX_RETRIES — a token rotation
@@ -2338,7 +2369,7 @@ export class KeepaliveEngine {
 
       this.inFlight = true
       try {
-        const body = JSON.parse(JSON.stringify(entry.body))
+        const body = JSON.parse(entry.body) as Record<string, unknown>
         const budgetTokens = (body.thinking as any)?.budget_tokens ?? 0
         body.max_tokens = budgetTokens > 0 ? budgetTokens + 1 : 1
         const usePendingAuth = this.orgSwitchPending.has(entry.lineageKey) && !!entry.headers.Authorization
@@ -2715,7 +2746,51 @@ export class KeepaliveEngine {
   // Debug snapshot writer
   // ────────────────────────────────────────────────────────────
 
-  private writeSnapshotDebug(model: string, body: Record<string, unknown>, usage: TokenUsage): void {
+  /**
+   * Снять с ДЕРЕВА всё, что нужно отладочной записи, в момент приёма запроса.
+   *
+   * Раньше это делалось при завершении и требовало держать дерево до тех пор.
+   * Здесь дерево ещё в руках у вызывающего, поэтому снимок обходится в счёт
+   * длин и три коротких хеша, а не в лишнюю копию тела.
+   */
+  private buildSnapshotMeta(model: string, body: Record<string, unknown>): Record<string, unknown> {
+    try {
+      const msgs = body.messages as { role: string; content: unknown }[]
+      const sys = body.system
+      const tools = body.tools as unknown[] | undefined
+      const sysStr = typeof sys === 'string' ? sys : JSON.stringify(sys)
+      return {
+        model,
+        messages: msgs?.length ?? 0,
+        tools: tools?.length ?? 0,
+        sysHash: createHash('md5').update(sysStr ?? '').digest('hex').slice(0, 8),
+        sysLen: (sysStr ?? '').length,
+        firstMsg: msgs?.[0] ? {
+          role: msgs[0].role,
+          contentLen: JSON.stringify(msgs[0].content).length,
+          contentHash: createHash('md5').update(JSON.stringify(msgs[0].content)).digest('hex').slice(0, 8),
+        } : null,
+        lastMsg: msgs?.length ? {
+          role: msgs[msgs.length - 1].role,
+          contentLen: JSON.stringify(msgs[msgs.length - 1].content).length,
+        } : null,
+        toolsHash: tools?.length ? createHash('md5').update(
+          JSON.stringify((tools as { name?: string }[]).map(t => t.name ?? '').join(','))
+        ).digest('hex').slice(0, 8) : null,
+      }
+    } catch {
+      // Отладочная запись не смеет ломать приём запроса.
+      return { model }
+    }
+  }
+
+  /**
+   * Записать отладочный снимок: готовые поля с приёма + расход, известный
+   * только при завершении. Тело пишется СТРОКОЙ как есть — разбирать его
+   * ради красивых отступов значило бы вернуть ту самую работу, ради которой
+   * всё это и затевалось.
+   */
+  private writeSnapshotDebug(meta: Record<string, unknown>, usage: TokenUsage, bodyJson: string): void {
     try {
       const snapshotDir = join(homedir(), '.claude', 'snapshots')
       mkdirSync(snapshotDir, { recursive: true })
@@ -2739,49 +2814,26 @@ export class KeepaliveEngine {
       } catch { /* rotation best-effort */ }
 
       this.snapshotCallCount++
-      const msgs = body.messages as { role: string; content: unknown }[]
-      const sys = body.system
-      const tools = body.tools as unknown[] | undefined
-
-      const sysStr = typeof sys === 'string' ? sys : JSON.stringify(sys)
-      const sysHash = createHash('md5').update(sysStr).digest('hex').slice(0, 8)
-
-      const meta: Record<string, unknown> = {
+      const full: Record<string, unknown> = {
         ts: new Date().toISOString(),
         pid: process.pid,
         callNum: this.snapshotCallCount,
-        model,
-        messages: msgs?.length ?? 0,
-        tools: tools?.length ?? 0,
-        sysHash,
-        sysLen: sysStr.length,
+        ...meta,
         usage: {
           input: usage.inputTokens ?? 0,
           cacheRead: usage.cacheReadInputTokens ?? 0,
           cacheWrite: usage.cacheCreationInputTokens ?? 0,
         },
-        firstMsg: msgs?.[0] ? {
-          role: msgs[0].role,
-          contentLen: JSON.stringify(msgs[0].content).length,
-          contentHash: createHash('md5').update(JSON.stringify(msgs[0].content)).digest('hex').slice(0, 8),
-        } : null,
-        lastMsg: msgs?.length ? {
-          role: msgs[msgs.length - 1].role,
-          contentLen: JSON.stringify(msgs[msgs.length - 1].content).length,
-        } : null,
-        toolsHash: tools?.length ? createHash('md5').update(
-          JSON.stringify((tools as { name?: string }[]).map(t => t.name ?? '').join(','))
-        ).digest('hex').slice(0, 8) : null,
       }
 
       const filename = `${process.pid}-${Date.now()}.json`
-      writeFileSync(join(snapshotDir, filename), JSON.stringify(meta, null, 2) + '\n')
+      writeFileSync(join(snapshotDir, filename), JSON.stringify(full, null, 2) + '\n')
 
       if (KeepaliveEngine.DUMP_BODY || this.snapshotCallCount <= 3) {
         const dumpDir = join(snapshotDir, 'bodies')
         mkdirSync(dumpDir, { recursive: true })
         const dumpFile = `${process.pid}-call${this.snapshotCallCount}-${Date.now()}.json`
-        writeFileSync(join(dumpDir, dumpFile), JSON.stringify(body, null, 2) + '\n')
+        writeFileSync(join(dumpDir, dumpFile), bodyJson + '\n')
       }
     } catch { /* debug logging must never crash */ }
   }
@@ -2845,7 +2897,14 @@ export class KeepaliveEngine {
   get _intervalMs(): number { return this.config.intervalMs }
   _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
     const key = lineageKey(body)
-    this.pendingSnapshots.set(key, { model, body, headers, role: 'main' })
+    this.pendingSnapshots.set(key, {
+      model,
+      body: JSON.stringify(body),
+      headers,
+      role: 'main',
+      hasAnyCacheControl: detectCacheTtlFromBody(body).hasAnyCacheControl,
+      debugMeta: this.buildSnapshotMeta(model, body),
+    })
     this._legacyPendingLineage = key
   }
 
@@ -2860,7 +2919,7 @@ export class KeepaliveEngine {
 
   /** @internal — for test invocation of the smart-pause handler */
   _testHandleQuotaRateLimit(
-    entry: { body: Record<string, unknown>; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
+    entry: { body: string; headers: Record<string, string>; model: string; inputTokens: number; lineageKey: string },
     err: { resetAt?: number | null; retryAfterSec?: number | null },
   ): void {
     this.handleQuotaRateLimit(entry, err)
@@ -2944,7 +3003,11 @@ export class KeepaliveEngine {
       for (const e of state.registry) {
         if (!e || typeof e.lineageKey !== 'string') continue
         this.registry.set(e.lineageKey, {
-          body: JSON.parse(JSON.stringify(e.body)),
+          // Снимки на диске от прежних версий держат тело ДЕРЕВОМ; новые —
+          // строкой. Принимаем обе формы: иначе первая же выкатка стёрла бы
+          // прогрев у всех живых сессий разом, а это ровно то, ради чего
+          // персистентность и существует.
+          body: typeof e.body === 'string' ? e.body : JSON.stringify(e.body),
           headers: { ...e.headers },
           model: e.model,
           lineageKey: e.lineageKey,

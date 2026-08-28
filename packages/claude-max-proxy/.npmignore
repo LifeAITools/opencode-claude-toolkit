@@ -1,0 +1,11 @@
+# 🔴 WHY THIS FILE EXISTS (measured 2026-08-28 on the published tarball).
+# `files: ["src", ...]` in package.json includes everything that sits on disk under
+# src/ — and the repo's root .gitignore does NOT apply here: npm looks for an ignore
+# file inside the package directory, finds none, and ships the lot. That is how
+# src/.claude/hooks/ — our own session state, logs and hook config — travelled into a
+# public package for anyone to download. Gitignored is not npmignored.
+src/.claude/
+.claude/
+
+# Sidecar tables of contents are generated for our own reading, not for the product.
+*.toc

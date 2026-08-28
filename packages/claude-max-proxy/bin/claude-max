@@ -1204,6 +1204,54 @@ async function cmdWatch(): Promise<void> {
   await p.exited
 }
 
+/**
+ * Машинная проверка того же самого состояния — `doctor --json`.
+ *
+ * 🔴 ЗАЧЕМ ОТДЕЛЬНЫЙ ВЫХОД (28.08.2026). Пакет отдают ДРУГОМУ АГЕНТУ, и первое,
+ * что он делает, — проверяет, что приехало и работает ли оно. Человеческий
+ * отчёт доктора для этого не годится: он раскрашен, он ЛЕЧИТ по ходу (то есть
+ * меняет систему, которую его просили только осмотреть) и его надо разбирать
+ * глазами. Здесь — чистое чтение: ничего не ставится, ничего не запускается,
+ * на выходе один объект и код возврата.
+ *
+ * `ok` отвечает за то, что зависит от НАС (bun, claude CLI, файлы, живой
+ * прокси, ссылка в ~/.local/bin). Вход человека в свою подписку — это
+ * `needsLogin`, и он НЕ обнуляет `ok`: свежая установка без входа исправна,
+ * просто ещё не начата.
+ */
+async function cmdDoctorJson(): Promise<void> {
+  const d = await doctor()
+  const ok = !!d.bun && !!d.claude && d.proxyFiles && d.binLink && d.proxyAlive
+  const report = {
+    ok,
+    needsLogin: !d.credsPresent,
+    version: readInstalledVersion(),
+    endpoint: d.endpoint ?? null,
+    endpointFromDiscovery: d.fromDiscovery ?? false,
+    checks: {
+      bun: d.bun,
+      claudeCli: d.claude,
+      proxyFilesInstalled: d.proxyFiles,
+      binLink: d.binLink,
+      binInPath: d.binInPath,
+      service: d.service,
+      serviceInstalled: d.serviceInstalled,
+      serviceActive: d.serviceActive,
+      proxyAlive: d.proxyAlive,
+      oauthCredentials: d.credsPresent,
+    },
+    paths: {
+      installDir: INSTALL_DIR,
+      binLink: BIN_LINK,
+      logFile: LOG_FILE,
+      jsonlFile: JSONL_FILE,
+      discoveryFile: DISCOVERY_FILE,
+    },
+  }
+  console.log(JSON.stringify(report, null, 2))
+  process.exit(ok ? 0 : 1)
+}
+
 async function cmdDoctor(): Promise<void> {
   // Doctor is a SELF-HEALING diagnostic:
   //   1. Report current state (what's installed vs missing)
@@ -1333,7 +1381,7 @@ async function main() {
     case 'org':       await cmdOrg(rest); break
     case 'logs':      await cmdLogs(rest); break
     case 'watch':     await cmdWatch(); break
-    case 'doctor':    await cmdDoctor(); break
+    case 'doctor':    rest.includes('--json') ? await cmdDoctorJson() : await cmdDoctor(); break
     case 'config':    await cmdConfig(); break
     case 'uninstall': await cmdUninstall(); break
     case 'help':
@@ -1352,7 +1400,8 @@ ${c(C.bold, 'Usage:')}
   claude-max disarm [sid] ${c(C.dim, 'drop KA snapshots + invalidate token — STOPS keepalive')}
   claude-max reload [sid] ${c(C.dim, 'drop snapshots + invalidate token — KEEPS keepalive (safe org swap)')}
   claude-max org list|switch ${c(C.dim, 'per-org token vault; pin a session to an org (multi-org)')}
-  claude-max doctor       ${c(C.dim, 'self-check: what is installed vs missing')}
+  claude-max doctor       ${c(C.dim, 'self-check + auto-heal')}
+  claude-max doctor --json ${c(C.dim, 'same state as JSON, read-only, exit 0 when ready')}
   claude-max uninstall    ${c(C.dim, 'remove service + binaries (keeps logs/creds)')}
 
 ${c(C.bold, 'Flags:')}

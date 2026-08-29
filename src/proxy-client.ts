@@ -1820,7 +1820,12 @@ export class ProxyClient {
               consent: {
                 marker: guard.overrideMarker,
                 command: '/cache-rewrite-ok',
-                cli: `context cache-rewrite-ok ${sessionId}`,
+                // --until-consumed, НЕ голая форма: подсказку читает ЧЕЛОВЕК у
+                // терминала, а сессия к этому моменту ходов не делает — часы
+                // на 180 с истекут раньше, чем он наберёт команду и пошлёт
+                // сообщение, которое её потратит. Согласие без часов ждёт
+                // ровно того хода, ради которого выдано.
+                cli: `context cache-rewrite-ok ${sessionId} --until-consumed`,
                 disable: 'keepalive.json → rewriteGuard.enabled=false',
               },
               message: (streak >= 2
@@ -1830,7 +1835,9 @@ export class ProxyClient {
                 + `(${rewriteAssessment.rewriteClass}) — `
                 + `an unconfirmed quota spend, blocked for all consumers. To proceed, either include `
                 + `${guard.overrideMarker} in your next message (/cache-rewrite-ok), or grant out-of-band: `
-                + `context cache-rewrite-ok ${sessionId}. Consent is single-use. `
+                + `context cache-rewrite-ok ${sessionId} --until-consumed. Consent is single-use `
+                + `(--until-consumed waits for this session's next turn instead of a 180s clock — `
+                + `the form that survives you typing it). `
                 + `(Disable: keepalive.json → rewriteGuard.enabled=false.)`,
             },
           })

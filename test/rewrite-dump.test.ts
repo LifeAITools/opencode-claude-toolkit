@@ -87,6 +87,35 @@ describe('writeRewriteBlockDump', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  /**
+   * 🔴 Имя сессии приходит ЗАГОЛОВКОМ от чужого клиента (29.08.2026: владелец
+   * подложки спросил, какой заголовок слать, и правильный ответ — «любая
+   * устойчивая строка»). Раз любая, то и путь обязан пережить любую: восемь
+   * знаков вида `../../a` увели бы дамп из каталога. Полное имя лежит внутри
+   * файла — режется только путь.
+   */
+  test('чужое имя сессии не уводит файл из каталога дампов', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rwd-esc-'))
+    const path = writeRewriteBlockDump(dir, {
+      sessionId: '../../../etc/passwd',
+      lineageKey: 'lin-1',
+      rewriteClass: 'avoidable:ttl-expiry',
+      predictedTokens: 1,
+      signals: { systemChanged: false, toolsChanged: false, orgChanged: false, idleMs: 1, ttlMs: 1 },
+      blockedRequest: { model: 'm', messages: [] },
+      previousPrefix: { system: undefined, tools: undefined },
+    })
+    expect(path).not.toBeNull()
+    expect(path!.startsWith(dir + '/')).toBe(true)
+    const files = readdirSync(dir)
+    expect(files.length).toBe(1)
+    expect(files[0]).not.toContain('/')
+    expect(files[0]).not.toContain('..')
+    // полное имя сохранено внутри артефакта — режется только путь
+    expect(JSON.parse(readFileSync(path!, 'utf8')).sessionId).toBe('../../../etc/passwd')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   test('returns null (never throws) when the directory cannot be created', () => {
     const path = writeRewriteBlockDump('/proc/nonexistent/cannot/mkdir', {
       sessionId: 's', lineageKey: 'l', rewriteClass: 'x', predictedTokens: 1,

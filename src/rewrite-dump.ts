@@ -210,7 +210,14 @@ export function writeRewriteBlockDump(
     const prefixDiff = diffPrefix(input.previousPrefix, curPrefix)
 
     const tsIso = new Date().toISOString()
-    const fname = `${tsIso.replace(/[:.]/g, '-')}-${input.sessionId.slice(0, 8)}`
+    // 🔴 Оба куска имени обеззараживаются, и sessionId — не формальность.
+    // Имя сессии приходит ЗАГОЛОВКОМ x-claude-code-session-id, то есть от
+    // чужого клиента и в любом виде: родной Claude Code шлёт UUID, а сосед на
+    // своей подложке пришлёт то, что сочтёт устойчивым. Восемь знаков вида
+    // `../../a` увели бы файл из каталога дампов. Полное имя лежит ВНУТРИ
+    // файла полем sessionId — режется только путь.
+    const sid8 = input.sessionId.slice(0, 8).replace(/[^a-zA-Z0-9-]+/g, '_') || 'anon'
+    const fname = `${tsIso.replace(/[:.]/g, '-')}-${sid8}`
       + `-${input.rewriteClass.replace(/[^a-zA-Z0-9-]+/g, '_')}.json`
     const path = join(dir, fname)
 

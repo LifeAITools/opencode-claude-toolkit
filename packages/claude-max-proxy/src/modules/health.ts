@@ -3,6 +3,7 @@
  */
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
+import { identityWindow } from '../identity-watch.js'
 import { loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 
 export interface HealthModuleOpts {
@@ -91,11 +92,20 @@ export function createHealthModule(moduleOpts: HealthModuleOpts): ProxyModule {
     {
       method: 'GET',
       path: '/health',
-      handler: async () => Response.json({
-        ok: true,
-        uptime: Math.floor(process.uptime()),
-        sessions: ctx.proxyClient.sessionCount(),
-      }),
+      handler: async () => {
+        // Пара к `sessions`: сколько настоящих запросов пришло за час и сколько
+        // из них безымянных. Без неё `sessions: 0` читается как «клиенты не
+        // называются» ровно так же, как «через прокси ничего не шло» — сутки
+        // потерянного времени у соседнего проекта и у меня (29.08.2026).
+        // Полей нет вовсе, когда слежка не подписана: «не мерили» ≠ «ноль».
+        const idw = identityWindow()
+        return Response.json({
+          ok: true,
+          uptime: Math.floor(process.uptime()),
+          sessions: ctx.proxyClient.sessionCount(),
+          ...(idw ? { reqLastHour: idw.requests, unidentifiedLastHour: idw.unidentified, windowMin: idw.windowMin } : {}),
+        })
+      },
     },
     {
       method: 'GET',

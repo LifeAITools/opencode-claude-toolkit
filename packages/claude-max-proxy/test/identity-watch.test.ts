@@ -16,7 +16,7 @@
 
 import { describe, test, expect, afterEach } from 'bun:test'
 import { bus, emit } from '../src/event-bus.js'
-import { startIdentityWatch } from '../src/identity-watch.js'
+import { startIdentityWatch, identityWindow } from '../src/identity-watch.js'
 
 let stop: (() => void) | null = null
 let seen: any[] = []
@@ -77,5 +77,48 @@ describe('прокси, который ничего не греет, зовёт 
     stop?.()
     for (let i = 0; i < 25; i++) { start(); nameless() }
     expect(seen.length).toBe(1)
+  })
+})
+
+/**
+ * 🔴 ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ БЕДЫ, И КУПЛЕНА ОНА ТЕМ ЖЕ ЧУЖИМ СЧЁТОМ (29.08.2026).
+ *
+ * Тревога выше зовёт человека, когда поток безымянный. Но владелец соседнего
+ * проекта смотрел не на тревогу, а на строку здоровья — и `sessions=0` соврал
+ * нам ОБОИМ: мы прочитали его как факт о клиенте, а он был фактом о тишине,
+ * через прокси за девять часов не прошло ни одного запроса. Число, означающее
+ * два разных состояния, разбирается только вторым числом рядом.
+ *
+ * И третье состояние важнее обоих: «не измеряли». Оно обязано выглядеть иначе,
+ * чем измеренный ноль, иначе двусмысленный ноль чинится вторым таким же.
+ */
+describe('окно наблюдения в строке здоровья', () => {
+  test('слежка не подписана — null, то есть НЕ МЕРИЛИ, а не ноль', () => {
+    expect(identityWindow()).toBeNull()
+  })
+
+  test('подписана, но запросов не было — ноль ИЗМЕРЕННЫЙ, а не отсутствие данных', () => {
+    arm()
+    const w = identityWindow()
+    expect(w).not.toBeNull()
+    expect(w!.requests).toBe(0)
+    expect(w!.unidentified).toBe(0)
+  })
+
+  test('тишина и безымянный поток различимы по паре чисел', () => {
+    arm()
+    heartbeat(0)
+    for (let i = 0; i < 25; i++) { start(); nameless() }
+    const w = identityWindow()!
+    expect(w.requests).toBe(25)
+    expect(w.unidentified).toBe(25)
+  })
+
+  test('остановка возвращает состояние в «не мерили»', () => {
+    arm()
+    start()
+    expect(identityWindow()).not.toBeNull()
+    stop!(); stop = null
+    expect(identityWindow()).toBeNull()
   })
 })

@@ -13,6 +13,7 @@
  */
 
 import type { ProxyConfig } from './config.js'
+import { identityWindow } from './identity-watch.js'
 // Minimal tracker interface — heartbeat only needs list() + size().
 // This decouples from the specific implementation (legacy SessionTracker
 // or the SDK-backed shim in server.ts).
@@ -185,11 +186,20 @@ export function startHeartbeat(
     let org: OrgTokenHealth | null = null
     try { org = getOrgHealth?.() ?? null } catch { org = null }
 
+    // Сколько настоящих запросов прошло за час и сколько из них безымянных.
+    // Без этой пары `sessions=0` двусмысленно: «клиенты не называются» и «через
+    // прокси ничего не шло» выглядят одинаково — на этом сутки потерял сосед,
+    // и я вместе с ним (29.08.2026, см. identity-watch.ts). Отсутствие полей
+    // означает «не мерили», а не «ноль».
+    const idw = identityWindow()
+
     emit({
       level: 'info',
       kind: 'HEALTH_HEARTBEAT',
       sessions: tracker.size(),
       liveKa,
+      reqLastHour: idw?.requests ?? null,
+      unidentifiedLastHour: idw?.unidentified ?? null,
       firesLastHour: fires,
       ticksLastHour: tickHistory.length,
       avgCacheRead,

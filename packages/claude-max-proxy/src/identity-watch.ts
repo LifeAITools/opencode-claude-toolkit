@@ -39,6 +39,8 @@ let starts: number[] = []
 let unidentified: number[] = []
 let armedSessions = 0
 let lastAlertAt = 0
+/** Подписана ли слежка. Ноль у неподписанной — не «тишина», а «не мерили». */
+let watching = false
 
 function prune(now: number): void {
   const cutoff = now - WINDOW_MS
@@ -52,11 +54,37 @@ export function _identityState(): { starts: number; unidentified: number; armed:
 }
 
 /**
+ * Окно наблюдения ДЛЯ СТРОКИ ЗДОРОВЬЯ — сколько настоящих запросов пришло за
+ * час и сколько из них безымянных.
+ *
+ * 🔴 ЗАЧЕМ ОТДЕЛЬНАЯ ДВЕРЬ, И ЭТО ТОЖЕ КУПЛЕНО ЧУЖИМ СЧЁТОМ (29.08.2026).
+ * `sessions=0` в строке здоровья означает ДВА РАЗНЫХ состояния: «клиенты не
+ * называются» и «через прокси вообще ничего не шло». Мы с владельцем соседнего
+ * проекта сутки читали этот ноль как факт о клиенте, а он в тот момент был
+ * фактом о тишине — у них за девять часов не прошло ни одного запроса. Число,
+ * означающее две вещи, разбирается только вторым числом рядом.
+ *
+ * Возвращает null, когда слежка не подписана: тогда полей в строке здоровья
+ * НЕ БУДЕТ ВОВСЕ — «не измеряли» обязано отличаться от «измерили ноль», иначе
+ * мы чиним один двусмысленный ноль вторым.
+ */
+export function identityWindow(): { requests: number; unidentified: number; windowMin: number } | null {
+  if (!watching) return null
+  prune(Date.now())
+  return {
+    requests: starts.length,
+    unidentified: unidentified.length,
+    windowMin: Math.round(WINDOW_MS / 60000),
+  }
+}
+
+/**
  * Подписаться на шину. Возвращает функцию остановки (тесты и выключение).
  * `onAlert` — куда звать человека; по умолчанию событие на шину, которое
  * подхватывает local-alert.
  */
 export function startIdentityWatch(): () => void {
+  watching = true
   const offStart = bus.onKind('REAL_REQUEST_START', () => {
     const now = Date.now()
     starts.push(now)
@@ -86,6 +114,7 @@ export function startIdentityWatch(): () => void {
     unidentified = []
     armedSessions = 0
     lastAlertAt = 0
+    watching = false
   }
 }
 

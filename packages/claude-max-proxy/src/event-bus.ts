@@ -316,6 +316,12 @@ export interface HealthHeartbeatEvent extends BaseEvent {
   kind: 'HEALTH_HEARTBEAT'
   sessions: number
   liveKa: number
+  /** Настоящих запросов за час и сколько из них без имени сессии. null =
+   *  слежка identity-watch не подписана, то есть НЕ МЕРИЛИ (не «ноль»).
+   *  Пара нужна затем, что `sessions: 0` в одиночку двусмысленно: молчание
+   *  клиентов и молчание вовсе выглядят одинаково. */
+  reqLastHour?: number | null
+  unidentifiedLastHour?: number | null
   firesLastHour: number
   ticksLastHour: number
   avgCacheRead: number

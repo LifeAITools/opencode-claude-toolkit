@@ -206,7 +206,22 @@ export interface KeepaliveStats {
    *  warm-up to the exact prefix family (e.g. the proxy's cache-miss
    *  predictor, so it does not mistake a KA-kept-warm prefix for expired). */
   lineageKey?: string
-  rateLimit?: { status: string | null; claim: string | null; resetAt: number | null }
+  /**
+   * Состояние лимитов, снятое с ОТВЕТА НА ЭТОТ служебный удар.
+   *
+   * 🔴 utilization5h/7d добавлены 29.08.2026: до этого сюда ехали только три
+   * первых поля, и 31 506 служебных ударов легли в журнал БЕЗ единого показания
+   * счётчика. Ночью служебный удар — единственный запрос в системе, поэтому
+   * только на нём движение счётчика не смешано с работой самого хода; без этих
+   * двух полей вопрос «тратит ли прогрев квоту» неразрешим в принципе.
+   */
+  rateLimit?: {
+    status: string | null
+    claim: string | null
+    resetAt: number | null
+    utilization5h?: number | null
+    utilization7d?: number | null
+  }
 }
 
 /** What we read from ~/.claude/.credentials.json */

@@ -2329,7 +2329,12 @@ export class ProxyClient {
               cacheReadInputTokens: stats.usage.cacheReadInputTokens ?? 0,
               cacheCreationInputTokens: stats.usage.cacheCreationInputTokens ?? 0,
             },
+            // Показания счётчика подписки, снятые с ОТВЕТА НА ЭТОТ УДАР.
+            // Ради них всё и делалось: ночью это единственный запрос в системе,
+            // поэтому только здесь движение счётчика не смешано с работой.
             rateLimit: stats.rateLimit,
+            util5h: (stats.rateLimit as { utilization5h?: number | null })?.utilization5h ?? null,
+            util7d: (stats.rateLimit as { utilization7d?: number | null })?.utilization7d ?? null,
           })
         },
         onTick: (tick) => {
@@ -2665,6 +2670,20 @@ export class ProxyClient {
     }
 
     if (!response.body) throw new Error('No response body')
+
+    // 🔴 ПОКАЗАНИЯ СЧЁТЧИКА ПОДПИСКИ СНИМАЮТСЯ И НА УСПЕХЕ, А НЕ ТОЛЬКО НА 429.
+    //
+    // Замер 29.08.2026: из 31 506 служебных ударов в журнале НИ ОДИН не нёс
+    // util5h/util7d — заголовки разбирались только в ветке отказа выше. А
+    // именно эти удары и есть единственные запросы, идущие НОЧЬЮ, когда никто
+    // не работает: каждый из них приносил ответ на вопрос «тратит ли прогрев
+    // квоту», и мы его выбрасывали. Без этого вопрос неразрешим в принципе —
+    // счётчик виден только на настоящих ходах, то есть всякое ночное окно
+    // измеряется через своих соседей и уплывает вместе со скользящим окном
+    // недели.
+    //
+    // Заголовки уже в руках, тело не трогается: цена — разбор пяти полей.
+    try { this.lastRateLimit = parseRateLimitHeaders(response.headers) } catch { /* учёт не должен ронять прогрев */ }
 
     // Parse SSE and yield StreamEvents (only what engine cares about)
     yield* parseSSEToEvents(response.body, signal)

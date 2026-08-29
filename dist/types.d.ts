@@ -113,6 +113,8 @@ export interface KeepaliveStats {
         status: string | null;
         claim: string | null;
         resetAt: number | null;
+        utilization5h?: number | null;
+        utilization7d?: number | null;
     };
 }
 export interface CredentialsFile {

@@ -98,6 +98,39 @@ describe('unidentified request (idSource:none)', () => {
     expect(start?.idSource).toBe('none')
     expect(events.some(e => e.kind === 'REQUEST_UNIDENTIFIED')).toBe(true)
   })
+
+  /**
+   * 🔴 Тревога обязана называть НЕ ТОЛЬКО беду, но и того, с кем она случилась
+   * (29.08.2026, куплено чужим временем). Владелец соседнего проекта неделями
+   * искал, почему у него ничего не греется. Событие писалось всё это время —
+   * и не говорило, ЧЕЙ клиент безымянный, так что по журналу нельзя было ни
+   * найти виновника, ни доказать, что он один. Имя клиента лежит в заголовке
+   * и достаётся без разбора тела.
+   */
+  test('называет, ЧЕЙ клиент пришёл безымянным', async () => {
+    const events: ProxyEvent[] = []
+    const c = mkClient(events)
+    // 🔴 Заголовки НАРОЧНО несут нашу подстановку claude-cli/…, а настоящее имя
+    // приезжает доводом: именно так это выглядит на живом пути, и именно на
+    // этом я ошибся, читая имя из заголовков (29.08.2026).
+    await c.handleRequest(
+      body(),
+      { 'user-agent': 'claude-cli/2.1.177' },
+      { sessionId: 'anon-ua', idSource: 'none', clientUserAgent: 'kiberos-agent/1.0' },
+    )
+    c.stop()
+    const e: any = events.find(x => x.kind === 'REQUEST_UNIDENTIFIED')
+    expect(e?.userAgent).toBe('kiberos-agent/1.0')
+  })
+
+  test('клиент не представился вовсе — поле null, а не выдуманное имя', async () => {
+    const events: ProxyEvent[] = []
+    const c = mkClient(events)
+    await c.handleRequest(body(), { 'user-agent': 'claude-cli/2.1.177' }, { sessionId: 'anon-noua', idSource: 'none' })
+    c.stop()
+    const e: any = events.find(x => x.kind === 'REQUEST_UNIDENTIFIED')
+    expect(e?.userAgent).toBeNull()
+  })
 })
 
 describe('identified request — the control', () => {

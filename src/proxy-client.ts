@@ -382,6 +382,20 @@ export interface HandleRequestContext {
   signal?: AbortSignal
 
   /**
+   * WHO called, as the caller named itself — the `user-agent` of the INCOMING
+   * request, taken before anything of ours touches it.
+   *
+   * 🔴 ЗАЧЕМ ОТДЕЛЬНОЕ ПОЛЕ, А НЕ `headers['user-agent']` НА МЕСТЕ ЗАПИСИ
+   * (замерено 29.08.2026, я привёз эту ошибку и поймал её живой проверкой):
+   * к `handleRequest` приезжают уже ПЕРЕПИСАННЫЕ заголовки — для чужого
+   * клиента прокси подставляет туда `claude-cli/…`, чтобы подписка приняла
+   * запрос. Прочитанное там имя ВСЕГДА наше собственное, одинаковое для всех
+   * звонящих, и в журнале выглядит как ответ, не будучи им. Настоящее имя
+   * живёт только до обогащения, поэтому и передаётся сюда доводом.
+   */
+  clientUserAgent?: string | null
+
+  /**
    * Whether this request comes from an INTERACTIVE human (native Claude Code),
    * as opposed to a programmatic endpoint client (OpenAI-compat /v1/chat/
    * completions, or an external Anthropic-API consumer). The rewrite guard is a
@@ -1876,6 +1890,15 @@ export class ProxyClient {
         sessionId,
         model,
         bodyBytes,
+        // 🔴 КТО пришёл — без этого тревога называет беду, но не адресата
+        // (29.08.2026). Владелец соседнего проекта неделями искал, почему у
+        // него ничего не греется; событие всё это время писалось, но не
+        // говорило, чей клиент безымянный, поэтому по журналу нельзя было ни
+        // найти виновника, ни доказать, что он один. Заголовки здесь уже под
+        // рукой — тело для этого не разбирается. Берётся ДО обогащения (см.
+        // HandleRequestContext.clientUserAgent): в заголовках на этом месте
+        // уже стоит наша подстановка, а не имя звонящего.
+        userAgent: ctx.clientUserAgent ?? null,
         msg: 'no x-claude-code-session-id header and no session id in metadata.user_id — '
           + 'request forwarded, keepalive NOT armed (a one-shot id can never be matched again)',
       })

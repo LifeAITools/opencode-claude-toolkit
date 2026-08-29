@@ -107,6 +107,10 @@ export function createAnthropicModule(): ProxyModule {
           sessionId,
           sourcePid,
           idSource,
+          // Имя звонящего берётся ИЗ ИСХОДНЫХ заголовков: в forwardHeaders для
+          // чужого клиента уже стоит наша подстановка claude-cli/…, и запись
+          // оттуда назвала бы всех одинаково.
+          clientUserAgent: headers['user-agent'] ?? null,
           signal: req.signal,
           // Native Claude Code = interactive human (can see a 400 + re-send with
           // marker). Any other Anthropic-API consumer is programmatic → the

@@ -37,6 +37,17 @@ describe('память в строке здоровья', () => {
     if (process.platform === 'linux') expect(m.peakSource).toBe('kernel')
   })
 
+  /**
+   * 🔴 СРАВНИВАЕМ ПИК С ЗАНЯТЫМ, А НЕ ПИК С ПИКОМ — и это не придирка к стилю
+   * (29.08.2026). Прежняя редакция требовала, чтобы пик поднялся на 100 МБ ВЫШЕ
+   * ПРЕЖНЕГО ПИКА. Но пик копится за всё время процесса: когда весь набор тестов
+   * бежит одним процессом, к этому месту он УЖЕ поднят чужими тестами, и свежий
+   * всплеск в 160 МБ ложится внутрь него, ничего не подняв. Тест падал (426 при
+   * ожидаемых 427) от ПОРЯДКА тестов, а не от поломки памяти: в одиночку он был
+   * зелёным всегда. Проверять надо то, ради чего он написан — что пик ПОМНИТ
+   * отпущенный всплеск, — а это свойство про занятое, и оно от порядка не
+   * зависит.
+   */
   test('пик ПОМНИТ всплеск, который к следующему замеру уже отпущен', () => {
     const before = sampleMemory()
     // Взять и отпустить заметный кусок: к моменту второго замера занятое
@@ -45,8 +56,13 @@ describe('память в строке здоровья', () => {
     hog.fill(7)
     const atPeak = sampleMemory()
     hog = null
-    expect(atPeak.peakRssMb).toBeGreaterThanOrEqual(before.peakRssMb + 100)
+    // Всплеск действительно случился — занятое выросло на заметную величину.
+    expect(atPeak.rssMb).toBeGreaterThanOrEqual(before.rssMb + 100)
+    // И пик его накрыл.
+    expect(atPeak.peakRssMb).toBeGreaterThanOrEqual(atPeak.rssMb)
     const after = sampleMemory()
+    // Главное: кусок отпущен, а пик по-прежнему помнит, каким было занятое.
+    expect(after.peakRssMb).toBeGreaterThanOrEqual(atPeak.rssMb)
     expect(after.peakRssMb).toBeGreaterThanOrEqual(atPeak.peakRssMb)
   })
 })

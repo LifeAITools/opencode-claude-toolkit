@@ -112,7 +112,13 @@ export interface ResolvedKeepaliveConfig {
   /** Whether keepalive is enabled at all. */
   readonly enabled: boolean
 
-  /** Idle timeout — stop KA if no real request for this long. 0 / Infinity = never stop. */
+  /** Idle timeout — stop KA if no real request for this long.
+   *
+   *  🔴 УМОЛЧАНИЕ ЗДЕСЬ Infinity, НО ЭТО НЕ ЗНАЧИТ «ГРЕТЬ ВЕЧНО»: при Infinity
+   *  движок подставляет предел окупаемости (KA_PAYOFF_FIRES × интервал, см.
+   *  keepalive-engine). Явное число — уважается как есть; явный null тоже
+   *  доходит до движка как Infinity и там превращается в тот же предел.
+   *  Чтобы греть ДЕЙСТВИТЕЛЬНО вечно, задайте заведомо большое число секунд. */
   readonly idleTimeoutMs: number
 
   /** Minimum input tokens for a request to register a snapshot. Default: 2000. */

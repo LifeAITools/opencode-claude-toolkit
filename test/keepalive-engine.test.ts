@@ -9,6 +9,7 @@
  */
 
 import { describe, test, expect } from 'bun:test'
+import { writeFileSync, readFileSync } from 'fs'
 import { KeepaliveEngine } from '../src/keepalive-engine.js'
 import { EvictionCircuitBreaker } from '../src/eviction-breaker.js'
 import { CacheRewriteBlockedError } from '../src/types.js'
@@ -1799,5 +1800,75 @@ describe('KeepaliveEngine: multi-lineage keepalive', () => {
 
     expect(fired).toEqual([lkIdle])   // active lineage skipped, idle one fired
     e.stop()
+  })
+})
+
+// ─── Предел простоя: только явно заданный ────────────────────────
+
+/**
+ * 🔴 ЧТО ЗДЕСЬ БЫЛО И ПОЧЕМУ СНЯТО (29.08.2026). Я выкатил сюда умолчание
+ * «отпускать разговор после 12.5 × интервал простоя», выведя 12.5 из отношения
+ * цен API: запись кэша 1.25, чтение 0.1. Фаундер поправил в тот же час: у нас
+ * ПОДПИСКА, а не API, и чтение кэша по ней НЕ ТАРИФИЦИРУЕТСЯ — значит основание
+ * порога было ложным целиком. Порог снят, рельс проекта записан.
+ *
+ * Осталось то, что верно независимо от цен: механизм работает для того, кто
+ * задал своё число, и задавать его надо В ФАЙЛЕ НАСТРОЕК, а не в конструкторе —
+ * каждый тик перечитывает файл и перезаписывает им поля движка.
+ */
+describe('KeepaliveEngine: предел простоя', () => {
+  const INTERVAL = 60_000
+
+  test('без явной настройки прогрев НЕ прекращается по простою', async () => {
+    const e = mkEngine({ intervalMs: INTERVAL, minTokens: 100 })
+    e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'x' }] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 50_000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now())
+    e._setLastRealActivityAt(Date.now() - 20 * 60 * 60 * 1000)  // сутки без работы
+    await e._tick()
+    expect(e._registry.size).toBeGreaterThan(0)
+    e.stop()
+  })
+
+  test('предел, заданный в файле настроек, соблюдается', async () => {
+    const path = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH!
+    const original = readFileSync(path, 'utf8')
+    const cfg = JSON.parse(original)
+    writeFileSync(path, JSON.stringify({ ...cfg, idleTimeoutSec: 600 }))
+    try {
+      const e = mkEngine({ intervalMs: INTERVAL, minTokens: 100 })
+      e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'x' }] }, {})
+      e.notifyRealRequestComplete({ inputTokens: 50_000, outputTokens: 1 })
+      e._setCacheWrittenAt(Date.now())
+      e._setLastRealActivityAt(Date.now() - 900_000)   // 15 минут > 10
+      await e._tick()
+      expect(e._registry.size).toBe(0)
+      e.stop()
+    } finally {
+      writeFileSync(path, original)
+    }
+  })
+
+  test('о снятии узнаёт журнал, а не только отладочный файл', async () => {
+    const path = process.env.CLAUDE_KEEPALIVE_CONFIG_PATH!
+    const original = readFileSync(path, 'utf8')
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(original), idleTimeoutSec: 600 }))
+    try {
+      let disarm: { reason: string } | null = null
+      const e = mkEngine({
+        intervalMs: INTERVAL, minTokens: 100,
+        onDisarmed: (info: { reason: string }) => { disarm = info },
+      })
+      e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'x' }] }, {})
+      e.notifyRealRequestComplete({ inputTokens: 50_000, outputTokens: 1 })
+      e._setCacheWrittenAt(Date.now())
+      e._setLastRealActivityAt(Date.now() - 900_000)
+      await e._tick()
+      expect(disarm).not.toBeNull()
+      expect(disarm!.reason).toBe('idle_timeout')
+      e.stop()
+    } finally {
+      writeFileSync(path, original)
+    }
   })
 })

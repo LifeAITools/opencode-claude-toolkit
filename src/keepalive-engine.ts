@@ -1527,11 +1527,21 @@ export class KeepaliveEngine {
     }
 
     // Idle timeout
+    //
+    // 🔴 УМОЛЧАНИЕ ЗДЕСЬ «НИКОГДА», И ЭТО НЕ НЕДОСМОТР — ОТКАЧЕНО 29.08.2026.
+    // В тот день я выкатил сюда умолчание «отпускать разговор после
+    // 12.5 × интервал простоя», выведя число из ОТНОШЕНИЯ ЦЕН API
+    // (запись 1.25 / чтение 0.1). Фаундер поправил в тот же час: у нас
+    // ПОДПИСКА, а не API, и чтение кэша по ней НЕ ТАРИФИЦИРУЕТСЯ. Значит
+    // основание порога было ложным целиком, и порог снят вместе с ним.
+    // Правило записано рельсом проекта, см. ka-subscription-not-api.
+    // Механизм остаётся рабочим для того, кто ЗАДАЛ своё число явно.
     const realIdle = Date.now() - this.lastRealActivityAt
     if (this.config.idleTimeoutMs !== Infinity && realIdle > this.config.idleTimeoutMs) {
       this.logClearDiag('idle_timeout', { realIdleMs: realIdle, idleTimeoutMs: this.config.idleTimeoutMs })
       this.clearRegistry()
       this.stop()
+      try { this.config.onDisarmed?.({ reason: 'idle_timeout', at: Date.now() }) } catch {}
       return
     }
 

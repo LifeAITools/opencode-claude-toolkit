@@ -105,6 +105,10 @@ import { createHash } from 'crypto'
 import { homedir } from 'os'
 import { join } from 'path'
 import { emit, bus } from './event-bus.js'
+
+/** Хранилище аккаунтов: оттуда берётся ТОЛЬКО человеческое имя аккаунта
+ *  (почта + организация). Токены в этом файле не читаются. */
+const ORG_VAULT_JSON = join(homedir(), '.claude-local', 'org-vault.json')
 import {
   CLAUDE_LOCAL,
   STATS_JSONL,
@@ -174,6 +178,13 @@ interface PidState {
 
 interface AccountState {
   accountHint: string
+  /** Почта аккаунта и название его организации — как их называет человек.
+   *  Переносятся из хранилища аккаунтов (там они захватываются при входе), а не
+   *  из конфигурации входа этой машины: та описывает ОДИН аккаунт, поэтому у
+   *  остальных имя оставалось неизвестным и голый номер читался как поломка
+   *  (вопрос фаундера 03.09.2026). Отсутствуют, когда аккаунта нет в хранилище. */
+  accountEmail?: string
+  orgName?: string
   util5h: number | null
   util7d: number | null
   resetAt: number | null
@@ -681,6 +692,51 @@ function inferAccountHint(
   return createHash('sha256').update(bucket).digest('hex').slice(0, 12)
 }
 
+/**
+ * Человеческое имя аккаунта по его номеру: почта и название организации,
+ * захваченные при входе и лежащие в хранилище аккаунтов.
+ *
+ * Читается с кэшем по времени правки файла: сборка состояния зовётся на каждом
+ * событии, а хранилище меняется только на входе или обновлении токена. Из файла
+ * берутся ТОЛЬКО два поля — токены не читаются, не логируются и не попадают
+ * никуда дальше этой функции.
+ *
+ * Отсутствие остаётся отсутствием: нет записи — нет полей, и потребитель сам
+ * решит, что показать вместо имени. Выдуманное имя было бы хуже номера.
+ */
+function lookupAccountIdentity(accountHint: string): { email?: string; orgName?: string } {
+  try {
+    const st = statSync(ORG_VAULT_JSON)
+    if (st.mtimeMs !== vaultCacheMtime) {
+      vaultCacheMtime = st.mtimeMs
+      vaultCache = new Map()
+      const raw = JSON.parse(readFileSync(ORG_VAULT_JSON, 'utf8')) as {
+        orgs?: Record<string, { accountEmail?: string; orgName?: string }>
+      }
+      for (const [orgId, entry] of Object.entries(raw.orgs ?? {})) {
+        if (!entry || typeof entry !== 'object') continue
+        vaultCache.set(orgId, {
+          ...(typeof entry.accountEmail === 'string' ? { email: entry.accountEmail } : {}),
+          ...(typeof entry.orgName === 'string' ? { orgName: entry.orgName } : {}),
+        })
+      }
+    }
+  } catch {
+    // Хранилища нет или оно нечитаемо — это не повод ронять учёт квоты.
+    return {}
+  }
+  // accountHint — это orgId целиком либо его начало (историческая форма).
+  const exact = vaultCache.get(accountHint)
+  if (exact) return exact
+  for (const [orgId, v] of vaultCache) {
+    if (orgId.startsWith(accountHint)) return v
+  }
+  return {}
+}
+
+let vaultCacheMtime = -1
+let vaultCache = new Map<string, { email?: string; orgName?: string }>()
+
 function recomputeAccountFromPids(accountHint: string): void {
   // Aggregate: max util5h, max util7d, latest resetAt, pids list
   let util5h: number | null = null
@@ -750,8 +806,27 @@ function recomputeAccountFromPids(accountHint: string): void {
       ? prev.issuedAt
       : new Date().toISOString()
 
+  const known = lookupAccountIdentity(accountHint)
+
   accountStates.set(accountHint, {
     accountHint,
+    // 🔴 ЧЕЛОВЕЧЕСКОЕ ИМЯ АККАУНТА, А НЕ ОДИН ЛИШЬ ЕГО НОМЕР.
+    //
+    // Случай 03.09.2026: фаундер увидел в подвале письма агента голый
+    // `02b4bfd1` и спросил, почему не указан адрес почты. Владелец
+    // telegram-surface показывает почту, как только она приезжает, — она просто
+    // не приезжала: он читал её из конфигурации входа Claude Code, а та
+    // описывает ОДИН аккаунт, под которым машина залогинена сейчас. Для
+    // остальных трёх честно печаталось «неизвестно», и это читалось как
+    // поломка.
+    //
+    // Между тем почта КАЖДОГО аккаунта у нас уже есть: она захватывается при
+    // входе и лежит в хранилище (org-vault.json, поля accountEmail/orgName).
+    // Здесь мы её просто переносим в файл квоты, чтобы всякий потребитель
+    // называл аккаунт так, как его называет человек. Токены из хранилища НЕ
+    // читаются и никуда не попадают.
+    ...(known.email ? { accountEmail: known.email } : {}),
+    ...(known.orgName ? { orgName: known.orgName } : {}),
     util5h,
     util7d,
     resetAt,

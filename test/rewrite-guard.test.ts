@@ -1064,6 +1064,13 @@ describe('rewrite guard — ход субагента', () => {
     const j = await r.json() as { error?: { message?: string } }
     expect(j.error?.message).toContain('plan-validator-profile')
     expect(j.error?.message).toContain('PARENT')
+    // 🔴 И ГЛАВНОЕ, НА ЧЁМ СОСЕД ОБЖЁГСЯ ЧЕРЕЗ ЧАС ПОСЛЕ ПЕРВОЙ ПРАВКИ: он
+    // прочитал «согласие выдаёт родитель» как «родитель выдаёт НА СВОЙ номер»
+    // и выдал его себе. Для прокси субагент — ПОЛНОЦЕННАЯ ОТДЕЛЬНАЯ СЕССИЯ
+    // (у погибшего было 890 записей под своим номером, включая свой подогрев),
+    // и согласие из чужой корзины не перетекает. Отказ обязан это сказать.
+    expect(j.error?.message).toContain('rg-sub-1')
+    expect(j.error?.message).toContain('does NOTHING')
     c.stop()
   })
 

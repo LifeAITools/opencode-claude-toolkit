@@ -1878,7 +1878,9 @@ export class ProxyClient {
                 // знания о нём нет (02.09.2026, потерянный проверщик соседа).
                 + (ctx.agentId
                   ? `NOTE: this turn belongs to sub-agent "${ctx.agentId}", which has no human to read this. `
-                    + `Its PARENT grants on its behalf with the command above and re-runs it. `
+                    + `Its PARENT must grant, and the command above ALREADY carries this sub-agent's OWN `
+                    + `session id (${sessionId}) — a grant on the parent's own id does NOTHING here: to the `
+                    + `proxy a sub-agent is a FULL SEPARATE SESSION with its own bucket. `
                   : '')
                 + `(Disable: keepalive.json → rewriteGuard.enabled=false.)`,
             },

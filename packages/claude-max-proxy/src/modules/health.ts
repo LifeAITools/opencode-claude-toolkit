@@ -18,6 +18,23 @@ export interface HealthModuleOpts {
 let ctx: ModuleContext
 let opts: HealthModuleOpts
 
+/**
+ * Порог, выше которого ответ /stats попадает в журнал. Норма — доли
+ * миллисекунды; полсекунды это чужой срок ожидания, поэтому 50 мс ловит
+ * деградацию с десятикратным запасом до того, как её увидит звонящий.
+ * Переопределяется переменной окружения (0 = писать каждое обращение).
+ */
+function statsSlowThresholdMs(): number {
+  // Читается НА КАЖДОМ обращении, а не один раз при загрузке: жалоба на редкий
+  // случай приходит к РАБОТАЮЩЕЙ службе, и понизить порог надо тогда же —
+  // иначе ловля начинается с перезапуска, то есть с потери того состояния, в
+  // котором случай и происходил.
+  const raw = process.env.CLAUDE_MAX_STATS_SLOW_MS
+  if (raw === undefined || raw === '') return 50
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : 50
+}
+
 function statsJson() {
   const tracker = { size: () => ctx.proxyClient.sessionCount(), list: () => ctx.proxyClient.listSessions() }
   return {
@@ -120,7 +137,46 @@ export function createHealthModule(moduleOpts: HealthModuleOpts): ProxyModule {
     {
       method: 'GET',
       path: '/stats',
-      handler: async () => Response.json(statsJson(), { headers: { 'Cache-Control': 'no-store' } }),
+      handler: async () => {
+        // 🔴 МЕДЛЕННЫЙ ОТВЕТ ЭТОЙ ДВЕРИ ДОЛЖЕН БЫТЬ ВИДЕН С МОЕЙ СТОРОНЫ, А НЕ
+        // ТОЛЬКО СО СТОРОНЫ ЗВОНЯЩЕГО.
+        //
+        // Случай 02.09.2026: владелец lat-context принёс расхождение — его
+        // читатель дважды за секунды получил разные ответы, и один раз счётчик
+        // «не прочитался: истёк срок ожидания» (его предел — полсекунды). Своей
+        // половины у меня НЕ БЫЛО ВОВСЕ: обращения сюда нигде не записывались,
+        // поэтому я не мог сказать даже того, дошёл ли запрос. Замер после
+        // случая: 0.25–0.84 мс на 45 сессиях, то есть в 600 раз быстрее его
+        // предела — значит вопрос «что там было» остался без ответа с обеих
+        // сторон сразу.
+        //
+        // Пишем НЕ каждое обращение (обходы ходят пачками и утопили бы журнал),
+        // а только превышение порога: рост с долей миллисекунды до десятков
+        // виден задолго до того, как станет чужим срывом ожидания. Ответ этой
+        // двери растёт вместе с числом сессий (19 КБ на 45), так что деградация
+        // ожидается именно от роста флота.
+        const t0 = performance.now()
+        const body = statsJson()
+        const text = JSON.stringify(body)
+        const ms = performance.now() - t0
+        const thresholdMs = statsSlowThresholdMs()
+        if (ms >= thresholdMs) {
+          ctx.emit({
+            level: 'info',
+            kind: 'STATS_SLOW',
+            sessionId: null,
+            durationMs: Math.round(ms * 100) / 100,
+            sessions: ctx.proxyClient.sessionCount(),
+            bytes: text.length,
+            thresholdMs,
+            msg: `/stats took ${ms.toFixed(1)}ms (threshold ${thresholdMs}ms) at `
+              + `${ctx.proxyClient.sessionCount()} sessions, ${text.length} bytes`,
+          })
+        }
+        return new Response(text, {
+          headers: { 'content-type': 'application/json', 'Cache-Control': 'no-store' },
+        })
+      },
     },
   ]
 

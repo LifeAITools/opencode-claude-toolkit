@@ -2151,12 +2151,28 @@ export class ProxyClient {
       })
 
       if (upstream.status === 429) {
+        // 🔴 ОТКАЗ БЕЗ ИМЕНИ АККАУНТА НЕ ОТВЕЧАЕТ НА ЕДИНСТВЕННЫЙ ВОПРОС, КОТОРЫЙ ЗАДАЮТ.
+        //
+        // Замер 02.09.2026: 105 отказов в журнале за двое суток, и ни один не нёс
+        // ни имени аккаунта, ни его доли — а спрашивают всегда одно: «чей запас
+        // кончился и был ли рядом свободный». В тот день 447 сессий сидели на
+        // аккаунте с долей 0.99, пока соседний стоял на 0.27, и доказать это по
+        // журналу было НЕЛЬЗЯ: пришлось сверять снимок квоты со стороны.
+        //
+        // Доля берётся из `reqRateLimit` — снимка ЗАГОЛОВКОВ ЭТОГО ответа, а не из
+        // общего `this.lastRateLimit`: последний перезаписывается параллельным
+        // запросом ДРУГОГО аккаунта, и отказ получил бы чужую долю под своим
+        // именем (та же гонка, что описана у reqRateLimit выше).
         this.events.emit({
           level: 'error',
           kind: 'UPSTREAM_RATE_LIMITED',
           sessionId,
-          resetAt: this.lastRateLimit.resetAt,
-          retryAfterSec: this.lastRateLimit.retryAfter,
+          org: this.resolveServedOrg(sessionId),
+          util5h: reqRateLimit.utilization5h,
+          util7d: reqRateLimit.utilization7d,
+          resetAt: reqRateLimit.resetAt,
+          resetAt7d: reqRateLimit.resetAt7d ?? null,
+          retryAfterSec: reqRateLimit.retryAfter,
           requestKind: 'real',
           status: 429,
         })
@@ -2447,7 +2463,7 @@ export class ProxyClient {
         const servedOrg = this.resolveServedOrg(sessionId)
         return servedOrg ? this.handleOrg401(servedOrg, failedToken) : Promise.resolve()
       },
-      doFetch: (body, headers, signal) => this.engineDoFetch(body, headers, signal),
+      doFetch: (body, headers, signal) => this.engineDoFetch(body, headers, signal, sessionId),
       getRateLimitInfo: () => this.lastRateLimit,
       isOwnerAlive: () => this.store.isOwnerAlive(sessionId),
     })
@@ -2666,6 +2682,11 @@ export class ProxyClient {
     body: Record<string, unknown>,
     headers: Record<string, string>,
     signal?: AbortSignal,
+    // Whose keepalive this is. Passed from the engine wiring (the `doFetch`
+    // closure already holds it) so a 429 on the KA path can name the session
+    // AND its account — without it the event carried `sessionId: null` and the
+    // busiest source of 429s in the log was unattributable to any account.
+    sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     const bodyStr = JSON.stringify(body)
     const response = await this.upstream.fetch(
@@ -2694,8 +2715,12 @@ export class ProxyClient {
         this.events.emit({
           level: 'error',
           kind: 'UPSTREAM_RATE_LIMITED',
-          sessionId: null,
+          sessionId: sessionId ?? null,
+          org: sessionId ? this.resolveServedOrg(sessionId) : null,
+          util5h: rl.utilization5h,
+          util7d: rl.utilization7d,
           resetAt: rl.resetAt,
+          resetAt7d: rl.resetAt7d ?? null,
           retryAfterSec: rl.retryAfter,
           requestKind: 'ka',
           status: 429,

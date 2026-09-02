@@ -474,7 +474,19 @@ function printDoctor(d: DocReport): void {
   line('~/.local/bin in PATH', d.binInPath, d.binInPath ? 'ok' : 'warn')
   line(`${d.service} unit installed`, d.serviceInstalled, d.serviceInstalled ? 'ok' : 'warn')
   line(`${d.service} unit active`, d.serviceActive, d.serviceActive ? 'ok' : 'warn')
-  line('OAuth credentials', d.credsPresent, d.credsPresent ? 'ok' : 'err')
+  // 🔴 ОТСУТСТВИЕ ВХОДА — НЕ ПОЛОМКА, А НЕСДЕЛАННЫЙ ПЕРВЫЙ ШАГ, И ЧЕЛОВЕКУ НАДО
+  // СКАЗАТЬ, КАКОЙ. Здесь стоял красный крестик и больше ничего: чужой человек,
+  // поставивший claude-max по публичной ссылке, видел «✗ OAuth credentials» и
+  // не знал ни что сломалось, ни куда идти — а не сломалось ничего, он просто
+  // ещё ни разу не запускал Claude Code. Машинный отчёт (`--json`) поле
+  // needsLogin отдавал всегда; человеку не доставалось ничего (02.09.2026,
+  // повод — вопрос агента маркетинга «что человеку нужно иметь заранее»).
+  line('OAuth credentials', d.credsPresent, d.credsPresent ? 'ok' : 'warn')
+  if (!d.credsPresent) {
+    console.log(`  ${c(C.dim, '  → это первый шаг, а не ошибка: запустите')} ${c(C.cyan, 'claude-max')}`)
+    console.log(`  ${c(C.dim, '    Claude Code откроет вход в браузере — нужна подписка Claude,')}`)
+    console.log(`  ${c(C.dim, '    ключ API не требуется.')}`)
+  }
   const whereSuffix = d.endpoint ? ` @ ${d.endpoint}${d.fromDiscovery ? ' (discovered)' : ' (default)'}` : ''
   line(`proxy alive${whereSuffix}`, d.proxyAlive, d.proxyAlive ? 'ok' : 'warn')
   // Show discovery file path for transparency

@@ -1906,7 +1906,12 @@ export class ProxyClient {
     // nothing got through in between.
     session.rewriteBlockStreak = null
 
-    this.events.emit({ level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes, idSource })
+    // agentId на КАЖДОМ ходу, а не только на отказе: родителю нужен номер
+    // сессии субагента, ПОКА ТОТ ЖИВ, — иначе рецепт спасения начинается со
+    // смерти. В расписке запуска субагент значится ИМЕНЕМ, своего номера там
+    // нет; связать имя с номером можно только здесь (02.09.2026, вопрос
+    // владельца anywhisper: «где родителю взять номер, пока тот жив»).
+    this.events.emit({ level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes, idSource, agentId: ctx.agentId ?? null })
     if (unidentified) {
       // Serve it — do not warm it. Skipping notifyRealRequestStart is what
       // makes this airtight rather than cosmetic: no pending snapshot is

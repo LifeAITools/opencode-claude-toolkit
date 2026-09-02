@@ -1085,6 +1085,20 @@ describe('rewrite guard — ход субагента', () => {
 
   /** Сам факт «это был субагент» обязан попасть в журнал — иначе такие смерти
    *  невозможно даже ПОСЧИТАТЬ, что и обнаружилось при разборе жалобы. */
+  /** Родителю номер нужен, ПОКА субагент жив, — значит имя обязано стоять на
+   *  каждом ходу, а не только на отказе. Иначе рецепт спасения начинается со
+   *  смерти того, кого спасают. */
+  test('имя субагента стоит на КАЖДОМ ходу, а не только на отказе', async () => {
+    const events: any[] = []
+    const c = mkClient({ eventEmitter: { emit: (e: never) => { events.push(e) } } })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'rg-sub-live', agentId: 'checker-live' })
+    c.stop()
+    const start = events.find(e => e.kind === 'REAL_REQUEST_START')
+    expect(start?.agentId).toBe('checker-live')
+    // и обычный ход не обзаводится выдуманным именем
+    expect(events.filter(e => e.kind === 'REAL_REQUEST_START' && e.agentId === undefined)).toHaveLength(0)
+  })
+
   test('в журнал попадает, чей это был ход', async () => {
     const events: any[] = []
     const c = mkClient({ eventEmitter: { emit: (e: never) => { events.push(e) } } })

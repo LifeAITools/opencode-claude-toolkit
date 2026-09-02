@@ -39,6 +39,7 @@ export interface HandleRequestContext {
     sessionId: string;
     sourcePid?: number | null;
     signal?: AbortSignal;
+    agentId?: string | null;
     clientUserAgent?: string | null;
     interactive?: boolean;
     idSource?: "header" | "body" | "none";

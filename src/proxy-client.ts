@@ -382,6 +382,23 @@ export interface HandleRequestContext {
   signal?: AbortSignal
 
   /**
+   * Имя СУБАГЕНТА, если ход принадлежит ему (`x-claude-code-agent-id`).
+   *
+   * 🔴 ЗАЧЕМ, И ЭТО КУПЛЕНО ЧУЖИМ СЧЁТОМ (02.09.2026). Сторож перезаписи
+   * останавливает ход и говорит человеку, что набрать, чтобы продолжить. У
+   * субагента человека НЕТ ВООБЩЕ: его отказ никто не видит, а перезапуск
+   * родителя не спасает уже погибшую работу. Путь спасения при этом
+   * СУЩЕСТВУЕТ — согласие за субагента выдаёт его родитель, — но об этом
+   * никто не знал, потому что отказ об этом не говорил. У соседнего проекта
+   * так погиб проверщик целиком: три прочитанных документа и несостоявшийся
+   * отчёт.
+   *
+   * Заголовок доезжает сюда доводом, а не читается из `headers`: там к этому
+   * месту уже стоит наша подстановка (см. clientUserAgent).
+   */
+  agentId?: string | null
+
+  /**
    * WHO called, as the caller named itself — the `user-agent` of the INCOMING
    * request, taken before anything of ours touches it.
    *
@@ -1809,6 +1826,9 @@ export class ProxyClient {
             // never has to parse prose or re-derive it from the class name.
             spendKind: isFirstWrite ? 'first-write' : 'rewrite',
             predictedTokens: rewriteAssessment.predictedTokens,
+            // Чей это ход — субагента или самой сессии. Без этого поля нельзя
+            // было даже ПОСЧИТАТЬ, сколько отказов убивает субагентов.
+            agentId: ctx.agentId ?? null,
             consecutiveBlocks: streak,
             continuation: lastMsg.isContinuation,
             dumpPath,
@@ -1852,6 +1872,14 @@ export class ProxyClient {
                 + `context cache-rewrite-ok ${sessionId} --until-consumed. Consent is single-use `
                 + `(--until-consumed waits for this session's next turn instead of a 180s clock — `
                 + `the form that survives you typing it). `
+                // Субагенту адресовать «наберите команду» бессмысленно: у него
+                // нет человека. Но и тупика нет — согласие за него выдаёт тот,
+                // кто его запустил. Об этом надо СКАЗАТЬ, иначе путь есть, а
+                // знания о нём нет (02.09.2026, потерянный проверщик соседа).
+                + (ctx.agentId
+                  ? `NOTE: this turn belongs to sub-agent "${ctx.agentId}", which has no human to read this. `
+                    + `Its PARENT grants on its behalf with the command above and re-runs it. `
+                  : '')
                 + `(Disable: keepalive.json → rewriteGuard.enabled=false.)`,
             },
           })

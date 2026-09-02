@@ -1027,3 +1027,63 @@ describe('proxy — a block that names the cheaper way out', () => {
     expect(block).toContain('signals?.orgChanged')             // only for an account change
   })
 })
+
+// ─── Ход субагента: отказ обязан назвать, КТО за него даёт согласие ──────
+
+/**
+ * 🔴 ЧЕМ КУПЛЕНО (02.09.2026, чужим счётом). Владелец соседнего проекта принёс
+ * замер: за день сторож убил у него две сессии, и одна из них была ПРОВЕРЩИКОМ-
+ * СУБАГЕНТОМ — погибла работа целиком, три прочитанных документа и
+ * несостоявшийся отчёт. Его вывод: «пути самоспасения изнутри нет, совет
+ * grant consent неисполним — сессия мертва».
+ *
+ * Путь на самом деле ЕСТЬ: согласие за субагента выдаёт тот, кто его запустил.
+ * Но отказ об этом молчал, поэтому знания о пути не было ни у кого — а сам
+ * субагент читать отказ не может по устройству: человека у него нет.
+ *
+ * Здесь проверяется, что отказ теперь НАЗЫВАЕТ субагента и адресует согласие
+ * его родителю. Что именно блокируется — не меняется ни на волос.
+ */
+describe('rewrite guard — ход субагента', () => {
+  // Тот же «тяжёлый холодный» ход, что и выше: он гарантированно упирается в
+  // порог, а нас интересует только ТЕКСТ отказа, а не его причина.
+  const heavy = () => JSON.stringify({
+    model: 'claude-opus-4-8',
+    system: [{ type: 'text', text: 'system prompt (new model)', cache_control: { type: 'ephemeral' } }],
+    tools: [],
+    messages: [{ role: 'user', content: 'resume after model switch ' + 'y'.repeat(240_000) }],
+  })
+
+  test('отказ называет субагента по имени и адресует согласие родителю', async () => {
+    const c = mkClient()
+    const r = await c.handleRequest(heavy(), {}, {
+      sessionId: 'rg-sub-1',
+      agentId: 'plan-validator-profile',
+    })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { message?: string } }
+    expect(j.error?.message).toContain('plan-validator-profile')
+    expect(j.error?.message).toContain('PARENT')
+    c.stop()
+  })
+
+  test('обычный ход — про субагента ни слова, текст не замусорен', async () => {
+    const c = mkClient()
+    const r = await c.handleRequest(heavy(), {}, { sessionId: 'rg-sub-2' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { message?: string } }
+    expect(j.error?.message).not.toContain('sub-agent')
+    c.stop()
+  })
+
+  /** Сам факт «это был субагент» обязан попасть в журнал — иначе такие смерти
+   *  невозможно даже ПОСЧИТАТЬ, что и обнаружилось при разборе жалобы. */
+  test('в журнал попадает, чей это был ход', async () => {
+    const events: any[] = []
+    const c = mkClient({ eventEmitter: { emit: (e: never) => { events.push(e) } } })
+    await c.handleRequest(heavy(), {}, { sessionId: 'rg-sub-3', agentId: 'checker-7' })
+    c.stop()
+    const b = events.find(e => e.kind === 'CACHE_REWRITE_BLOCKED')
+    expect(b?.agentId).toBe('checker-7')
+  })
+})

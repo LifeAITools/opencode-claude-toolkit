@@ -111,6 +111,10 @@ export function createAnthropicModule(): ProxyModule {
           // чужого клиента уже стоит наша подстановка claude-cli/…, и запись
           // оттуда назвала бы всех одинаково.
           clientUserAgent: headers['user-agent'] ?? null,
+          // Тот же заголовок, по которому выше определяется «родной клиент».
+          // Сторожу он нужен отдельно: субагенту адресовать «наберите команду»
+          // некому, и отказ обязан назвать, кто за него это делает.
+          agentId: headers['x-claude-code-agent-id'] ?? null,
           signal: req.signal,
           // Native Claude Code = interactive human (can see a 400 + re-send with
           // marker). Any other Anthropic-API consumer is programmatic → the

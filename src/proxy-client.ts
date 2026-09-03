@@ -3340,10 +3340,50 @@ export class ProxyClient {
       }
 
       const verdict = classifyRewrite({ isFirstRequest, toolsChanged, idleMs, ttlMs, orgChanged, spansProxyRestart, kaRevivalDropped, warmSiblingExists, warmSiblingKind })
-      // When the cacheable prefix diverges or expires, ~the whole context
-      // re-caches. bodyBytes/4 is a rough token estimate — adequate for a
-      // threshold check (the guard) and a human-readable log figure.
-      const predictedTokens = Math.round(bodyBytes / 4)
+      // ── What this turn will actually PAY, not what the turn WEIGHS ────────
+      //
+      // 🔴 THE OLD LINE WAS `Math.round(bodyBytes / 4)` FOR EVERY CLASS, AND FOR
+      // THE COMMONEST ONE IT WAS WRONG BY A FACTOR OF SIXTY-SIX.
+      //
+      // Measured over one day of fleet traffic (2026-09-03): 567 predictions of
+      // `expected:tools-changed` promised 137M tokens between them and 2M were
+      // actually written — 12 of the 567 came true. Live pairs: promised
+      // 988 629, wrote 807, READ 967 105 back. The cache had not moved at all.
+      //
+      // The reason is that all of them are the SAME event: a tool schema being
+      // fetched on demand and APPENDED to the list — `+[todo_priming]`,
+      // `+[tg_send]`, `+[todo_comments]`. We turned that on ourselves on
+      // 2026-08-21 (ENABLE_TOOL_SEARCH) to stop shipping 273k characters of
+      // schemas in every request, and the predictor has been calling each of
+      // those appends a catastrophe ever since.
+      //
+      // 🔴 AND THE FOUNDER'S QUESTION IS THE REASON THIS IS FIXED HERE RATHER
+      // THAN TUNED. He asked, 2026-09-03: "we compare against the dump we saved
+      // last time — so the marker fires on facts, not on a guess". The COMPARISON
+      // is indeed factual: hashes of system + tool names, matched or not. The
+      // PRICE was the guess — one line, applied to every class alike. This makes
+      // the price come from the same comparison the verdict already came from.
+      //
+      // What still costs the whole body, honestly: a cache that DIED (ttl-expiry,
+      // proxy-restart), a session that LEFT for another account (org-switch), and
+      // a first write (cold-start). Nothing survives there, so the whole-body
+      // figure IS the measurement. Only a prefix that merely GREW is cheap.
+      let predictedTokens = Math.round(bodyBytes / 4)
+      if (verdict.class === 'expected:tools-changed') {
+        // WHICH previous tool set to compare against. A tool change mints a NEW
+        // lineage key, so `prevPrefix` (this key's own history) is empty by
+        // construction — the set we grew FROM belongs to the warm sibling the
+        // classifier just matched. Comparing against the empty one would price
+        // every append as a first write, which is the bug being fixed here.
+        const before = (warmSiblingExists && siblingKey)
+          ? this.lineagePrefix.get(siblingKey)?.tools
+          : prevPrefix?.tools
+        const grew = toolsetGrowth(before, body.tools)
+        // `null` = something was removed or an existing definition changed, i.e.
+        // the prefix genuinely diverged rather than grew. Keep the whole-body
+        // figure there — that case really can re-cache everything.
+        if (grew !== null) predictedTokens = Math.max(1, Math.round(grew / 4))
+      }
       this.events.emit({
         level: verdict.expected ? 'info' : 'error',
         kind: 'PREDICTED_CACHE_MISS',
@@ -3556,6 +3596,45 @@ function savePrefixHistory(m: Map<string, PrefixHistoryEntry>, path: string): vo
 
 /** Sorted unique tool-name set of a request body's `tools` array — for the
  *  observability tool-set-drift diff. Never throws. */
+/**
+ * Bytes ADDED to a tool set, or `null` when it did not merely grow.
+ *
+ * A tool list that only gained entries — every previous tool still present and
+ * byte-identical — costs the weight of what was added, because the cached
+ * prefix in front of it is untouched. Measured 2026-09-03 across 555 such
+ * turns: the cache read back whole and the write was the size of one schema.
+ *
+ * Returning `null` for any removal or redefinition is the conservative half and
+ * is deliberate: those genuinely move the prefix, and guessing them cheap would
+ * trade a marker that cries wolf for one that stays silent through a real
+ * spend — the worse of the two failures.
+ */
+function toolsetGrowth(prevTools: unknown, nextTools: unknown): number | null {
+  if (!Array.isArray(prevTools) || !Array.isArray(nextTools)) return null
+  const prevByName = new Map<string, string>()
+  for (const t of prevTools) {
+    const n = (t && typeof t === 'object') ? (t as { name?: unknown }).name : undefined
+    if (typeof n !== 'string') return null
+    try { prevByName.set(n, JSON.stringify(t)) } catch { return null }
+  }
+  let added = 0
+  const seen = new Set<string>()
+  for (const t of nextTools) {
+    const n = (t && typeof t === 'object') ? (t as { name?: unknown }).name : undefined
+    if (typeof n !== 'string') return null
+    let ser: string
+    try { ser = JSON.stringify(t) } catch { return null }
+    const before = prevByName.get(n)
+    if (before === undefined) { added += ser.length; seen.add(n); continue }
+    // An existing tool whose definition MOVED is not growth.
+    if (before !== ser) return null
+    seen.add(n)
+  }
+  // Anything dropped is not growth either.
+  for (const n of prevByName.keys()) if (!seen.has(n)) return null
+  return added
+}
+
 function toolNameSet(tools: unknown): Set<string> {
   const out = new Set<string>()
   if (Array.isArray(tools)) {

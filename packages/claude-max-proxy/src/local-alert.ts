@@ -92,6 +92,13 @@ const REWRITE_ALERT_MIN_STREAK = 2
 const REWRITE_ALERT_COOLDOWN_MS = 15 * 60 * 1000
 const rewriteAnnouncedAt = new Map<string, number>()
 
+// Сторож запаса гасится ПО АККАУНТУ, а не по сессии, и это не мелочь: он
+// останавливает КАЖДУЮ сессию на исчерпанном аккаунте, а их бывает три
+// десятка. Ключ по сессии превратил бы одно событие в тридцать одинаковых
+// уведомлений — способ добиться, чтобы человек выключил уведомления совсем.
+const QUOTA_ALERT_COOLDOWN_MS = 15 * 60 * 1000
+const quotaAnnouncedAt = new Map<string, number>()
+
 /**
  * Subscribe the alert path to the events worth waking a human for. Returns a
  * stop function (tests and shutdown use it).
@@ -145,6 +152,37 @@ export function startLocalAlert(): () => void {
       + ` Разрешить: context cache-rewrite-ok ${sid}`,
     )
   })
+  // Запас окна кончился, и сторож остановил настоящие ходы, чтобы прогрев
+  // дожил до сброса. Человеку это надо сказать ОДИН раз на аккаунт и сказать
+  // ГЛАВНОЕ: ждать осталось столько-то, а кэш при этом жив — иначе он решит,
+  // что флот сломался, и пойдёт всех перезапускать, то есть сделает ровно ту
+  // перезапись, которую сторож и бережёт. (Замер 03.09.2026: восемь живых
+  // сессий, ~3.4 млн токенов перезаписи, ни одной по чьему-либо решению.)
+  const offQuota = bus.onKind('QUOTA_GUARD_BLOCKED' as never, (e: any) => {
+    const org = String(e?.orgId ?? 'unknown')
+    const now = Date.now()
+    const announced = quotaAnnouncedAt.get(org)
+    if (announced !== undefined && now - announced < QUOTA_ALERT_COOLDOWN_MS) return
+    quotaAnnouncedAt.set(org, now)
+    const pct = Math.round(Number(e?.util5h ?? 0) * 100)
+    const resetIn = Number(e?.resetInSec ?? 0)
+    const waitMin = Number.isFinite(resetIn) && resetIn > 0 ? Math.ceil(resetIn / 60) : null
+    const resetAt = Number(e?.resetAt ?? 0)
+    const resetClock = resetAt > 0
+      ? new Date(resetAt * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+      : null
+    fire(
+      'Запас окна на исходе — настоящие ходы остановлены, прогрев идёт',
+      `аккаунт ${org.slice(0, 8)}: пятичасовое окно израсходовано на ${pct}%.`
+      + ` Настоящие ходы отбиваются, чтобы аккаунт не упёрся в отказ самого Anthropic —`
+      + ` тот закрывает и прогрев, и тогда кэши всех сессий умирают по часам,`
+      + ` а каждая после сброса покупает свой контекст заново.`
+      + (resetClock ? ` Запас вернётся в ${resetClock}` : '')
+      + (waitMin !== null ? ` (через ${waitMin} мин)` : '')
+      + '. Кэши при этом ЖИВЫ: после сброса сессии продолжат с чтения, а не с перезаписи.'
+      + ' Продавить один ход: POST /admin/quota-ok {"sessionId":"<номер>"} на порт прокси.',
+    )
+  })
   // Прокси, который работает и ничего не греет, — это установленный и
   // бесполезный продукт. Соседи нашли это у себя САМИ, спустя недели, потому
   // что событие было, а голоса у него не было. См. identity-watch.ts.
@@ -158,11 +196,13 @@ export function startLocalAlert(): () => void {
     ))
   return () => {
     try { offWarmsNothing?.() } catch { /* already off */ }
+    try { offQuota?.() } catch { /* already off */ }
     try { offBegan?.() } catch { /* already off */ }
     try { offEnded?.() } catch { /* already off */ }
     try { offStuck?.() } catch { /* already off */ }
     try { offRewrite?.() } catch { /* already off */ }
     // Перезапуск наблюдателя не должен молча съесть первую тревогу.
     rewriteAnnouncedAt.clear()
+    quotaAnnouncedAt.clear()
   }
 }

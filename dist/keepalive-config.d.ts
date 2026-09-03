@@ -30,6 +30,7 @@ export interface ResolvedKeepaliveConfig {
     readonly dump: DumpConfig;
     readonly roleDetector: RoleWeights;
     readonly rewriteGuard: RewriteGuardConfig;
+    readonly quotaGuard: QuotaGuardConfig;
     readonly tokenRotationContextThreshold: number;
     readonly tokenRotationPollIntervalMs: number;
     readonly orgIdCacheTtlMs: number;
@@ -46,6 +47,12 @@ export interface RewriteGuardConfig {
     readonly dumpBlocked: boolean;
     readonly interactiveOnly: boolean;
     readonly consentGrantTtlSec: number;
+    readonly consentGrantPath: string;
+}
+export interface QuotaGuardConfig {
+    readonly enabled: boolean;
+    readonly blockAtUtil5h: number;
+    readonly overrideMarker: string;
     readonly consentGrantPath: string;
 }
 export declare const RECOMMENDED_1H_CONFIG: {

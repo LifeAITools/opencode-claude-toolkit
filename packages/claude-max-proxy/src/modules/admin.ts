@@ -17,6 +17,7 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
+import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -84,6 +85,43 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
         }
         const refreshed = ctx.managedSessions.heartbeat(body.workerId, body.activeSessionIds)
         return Response.json({ ok: true, refreshed, total: ctx.managedSessions.list().length })
+      },
+    },
+
+    // Consent for ONE turn held back by the quota guard.
+    //
+    // 🔴 WHY A DOOR OF OUR OWN. The cache guard's consent is typed by a human
+    // as `context cache-rewrite-ok`, which lives in the lat-context CLI — a
+    // repository we do not own. Promising a command we cannot ship would leave
+    // every held sub-agent with a refusal that names a way out that does not
+    // exist. This endpoint is the way out we can guarantee today; the CLI
+    // wrapper is asked for separately and can simply call it.
+    //
+    // The grant is single-use and read by the guard on the session's next
+    // turn — the same shape as the cache guard's, deliberately, so a person
+    // does not have to learn two consent models.
+    {
+      method: 'POST',
+      path: '/admin/quota-ok',
+      handler: async (req) => {
+        let body: { sessionId?: string; ttlSec?: number } = {}
+        try { body = await req.json() as any } catch { /* empty body handled below */ }
+        if (!body.sessionId) return Response.json({ error: 'sessionId required' }, { status: 400 })
+        const guard = loadKeepaliveConfig().quotaGuard
+        // Default 1 hour, not the cache guard's 180 s: a session held by this
+        // guard is by definition NOT taking turns — it is waiting for a window
+        // that resets in tens of minutes — so a three-minute clock would expire
+        // long before the turn it was granted for.
+        const ttlSec = Number.isFinite(body.ttlSec) && (body.ttlSec as number) > 0
+          ? Math.min(body.ttlSec as number, 6 * 3600)
+          : 3600
+        grantConsent(guard.consentGrantPath, body.sessionId, ttlSec * 1000)
+        return Response.json({
+          ok: true,
+          sessionId: body.sessionId,
+          ttlSec,
+          note: 'single-use — consumed by this session\'s next real turn',
+        })
       },
     },
 

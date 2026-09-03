@@ -152,6 +152,12 @@ export interface ResolvedKeepaliveConfig {
    *  → `rewriteGuard`. See RewriteGuardConfig. */
   readonly rewriteGuard: RewriteGuardConfig
 
+  /** Quota-guard policy — refuse real turns near the 5h ceiling so keepalive
+   *  can keep the fleet's caches alive until the window resets. SSOT-tunable
+   *  + hot-reloaded via `~/.claude/keepalive.json` → `quotaGuard`.
+   *  See QuotaGuardConfig. */
+  readonly quotaGuard: QuotaGuardConfig
+
   /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
   readonly tokenRotationContextThreshold: number
 
@@ -269,6 +275,65 @@ export interface RewriteGuardConfig {
   readonly consentGrantPath: string
 }
 
+/**
+ * Quota-guard policy — stop the fleet BEFORE Anthropic does.
+ *
+ * The cache guard answers "is this turn worth a re-cache". This one answers a
+ * question that comes earlier and kills more: "is there any quota left to
+ * spend at all". They are separate because their failure modes are opposite —
+ * a cache rewrite costs quota, while running out of quota costs every cache
+ * the fleet holds.
+ *
+ * MEASURED 2026-09-03 (the incident this exists for). Anthropic marked every
+ * response `allowed_warning` from util5h=0.91 at 11:33 local, the fleet kept
+ * pushing, util5h reached 0.98, and at 12:19 the account started refusing
+ * EVERYTHING with 429 — keepalive fires included. With warming impossible,
+ * every session's cache died on its own clock ~30 min later, and when quota
+ * returned at 13:10 the survivors each faced a 330k-550k cold rewrite: eight
+ * live sessions, ~3.4M tokens of re-cache, none of it wanted by anyone.
+ *
+ * The founder's directive that day, verbatim: «чтобы нам не гробить вообще
+ * все сессии... мы можем отправлять Keepalive, но не отправлять реальные
+ * запросы». So this guard refuses REAL turns while letting keepalive through:
+ * the caches stay warm behind the wall, and after the reset every session
+ * resumes on a live cache instead of buying its context back.
+ *
+ * WHY IT LIVES IN THE REQUEST PATH AND NOT IN THE ENGINE: a keepalive fire
+ * never travels through `handleRequest`, so "keepalive is exempt" is a
+ * structural property here, not a flag anyone can get wrong later.
+ *
+ * Default: disabled (opt-in), same as the cache guard — a wall that stops the
+ * whole fleet is turned on deliberately, in `~/.claude/keepalive.json`.
+ */
+export interface QuotaGuardConfig {
+  /** Master switch. Default false — must be explicitly opted into. */
+  readonly enabled: boolean
+  /** Refuse real turns once the account's 5h utilisation reaches this.
+   *
+   *  Default 0.95. NOT 0.99, and the difference is the whole point: the
+   *  utilisation we hold is what the LAST answer reported, so it is always
+   *  behind by one in-flight turn, and under a working fleet it moves ~0.01
+   *  every couple of minutes (measured 0.91 -> 0.98 in 29 minutes on
+   *  2026-09-03). A threshold set at the refusal line is a threshold the
+   *  fleet jumps over between two reads. Five points of headroom is what
+   *  buys the caches their survival. */
+  readonly blockAtUtil5h: number
+  /** Substring in the LATEST user message that overrides the block for that
+   *  turn — the same fresh-consent shape the cache guard uses. Default below. */
+  readonly overrideMarker: string
+  /** Where session-scoped consent grants live for consumers that cannot carry
+   *  a message marker (agents, continuations, programmatic clients).
+   *  Default ~/.claude-local/quota-guard-grants.json. */
+  readonly consentGrantPath: string
+}
+
+const DEFAULT_QUOTA_GUARD: QuotaGuardConfig = {
+  enabled: false,
+  blockAtUtil5h: 0.95,
+  overrideMarker: '[%quota-ok%]',
+  consentGrantPath: join(homedir(), '.claude-local', 'quota-guard-grants.json'),
+}
+
 const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
   enabled: false,
   minRewriteTokens: 50_000,
@@ -300,6 +365,7 @@ const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampM
   dump:                      DEFAULT_DUMP,
   roleDetector:              DEFAULT_ROLE_WEIGHTS,
   rewriteGuard:              DEFAULT_REWRITE_GUARD,
+  quotaGuard:                DEFAULT_QUOTA_GUARD,
   // Token-rotation defaults (REQ-13). Hot-reloadable via ~/.claude/keepalive.json.
   tokenRotationContextThreshold: 150_000,
   tokenRotationPollIntervalMs:   30_000,
@@ -536,6 +602,26 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
       : DEFAULT_REWRITE_GUARD.consentGrantPath,
   }
 
+  // Quota-guard policy — validated, hot-reloadable. Default off (opt-in): a
+  // wall that stops every real turn on an account is switched on deliberately.
+  const qg = (raw?.quotaGuard && typeof raw.quotaGuard === 'object')
+    ? raw.quotaGuard as Record<string, unknown> : {}
+  const quotaGuard: QuotaGuardConfig = {
+    enabled: bool(qg.enabled, DEFAULT_QUOTA_GUARD.enabled),
+    // Floor 0.50 is not politeness — below it the guard would refuse a fleet
+    // that has half its window left, which is a worse outage than the one it
+    // prevents. Ceiling 0.99 because 1.0 is where Anthropic already refuses:
+    // a guard that fires there has no work left to do.
+    blockAtUtil5h: num(qg.blockAtUtil5h, 'quotaGuard.blockAtUtil5h',
+      DEFAULT_QUOTA_GUARD.blockAtUtil5h, 0.50, 0.99),
+    overrideMarker: (typeof qg.overrideMarker === 'string' && qg.overrideMarker.length > 0)
+      ? qg.overrideMarker
+      : DEFAULT_QUOTA_GUARD.overrideMarker,
+    consentGrantPath: (typeof qg.consentGrantPath === 'string' && qg.consentGrantPath.length > 0)
+      ? qg.consentGrantPath
+      : DEFAULT_QUOTA_GUARD.consentGrantPath,
+  }
+
   const config: ResolvedKeepaliveConfig = {
     cacheTtlMs,
     safetyMarginMs,
@@ -582,6 +668,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     dump: DEFAULT_DUMP,
     roleDetector,
     rewriteGuard,
+    quotaGuard,
     // Token-rotation knobs (REQ-13, CR-08). Hot-reloaded via mtime cache.
     tokenRotationContextThreshold: num(
       raw?.tokenRotationContextThreshold,

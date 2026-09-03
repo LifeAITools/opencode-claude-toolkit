@@ -80,6 +80,7 @@ export declare class ProxyClient {
     private readonly orgVault;
     private readonly orgRotateConsent;
     private readonly lastServedOrg;
+    private readonly rateLimitByOrg;
     private readonly orgRefreshInflight;
     private readonly orgLastRefreshAt;
     private readonly orgRefreshCooldown;

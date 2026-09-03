@@ -30,6 +30,19 @@ writeFileSync(FIXTURE_PATH, JSON.stringify({
     consentGrantPath: '/tmp/__test_cache_rewrite_grants.json',
     consentGrantTtlSec: 180,
   },
+  // Quota guard ON for test/quota-guard.test.ts. Harmless to every other test
+  // BY CONSTRUCTION, not by luck: the guard needs a per-account 5h utilisation
+  // reading, and that only exists once a mocked upstream answers with
+  // `anthropic-ratelimit-unified-5h-utilization` + `anthropic-organization-id`.
+  // Suites whose mock answers without those headers have util5h === null and
+  // are never judged.
+  quotaGuard: {
+    enabled: true,
+    blockAtUtil5h: 0.95,
+    overrideMarker: '[quota-ok]',
+    // Hermetic grant store — never the host's ~/.claude-local/ file.
+    consentGrantPath: '/tmp/__test_quota_guard_grants.json',
+  },
 }))
 process.env.CLAUDE_KEEPALIVE_CONFIG_PATH = FIXTURE_PATH
 

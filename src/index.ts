@@ -52,7 +52,12 @@ export {
   getConfigPath as getKeepaliveConfigPath,
   RECOMMENDED_1H_CONFIG,
 } from './keepalive-config.js'
-export type { ResolvedKeepaliveConfig } from './keepalive-config.js'
+export type { ResolvedKeepaliveConfig, QuotaGuardConfig, RewriteGuardConfig } from './keepalive-config.js'
+
+// Consent grants — the out-of-band channel both guards read. Exported because
+// the door that WRITES a grant (the proxy's /admin/quota-ok) lives in the
+// server package, while the guard that reads it lives here.
+export { grantConsent, consumeConsent } from './rewrite-consent.js'
 
 // Cache metrics + regression detector — rolling-window summary and alerts on
 // hit-rate degradation (catches silent Anthropic-side cache changes).

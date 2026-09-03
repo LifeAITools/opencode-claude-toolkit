@@ -587,6 +587,17 @@ export class ProxyClient {
   private readonly orgRotateConsent: Set<string> = new Set()
   /** Per-session org actually served by Anthropic (response header evidence). */
   private readonly lastServedOrg: Map<string, string> = new Map()
+  /** Last rate-limit reading PER ACCOUNT, keyed by the org Anthropic named as
+   *  the server of that response.
+   *
+   *  🔴 THE SHARED `lastRateLimit` CANNOT ANSWER "how full is THIS account" —
+   *  it holds whichever response landed last, and with two accounts serving
+   *  concurrently that is a coin flip. The same confusion already cost us once
+   *  (2026-06-24: a b3219c9b request emitted f9420373's 7d=0.99 under its own
+   *  label), and a guard that refuses turns on a wrong reading would stop an
+   *  account that has 2/3 of its window free — measured 2026-09-03, when one
+   *  account sat at 0.98 while the other was at 0.33. */
+  private readonly rateLimitByOrg: Map<string, RateLimitSnapshot> = new Map()
   /** Single-flight refresh guard per orgId. */
   private readonly orgRefreshInflight: Map<string, Promise<void>> = new Map()
   /** Last successful refresh (epoch ms) per orgId — the H2 min-interval floor. */
@@ -1702,6 +1713,110 @@ export class ProxyClient {
     //      marker at block time (tool_result continuations, programmatic
     //      clients, an out-of-band orchestrator deciding for a sub-agent):
     //      `context cache-rewrite-ok <sessionId>`.
+    // ══ QUOTA GUARD — stop the fleet before Anthropic does ═══════════════
+    //
+    // Runs BEFORE the cache guard on purpose: "is there quota left to spend"
+    // comes earlier than "is this spend worth it", and when the answer is no
+    // the second question is moot.
+    //
+    // WHY THIS EXISTS (measured 2026-09-03, the incident it was built for).
+    // Anthropic flagged every response `allowed_warning` from util5h=0.91 at
+    // 11:33 local. The fleet read that as nothing and kept working for 46
+    // minutes, to 0.98. At 12:19 the account began refusing EVERYTHING with
+    // 429 — keepalive fires included — so no cache could be warmed by anyone.
+    // Each cache then died on its own one-hour clock, ~30 min before quota
+    // came back at 13:10. Eight live sessions woke to a 330k-550k cold
+    // rewrite each: ~3.4M tokens of re-cache that nobody chose to buy.
+    //
+    // The founder's directive that day: real turns stop, keepalive keeps
+    // going — «мы можем отправлять Keepalive, но не отправлять реальные
+    // запросы» — so the caches survive the wall and everyone resumes warm.
+    //
+    // 🔴 KEEPALIVE IS EXEMPT STRUCTURALLY, NOT BY A FLAG. A KA fire never
+    // travels through handleRequest (KeepaliveEngine calls the upstream
+    // directly), so there is no branch here that could accidentally start
+    // refusing the very traffic this guard exists to protect.
+    {
+      const qGuard = loadKeepaliveConfig().quotaGuard
+      // Which ACCOUNT is this turn about to spend from: the org Anthropic
+      // itself named on this session's last response, else the pin it will be
+      // sent under. A session with neither has no reading to judge and is let
+      // through — refusing on an unknown account would block first turns.
+      const spendOrg = this.lastServedOrg.get(sessionId)
+        ?? this.sessionPins.get(sessionId)?.orgId
+        ?? null
+      const orgReading = spendOrg ? this.rateLimitByOrg.get(spendOrg) : undefined
+      const util5h = orgReading?.utilization5h ?? null
+      if (qGuard.enabled && util5h !== null && util5h >= qGuard.blockAtUtil5h) {
+        // Same two consent channels as the cache guard: a marker in the turn
+        // being sent, or an out-of-band grant for callers that cannot write
+        // one (sub-agents, tool-result continuations, programmatic clients).
+        const consented = inspectLastUserMessage(parsedBody, qGuard.overrideMarker).hasMarker
+          || consumeConsent(qGuard.consentGrantPath, sessionId)
+        if (!consented) {
+          const resetAt = orgReading?.resetAt ?? null
+          const resetsInSec = resetAt ? Math.max(0, resetAt * 1000 - Date.now()) / 1000 : null
+          // Local wall-clock, because "resumes in 2412 seconds" is a number a
+          // person has to convert before they can act on it.
+          const resetLocal = resetAt
+            ? new Date(resetAt * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+            : null
+          this.events.emit({
+            level: 'error',
+            kind: 'QUOTA_GUARD_BLOCKED',
+            sessionId,
+            orgId: spendOrg,
+            util5h,
+            threshold: qGuard.blockAtUtil5h,
+            resetAt,
+            resetInSec: resetsInSec === null ? null : Math.round(resetsInSec),
+            agentId: ctx.agentId ?? null,
+            msg: `quota guard blocked a real turn — account ${(spendOrg ?? 'unknown').slice(0, 8)} `
+              + `is at ${(util5h * 100).toFixed(0)}% of its 5h window (threshold `
+              + `${(qGuard.blockAtUtil5h * 100).toFixed(0)}%)`
+              + (resetLocal ? `, resets ${resetLocal}` : '')
+              + ' — keepalive keeps warming this session, so its cache survives the wall',
+          })
+          return jsonResponse(400, {
+            error: {
+              type: 'quota_guard',
+              orgId: spendOrg,
+              util5h,
+              threshold: qGuard.blockAtUtil5h,
+              resetAt,
+              resetInSec: resetsInSec === null ? null : Math.round(resetsInSec),
+              consent: {
+                marker: qGuard.overrideMarker,
+                // The door that EXISTS today. A `context quota-ok` wrapper is
+                // asked of the CLI's owner separately; naming a command we do
+                // not ship would leave a held sub-agent with an exit that
+                // is not there.
+                http: `POST http://127.0.0.1:5050/admin/quota-ok {"sessionId":"${sessionId}"}`,
+                disable: 'keepalive.json → quotaGuard.enabled=false',
+              },
+              // 🔴 THE LEADING `Quota guard` IS A CONTRACT, exactly as
+              // `Cache guard` is: the Claude Code CLI has no class for a 400
+              // whose error.type it does not know, so it files the turn as
+              // `unknown`, and the only way a downstream watcher can tell our
+              // refusals apart is this opening marker. Pinned by test.
+              message: `Quota guard: the 5h window on account `
+                + `${(spendOrg ?? 'unknown').slice(0, 8)} is ${(util5h * 100).toFixed(0)}% spent `
+                + `(stop line ${(qGuard.blockAtUtil5h * 100).toFixed(0)}%)`
+                + (resetLocal ? `, and it resets at ${resetLocal}` : '')
+                + '. This turn is held back so the account does not hit Anthropic\'s own 429 — '
+                + 'which would refuse KEEPALIVE too and let every cached session on this account '
+                + 'expire, costing a full re-cache each. Your cache stays warm while you wait: '
+                + 'resume after the reset and it is a read, not a rewrite. '
+                + `To spend anyway, include ${qGuard.overrideMarker} in your next message, `
+                + `or grant out-of-band: POST /admin/quota-ok {"sessionId":"${sessionId}"} `
+                + `to the proxy's control port. `
+                + '(Disable: keepalive.json → quotaGuard.enabled=false.)',
+            },
+          })
+        }
+      }
+    }
+
     {
       const guard = loadKeepaliveConfig().rewriteGuard
       // org-switch stands down ONLY when Layer 2 actually absorbs the cost:
@@ -2053,6 +2168,11 @@ export class ProxyClient {
         const servedOrg = upstream.headers.get('anthropic-organization-id')
         if (servedOrg) {
           this.lastServedOrg.set(sessionId, servedOrg)
+          // Per-account quota reading, recorded where the account is KNOWN from
+          // the response itself — the only place the pairing is evidence and
+          // not inference. This is what the quota guard reads before the NEXT
+          // turn of any session on this account.
+          this.rateLimitByOrg.set(servedOrg, reqRateLimit)
           this.orgVault.markVerified(servedOrg)
           // TOFU auto-pin: the first org Anthropic actually serves a session
           // becomes a sticky implicit pin, so an unpinned session stops

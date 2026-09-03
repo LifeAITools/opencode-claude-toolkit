@@ -134,6 +134,7 @@ export declare class KeepaliveEngine {
             at: number;
             errStatus?: number | null;
             errMessage?: string | null;
+            detail?: Record<string, number>;
         }) => void;
         onHeld?: (info: {
             reason: string;

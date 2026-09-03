@@ -143,8 +143,18 @@ export interface KeepaliveConfig {
   onTick?: (tick: KeepaliveTick) => void
   /** Fired when KA disarms (network/cache issues) but timer stays alive for auto-resume.
    *  errStatus/errMessage carry the upstream error of the current fault episode
-   *  (e.g. 401 during a token-rotation wave) — null when the disarm had none. */
-  onDisarmed?: (info: { reason: string; at: number; errStatus?: number | null; errMessage?: string | null }) => void
+   *  (e.g. 401 during a token-rotation wave) — null when the disarm had none.
+   *
+   *  `detail` carries the NUMBERS the decision rested on, when the caller has
+   *  them. A disarm writes off a session's warm context, and the durable
+   *  journal used to record only that it happened: the figures went to a debug
+   *  file that rotates in ~2 days. Measured 2026-09-03 — 67 disarms in the
+   *  journal with no numbers, rebuilt one rotation before they were gone.
+   *  Consumers spread these flat onto their event so a reader can grep them. */
+  onDisarmed?: (info: {
+    reason: string; at: number; errStatus?: number | null; errMessage?: string | null
+    detail?: Record<string, number>
+  }) => void
   /** A fleet-wide HOLD began: fires suspended for a bounded wait, snapshot
    *  KEPT, a timer will resume them. Deliberately distinct from onDisarmed —
    *  reporting a hold as a disarm reads as lost warmth, and reporting nothing

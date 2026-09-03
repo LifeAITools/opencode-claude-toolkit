@@ -2460,7 +2460,15 @@ export class ProxyClient {
           reason: info.reason,
           errStatus: info.errStatus ?? null,
           errMessage: info.errMessage ?? null,
+          // The numbers the decision rested on, when the caller supplied them.
+          // Spread flat so a journal reader greps `gapMs=` without unwrapping
+          // a nested object — the whole point is that the figures survive in
+          // the durable journal instead of a debug file that rotates in ~2d.
+          ...(info.detail ?? {}),
           msg: `KA disarmed for session ${sessionId.slice(0, 8)} — reason=${info.reason}`
+            + (info.detail
+              ? ` (${Object.entries(info.detail).map(([k, v]) => `${k}=${v}`).join(' ')})`
+              : '')
             + (info.errStatus || info.errMessage ? ` err=${info.errStatus ?? 'na'}:${info.errMessage ?? ''}` : ''),
         }),
         onRewriteWarning: (info) => this.events.emit({

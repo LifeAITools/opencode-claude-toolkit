@@ -610,7 +610,13 @@ export class KeepaliveEngine {
   private config: Required<Pick<KeepaliveConfig, 'enabled' | 'intervalMs' | 'idleTimeoutMs' | 'minTokens' | 'maxFiresPerTick' | 'rewriteWarnIdleMs' | 'rewriteWarnTokens' | 'rewriteBlockIdleMs' | 'rewriteBlockEnabled'>> & {
     onHeartbeat?: (stats: KeepaliveStats) => void
     onTick?: (tick: KeepaliveTick) => void
-    onDisarmed?: (info: { reason: string; at: number; errStatus?: number | null; errMessage?: string | null }) => void
+    /** `detail` carries the numbers the decision rested on — see the private
+     *  `onDisarmed` helper for why they belong on the event and not only in a
+     *  debug file that rotates away in two days. */
+    onDisarmed?: (info: {
+      reason: string; at: number; errStatus?: number | null; errMessage?: string | null
+      detail?: Record<string, number>
+    }) => void
     /** A fleet-wide hold began: fires are suspended but the snapshot is KEPT
      *  and a timer will resume them. Distinct from onDisarmed on purpose — a
      *  hold that reported itself as a disarm would read as lost warmth, and a
@@ -2109,14 +2115,21 @@ export class KeepaliveEngine {
     if (cacheDiesAt < resetAtMs) {
       // Cache won't survive — disarm now, save the cold cache_write that would
       // happen on next fire after reset.
-      this.logClearDiag('quota_outlives_cache', {
+      const decision = {
         cacheDiesInMs: cacheDiesAt - now,
         quotaResetsInMs: waitMs,
         gapMs: resetAtMs - cacheDiesAt,
         cacheTtlMs: this.cacheTtlMs,
-      })
+      }
+      this.logClearDiag('quota_outlives_cache', decision)
       this.clearRegistry()
-      this.onDisarmed('quota_outlives_cache')
+      // The same numbers ride the durable event, not only the debug file.
+      // Measured 2026-09-03 over 67 real disarms: the quota outlived the cache
+      // by 1.1h at the closest and 3.3h at the median — not one call was near
+      // the line. That result is what makes the morning re-cache arithmetic
+      // rather than a bug, and it was only provable because the numbers still
+      // existed. One more log rotation and it would not have been.
+      this.onDisarmed('quota_outlives_cache', decision)
       return
     }
 
@@ -2475,7 +2488,20 @@ export class KeepaliveEngine {
    * killing the interval timer. Timer remains cheap+unref'd, becomes no-op
    * with empty registry, and auto-resumes on next real request.
    */
-  private onDisarmed(reason: string): void {
+  /**
+   * @param detail  Numbers the DECISION rested on, carried on the event itself.
+   *   🔴 WHY THIS PARAMETER EXISTS, MEASURED 2026-09-03. A disarm is the moment
+   *   a session's warm context is written off; the durable journal recorded
+   *   THAT it happened and never HOW MUCH or HOW CLOSE the call was. The
+   *   numbers went only to `logClearDiag`, i.e. to ~/.claude/claude-max-debug.log
+   *   — a file that rotates in about two days. Asked "what did last night's
+   *   quota storm cost the fleet", I found 67 disarms in the journal with no
+   *   figures, and had to reconstruct them from a rotated debug file that was
+   *   one rotation away from being gone. Twice on the way I nearly published a
+   *   wrong conclusion from that absence. A decision whose evidence outlives it
+   *   by 48 hours is not observable; put the evidence on the decision.
+   */
+  private onDisarmed(reason: string, detail?: Record<string, number>): void {
     this.abortController?.abort()
     this.abortController = null
     this.inFlight = false
@@ -2493,6 +2519,7 @@ export class KeepaliveEngine {
         reason, at: Date.now(),
         errStatus: err?.status ?? null,
         errMessage: err?.message ?? null,
+        ...(detail ? { detail } : {}),
       })
     } catch {}
 

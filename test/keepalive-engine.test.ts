@@ -1481,6 +1481,44 @@ describe('KeepaliveEngine public API', () => {
     expect(e._quotaPauseTimer).toBeNull()   // no pause scheduled
   })
 
+  test('the disarm carries the numbers it was decided on, not just the reason', () => {
+    // 🔴 A disarm is the moment a session's warm context is written off, and
+    // the durable journal used to record only THAT it happened. The figures
+    // went to ~/.claude/claude-max-debug.log, which rotates in about two days.
+    // Measured 2026-09-03: asked what the night's quota storm had cost, I found
+    // 67 disarms in the journal carrying no numbers at all, and had to rebuild
+    // them from a rotated debug file that was one rotation from gone — the run
+    // that proved the morning re-cache is arithmetic (quota outlived the cache
+    // by 1.1h at the closest of 67, never near the line) would soon have been
+    // unprovable. Evidence must outlive the decision it justifies.
+    let info: { reason: string; detail?: Record<string, number> } | null = null
+    const e = mkEngine({ minTokens: 100, onDisarmed: (i) => { info = i } })
+    e.notifyRealRequestStart('m', { messages: [] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 })
+    e._setCacheWrittenAt(Date.now() - 240_000)   // cache 4 min old of a 5 min TTL
+
+    const entry = Array.from(e._registry.values())[0]!
+    e._testHandleQuotaRateLimit(entry, {
+      resetAt: Math.floor((Date.now() + 600_000) / 1000),   // quota 10 min away
+      retryAfterSec: null,
+    })
+
+    const got = info as { reason: string; detail?: Record<string, number> } | null
+    expect(got?.reason).toBe('quota_outlives_cache')
+    const d = got?.detail
+    expect(d).toBeDefined()
+    // 300s TTL − 240s age − 15s margin ≈ 45s of cache left...
+    expect(d!.cacheDiesInMs).toBeGreaterThan(30_000)
+    expect(d!.cacheDiesInMs).toBeLessThan(60_000)
+    // ...against a 10-minute wait for quota...
+    expect(d!.quotaResetsInMs).toBeGreaterThan(9 * 60_000)
+    // ...so the gap is the ~9 minutes by which the wait outlives the cache.
+    // That number is the whole decision: near zero would mean a close call
+    // worth revisiting, and large means the context was doomed either way.
+    expect(d!.gapMs).toBeGreaterThan(8 * 60_000)
+    expect(d!.cacheTtlMs).toBe(300_000)
+  })
+
   test('429 with no resetAt hint → does NOT engage smart-pause (defers to retryChain)', () => {
     // Without resetAt, smart-pause has no decision basis. Fall back to the
     // existing retryChain path — its specific behavior (immediate disarm vs

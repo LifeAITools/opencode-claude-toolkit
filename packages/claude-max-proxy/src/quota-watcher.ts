@@ -127,6 +127,27 @@ import {
 const STATS_POLL_INTERVAL_MS = 1_000          // tail polling cadence
 const QUOTA_WRITE_THROTTLE_MS = 5_000         // min interval between SSOT writes
 const PID_STATE_PRUNE_AFTER_MS = 30 * 60_000  // forget pids silent >30min
+/** How long a SESSION's account binding is remembered after it goes quiet.
+ *
+ *  🔴 DELIBERATELY 24× THE PID WINDOW, and the difference is not an oversight.
+ *  A pid entry is a live measurement — its utilisation goes stale the moment
+ *  the process stops reporting, so holding it longer would mean answering with
+ *  a number that is no longer true. A session entry says only WHICH ACCOUNT the
+ *  session runs on, and that does not decay: the pin is held for the session's
+ *  whole life and only a human's explicit reload moves it (project rail
+ *  `no-live-account-migration`). Ageing it out on the pid clock threw away a
+ *  fact that was still correct.
+ *
+ *  And it threw it away for exactly the sessions that need it. The wake-router
+ *  must not wake an agent whose 5h window is over 95% spent (founder, 2026-09-03);
+ *  the agent most likely to be woken is the one that has been idle for hours —
+ *  which is precisely the one a 30-minute clock had already forgotten. Its owner
+ *  measured 2 of 6 live sessions resolvable at 13:14 that day.
+ *
+ *  Consumers still see `lastSeenAt` untouched, so an old reading is legible AS
+ *  old; this window governs when we stop answering at all, not how fresh we
+ *  claim the answer is. */
+const SESSION_STATE_PRUNE_AFTER_MS = 12 * 60 * 60_000  // 12h
 // 0.98 → 0.90 (2026-08-16, founder directive): agents given the critical signal at
 // 98% could not finish their current step in the remaining 2% and ran into 100%
 // and a 429 storm. 10% headroom buys a lossless wrap-up. Mirrors the engine-side
@@ -316,6 +337,48 @@ function reportCorruption(reason: string, sample: string): void {
 
 // ─── Public API ──────────────────────────────────────────────────────
 
+/** Carry forward what a restart must not forget, from the previous snapshot.
+ *  Split out of the boot path so a test can drive it with a hand-built file
+ *  instead of the machine's real one. */
+function seedFromPreviousSnapshot(prev: QuotaStatusFile): void {
+  const now = Date.now()
+  for (const [hint, acc] of Object.entries(prev.accounts ?? {})) {
+    if (typeof acc?.resetAt === 'number' && acc.resetAt > now) {
+      expectedResetAt.set(hint, { resetAt: acc.resetAt, observedAt: now })
+    }
+    // Недельную отметку прежний снимок хранит уже в ISO — разбираем обратно в мс. Она живёт
+    // днями, поэтому пережить перезапуск вотчера для неё важнее, чем для пятичасовой.
+    const prev7d = acc?.reset7dAt ? Date.parse(acc.reset7dAt) : NaN
+    if (Number.isFinite(prev7d) && prev7d > now) {
+      expectedReset7dAt.set(hint, { resetAt: prev7d, observedAt: now })
+    }
+  }
+  // Which account each SESSION runs on — seeded for the same reason, and it
+  // matters to a reader outside this process.
+  //
+  // 🔴 MEASURED 2026-09-03 BY THE WAKE-ROUTER'S OWNER, who consumes this map.
+  // The founder asked him to stop waking an agent whose 5h window is over 95%
+  // spent. He can only judge a session whose account he can see — and at
+  // 13:14 he saw 2 of 6 live sessions, against 24 of 30 two hours earlier.
+  // The difference was not decay: the proxy had been redeployed in between,
+  // and a restart emptied this map. Every sleeping session then stayed
+  // invisible until it happened to call the model again, which for an idle
+  // agent can be hours — precisely the agent the founder wants protected.
+  //
+  // Restoring is safe BECAUSE a session does not change accounts: the pin is
+  // held for its whole life and only a human's explicit reload moves it
+  // (project rail `no-live-account-migration`). So an entry read back from
+  // disk names the same account it named before the restart. `lastSeenAt` is
+  // carried over unchanged rather than stamped to now — a consumer deciding
+  // on this must be able to see that the reading is old, and a fresh stamp
+  // would be a lie about when we last heard from that session.
+  for (const [sid, sess] of Object.entries(prev.sessions ?? {})) {
+    if (typeof sess?.org === 'string' && typeof sess?.lastSeenAt === 'number') {
+      sessionStates.set(sid, { org: sess.org, lastSeenAt: sess.lastSeenAt })
+    }
+  }
+}
+
 export function startQuotaWatcher(opts: QuotaWatcherOptions): () => void {
   ensureDir(CLAUDE_LOCAL)
 
@@ -323,22 +386,11 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): () => void {
   //    write below wipes it — a watcher restart must not forget a still-valid
   //    reset time that upstream may not repeat for a while.
   try {
-    const prev = JSON.parse(readFileSync(QUOTA_STATUS_JSON, 'utf8')) as QuotaStatusFile
-    const now = Date.now()
-    for (const [hint, acc] of Object.entries(prev.accounts ?? {})) {
-      if (typeof acc?.resetAt === 'number' && acc.resetAt > now) {
-        expectedResetAt.set(hint, { resetAt: acc.resetAt, observedAt: now })
-      }
-      // Недельную отметку прежний снимок хранит уже в ISO — разбираем обратно в мс. Она живёт
-      // днями, поэтому пережить перезапуск вотчера для неё важнее, чем для пятичасовой.
-      const prev7d = acc?.reset7dAt ? Date.parse(acc.reset7dAt) : NaN
-      if (Number.isFinite(prev7d) && prev7d > now) {
-        expectedReset7dAt.set(hint, { resetAt: prev7d, observedAt: now })
-      }
-    }
+    seedFromPreviousSnapshot(JSON.parse(readFileSync(QUOTA_STATUS_JSON, 'utf8')) as QuotaStatusFile)
   } catch {
     // first boot / missing / corrupt previous snapshot — nothing to seed
   }
+
 
   // 1. Boot event
   appendTokenEvent({
@@ -998,9 +1050,13 @@ function pruneStaleStates(now: number): void {
     }
   }
   for (const h of affectedAccounts) recomputeAccountFromPids(h)
-  // Sessions are plain ids (no liveness probe possible) — prune by age only.
+  // Sessions are plain ids (no liveness probe possible) — prune by age only,
+  // on their OWN much longer clock: an account binding stays true while the
+  // session sleeps, and forgetting it blinds the wake-router to the very
+  // agents it is supposed to protect. See SESSION_STATE_PRUNE_AFTER_MS.
+  const sessionCutoff = now - SESSION_STATE_PRUNE_AFTER_MS
   for (const [ses, s] of sessionStates.entries()) {
-    if (s.lastSeenAt < cutoff) sessionStates.delete(ses)
+    if (s.lastSeenAt < sessionCutoff) sessionStates.delete(ses)
   }
 }
 
@@ -1040,6 +1096,7 @@ function ensureDir(d: string): void {
 export const __testing = {
   ingestStatsLine,
   pruneStaleStates,
+  seedFromPreviousSnapshot,
   snapshot: (): QuotaStatusFile => ({
     version: 1,
     updatedAt: new Date().toISOString(),

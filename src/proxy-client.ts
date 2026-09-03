@@ -1813,9 +1813,35 @@ export class ProxyClient {
             }
           } catch { /* a hint must never break the block path */ }
           const isFirstWrite = rewriteAssessment.rewriteClass === 'expected:cold-start'
+          // 🔴 THREE causes wore ONE sentence, and for the commonest of them it
+          // was false in the way that matters. A cold start WRITES a cache for
+          // the first time. An org-switch ABANDONS a cache that still exists on
+          // the other account — there `freeReadHint` above offers the way back,
+          // so "discarded and bought again" is exactly right and actionable.
+          // But a ttl-expiry means the cache DIED ON THE CLOCK, hours before
+          // this turn; nothing this turn does discards it, and there is no
+          // cheaper path to offer. Telling that reader a paid cache "is
+          // discarded" invites them to prevent a loss that already happened,
+          // and to retry looking for the mistake they did not make.
+          // MEASURED 2026-09-03: of 29 overnight blocks, 26 were ttl-expiry at
+          // 8–9h idle against a 1h lifetime — the fleet had simply slept. Five
+          // project owners woke to a refusal that read as their own avoidable
+          // error, and one shift (20f32b0a) died against it after six retries.
+          // Machine-readable fields — rewriteClass, spendKind, predictedTokens,
+          // consecutiveBlocks, consent.* — are UNCHANGED and remain the only
+          // thing a consumer keys on; this edit touches prose alone.
+          const idleMs = rewriteAssessment.signals?.idleMs ?? null
+          const expiredAgo = idleMs !== null && idleMs > 0
+            ? ` ~${idleMs >= 3_600_000
+                ? `${(idleMs / 3_600_000).toFixed(1)}h`
+                : `${Math.round(idleMs / 60_000)}m`} ago`
+            : ''
           const spendPhrase = isFirstWrite
             ? `write ~${rewriteAssessment.predictedTokens} tokens of NEW cache (first write for this lineage — nothing is being discarded)`
-            : `re-cache ~${rewriteAssessment.predictedTokens} tokens (a cache already paid for is discarded and bought again)`
+            : rewriteAssessment.rewriteClass === 'avoidable:ttl-expiry'
+              ? `re-cache ~${rewriteAssessment.predictedTokens} tokens (the cache expired${expiredAgo} and is already gone — `
+                + `this turn buys it back; the choice is to pay or to stop this session, NOT to save the old cache)`
+              : `re-cache ~${rewriteAssessment.predictedTokens} tokens (a cache already paid for is discarded and bought again)`
           this.events.emit({
             level: 'error',
             kind: 'CACHE_REWRITE_BLOCKED',
@@ -1862,6 +1888,20 @@ export class ProxyClient {
                 cli: `context cache-rewrite-ok ${sessionId} --until-consumed`,
                 disable: 'keepalive.json → rewriteGuard.enabled=false',
               },
+              // 🔴 THE LEADING `Cache guard` IS A PUBLISHED CONTRACT, NOT A
+              // STYLE CHOICE — do not reword it, and do not let anything
+              // precede it. Downstream watchers cannot tell this refusal apart
+              // any other way: the Claude Code CLI has no class for a 400 whose
+              // `error.type` is `cache_rewrite_guard`, so it files the turn as
+              // class `unknown` (measured 2026-09-03 over one project's
+              // transcripts: 12 blocks, all `unknown`, against `rate_limit` for
+              // 429 and `server_error` for 529). The telegram error-watch
+              // therefore mapped the class NAME `unknown` to "cache rewrite
+              // guard" — which makes EVERY unclassified error of any kind read
+              // to the founder as ours. This prefix is the honest key it should
+              // use instead, so it stays byte-stable across versions.
+              // Pinned by test: 'the refusal opens with the marker downstream
+              // watchers key on'.
               message: (streak >= 2
                 ? `Cache guard (${streak} turns IN A ROW now — retrying will not clear this; `
                   + `grant consent or change what the turn sends): this turn would ${spendPhrase} `

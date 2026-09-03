@@ -168,6 +168,79 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     rmSync(path, { force: true })
   })
 
+  test('the refusal opens with the marker downstream watchers key on', async () => {
+    // 🔴 THIS PREFIX IS A CONTRACT WITH ANOTHER OWNER, and it is the only
+    // handle they have. The Claude Code CLI has no class for a 400 carrying
+    // `error.type: cache_rewrite_guard`, so it files every one of our blocks
+    // under the class literally named `unknown` — measured 2026-09-03 across
+    // one project's transcripts: 12 blocks, all `unknown`, while 429 files as
+    // `rate_limit` and 529 as `server_error`. The telegram error-watch, having
+    // nothing better, mapped the NAME `unknown` to "cache rewrite guard" — so
+    // today every unclassified error of any kind is announced to the founder
+    // as ours. The fix on their side is to key on this prefix; the duty on
+    // ours is that it never moves. Both shapes of the sentence must carry it,
+    // first thing, with nothing in front.
+    const path = join(TMP, 'rg-marker.json')
+    seedIdleFor(path, 'rg-marker', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+
+    const msgs: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-marker' })
+      msgs.push(((await r.json()) as { error?: { message?: string } }).error?.message ?? '')
+    }
+    // First refusal — the plain branch; second — the streak branch. They are
+    // two separate strings in the source, so both are pinned here.
+    expect(msgs[0]).not.toContain('IN A ROW')
+    expect(msgs[1]).toContain('IN A ROW')
+    for (const m of msgs) expect(m.startsWith('Cache guard')).toBe(true)
+
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
+  test('an EXPIRED cache is not "discarded by this turn" — the refusal says it is already gone, and how long ago', async () => {
+    // 🔴 ONE sentence served three different causes, and for the commonest it
+    // was false in the way that matters. A ttl-expiry means the cache died on
+    // the clock hours earlier; this turn discards nothing and there is no
+    // cheaper path. Saying "a cache already paid for is discarded and bought
+    // again" told that reader they were about to cause a loss — so they looked
+    // for their own mistake and retried instead of answering the question.
+    // MEASURED 2026-09-03: 26 of 29 overnight blocks were ttl-expiry at 8–9h
+    // idle against a 1h lifetime; five owners woke to a refusal that read as
+    // their own avoidable error, and one shift died against it after six tries.
+    const path = join(TMP, 'rg-expired-wording.json')
+    seedIdleFor(path, 'rg-expired', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-expired' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as {
+      error?: { message?: string; rewriteClass?: string; spendKind?: string; predictedTokens?: number }
+    }
+    expect(j.error?.rewriteClass).toBe('avoidable:ttl-expiry')
+
+    const msg = j.error?.message ?? ''
+    // It must say the loss ALREADY happened...
+    expect(msg).toContain('already gone')
+    // ...name WHEN, so the reader can see it was the clock and not their turn
+    // (10 min seeded → the minutes branch of the formatter),...
+    expect(msg).toMatch(/expired ~\d+m ago/)
+    // ...and name the real choice, since "prevent it" is not on the menu.
+    expect(msg).toContain('pay or to stop this session')
+    // The old sentence must NOT survive here: it is what sent people hunting
+    // for a mistake they had not made.
+    expect(msg).not.toContain('is discarded and bought again')
+
+    // 🔴 The machine-readable half is the contract other owners key on — the
+    // telegram error-watch and the local alert both branch on rewriteClass /
+    // spendKind, never on this prose. Prove the edit left it alone.
+    expect(j.error?.spendKind).toBe('rewrite')
+    expect(typeof j.error?.predictedTokens).toBe('number')
+
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
   test('the refusal counts itself: 1, 2, 3 in a row, and says so from the second', async () => {
     // 🔴 ONE refusal and EIGHT IN A ROW are different events for the person
     // sitting there, and they used to look identical. Measured by
@@ -936,7 +1009,17 @@ describe('rewrite guard: a FIRST write is not a REwrite', () => {
     expect(j.error?.rewriteClass).toBe('avoidable:ttl-expiry')
     expect(j.error?.spendKind).toBe('rewrite')
     expect(j.error?.message).toContain('re-cache')
-    expect(j.error?.message).toContain('discarded and bought again')
+    // It is a REwrite and never a first write — that is what this test guards.
+    expect(j.error?.message).not.toContain('NEW cache')
+    // "already paid for" now reads as buying the SAME cache BACK. The older
+    // wording ("a cache already paid for is discarded and bought again") was
+    // retired 2026-09-03: it describes an org-switch, where the cache still
+    // lives on the other account, but not an expiry, where the clock destroyed
+    // it hours before this turn. Told the expiry story, five owners went
+    // looking for a mistake they had not made. The distinction, and the
+    // measurement behind it, live in the sibling test 'an EXPIRED cache is not
+    // "discarded by this turn"'.
+    expect(j.error?.message).toContain('buys it back')
 
     const blocked = events.find((e) => e.kind === 'CACHE_REWRITE_BLOCKED')
     expect(blocked?.spendKind).toBe('rewrite')

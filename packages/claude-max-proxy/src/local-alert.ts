@@ -28,6 +28,9 @@
  * being lost while it happens.
  */
 
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { bus } from './event-bus.js'
 
 /** Whether to deliver at all — off in tests, and a way out if it ever annoys. */
@@ -99,6 +102,103 @@ const rewriteAnnouncedAt = new Map<string, number>()
 const QUOTA_ALERT_COOLDOWN_MS = 15 * 60 * 1000
 const quotaAnnouncedAt = new Map<string, number>()
 
+// ── Тревога по СОСТОЯНИЮ, а не по событию ────────────────────────────
+//
+// 🔴 ЗАЧЕМ, И ЭТО НАШЁЛ НЕ Я. Владелец побудок 03.09.2026 прошёл ГЛАЗАМИ по
+// экранам флота и нашёл ВОСЕМЬ агентов, стоящих у сторожа мёртво: у каждого
+// последнее событие — отказ, дальше пустая строка. Самый давний молчал
+// 6,7 суток. По журналу при этом всё выглядело исправно: 70 честных тревог за
+// восемь дней, каждая с именем сессии и готовой командой.
+//
+// Причина в том, что тревога выше звучит НА ОТКАЗ — то есть пока агент ещё
+// стучится. Замер по тем же 70 записям: у активных сессий 5–6 срабатываний
+// подряд, у сдавшихся после второго отказа — ровно одно. Агент, который встал
+// и ЗАМОЛЧАЛ, выпадает из поля зрения совсем: новых отказов нет, а тишина
+// вставшего неотличима от тишины здорового.
+//
+// Поэтому здесь ведётся именно СОСТОЯНИЕ: кто стоит и сколько уже стоит.
+// Напоминание повторяется с растущим шагом и НАЗЫВАЕТ СРОК — сессия, стоящая
+// шестые сутки, говорит о себе шестые сутки, а не один раз в первые пятнадцать
+// минут.
+//
+// 🔴 И ОНО ПЕРЕЖИВАЕТ ПЕРЕЗАПУСК СЛУЖБЫ, иначе лечение не работает вовсе: за
+// один сегодняшний день служба перезапускалась четырежды, а стоящие сессии
+// живут сутками. Память в процессе забыла бы ровно тех, ради кого всё это.
+// Путь настраиваемый — иначе испытание пишет в ЖИВОЙ файл машины и, что хуже,
+// читает из него чужие сессии: обход шлёт уведомления по остаткам от флота, и
+// «сработало один раз» превращается в «сработало сколько-то раз».
+const BLOCKED_STATE_JSON = process.env.PROXY_BLOCKED_STATE_PATH
+  || join(homedir(), '.claude-local', 'blocked-sessions.json')
+/** Шаг напоминаний: чем дольше стоит, тем реже — но никогда не молча. */
+const STUCK_REMINDER_STEPS_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000, 24 * 60 * 60_000]
+const STUCK_SWEEP_INTERVAL_MS = 10 * 60_000
+interface StuckSession {
+  since: number          // когда отказали в первый раз
+  lastBlockAt: number    // последний отказ
+  announcedAt: number    // когда в последний раз напоминали
+  announcements: number
+  reason: string
+  tokens: number
+}
+const stuck = new Map<string, StuckSession>()
+
+function loadStuck(): void {
+  try {
+    const raw = JSON.parse(readFileSync(BLOCKED_STATE_JSON, 'utf8')) as Record<string, StuckSession>
+    for (const [sid, v] of Object.entries(raw ?? {})) {
+      if (v && typeof v.since === 'number') stuck.set(sid, v)
+    }
+  } catch { /* первый запуск или битый файл — начинаем с чистого */ }
+}
+function saveStuck(): void {
+  try {
+    const dir = join(homedir(), '.claude-local')
+    try { mkdirSync(dir, { recursive: true }) } catch { /* уже есть */ }
+    writeFileSync(BLOCKED_STATE_JSON, JSON.stringify(Object.fromEntries(stuck)), 'utf8')
+  } catch { /* учёт не должен ронять службу */ }
+}
+/** «6,7 суток» / «9,1 ч» / «22 мин» — человеку нужен срок, а не отметка времени. */
+/** Один проход по стоящим. Время — АРГУМЕНТ: обход, читающий часы сам, в тесте
+ *  можно только ждать, а шаг напоминания здесь измеряется сутками. */
+function sweepStuck(now: number): void {
+  let changed = false
+  for (const [sid, st] of stuck) {
+    // Шаг берётся по числу УЖЕ СДЕЛАННЫХ напоминаний минус первое, прозвучавшее
+    // на самом отказе: иначе первый повтор ушёл бы на час, а он нужен раньше —
+    // пятнадцать минут это ещё то окно, в котором человек помнит, чем занимался.
+    const idx = Math.min(Math.max(0, st.announcements - 1), STUCK_REMINDER_STEPS_MS.length - 1)
+    const step = STUCK_REMINDER_STEPS_MS[idx]
+    if (now - st.announcedAt < step) continue
+    st.announcedAt = now
+    st.announcements += 1
+    changed = true
+    fire(
+      `Агент стоит у сторожа кэша уже ${humanFor(now - st.since)}`,
+      `сессия ${sid}: ${st.reason}; ход просит ${groupDigits(st.tokens)} токенов.`
+      + ` Сама она выйти не может и БОЛЬШЕ НЕ ПЫТАЕТСЯ — молчание тут не признак здоровья.`
+      + ` Разрешить: context cache-rewrite-ok ${sid} --until-consumed`
+      + ` — либо перезапустить её, если работа уже неактуальна.`,
+    )
+  }
+  if (changed) saveStuck()
+}
+
+/** Испытательный шов: прогнать обход в названный момент и посмотреть состояние. */
+export const _stuckState = {
+  sweep: (now: number) => sweepStuck(now),
+  get: (sid: string) => stuck.get(sid),
+  size: () => stuck.size,
+  clear: () => { stuck.clear() },
+}
+
+function humanFor(ms: number): string {
+  const min = ms / 60_000
+  if (min < 90) return `${Math.round(min)} мин`
+  const h = min / 60
+  if (h < 36) return `${h.toFixed(1)} ч`
+  return `${(h / 24).toFixed(1)} суток`
+}
+
 /**
  * Subscribe the alert path to the events worth waking a human for. Returns a
  * stop function (tests and shutdown use it).
@@ -144,6 +244,20 @@ export function startLocalAlert(): () => void {
     if (announced !== undefined && now - announced < REWRITE_ALERT_COOLDOWN_MS) return
     rewriteAnnouncedAt.set(sid, now)
     const tokens = Number(e?.predictedTokens ?? 0)
+    // Запомнить СОСТОЯНИЕ: с этой минуты сессия считается стоящей, пока не
+    // сделает успешный ход или пока не умрёт её процесс.
+    {
+      const prev = stuck.get(sid)
+      stuck.set(sid, {
+        since: prev?.since ?? now,
+        lastBlockAt: now,
+        announcedAt: now,
+        announcements: (prev?.announcements ?? 0) + 1,
+        reason: rewriteReason(e?.rewriteClass, e?.spendKind),
+        tokens: Number.isFinite(tokens) ? tokens : 0,
+      })
+      saveStuck()
+    }
     fire(
       'Агент стоит у сторожа кэша и ждёт согласия',
       `сессия ${sid}: ${streak} хода подряд отказано, ${rewriteReason(e?.rewriteClass, e?.spendKind)};`
@@ -183,6 +297,23 @@ export function startLocalAlert(): () => void {
       + ' Продавить один ход: POST /admin/quota-ok {"sessionId":"<номер>"} на порт прокси.',
     )
   })
+  // Сессия ПОШЛА — снять с учёта. Именно успешный ход, а не новая попытка:
+  // попытка, которую снова отбили, состояния не меняет.
+  const offWent = bus.onKind('REAL_REQUEST_COMPLETE' as never, (e: any) => {
+    const sid = String(e?.sessionId ?? '')
+    if (sid && stuck.delete(sid)) saveStuck()
+  })
+  // Процесса больше нет — напоминать о покойнике незачем, это ровно тот шум,
+  // из-за которого уведомления в конце концов выключают.
+  const offDead = bus.onKind('SESSION_DEAD' as never, (e: any) => {
+    const sid = String(e?.sessionId ?? '')
+    if (sid && stuck.delete(sid)) saveStuck()
+  })
+  // Обход по состоянию: кто стоит и достаточно ли давно молчали о нём.
+  loadStuck()
+  const sweep = setInterval(() => sweepStuck(Date.now()), STUCK_SWEEP_INTERVAL_MS)
+  sweep.unref?.()
+
   // Прокси, который работает и ничего не греет, — это установленный и
   // бесполезный продукт. Соседи нашли это у себя САМИ, спустя недели, потому
   // что событие было, а голоса у него не было. См. identity-watch.ts.
@@ -197,6 +328,9 @@ export function startLocalAlert(): () => void {
   return () => {
     try { offWarmsNothing?.() } catch { /* already off */ }
     try { offQuota?.() } catch { /* already off */ }
+    try { offWent?.() } catch { /* already off */ }
+    try { offDead?.() } catch { /* already off */ }
+    try { clearInterval(sweep) } catch { /* already stopped */ }
     try { offBegan?.() } catch { /* already off */ }
     try { offEnded?.() } catch { /* already off */ }
     try { offStuck?.() } catch { /* already off */ }

@@ -3405,9 +3405,20 @@ export class ProxyClient {
         // not a re-write. Saying "rewrite" for both is what made a 448 104-token
         // first write read as discarded work in the log.
         spendKind: verdict.class === 'expected:cold-start' ? 'first-write' : 'rewrite',
+        // 🔴 A FIRST WRITE IS AN UPPER BOUND, NOT A FORECAST, AND THE WORDING
+        // NOW SAYS SO. Measured 2026-09-03 over 1174 cold-start predictions:
+        // the MEDIAN ratio of tokens actually written to tokens predicted is
+        // 0.00 — most of them found the prefix already warm upstream and wrote
+        // nothing at all. We cannot know that before sending (only Anthropic
+        // knows what it still holds), so the number stays; calling it a
+        // prediction is what was wrong. Only 2 of the 1174 crossed the guard's
+        // 200k line, and 1 of those really did write 858 924 — so the wall
+        // itself is placed correctly and is deliberately left alone.
         msg: `predicted `
           + (verdict.class === 'expected:cold-start' ? 'FIRST cache write' : 'cache REwrite')
-          + ` — ${verdict.class} (~${predictedTokens} tok)`
+          + (verdict.class === 'expected:cold-start'
+              ? ` — ${verdict.class} (up to ~${predictedTokens} tok, and nothing at all if the prefix is still warm upstream)`
+              : ` — ${verdict.class} (~${predictedTokens} tok)`)
           + (systemChanged ? ' [system changed]' : '')
           + (toolsChanged ? ' [tools changed]' : '')
           + (orgChanged ? ' [org switched]' : '')

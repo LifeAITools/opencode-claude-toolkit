@@ -2591,6 +2591,43 @@ export class ProxyClient {
               : '')
             + (info.errStatus || info.errMessage ? ` err=${info.errStatus ?? 'na'}:${info.errMessage ?? ''}` : ''),
         }),
+        // 🔴 ЗАЧЕМ ЭТО СОБЫТИЕ ВООБЩЕ ЕСТЬ (замер 03.09.2026).
+        // За сутки прогрев дал 8.6% чтения кэша и 2.5% выхлопа — но 36% ВСЕЙ
+        // ЗАПИСИ кэша флота: 35 млн токенов из 97. Из 2794 выстрелов 144
+        // (5.2%) вместо дешёвого чтения перекупали пропавший кэш по 600–900к
+        // за раз. И ни одно из этих срабатываний не было видно в журнале:
+        // наблюдатель onPartialRewrite был ОБЪЯВЛЕН, но никем не передан, а
+        // сам движок писал о нём только в ~/.claude/claude-max-debug.log,
+        // который проворачивается за двое суток.
+        //
+        // Разница цены здесь принципиальная, и в этом смысл события. Чтение
+        // кэша счётчик подписки почти не двигает — три часа ЧИСТОГО прогрева
+        // (11.2 млн чтения) сдвинули пятичасовое окно на 0.00, при том что 16
+        // минут работы флота дали +0.24. Двигает ЗАПИСЬ. Значит перезапись
+        // прогревом — единственная его трата, которая вообще имеет цену, и
+        // до сих пор она была единственной, которую нельзя было сосчитать.
+        //
+        // И она проходит МИМО сторожа перезаписи: тот стоит в handleRequest и
+        // видит только настоящие ходы. Ту же самую покупку, сделанную
+        // прогревом, никто не останавливает и никто не считает. Событие не
+        // решает, что с этим делать — оно делает трату видимой, чтобы решение
+        // опиралось на числа, а не на память о том, что «кажется, дорого».
+        onPartialRewrite: (info) => this.events.emit({
+          level: 'error',
+          kind: 'KA_PARTIAL_REWRITE',
+          sessionId,
+          lineageKey: info.lineageKey,
+          cacheRead: info.cacheRead,
+          cacheWrite: info.cacheWrite,
+          msSinceLastRealRequest: Number.isFinite(info.msSinceLastRealRequest)
+            ? Math.round(info.msSinceLastRealRequest) : null,
+          msg: `KA rewrote a cache it was supposed to only refresh — session ${sessionId.slice(0, 8)}, `
+            + `lineage ${info.lineageKey}: kept ${info.cacheRead} read, PAID ${info.cacheWrite} write`
+            + (Number.isFinite(info.msSinceLastRealRequest)
+              ? `, last real turn ${Math.round(info.msSinceLastRealRequest / 1000)}s ago`
+              : ', no real turn on record')
+            + ' — this spend bypasses the rewrite guard, which only sees real turns',
+        }),
         onRewriteWarning: (info) => this.events.emit({
           level: info.blocked ? 'error' : 'info',
           kind: info.blocked ? 'REWRITE_BLOCK' : 'REWRITE_WARN',

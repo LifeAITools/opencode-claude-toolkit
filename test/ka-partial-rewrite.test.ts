@@ -86,3 +86,72 @@ describe('a rewrite that keeps the head', () => {
     e.stop()
   })
 })
+
+/**
+ * The observer above existed for two weeks and reported to NOBODY.
+ *
+ * `onPartialRewrite` was declared in the options type and forwarded by the
+ * engine — and no caller ever passed one, so the only trace of the spend was a
+ * line in ~/.claude/claude-max-debug.log, which rotates in about two days. The
+ * measurement it was built for could therefore never be taken: on 2026-09-03
+ * the day's figures had to be reconstructed from cache-usage arithmetic across
+ * the whole journal, because the event that names this exact case did not exist
+ * in it.
+ *
+ * The figures that reconstruction produced are why the wiring matters: over one
+ * day keepalive accounted for 8.6% of the fleet's cache reads and 2.5% of its
+ * model output — but 36% of ALL cache WRITES, 35M tokens. And a write is the
+ * part that moves the subscription counter: three hours of pure keepalive
+ * (11.2M read) moved the 5h window by 0.00, while sixteen minutes of fleet work
+ * moved it +0.24.
+ *
+ * So this test does not check the detector — the block above does. It checks
+ * that the detector is CONNECTED, which is the thing that was actually broken.
+ */
+describe('the report reaches the journal, not just a debug file', () => {
+  test('ProxyClient hands the engine an onPartialRewrite that emits on the bus', async () => {
+    const { ProxyClient } = await import('../src/proxy-client.js')
+    const { mkdtempSync } = await import('fs')
+    const { tmpdir } = await import('os')
+    const { join } = await import('path')
+    const emitted: any[] = []
+    const tmp = mkdtempSync(join(tmpdir(), 'ka-pr-wire-'))
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 3600 },
+      credentialsProvider: { getAccessToken: async () => 'tok', invalidate() {} },
+      upstreamFetcher: { fetch: async () => new Response('event: message_stop\ndata: {"type":"message_stop"}\n\n',
+        { status: 200, headers: { 'content-type': 'text/event-stream' } }) },
+      prefixHistoryPath: join(tmp, 'ph.json'),
+      orgIdResolver: { current: () => 'org-x' },
+      rewriteBlockDumpDir: join(tmp, 'dumps'),
+      proxyStartedAt: 0,
+      eventEmitter: { emit: (e: any) => emitted.push(e) },
+    } as never)
+
+    // Arm a session, then hand its engine the exact shape a tail-loss fire
+    // returns: the head still reads back, everything after it is bought again.
+    const r = await c.handleRequest(JSON.stringify({
+      model: 'claude-opus-5',
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+      messages: [{ role: 'user', content: 'x'.repeat(9000) }],
+    }), {}, { sessionId: 'pr-wire-1' })
+    await r.text()
+
+    const engine = (c as any).store?.get?.('pr-wire-1')?.engine
+    expect(engine).toBeTruthy()
+    engine.config.onPartialRewrite({
+      lineageKey: 'aaaa:bbbb', cacheRead: 120_852, cacheWrite: 706_839,
+      msSinceLastRealRequest: 45_000, at: Date.now(),
+    })
+
+    const ev = emitted.find(e => e.kind === 'KA_PARTIAL_REWRITE')
+    expect(ev).toBeTruthy()
+    expect(ev.cacheWrite).toBe(706_839)
+    expect(ev.cacheRead).toBe(120_852)
+    expect(ev.sessionId).toBe('pr-wire-1')
+    // The message has to say WHY this line matters, or a reader meets a number
+    // with no reason to care about it.
+    expect(ev.msg).toContain('bypasses the rewrite guard')
+    await c.stop()
+  })
+})

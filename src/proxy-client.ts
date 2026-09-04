@@ -2066,7 +2066,27 @@ export class ProxyClient {
     // смерти. В расписке запуска субагент значится ИМЕНЕМ, своего номера там
     // нет; связать имя с номером можно только здесь (02.09.2026, вопрос
     // владельца anywhisper: «где родителю взять номер, пока тот жив»).
-    this.events.emit({ level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes, idSource, agentId: ctx.agentId ?? null })
+    this.events.emit({
+      level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes, idSource,
+      agentId: ctx.agentId ?? null,
+      // 🔴 КТО ПРИШЁЛ — но ТОЛЬКО когда номер процесса не разрешился.
+      //
+      // Номер процесса мы находим по сетевому порту, разбирая /proc: клиент с
+      // ЭТОЙ машины опознаётся, а пришедший иначе — нет, и тогда критерий «жив
+      // ли тот, кто завёл сессию» неприменим вовсе. Такая сессия не считается
+      // мёртвой никогда (proxy-adapters: pid === null → isOwnerAlive = true) и
+      // греется, пока её не выметет по возрасту.
+      //
+      // Замер 04.09.2026: семь таких сессий, 616 служебных выстрелов, и ЧЕТЫРЕ
+      // из семи за сутки не сделали НИ ОДНОГО настоящего хода. Опознать их было
+      // нечем — ни имени клиента, ни владельца, только имя сессии в шестнадцати
+      // ричном виде. Фаундер спросил дословно: «логируем, кто это был, кто их
+      // вызывал, или ещё что-то полезное, чтобы потом идентифицировать».
+      //
+      // Пишем только в этом случае: у наших агентов номер процесса есть, и поле
+      // не появится вовсе — журнал не растёт ради строки, которая всегда одна.
+      ...(sourcePid === null ? { clientUserAgent: ctx.clientUserAgent ?? null, pidUnresolved: true } : {}),
+    })
     if (unidentified) {
       // Serve it — do not warm it. Skipping notifyRealRequestStart is what
       // makes this airtight rather than cosmetic: no pending snapshot is

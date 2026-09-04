@@ -1,6 +1,6 @@
 {
   "name": "@kiberos/claude-max-proxy",
-  "version": "1.0.94",
+  "version": "1.0.95",
   "description": "Transparent Anthropic-native proxy for native Claude Code CLI — keeps prompt cache warm via autonomous keepalive hits. Saves subscription quota by preventing cache_write bursts.",
   "type": "module",
   "bin": {

@@ -1,3 +1,4 @@
+import type { AgentRole } from "./lineage.js";
 export interface CredentialStore {
     read(): Promise<StoredCredentials | null>;
     write(credentials: StoredCredentials): Promise<void>;
@@ -61,6 +62,7 @@ export interface KeepaliveConfig {
     }) => void;
     onPartialRewrite?: (info: {
         lineageKey: string;
+        role?: AgentRole;
         cacheRead: number;
         cacheWrite: number;
         msSinceLastRealRequest: number;
@@ -76,6 +78,7 @@ export interface KeepaliveConfig {
         lineageKey: string;
         idleMs: number;
         at: number;
+        role?: AgentRole;
     }) => void;
     onFireError?: (info: {
         lineageKey: string;
@@ -110,6 +113,7 @@ export interface KeepaliveStats {
     idleMs: number;
     model: string;
     lineageKey?: string;
+    role?: AgentRole;
     rateLimit?: {
         status: string | null;
         claim: string | null;

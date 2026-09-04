@@ -624,7 +624,7 @@ export class KeepaliveEngine {
     onHeld?: (info: { reason: string; at: number; holdMs: number; regSize: number }) => void
     /** A fire kept the shared head of its prefix and paid for the tail again —
      *  invisible to the eviction test, and 57% of the spend it exists to catch. */
-    onPartialRewrite?: (info: { lineageKey: string; cacheRead: number; cacheWrite: number; msSinceLastRealRequest: number; at: number }) => void
+    onPartialRewrite?: (info: { lineageKey: string; role?: AgentRole; cacheRead: number; cacheWrite: number; msSinceLastRealRequest: number; at: number }) => void
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
     /**
      * A keepalive fire BEGAN / FAILED.
@@ -643,7 +643,7 @@ export class KeepaliveEngine {
      * failing — the same failures-only blindness that made the request_id
      * question unanswerable (fixed the same day in the real-request path).
      */
-    onFireStart?: (info: { lineageKey: string; idleMs: number; at: number }) => void
+    onFireStart?: (info: { lineageKey: string; idleMs: number; at: number; role?: AgentRole }) => void
     onFireError?: (info: {
       lineageKey: string
       idleMs: number
@@ -1714,7 +1714,14 @@ export class KeepaliveEngine {
     // never break the fire path, hence the swallow (same rule as the callbacks
     // around it).
     const fireStartedAt = Date.now()
-    try { this.config.onFireStart?.({ lineageKey: best.lineageKey, idleMs: idle, at: fireStartedAt }) } catch {}
+    // 🔴 РОЛЬ РОДОСЛОВНОЙ ЕДЕТ НА СОБЫТИИ, А НЕ ОСТАЁТСЯ В ДВИЖКЕ.
+    // Одна сессия греет до четырёх кэшей: свой главный и кэши недавних
+    // субагентов. Замер за ночь 03→04.09: прогрев перекупил контекст 49 раз на
+    // 7,1 млн токенов, и ответить «чьи это были кэши — главные или уже
+    // отработавших субагентов» оказалось НЕЧЕМ: роль знает движок, а в журнал
+    // она никогда не попадала. Без неё вопрос «стоит ли вообще греть кэш
+    // субагента, который закончил» решается на глаз, а он стоит миллионы.
+    try { this.config.onFireStart?.({ lineageKey: best.lineageKey, idleMs: idle, at: fireStartedAt, role: best.role }) } catch {}
 
     try {
       const body = JSON.parse(best.body) as Record<string, unknown>
@@ -1780,6 +1787,7 @@ export class KeepaliveEngine {
         idleMs: idle,
         model: best.model,
         lineageKey: best.lineageKey,
+        role: best.role,
         rateLimit: {
           status: rl.status,
           claim: rl.claim,
@@ -1839,6 +1847,7 @@ export class KeepaliveEngine {
         try {
           this.config.onPartialRewrite?.({
             lineageKey: best.lineageKey,
+            role: best.role,
             cacheRead: cr,
             cacheWrite: cw,
             msSinceLastRealRequest: msSinceReal,

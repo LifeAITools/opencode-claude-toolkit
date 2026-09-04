@@ -144,6 +144,7 @@ export declare class KeepaliveEngine {
         }) => void;
         onPartialRewrite?: (info: {
             lineageKey: string;
+            role?: AgentRole;
             cacheRead: number;
             cacheWrite: number;
             msSinceLastRealRequest: number;
@@ -159,6 +160,7 @@ export declare class KeepaliveEngine {
             lineageKey: string;
             idleMs: number;
             at: number;
+            role?: AgentRole;
         }) => void;
         onFireError?: (info: {
             lineageKey: string;

@@ -2470,6 +2470,10 @@ export class ProxyClient {
             level: 'info',
             kind: 'KA_FIRE_START',
             sessionId,
+            // Чей кэш греем: главный разговор или отработавший субагент.
+            // См. KeepaliveStats.role — без этого поля нельзя ответить, за чьи
+            // кэши платятся миллионы перезаписи.
+            role: info.role ?? null,
             // The account that ACTUALLY served this fire — the pin when the session has
             // one, otherwise whichever account the pool is currently serving. The
             // narrower `sessionPins` alone left this null on 88 of 91 paid warm-ups
@@ -2523,6 +2527,7 @@ export class ProxyClient {
             kind: 'KA_FIRE_COMPLETE',
             sessionId,
             lineageKey: stats.lineageKey,
+            role: stats.role ?? null,
             // Org of the session's pinned token (multi-org quota attribution).
             // The account that ACTUALLY served this fire — the pin when the session has
             // one, otherwise whichever account the pool is currently serving. The
@@ -2617,6 +2622,7 @@ export class ProxyClient {
           kind: 'KA_PARTIAL_REWRITE',
           sessionId,
           lineageKey: info.lineageKey,
+          role: info.role ?? null,
           cacheRead: info.cacheRead,
           cacheWrite: info.cacheWrite,
           msSinceLastRealRequest: Number.isFinite(info.msSinceLastRealRequest)

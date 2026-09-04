@@ -3,6 +3,8 @@
  * Implement this to store tokens in a database, Redis, KV store, etc.
  * Mirrors CLI's SecureStorage pattern (plainTextStorage.ts).
  */
+
+import type { AgentRole } from './lineage.js'
 export interface CredentialStore {
   /** Read current credentials. Return null if not found. */
   read(): Promise<StoredCredentials | null>
@@ -163,7 +165,7 @@ export interface KeepaliveConfig {
   /** A keepalive fire kept the shared head of its prefix and paid for the tail
    *  again. Distinct from an eviction: the ratio test misses it entirely, and
    *  it accounted for 57% of all keepalive cache-write spend on 2026-08-20. */
-  onPartialRewrite?: (info: { lineageKey: string; cacheRead: number; cacheWrite: number; msSinceLastRealRequest: number; at: number }) => void
+  onPartialRewrite?: (info: { lineageKey: string; role?: AgentRole; cacheRead: number; cacheWrite: number; msSinceLastRealRequest: number; at: number }) => void
   /** Fired on next real stream after long idle — surfaces potential cache_write cost */
   onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
   /**
@@ -172,7 +174,7 @@ export interface KeepaliveConfig {
    * "keepalive was quiet" reads the same whether it was quiet or was failing
    * on every attempt. See the full note on the engine's own config type.
    */
-  onFireStart?: (info: { lineageKey: string; idleMs: number; at: number }) => void
+  onFireStart?: (info: { lineageKey: string; idleMs: number; at: number; role?: AgentRole }) => void
   onFireError?: (info: {
     lineageKey: string
     idleMs: number
@@ -216,6 +218,15 @@ export interface KeepaliveStats {
    *  warm-up to the exact prefix family (e.g. the proxy's cache-miss
    *  predictor, so it does not mistake a KA-kept-warm prefix for expired). */
   lineageKey?: string
+  /** Чей это кэш: главный разговор сессии или отработавший субагент.
+   *
+   *  🔴 ДОБАВЛЕНО 04.09.2026, И ВОТ ПОЧЕМУ. Одна сессия греет до четырёх кэшей:
+   *  свой и кэши недавних субагентов. За ночь 03→04.09 прогрев перекупил
+   *  контекст 49 раз на 7,1 млн токенов — а ответить, чьи это были кэши,
+   *  оказалось НЕЧЕМ: роль знал движок, в журнал она не попадала никогда.
+   *  Без неё вопрос «стоит ли греть кэш субагента, который уже закончил»
+   *  решается на глаз, а он стоит миллионы. */
+  role?: AgentRole
   /**
    * Состояние лимитов, снятое с ОТВЕТА НА ЭТОТ служебный удар.
    *

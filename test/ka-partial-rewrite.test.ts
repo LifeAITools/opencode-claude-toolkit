@@ -140,12 +140,17 @@ describe('the report reaches the journal, not just a debug file', () => {
     const engine = (c as any).store?.get?.('pr-wire-1')?.engine
     expect(engine).toBeTruthy()
     engine.config.onPartialRewrite({
-      lineageKey: 'aaaa:bbbb', cacheRead: 120_852, cacheWrite: 706_839,
+      lineageKey: 'aaaa:bbbb', role: 'sub', cacheRead: 120_852, cacheWrite: 706_839,
       msSinceLastRealRequest: 45_000, at: Date.now(),
     })
 
     const ev = emitted.find(e => e.kind === 'KA_PARTIAL_REWRITE')
     expect(ev).toBeTruthy()
+    // Чей это кэш — главный или отработавшего субагента. Одна сессия греет до
+    // четырёх, и без роли нельзя ответить, за чьи именно платятся миллионы:
+    // за ночь 03→04.09 прогрев перекупил контекст 49 раз на 7,1 млн токенов, и
+    // вопрос «чьи это были кэши» упёрся в отсутствие ровно этого поля.
+    expect('role' in ev).toBe(true)
     expect(ev.cacheWrite).toBe(706_839)
     expect(ev.cacheRead).toBe(120_852)
     expect(ev.sessionId).toBe('pr-wire-1')

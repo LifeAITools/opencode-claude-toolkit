@@ -77,6 +77,7 @@ import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { consumeConsent } from './rewrite-consent.js'
+import { readOwnerPassport } from './owner-passport.js'
 import { FileOrgIdResolver, readOrgInfoFromConfig, type OrgIdResolver } from './org-identity.js'
 import { OrgVault } from './org-vault.js'
 import {
@@ -1481,12 +1482,47 @@ export class ProxyClient {
     const unidentified = idSource === 'none'
 
     // Get or create session with KA engine
+    // 🔴 ПАСПОРТ ВЛАДЕЛЬЦА СНИМАЕТСЯ ЗДЕСЬ, И ЭТО МЕСТО КУПЛЕНО ОШИБКОЙ.
+    // Сперва он был написан в SessionTracker пакета прокси — и уехал в мёртвый
+    // код: живой прокси создаёт сессии ЭТИМ путём, а событие рождения из
+    // трекера не эмитилось ни разу за всю жизнь журнала (04.09.2026: ровно
+    // ноль записей). Выкатка была зелёной, путь не отрабатывал; поймано живой
+    // пробой — запросом с новым именем сессии, а не чтением кода.
+    const bornAt = Date.now()
     const session = this.store.getOrCreate(
       sessionId,
       sourcePid,
       () => this.createEngine(sessionId),
     )
+    // Новая ли она: у только что созданной отметка рождения не раньше нашей.
+    const isNewSession = session.firstSeenAt >= bornAt
     session.lastRequestAt = Date.now()
+    if (isNewSession) {
+      // Один раз на сессию — паспорт не меняется, а чтение /proc стоит вызовов.
+      const owner = sourcePid !== null ? readOwnerPassport(sourcePid) : null
+      this.events.emit({
+        level: 'info',
+        kind: 'SESSION_TRACKED',
+        sessionId,
+        pid: sourcePid,
+        // Плоско, чтобы читатель журнала находил владельца грепом `ownerName=`.
+        ownerName: owner?.name ?? null,
+        ownerCmd: owner?.cmd ?? null,
+        ownerCwd: owner?.cwd ?? null,
+        ownerPpid: owner?.ppid ?? null,
+        ownerParentName: owner?.parentName ?? null,
+        clientUserAgent: ctx.clientUserAgent ?? null,
+        // Почему владельца нет — честно и разными словами: «порт не назван» и
+        // «процесс по порту не найден» лечатся по-разному, а молчаливый null их
+        // склеивал.
+        ownerUnresolved: sourcePid === null ? 'номер процесса не разрешён' : null,
+        msg: owner
+          ? `сессия ${sessionId.slice(0, 8)} — владелец ${owner.name ?? '?'} (${sourcePid}), запущен из ${owner.parentName ?? '?'}`
+            + (owner.cwd ? `, каталог ${owner.cwd}` : '')
+          : `сессия ${sessionId.slice(0, 8)} — владелец НЕ ОПОЗНАН (клиент: ${ctx.clientUserAgent ?? 'не назвался'});`
+            + ' правило «жив ли тот, кто завёл сессию» к ней неприменимо',
+      })
+    }
 
     // Normalize body
     const rawBodyStr = typeof rawBody === 'string'

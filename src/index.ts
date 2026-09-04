@@ -59,6 +59,11 @@ export type { ResolvedKeepaliveConfig, QuotaGuardConfig, RewriteGuardConfig } fr
 // server package, while the guard that reads it lives here.
 export { grantConsent, consumeConsent } from './rewrite-consent.js'
 
+// Паспорт владельца сессии — кто её завёл. Живёт в SDK, потому что сессии
+// рождаются на пути прокси-клиента, а не в трекере пакета (см. шапку файла).
+export { readOwnerPassport, scrubSecrets } from './owner-passport.js'
+export type { OwnerPassport } from './owner-passport.js'
+
 // Cache metrics + regression detector — rolling-window summary and alerts on
 // hit-rate degradation (catches silent Anthropic-side cache changes).
 export { CacheMetricsCollector } from './cache-metrics.js'

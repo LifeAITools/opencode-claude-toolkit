@@ -15,7 +15,7 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { readOwnerPassport, scrubSecrets } from '../src/session-tracker.js'
+import { readOwnerPassport, scrubSecrets } from '@life-ai-tools/claude-code-sdk'
 
 describe('паспорт владельца сессии', () => {
   test('свой процесс опознаётся: имя, команда, каталог, родитель', () => {

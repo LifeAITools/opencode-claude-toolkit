@@ -10,6 +10,8 @@ export { upgradeCacheControlTtl, detectCacheTtlFromBody } from "./keepalive-engi
 export { loadKeepaliveConfig, reloadKeepaliveConfig, getCacheTtlMs, getSafetyMarginMs, getConfigPath as getKeepaliveConfigPath, RECOMMENDED_1H_CONFIG, } from "./keepalive-config.js";
 export type { ResolvedKeepaliveConfig, QuotaGuardConfig, RewriteGuardConfig } from "./keepalive-config.js";
 export { grantConsent, consumeConsent } from "./rewrite-consent.js";
+export { readOwnerPassport, scrubSecrets } from "./owner-passport.js";
+export type { OwnerPassport } from "./owner-passport.js";
 export { CacheMetricsCollector } from "./cache-metrics.js";
 export type { RecordedRequest, MetricsSummary, RegressionInfo, CacheMetricsOptions, } from "./cache-metrics.js";
 export type { ICredentialsProvider, IEventEmitter, ISessionStore, IUpstreamFetcher, ILivenessChecker, ProxyEvent, Session, ProxyClientAdapters, } from "./proxy-ports.js";

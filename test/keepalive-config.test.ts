@@ -16,8 +16,12 @@ describe('keepalive-config: defaults (no file)', () => {
     const c = _resolve(null)
     expect(c.cacheTtlMs).toBe(5 * 60 * 1000)
     expect(c.safetyMarginMs).toBe(15 * 1000)
-    // Auto-scaled: max(60_000, min(TTL/2, 1_800_000)) = min(150_000, 1_800_000) = 150_000
-    expect(c.intervalMs).toBe(150_000)
+    // 🔴 БЫЛО 150_000 — половина срока. СТАЛО 0.75 срока по решению фаундера
+    // 04.09.2026: промежуток обязан следовать за ПОМЕТКОЙ в запросе, а не за
+    // числом. При пятиминутном сроке 0.75 дают 225 с, и потолок (срок − запас −
+    // минута = 225 с) их не режет — совпадение, но правильное: последний
+    // выстрел успевает завершиться.
+    expect(c.intervalMs).toBe(225_000)
     expect(c._source).toBe('defaults')
   })
 
@@ -41,9 +45,19 @@ describe('keepalive-config: 1h TTL via file', () => {
     expect(c._source).toBe('mixed')
   })
 
-  test('default intervalMs scales with 1h TTL to 1800s (max 30min)', () => {
+  test('промежуток при часовом сроке — 45 минут, ровно как стояло руками', () => {
+    // 🔴 ПРЕЖНЕЕ ЗАКРЕПЛЕНИЕ (30 минут) описывало формулу «половина срока, но
+    // не больше получаса», и она переставала следовать за сроком ровно там, где
+    // это дороже всего: при часе давала 30 минут, при двух часах — тоже 30.
+    // Доля 0.75 подобрана так, чтобы живое поведение не изменилось ни на
+    // секунду: в настройке флота стояло 2700 с, столько же даёт и доля.
     const c = _resolve({ cacheTtlSec: 3600 })
-    expect(c.intervalMs).toBe(1_800_000)
+    expect(c.intervalMs).toBe(2_700_000)
+  })
+
+  test('двухчасовой срок больше не упирается в получасовой потолок', () => {
+    const c = _resolve({ cacheTtlSec: 7200 })
+    expect(c.intervalMs).toBe(5_400_000)
   })
 
   test('explicit intervalSec wins over auto-scale', () => {

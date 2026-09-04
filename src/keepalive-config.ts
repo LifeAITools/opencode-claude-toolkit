@@ -88,6 +88,11 @@ export interface ResolvedKeepaliveConfig {
   /** Keepalive interval — how often KA fires when idle. Default: 1800_000 (30min) when 1h TTL active, else 120_000. */
   readonly intervalMs: number
 
+  /** Доля срока жизни кэша, через которую уходит служебный запрос. По умолчанию
+   *  0.75. Из неё считается intervalMs, когда он не задан явно — так промежуток
+   *  следует за пометкой в запросе, а не за числом, вбитым руками. */
+  readonly intervalFraction: number
+
   /** Lower clamp for intervalMs. Default: 60_000. */
   readonly intervalClampMin: number
 
@@ -346,10 +351,17 @@ const DEFAULT_REWRITE_GUARD: RewriteGuardConfig = {
   consentGrantPath: join(homedir(), '.claude-local', 'cache-rewrite-grants.json'),
 }
 
+/** Какую долю срока жизни кэша ждать до служебного запроса.
+ *  0.75 — ровно нынешние 45 минут при часовом кэше, то есть переход на долю
+ *  ничего не меняет сегодня и всё меняет в тот день, когда придёт пометка с
+ *  другим сроком. Решение фаундера 04.09.2026. */
+const DEFAULT_INTERVAL_FRACTION = 0.75
+
 const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampMax'> = {
   cacheTtlMs:                5 * 60 * 1000,        // 5 min — legacy Anthropic behavior
   safetyMarginMs:            15 * 1000,            // 15 s — legacy
   intervalMs:                120 * 1000,           // 2 min — legacy KA cadence
+  intervalFraction:          DEFAULT_INTERVAL_FRACTION,
   intervalClampMin:          60 * 1000,
   retryDelaysMs:             [2,3,5,7,10,12,15,17,20,20,20,20,20].map(s => s * 1000),
   rewriteWarnIdleMs:         300 * 1000,
@@ -530,9 +542,30 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     300_000,
   )
 
-  // Default interval = scale with TTL: 5m TTL → 120s; 1h TTL → 1800s.
-  // Formula: max(60s, min(TTL/2, 1800s)).
-  const defaultInterval = Math.max(60_000, Math.min(cacheTtlMs / 2, 1_800_000))
+  // ── Промежуток между служебными запросами — ДОЛЯ срока, а не минуты ──
+  //
+  // 🔴 ЭТО РЕШЕНИЕ ФАУНДЕРА 04.09.2026, И ПРИЧИНА В ЕГО ЖЕ СЛОВАХ: «30 или 45 —
+  // это всего лишь влияет на то, как быстро мы постараемся отправить... это
+  // может быть 75%, 50% или 80%». Абсолютное число живёт правильно ровно до
+  // первой смены срока: пометки в запросах бывают и часовые, и пятиминутные, а
+  // сорок пять минут остаются сорока пятью минутами и превращаются в опоздание
+  // на сорок минут.
+  //
+  // Прежняя формула — половина срока, но не больше получаса — вела себя так же
+  // непослушно: при часовом кэше она давала тридцать минут, при двухчасовом
+  // тоже тридцать, потому что упиралась в свой же потолок.
+  //
+  // Доля 0.75 выбрана так, чтобы поведение НЕ ИЗМЕНИЛОСЬ ни на секунду: при
+  // часовом кэше это ровно нынешние сорок пять минут. Разница в том, что теперь
+  // число следует за пометкой само — увидели пятиминутную, и промежуток стал
+  // 3 мин 45 с без единой правки настроек.
+  //
+  // Потолок ниже (срок − запас − минута) остаётся и продолжает срезать долю,
+  // когда срок совсем короткий: при пяти минутах он даст 3 минуты, и это
+  // правильнее доли — последний выстрел обязан успеть завершиться.
+  const intervalFraction = num(raw?.intervalFraction, 'intervalFraction',
+    DEFAULT_INTERVAL_FRACTION, 0.1, 0.95)
+  const defaultInterval = Math.max(60_000, Math.round(cacheTtlMs * intervalFraction))
 
   let intervalMs = num(
     (raw?.intervalMs ?? (typeof raw?.intervalSec === 'number' ? raw.intervalSec * 1000 : undefined)),
@@ -626,6 +659,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     cacheTtlMs,
     safetyMarginMs,
     intervalMs,
+    intervalFraction,
     intervalClampMin,
     intervalClampMax,
     retryDelaysMs,

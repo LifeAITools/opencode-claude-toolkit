@@ -14,6 +14,7 @@ export interface ResolvedKeepaliveConfig {
     readonly cacheTtlMs: number;
     readonly safetyMarginMs: number;
     readonly intervalMs: number;
+    readonly intervalFraction: number;
     readonly intervalClampMin: number;
     readonly intervalClampMax: number;
     readonly retryDelaysMs: readonly number[];

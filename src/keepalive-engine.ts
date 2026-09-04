@@ -625,6 +625,17 @@ export class KeepaliveEngine {
     /** A fire kept the shared head of its prefix and paid for the tail again —
      *  invisible to the eviction test, and 57% of the spend it exists to catch. */
     onPartialRewrite?: (info: { lineageKey: string; role?: AgentRole; cacheRead: number; cacheWrite: number; msSinceLastRealRequest: number; at: number }) => void
+    /** Прогрев по этой сессии НЕ вооружился — и вот почему.
+     *
+     *  🔴 ПРОСЬБА ФАУНДЕРА 04.09.2026: «если вдруг мы по какой-то причине не
+     *  смогли что-то опознать — надо логировать вообще все случаи, чтобы сразу
+     *  было понятно, что пошло не так». До этого молчание было полным: сессия
+     *  просто не грелась, и снаружи это неотличимо от исправной работы, а цена
+     *  ошибки — полная перепокупка разговора на следующем ходу.
+     *
+     *  Зовётся ОДИН РАЗ на сессию для каждой причины: у мелких служебных сессий
+     *  ходов бывают сотни, и запись на каждый превратила бы журнал в шум. */
+    onNotArmed?: (info: { reason: string; detail: string; lineageKey: string | null; at: number }) => void
     onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
     /**
      * A keepalive fire BEGAN / FAILED.
@@ -761,6 +772,9 @@ export class KeepaliveEngine {
   // 0 = explicit "no jitter" (honored — used by tests to make timing deterministic).
   // >0 = current jitter offset added to fire threshold to spread multi-session bursts.
   private jitterMs = -1
+  /** О какой причине «не вооружились» уже сказали — чтобы не повторяться на
+   *  каждом ходу: у служебных сессий их сотни. */
+  private readonly notArmedSaid = new Set<string>()
 
   // Quota-pause state (set when 429 arrives with resetAt header; engine
   // suspends fires until resetAt because retrying before quota window
@@ -852,6 +866,7 @@ export class KeepaliveEngine {
       onDisarmed: ka.onDisarmed,
       onHeld: ka.onHeld,
       onPartialRewrite: ka.onPartialRewrite,
+      onNotArmed: ka.onNotArmed,
       onRewriteWarning: ka.onRewriteWarning,
       onNetworkStateChange: ka.onNetworkStateChange,
       onTtlScan: ka.onTtlScan,
@@ -1039,6 +1054,14 @@ export class KeepaliveEngine {
     return key
   }
 
+  /** Сказать ОДИН раз, почему прогрев не вооружился. Второй такой же случай по
+   *  этой же сессии молчит: смысл записи — объяснить, а не считать. */
+  private sayNotArmed(reason: string, detail: string, lineageKey: string | null): void {
+    if (this.notArmedSaid.has(reason)) return
+    this.notArmedSaid.add(reason)
+    try { this.config.onNotArmed?.({ reason, detail, lineageKey, at: Date.now() }) } catch { /* наблюдатель не роняет путь */ }
+  }
+
   /**
    * Call after a real request completes successfully. Registers the pending
    * snapshot for KA — but ONLY for the main agent's lineage. Sub-agent and aux
@@ -1103,6 +1126,22 @@ export class KeepaliveEngine {
       // see the LRU eviction below.) (`unknown` registers as the over-KA-safe
       // default — under-KA is expensive, over-KA is cheap.)
       const existing = this.registry.get(key)
+      // 🔴 ДВА ТИХИХ ОТКАЗА, КОТОРЫЕ ТЕПЕРЬ ГОВОРЯТ. Ход, не дотянувший до
+      // порога, и ход меньше уже сохранённого снимка оба просто не регистрируют
+      // ничего — снаружи это неотличимо от исправной работы, а цена ошибки
+      // полная: следующий настоящий ход платит за весь разговор заново.
+      // Просьба фаундера 04.09: «надо логировать вообще все случаи, чтобы сразу
+      // было понятно, что пошло не так».
+      if (totalTokens < this.config.minTokens) {
+        this.sayNotArmed('too_small',
+          `ход весит ${totalTokens} токенов при пороге ${this.config.minTokens} — снимок не берём,`
+          + ' греть нечего; для одноразового запроса это норма, для рабочей сессии — беда',
+          key)
+      } else if (existing && totalTokens < existing.inputTokens) {
+        this.sayNotArmed('smaller_than_kept',
+          `ход весит ${totalTokens} токенов, а сохранённый снимок ${existing.inputTokens} —`
+          + ' держим прежний, он полнее', key)
+      }
       if (totalTokens >= this.config.minTokens
           && (!existing || totalTokens >= existing.inputTokens)) {
         const entry = {
@@ -1156,6 +1195,13 @@ export class KeepaliveEngine {
       this.writeSnapshotDebug(debugMeta, usage, body)
 
       this.pendingSnapshots.delete(key)
+    } else {
+      // Отложенного снимка нет — значит начало хода до нас не дошло (тело не
+      // разобралось, ход другой родословной, или клиент шлёт завершение без
+      // начала). Греть по этой сессии будет нечего, и молчать об этом нельзя.
+      this.sayNotArmed('no_pending_snapshot',
+        'завершение хода пришло без отложенного снимка — начало хода не дошло до движка,'
+        + ' поэтому греть по этой сессии нечего', lineageKeyArg ?? null)
     }
 
     if (this.registry.size > 0) this.startTimer()

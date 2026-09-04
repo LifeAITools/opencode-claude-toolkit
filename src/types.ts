@@ -166,6 +166,10 @@ export interface KeepaliveConfig {
    *  again. Distinct from an eviction: the ratio test misses it entirely, and
    *  it accounted for 57% of all keepalive cache-write spend on 2026-08-20. */
   onPartialRewrite?: (info: { lineageKey: string; role?: AgentRole; cacheRead: number; cacheWrite: number; msSinceLastRealRequest: number; at: number }) => void
+  /** Прогрев не вооружился по этой сессии — с названной причиной.
+   *  Объявлено ЗДЕСЬ И В keepalive-engine.ts: правка одного объявления
+   *  оставляет второе прежним (эта беда уже кусала на onDisarmed 03.09). */
+  onNotArmed?: (info: { reason: string; detail: string; lineageKey: string | null; at: number }) => void
   /** Fired on next real stream after long idle — surfaces potential cache_write cost */
   onRewriteWarning?: (info: { idleMs: number; estimatedTokens: number; blocked: boolean; model: string }) => void
   /**

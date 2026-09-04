@@ -2690,6 +2690,26 @@ export class ProxyClient {
               : ', no real turn on record')
             + ' — this spend bypasses the rewrite guard, which only sees real turns',
         }),
+        // Прогрев по сессии не вооружился — с названной причиной.
+        //
+        // 🔴 ПРОСЬБА ФАУНДЕРА 04.09.2026: «если вдруг мы по какой-то причине не
+        // смогли что-то опознать — надо логировать вообще все случаи, чтобы
+        // сразу было понятно, что пошло не так». Молчание тут дороже шума:
+        // сессия просто не греется, снаружи это неотличимо от исправной работы,
+        // а платит за это следующий её настоящий ход — полной перепокупкой
+        // разговора.
+        //
+        // Уровень error, а не info, ровно поэтому: это не наблюдение, это
+        // предупреждение о будущей трате. Повторов нет — движок говорит по
+        // одному разу на причину.
+        onNotArmed: (info) => this.events.emit({
+          level: 'error',
+          kind: 'KA_NOT_ARMED',
+          sessionId,
+          reason: info.reason,
+          lineageKey: info.lineageKey,
+          msg: `прогрев НЕ вооружён для сессии ${sessionId.slice(0, 8)} — ${info.detail}`,
+        }),
         onRewriteWarning: (info) => this.events.emit({
           level: info.blocked ? 'error' : 'info',
           kind: info.blocked ? 'REWRITE_BLOCK' : 'REWRITE_WARN',

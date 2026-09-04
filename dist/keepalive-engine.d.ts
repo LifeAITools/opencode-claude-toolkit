@@ -81,6 +81,7 @@ export declare class KeepaliveEngine {
     private inFlight;
     private inFlightLineageKey;
     private jitterMs;
+    private readonly notArmedSaid;
     private quotaPauseTimer;
     private quotaPauseUntil;
     private evictionHoldTimer;
@@ -89,6 +90,7 @@ export declare class KeepaliveEngine {
     private lastFireToken;
     constructor(opts: KeepaliveEngineOptions);
     notifyRealRequestStart(model: string, body: Record<string, unknown>, headers: Record<string, string>): string;
+    private sayNotArmed;
     notifyRealRequestComplete(usage: TokenUsage, lineageKeyArg?: string): void;
     markOrgSwitchPending(lineageKeyArg: string): void;
     clearOrgSwitchPending(lineageKeyArg: string): void;
@@ -148,6 +150,12 @@ export declare class KeepaliveEngine {
             cacheRead: number;
             cacheWrite: number;
             msSinceLastRealRequest: number;
+            at: number;
+        }) => void;
+        onNotArmed?: (info: {
+            reason: string;
+            detail: string;
+            lineageKey: string | null;
             at: number;
         }) => void;
         onRewriteWarning?: (info: {

@@ -68,6 +68,12 @@ export interface KeepaliveConfig {
         msSinceLastRealRequest: number;
         at: number;
     }) => void;
+    onNotArmed?: (info: {
+        reason: string;
+        detail: string;
+        lineageKey: string | null;
+        at: number;
+    }) => void;
     onRewriteWarning?: (info: {
         idleMs: number;
         estimatedTokens: number;

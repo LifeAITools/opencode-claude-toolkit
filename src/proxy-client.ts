@@ -3116,6 +3116,10 @@ export class ProxyClient {
                 outputTokens: u.output_tokens ?? 0,
                 cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
                 cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+                // Сколько раз модель сама ходила в интернет за этот ход.
+                // Отсутствие поля — это ОТСУТСТВИЕ, а не ноль: ход без поиска
+                // и ход, про который мы не знаем, должны различаться.
+                ...serverToolCounts(u),
               }
               // Phase 3.B (REQ-05, OQ-02): TTL-split + deletion subfields.
               // Present only on responses that used 1h cache_control or
@@ -3156,6 +3160,7 @@ export class ProxyClient {
               outputTokens: u.output_tokens ?? 0,
               cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
               cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+               ...serverToolCounts(u),
             }
             const cc = u.cache_creation
             if (cc && typeof cc === 'object') {
@@ -3618,6 +3623,27 @@ function firstEpochSeconds(headers: Headers, names: readonly string[]): number |
   return null
 }
 
+/**
+ * Обращения модели к серверным инструментам за этот ход — поиск в интернете и
+ * открытие названной страницы.
+ *
+ * 🔴 ОТСУТСТВИЕ ПОЛЯ ОСТАЁТСЯ ОТСУТСТВИЕМ, А НЕ НУЛЁМ. Ход без поиска и ход,
+ * про который мы не знаем, — разные вещи: первый доказывает, что поиска не
+ * было, второй не доказывает ничего. Ноль вместо пропуска превратил бы «не
+ * мерили» в «измеренный ноль» — ошибка, которая в этом проекте уже стоила
+ * ложных выводов не раз.
+ */
+function serverToolCounts(u: Record<string, unknown> | null | undefined):
+  { webSearchRequests?: number; webFetchRequests?: number } {
+  const st = (u && typeof u === 'object') ? (u as { server_tool_use?: unknown }).server_tool_use : undefined
+  if (!st || typeof st !== 'object') return {}
+  const o = st as { web_search_requests?: unknown; web_fetch_requests?: unknown }
+  const out: { webSearchRequests?: number; webFetchRequests?: number } = {}
+  if (typeof o.web_search_requests === 'number') out.webSearchRequests = o.web_search_requests
+  if (typeof o.web_fetch_requests === 'number') out.webFetchRequests = o.web_fetch_requests
+  return out
+}
+
 export function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
   return {
     status: headers.get('anthropic-ratelimit-unified-status'),
@@ -3898,6 +3924,7 @@ async function* parseSSEToEvents(
             outputTokens: u.output_tokens ?? 0,
             cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
             cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+             ...serverToolCounts(u),
           }
           // Phase 3.B (REQ-05): same TTL-split + deletion capture as
           // upstream.ts. Optional subfields forwarded `undefined` on absent.
@@ -3936,6 +3963,7 @@ async function* parseSSEToEvents(
             outputTokens: u.output_tokens ?? 0,
             cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
             cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+             ...serverToolCounts(u),
           }
           const cc = u.cache_creation
           if (cc && typeof cc === 'object') {

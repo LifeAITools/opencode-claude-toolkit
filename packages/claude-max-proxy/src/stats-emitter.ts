@@ -64,6 +64,15 @@ interface StatsLineUsage {
   out: number
   cacheRead: number
   cacheWrite: number
+  /** Сколько раз модель сама ходила в интернет за этот ход.
+   *
+   *  🔴 ПОЛЕ ПОЯВЛЯЕТСЯ, ТОЛЬКО ЕСЛИ ПОИСК БЫЛ. Отсутствие — это отсутствие, а
+   *  не измеренный ноль: ход без поиска и ход, про который мы не знаем, должны
+   *  различаться, иначе потребитель прочитает нашу неосведомлённость как
+   *  доказательство. Заведено 05.09.2026, когда владелец чат-сервиса спросил,
+   *  во что обойдётся открыть поиск людям, и ответить оказалось нечем. */
+  webSearch?: number
+  webFetch?: number
 }
 
 interface StatsLine {
@@ -120,6 +129,8 @@ function projectUsage(u: UsageEventPayload | undefined): StatsLineUsage {
     out: u?.outputTokens ?? 0,
     cacheRead: u?.cacheReadInputTokens ?? 0,
     cacheWrite: u?.cacheCreationInputTokens ?? 0,
+    ...(typeof u?.webSearchRequests === 'number' ? { webSearch: u.webSearchRequests } : {}),
+    ...(typeof u?.webFetchRequests === 'number' ? { webFetch: u.webFetchRequests } : {}),
   }
 }
 

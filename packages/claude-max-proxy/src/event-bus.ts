@@ -199,6 +199,10 @@ export interface SessionDeadEvent extends BaseEvent {
 export interface UsageEventPayload {
   inputTokens: number
   outputTokens: number
+  /** Сколько раз модель сама ходила в интернет за этот ход. Отсутствие поля —
+   *  отсутствие, а не ноль (см. TokenUsage.webSearchRequests в SDK). */
+  webSearchRequests?: number
+  webFetchRequests?: number
   cacheReadInputTokens: number
   cacheCreationInputTokens: number
   cacheCreation5mInputTokens?: number

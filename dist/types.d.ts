@@ -266,6 +266,8 @@ export type StreamEvent = {
 export interface TokenUsage {
     inputTokens: number;
     outputTokens: number;
+    webSearchRequests?: number;
+    webFetchRequests?: number;
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
     cacheCreation5mInputTokens?: number;

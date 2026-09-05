@@ -393,11 +393,40 @@ function toAnthropicMessages(messages: OAIMessage[]): unknown[] {
 
 function toAnthropicTools(tools?: OAITool[]): unknown[] | undefined {
   if (!tools?.length) return undefined
-  return tools.map(t => ({
-    name: t.function.name,
-    description: t.function.description ?? '',
-    input_schema: t.function.parameters ?? { type: 'object', properties: {} },
-  }))
+  return tools.map((t) => {
+    // 🔴 СЕРВЕРНЫЙ ИНСТРУМЕНТ ANTHROPIC ПРОПУСКАЕТСЯ КАК ЕСТЬ, А НЕ ПАДАЕТ.
+    //
+    // Поиск в интернете и открытие страницы объявляются иначе, чем обычный
+    // инструмент: у них есть `type` вида `web_search_20250305` и `name` верхним
+    // уровнем, а вложенного `function` нет вовсе. Прежняя строка читала
+    // `t.function.name` у каждого — и на таком объявлении вся дверь падала с
+    // «undefined is not an object», причём падала ПЕРЕВОДОМ, то есть до того,
+    // как запрос вообще куда-то уехал.
+    //
+    // Принёс владелец чат-сервиса 05.09.2026 с точным рецептом. Ему самому эта
+    // дверь не нужна — он переходит на родную, — но следующий пришедший получил
+    // бы то же самое и пошёл искать причину у себя, а не у нас: сообщение об
+    // ошибке не называет ни инструмента, ни того, что дело в его форме.
+    //
+    // Пропускаем такие объявления НЕТРОНУТЫМИ: Anthropic ждёт их ровно в этом
+    // виде, а переводить тут нечего — это не наш инструмент, а его собственный.
+    const anyTool = t as unknown as { type?: unknown; name?: unknown; function?: unknown }
+    if (typeof anyTool.type === 'string' && anyTool.type !== 'function' && !anyTool.function) {
+      return t
+    }
+    if (!t.function || typeof t.function.name !== 'string') {
+      // Объявление, которое не является ни функцией, ни серверным инструментом.
+      // Раньше здесь было падение всей двери; теперь оно едет дальше, и отказ
+      // придёт от Anthropic — с его формулировкой, которая назовёт причину
+      // точнее нашей догадки.
+      return t
+    }
+    return {
+      name: t.function.name,
+      description: t.function.description ?? '',
+      input_schema: t.function.parameters ?? { type: 'object', properties: {} },
+    }
+  })
 }
 
 function toAnthropicToolChoice(

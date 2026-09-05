@@ -498,3 +498,64 @@ describe('openaiErrorResponse', () => {
     expect(body.error.code).toBe('invalid_api_key')
   })
 })
+
+/**
+ * Серверный инструмент Anthropic не должен ронять переводчик.
+ *
+ * 🔴 ПРИНЁС ВЛАДЕЛЕЦ ЧАТ-СЕРВИСА 05.09.2026 с точным рецептом. Поиск в
+ * интернете объявляется иначе, чем обычный инструмент: `type`
+ * ("web_search_20250305") и `name` верхним уровнем, а вложенного `function` нет
+ * вовсе. Переводчик читал `t.function.name` у КАЖДОГО объявления и падал с
+ * «Translation error: undefined is not an object» — падал ПЕРЕВОДОМ, то есть
+ * запрос не уезжал никуда.
+ *
+ * Ему самому эта дверь не нужна, он перешёл на родную. Чинится ради следующего:
+ * то сообщение не называет ни инструмента, ни того, что дело в его форме, и
+ * пришедший пойдёт искать причину у себя.
+ */
+describe('серверные инструменты в OpenAI-совместимой двери', () => {
+  test('объявление поиска проходит нетронутым, а не роняет перевод', () => {
+    const body = {
+      model: 'claude-haiku-4-5-20251001',
+      messages: [{ role: 'user' as const, content: 'что нового' }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
+    }
+    // Переводчик отдаёт готовое тело строкой — читаем его, а не догадываемся.
+    const out = JSON.parse(translateToAnthropicBody(body as never).body) as { tools?: unknown[] }
+    expect(out.tools).toHaveLength(1)
+    // Объявление доезжает СВОИМИ полями — их не переписали в форму обычного
+    // инструмента. Пометка кэша добавляется последнему инструменту нашим же
+    // переводчиком и здесь ожидаема; живая проба 05.09 подтвердила, что
+    // Anthropic принимает её и на своём инструменте (ответ 200, поиск отработал).
+    const tool = out.tools![0] as Record<string, unknown>
+    expect(tool.type).toBe('web_search_20250305')
+    expect(tool.name).toBe('web_search')
+    expect(tool.max_uses).toBe(2)
+    expect('function' in tool).toBe(false)
+  })
+
+  test('обычный инструмент по-прежнему переводится', () => {
+    const body = {
+      model: 'claude-haiku-4-5-20251001',
+      messages: [{ role: 'user' as const, content: 'посчитай' }],
+      tools: [{ type: 'function', function: { name: 'add', description: 'сложить', parameters: { type: 'object' } } }],
+    }
+    const out = JSON.parse(translateToAnthropicBody(body as never).body) as { tools?: Array<{ name: string }> }
+    expect(out.tools![0].name).toBe('add')
+  })
+
+  test('оба вида рядом — каждый по своим правилам', () => {
+    const body = {
+      model: 'claude-haiku-4-5-20251001',
+      messages: [{ role: 'user' as const, content: 'работай' }],
+      tools: [
+        { type: 'function', function: { name: 'add', parameters: { type: 'object' } } },
+        { type: 'web_search_20250305', name: 'web_search' },
+      ],
+    }
+    const out = JSON.parse(translateToAnthropicBody(body as never).body) as { tools?: any[] }
+    expect(out.tools![0].name).toBe('add')
+    expect(out.tools![0].input_schema).toBeTruthy()
+    expect(out.tools![1].type).toBe('web_search_20250305')
+  })
+})

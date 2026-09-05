@@ -413,6 +413,28 @@ emit({
 
 // ═══ Bun.serve — thin router ═══════════════════════════════════
 
+/**
+ * Идёт ли сейчас остановка. Пока идёт, НОВЫЕ запросы получают внятный отказ, а
+ * не пустоту.
+ *
+ * 🔴 ЗАЧЕМ, ЗАМЕР 05.09.2026. Слив при остановке (ниже) сделан, чтобы не рвать
+ * уже идущие ходы, и он свою работу делает. Но пока он ждёт — до двадцати
+ * секунд, потому что стримы бывают длинными, — служба уже не принимает НОВЫЕ
+ * соединения, и они просто обрываются на уровне сокета.
+ *
+ * Раньше это было терпимо: за дверью стояли агенты, которые молча повторяют.
+ * В этот день туда пришёл ЧЕЛОВЕК — фаундер задал вопрос с телефона через
+ * чат-сервис, запрос ушёл через пять секунд после начала остановки и остался
+ * без ответа вовсе. Владелец чат-сервиса принёс это словами: «раньше в вашу
+ * дверь ходили только агенты, а теперь за ней сидит человек и видит пустоту».
+ *
+ * Поэтому во время слива дверь ОТВЕЧАЕТ: 503 с Retry-After и понятным текстом.
+ * Клиент может повторить сам, а человек видит причину вместо тишины.
+ */
+let isDraining = false
+/** Сколько ходов сейчас в полёте — по ним и решается, когда можно уходить. */
+let inFlightRequests = 0
+
 const server = Bun.serve({
   port: RUNTIME_PORT,
   hostname: RUNTIME_HOST,
@@ -420,9 +442,34 @@ const server = Bun.serve({
 
   async fetch(req, server) {
     const url = new URL(req.url)
+    if (isDraining && url.pathname !== '/health') {
+      // Ровно столько, сколько служба обычно поднимается: перезапуск занимает
+      // секунды, и просить ждать дольше — врать в другую сторону.
+      const retryAfterSec = 5
+      return new Response(JSON.stringify({
+        error: {
+          type: 'proxy_restarting',
+          message: 'claude-max-proxy перезапускается и сейчас не принимает новые запросы; '
+            + `идущие договаривают. Повторите через ${retryAfterSec} с — это не ошибка запроса.`,
+          retry_after_sec: retryAfterSec,
+        },
+      }), {
+        status: 503,
+        headers: { 'content-type': 'application/json', 'retry-after': String(retryAfterSec) },
+      })
+    }
     const route = matchRoute(allRoutes, req.method, url.pathname)
-    if (route) return route.handler(req, server)
-    return new Response('Not Found', { status: 404 })
+    if (!route) return new Response('Not Found', { status: 404 })
+    // Считаем ход в полёте: слив при остановке ждёт именно этого числа, а не
+    // обещания сокета. Стриминговый ответ считается завершённым, когда вернулся
+    // объект ответа — тело дочитывает клиент, и держать ради него остановку
+    // вечно нельзя.
+    inFlightRequests += 1
+    try {
+      return await route.handler(req, server)
+    } finally {
+      inFlightRequests -= 1
+    }
   },
 })
 
@@ -554,6 +601,9 @@ const DRAIN_MS = Number(process.env.PROXY_DRAIN_MS ?? 20_000)
  * названный в журнале, а не тихий.
  */
 async function shutdown(): Promise<void> {
+  // Первым делом — сказать новым, что мы уходим. До этой строки они обрывались
+  // молча, и человек за дверью видел пустоту (05.09.2026).
+  isDraining = true
   if (parentWatcher) clearInterval(parentWatcher)
   stopStatsEmitter()
   stopHeartbeat()
@@ -563,17 +613,24 @@ async function shutdown(): Promise<void> {
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.
   proxyClient.stop()
   if (DRAIN_MS > 0) {
-    // stop(false) — «не принимать новые, дать текущим закончиться». Обещание Bun возвращается
-    // промисом, поэтому гонка с потолком, а не слепое ожидание.
-    const drained = server.stop(false)
-    const finished = await Promise.race([
-      Promise.resolve(drained).then(() => true),
-      new Promise<false>((r) => setTimeout(() => r(false), DRAIN_MS)),
-    ])
-    if (!finished) {
-      console.error(`[shutdown] идущие запросы не закончились за ${DRAIN_MS}ms — обрываю`)
-      server.stop(true)
+    // 🔴 ДВЕРЬ ОСТАЁТСЯ ОТКРЫТОЙ ВЕСЬ СЛИВ, И ЭТО ГЛАВНОЕ ОТЛИЧИЕ ОТ ПРЕЖНЕГО.
+    // Раньше здесь стояло `server.stop(false)` — «не принимать новые, дать
+    // текущим закончиться». Текущим он давал, а новые обрывались на уровне
+    // сокета, молча, и всё то время, пока идёт слив (до двадцати секунд).
+    // 05.09.2026 в это окно попал живой вопрос фаундера с телефона: ушёл через
+    // пять секунд после начала остановки и не получил ничего.
+    //
+    // Теперь сокет не закрывается: новые получают 503 с Retry-After (см. fetch),
+    // а уходим мы, когда договорят СВОИ ходы — по счётчику в полёте, а не по
+    // обещанию сокета.
+    const until = Date.now() + DRAIN_MS
+    while (inFlightRequests > 0 && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 100))
     }
+    if (inFlightRequests > 0) {
+      console.error(`[shutdown] ${inFlightRequests} запрос(ов) не закончились за ${DRAIN_MS}ms — обрываю`)
+    }
+    server.stop(true)
   } else {
     server.stop(true)
   }

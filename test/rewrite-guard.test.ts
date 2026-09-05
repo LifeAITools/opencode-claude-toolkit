@@ -168,6 +168,39 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     rmSync(path, { force: true })
   })
 
+  /**
+   * 🔴 СПОСОБ, ДОСТУПНЫЙ ЧЕЛОВЕКУ, ОБЯЗАН СТОЯТЬ В САМОМ ТЕКСТЕ.
+   *
+   * Замер владельца чат-сервиса 05.09.2026: этот текст доезжает до человека в
+   * браузере ДОСЛОВНО, и человек читал в нём предложение набрать команду
+   * агентского CLI, которого у него нет. Метка, которую он МОЖЕТ просто
+   * напечатать в чате, жила только в машинной части ответа — её видит код, а
+   * не он.
+   *
+   * Его слова: «любой другой ваш потребитель с человеком за рулём наступит на
+   * то же самое».
+   */
+  test('метка согласия стоит В ПЕРВЫХ 512 ЗНАКАХ — там, где её обрезают чужие приложения', async () => {
+    const path = join(TMP, 'human-path.json')
+    seedIdleFor(path, 'human-path', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'human-path' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { message?: string } }
+    const m = j.error!.message!
+    // 🔴 512 — НЕ КРУГЛОЕ ЧИСЛО, А ЗАМЕР. Владелец чат-сервиса 05.09.2026:
+    // их приложение показывает текст провайдера, обрезая на 512 знаках. Метка
+    // в тексте БЫЛА и раньше — но стояла после длинного объяснения и после
+    // команды агентского CLI, то есть за обрезом. Человек в браузере видел
+    // предложение набрать команду, которой у него нет, и не видел способа,
+    // который ему доступен: просто напечатать метку в чате.
+    expect(m.slice(0, 512)).toContain('[cache-rewrite-ok]')
+    // И названа раньше команды терминала: человек читает сверху вниз.
+    expect(m.indexOf('[cache-rewrite-ok]')).toBeLessThan(m.indexOf('context cache-rewrite-ok'))
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
   test('the refusal opens with the marker downstream watchers key on', async () => {
     // 🔴 THIS PREFIX IS A CONTRACT WITH ANOTHER OWNER, and it is the only
     // handle they have. The Claude Code CLI has no class for a 400 carrying

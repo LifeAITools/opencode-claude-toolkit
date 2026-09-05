@@ -2058,9 +2058,25 @@ export class ProxyClient {
                   + `grant consent or change what the turn sends): this turn would ${spendPhrase} `
                 : `Cache guard: this turn would ${spendPhrase} `)
                 + `(${rewriteAssessment.rewriteClass}) — `
-                + `an unconfirmed quota spend, blocked for all consumers. To proceed, either include `
-                + `${guard.overrideMarker} in your next message (/cache-rewrite-ok), or grant out-of-band: `
-                + `context cache-rewrite-ok ${sessionId} --until-consumed. Consent is single-use `
+                + `an unconfirmed quota spend, blocked for all consumers. `
+                // 🔴 СПОСОБ, ДОСТУПНЫЙ ЧЕЛОВЕКУ, НАЗВАН ПЕРВЫМ И ЦЕЛИКОМ.
+                //
+                // Владелец чат-сервиса 05.09.2026 принёс замер: этот текст
+                // доезжает до человека в браузере ДОСЛОВНО, и человек читал в
+                // нём предложение набрать команду `context …` — агентского CLI,
+                // которого у него нет и быть не может. Метка, которую он МОЖЕТ
+                // просто напечатать в чате, жила только в машинной части ответа,
+                // куда человек не добирается: её видит код, а не он.
+                //
+                // Сосед свою половину уже сделал, но написал точно: «любой
+                // другой ваш потребитель с человеком за рулём наступит на то же
+                // самое». Поэтому метка теперь стоит в самом тексте, до всякой
+                // команды, и названа как действие, а не как поле.
+                + `TO PROCEED: send ${guard.overrideMarker} at the start of your next message — `
+                + `that is the whole consent, and it works for a person typing in a chat. `
+                + `An agent or programmatic client that cannot add text to its message can grant `
+                + `out-of-band instead: context cache-rewrite-ok ${sessionId} --until-consumed. `
+                + `Consent is single-use `
                 + `(--until-consumed waits for this session's next turn instead of a 180s clock — `
                 + `the form that survives you typing it). `
                 // Субагенту адресовать «наберите команду» бессмысленно: у него

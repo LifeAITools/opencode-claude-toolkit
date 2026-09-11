@@ -202,6 +202,27 @@ interface RegistryEntry {
    * earlier, shows a provider that is throwing purchases away.
    */
   lastFireColdWrote: boolean
+  /**
+   * КОГДА КЭШ ИМЕННО ЭТОЙ ВЕТКИ БЫЛ ЗАПИСАН ИЛИ ПОДТВЕРЖДЁН ЖИВЫМ — абсолютная
+   * метка, а не отсчёт.
+   *
+   * До 11.09.2026 возраст кэша мерили ОДНИМ полем на весь движок
+   * (`cacheWrittenAt`), а веток у сессии 5–7, у каждой свой кэш и свой срок.
+   * Любой настоящий ход по ЛЮБОЙ ветке молодил общие часы, и ворота
+   * `cache_dead_at_fire_gate` открывались для ВСЕХ веток разом — включая те,
+   * чей префикс умер час назад. Выстрел по такой ветке ничего не освежает: он
+   * ПОКУПАЕТ префикс заново, полной ценой контекста.
+   *
+   * Замер того дня: 29 покупок за утро, 3 347 852 токена записи, все 29 —
+   * первый выстрел по ветке, и по 25 из них купленное больше никто не прочитал.
+   *
+   * Ставится в двух местах и только в них: настоящий ход, отдавший снимок
+   * (кэш записан им), и выстрел, ПРОЧИТАВШИЙ кэш обратно (чтение продлевает
+   * жизнь префикса — на этом стоит весь прогрев). Покупка НЕ продлевает
+   * ничего: ветка, за которую заплатили, получает метку только если её потом
+   * прочитали.
+   */
+  cacheWrittenAt: number
 }
 
 /** A snapshot primed by notifyRealRequestStart, awaiting its completion. */
@@ -1151,6 +1172,9 @@ export class KeepaliveEngine {
           // write on it IS evidence the server dropped the prefix.
           provenAlive: true,
           lastFireColdWrote: false,
+          // Этот ход и записал кэш ветки — её собственные часы стартуют здесь,
+          // независимо от того, что происходит у соседних веток.
+          cacheWrittenAt: now,
         }
         this.registry.set(key, entry)
         this.lastSnapshots.set(key, entry) // retain for self-heal re-prime
@@ -1661,7 +1685,7 @@ export class KeepaliveEngine {
     // Eligible = every cache_control lineage whose per-lineage idle crossed the
     // fire threshold. Ordered main→heaviest→most-stale so the most valuable
     // caches are warmed first when the per-tick cap bites.
-    const eligible = Array.from(this.registry.values())
+    let eligible = Array.from(this.registry.values())
       .filter((e) => e.hasCacheControl)
       .map((e) => ({ entry: e, idle: lineageIdle(e) }))
       .filter((x) => x.idle >= fireThresholdMs)
@@ -1673,6 +1697,55 @@ export class KeepaliveEngine {
         return b.idle - a.idle
       })
     if (eligible.length === 0) return  // nothing due yet — onTick already emitted
+
+    // ── Каждая ветка судится по СВОИМ часам, а не по общим ────────────────
+    // Ворота ниже меряют возраст одним полем на весь движок. Это и была дыра:
+    // ход по любой ветке молодил общие часы, и выстрел уходил в префикс,
+    // умерший час назад, — то есть покупал его заново полной ценой.
+    // Замер 11.09.2026: 29 таких покупок за утро, 3 347 852 токена записи, и
+    // по 25 веткам из 29 купленное потом никто не прочитал.
+    //
+    // Мёртвую ветку СНИМАЕМ, а не глушим ею весь движок: соседние кэши той же
+    // сессии живы, и лишать их тепла из-за одной забытой ветки — та самая
+    // потеря, ради которой ворота и ставились. Если после отсева не осталось
+    // ничего, ниже отработает прежний путь с полной остановкой.
+    const deadAtGate: string[] = []
+    for (const x of eligible) {
+      const writtenAt = x.entry.cacheWrittenAt
+      if (writtenAt <= 0) continue          // возраст неизвестен — не нам решать
+      if (Date.now() - writtenAt >= this.cacheTtlMs - this.safetyMarginMs) {
+        deadAtGate.push(x.entry.lineageKey)
+      }
+    }
+    if (deadAtGate.length > 0) {
+      for (const key of deadAtGate) {
+        const e = this.registry.get(key)
+        try {
+          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            `[${new Date().toISOString()}] KA_LINEAGE_DROPPED_CACHE_DEAD pid=${process.pid} ${RUNTIME_IDENTITY}`
+            + ` lineage=${key} cacheAgeSec=${e ? Math.round((Date.now() - e.cacheWrittenAt) / 1000) : -1}`
+            + ` cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} regSize=${this.registry.size}`
+            + ' — снята: её префикс мёртв, выстрел был бы покупкой, а не прогревом\n')
+        } catch { /* logging best-effort */ }
+        this.registry.delete(key)
+      }
+      this.notifyRegistryChanged()
+      const survivors = new Set(this.registry.keys())
+      eligible = eligible.filter((x) => survivors.has(x.entry.lineageKey))
+      if (eligible.length === 0) {
+        // Живых веток не осталось — дальше прежний путь: движок замолкает и
+        // называет причину, как и раньше.
+        this.logClearDiag('cache_dead_at_fire_gate', {
+          cacheAgeMs: this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1,
+          cacheTtlMs: this.cacheTtlMs,
+          droppedLineages: deadAtGate.length,
+        })
+        this.clearRegistry()
+        this.stop()
+        try { this.config.onDisarmed?.({ reason: 'cache_dead_at_fire_gate', at: Date.now() }) } catch {}
+        return
+      }
+    }
 
     // ── Last gate before spending: is the cache we are about to refresh still
     // alive AT ALL? ──────────────────────────────────────────────────────
@@ -1823,7 +1896,15 @@ export class KeepaliveEngine {
       {
         const rCr = usage.cacheReadInputTokens ?? 0
         const rCw = usage.cacheCreationInputTokens ?? 0
-        if (rCr > 0 && rCr > rCw) { best.provenAlive = true; best.lastFireColdWrote = false }
+        if (rCr > 0 && rCr > rCw) {
+          best.provenAlive = true; best.lastFireColdWrote = false
+          // Чтение префикса продлевает его жизнь у Anthropic — на этом стоит
+          // весь прогрев. Значит собственные часы ЭТОЙ ветки идут отсюда.
+          // Покупка (rCw больше rCr) их не трогает нарочно: заплатить за
+          // префикс и считать его после этого свежим — ровно тот круг, из-за
+          // которого одна ветка платила по 300k и уходила в тишину.
+          best.cacheWrittenAt = Date.now()
+        }
       }
 
       const rl = this.getRateLimitInfo()
@@ -2974,6 +3055,13 @@ export class KeepaliveEngine {
   /** @internal — mutable internal state getters/setters for test inspection */
   _setLastRealActivityAt(v: number): void { this.lastRealActivityAt = v }
   _setCacheWrittenAt(v: number): void { this.cacheWrittenAt = v }
+  /** @internal — for tests: pin ONE lineage's own cache clock. The engine-wide
+   *  `_setCacheWrittenAt` cannot express the case this exists for — one branch
+   *  dead while a neighbour is fresh — which is exactly how the spend hid. */
+  _setLineageCacheWrittenAt(key: string, v: number): void {
+    const e = this.registry.get(key)
+    if (e) e.cacheWrittenAt = v
+  }
   /** @internal — for tests: pin a registry entry's role. Role classification is
    *  not what a provenance test is about, and letting it decide silently is how
    *  such a test passes for the wrong reason. */
@@ -3115,6 +3203,11 @@ export class KeepaliveEngine {
           inputTokens: e.inputTokens,
           hasCacheControl: e.hasCacheControl,
           provenAlive: false,   // resurrected — nothing has proven it yet
+          // Воскрешённая ветка наследует время записи из сохранённого
+          // состояния: другого достоверного мы о ней не знаем, а поставить
+          // «сейчас» значило бы омолодить мёртвый префикс и заплатить за него
+          // первым же выстрелом — ровно тот случай, что эти часы и ловят.
+          cacheWrittenAt: state.cacheWrittenAt,
           lastFireColdWrote: false,
         })
       }

@@ -294,10 +294,38 @@ export function stuckSessionState(sessionId: string, now: number = Date.now()):
   return { stuck: true, stuckForSec: Math.max(0, Math.round((now - st.since) / 1000)) }
 }
 
+/**
+ * Снять сессию с учёта стоящих по решению ЧЕЛОВЕКА.
+ *
+ * 🔴 ЗАЧЕМ ЭТА ДВЕРЬ ЕСТЬ. Учёт умеет снимать сам — по мёртвому процессу и по
+ * потолку в двое суток, — но не умел принять «этой сессии не существует,
+ * убери». Замер 11.09.2026: в живом учёте висела aaf2acbd — 190 часов, 18
+ * напоминаний человеку, процесса за ней нет вовсе, а снять было нечем: ждать
+ * сутки до потолка или править боевой файл машины руками. Правка руками —
+ * ровно то, чем эта смена уже обожглась в тот же день.
+ *
+ * Цена пробела не в мусоре, а в доверии: тревога зовёт человека разрешить
+ * сессию, которой нет; нажатие уходит впустую; человек перестаёт читать
+ * карточки — ломается то, ради чего вся цепь строилась.
+ *
+ * Отвечает РАЗЛИЧИМО: «убрал» и «нечего было убирать» — разные исходы, и
+ * рисующий карточку обязан их различать.
+ */
+export function dropStuck(sessionId: string, now: number = Date.now()):
+  { dropped: boolean; wasStuck: boolean; stuckForSec: number | null } {
+  const st = stuck.get(sessionId)
+  if (!st) return { dropped: false, wasStuck: false, stuckForSec: null }
+  const stuckForSec = Math.max(0, Math.round((now - st.since) / 1000))
+  stuck.delete(sessionId)
+  saveStuck()
+  return { dropped: true, wasStuck: true, stuckForSec }
+}
+
 /** Испытательный шов: прогнать обход в названный момент и посмотреть состояние. */
 export const _stuckState = {
   sweep: (now: number) => sweepStuck(now),
   get: (sid: string) => stuck.get(sid),
+  put: (sid: string, v: StuckSession) => { stuck.set(sid, v) },
   size: () => stuck.size,
   clear: () => { stuck.clear() },
 }

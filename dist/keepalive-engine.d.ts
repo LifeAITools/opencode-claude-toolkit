@@ -22,6 +22,7 @@ interface RegistryEntry {
     hasCacheControl: boolean;
     provenAlive: boolean;
     lastFireColdWrote: boolean;
+    cacheWrittenAt: number;
 }
 export declare function stripCredentials(headers: Record<string, string>): Record<string, string>;
 export declare function detectCacheTtlFromBody(body: unknown): {
@@ -197,6 +198,7 @@ export declare class KeepaliveEngine {
     get _lastKnownCacheTokensByModel(): ReadonlyMap<string, number>;
     _setLastRealActivityAt(v: number): void;
     _setCacheWrittenAt(v: number): void;
+    _setLineageCacheWrittenAt(key: string, v: number): void;
     _setLineageRole(key: string, role: AgentRole): void;
     _ageLineages(ms: number): void;
     get _cacheWrittenAt(): number;

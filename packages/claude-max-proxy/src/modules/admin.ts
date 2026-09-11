@@ -18,7 +18,7 @@ import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
-import { stuckSessionState } from '../local-alert.js'
+import { stuckSessionState, dropStuck } from '../local-alert.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -209,6 +209,40 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
               ? 'granted, but this session is NOT currently held by the cache guard'
               : 'granted, but NOTHING is known about this session here — check the id '
                 + 'before telling a person it is unblocked'),
+        })
+      },
+    },
+
+    // Снять сессию с учёта стоящих — решение ЧЕЛОВЕКА, а не согласие на трату.
+    //
+    // 🔴 ЭТО НЕ ДВЕРЬ СОГЛАСИЯ И НЕ ЕЁ СИНОНИМ. /admin/cache-rewrite-ok говорит
+    // «покупку разрешаю, продолжай»; эта говорит «такой сессии больше нет,
+    // перестань про неё напоминать». Замер 11.09.2026: в учёте висела aaf2acbd —
+    // 190 часов, 18 напоминаний человеку, процесса за ней нет, и убрать её было
+    // нечем, кроме как ждать сутки до потолка или править боевой файл машины
+    // руками. Второе — ровно то, чем эта смена уже обожглась в тот же день.
+    //
+    // Цена пробела не в мусоре, а в доверии: карточка зовёт человека разрешить
+    // несуществующего агента, нажатие уходит впустую, и человек перестаёт читать
+    // карточки — ломается то, ради чего вся цепь строилась.
+    {
+      method: 'POST',
+      path: '/admin/stuck-session/drop',
+      handler: async (req) => {
+        let body: { sessionId?: string } = {}
+        try { body = await req.json() as any } catch { /* пустое тело — ниже */ }
+        if (!body.sessionId) return Response.json({ error: 'sessionId required' }, { status: 400 })
+        const r = dropStuck(body.sessionId)
+        return Response.json({
+          ok: true,
+          sessionId: body.sessionId,
+          dropped: r.dropped,
+          stuckForSec: r.stuckForSec,
+          // Различимо нарочно: «убрал» и «нечего было убирать» — разные исходы,
+          // и рисующий карточку обязан сказать человеку, который из них случился.
+          note: r.dropped
+            ? 'снята с учёта — напоминаний по ней больше не будет'
+            : 'в учёте стоящих такой сессии не было — ничего не изменилось',
         })
       },
     },

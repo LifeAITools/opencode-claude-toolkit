@@ -354,7 +354,11 @@ const stopIdentityWatch = startIdentityWatch()
 // And the alerts leave the log file: detecting a storm and writing it to disk
 // is what let a 52-minute outage reach the founder by feel instead of by
 // notification on 2026-08-24. See local-alert.ts.
-const stopLocalAlert = startLocalAlert()
+// Распознаватель владельца: тревога записывает его рядом со стоящей сессией и
+// потому переживает перезапуск службы — трекер-то начинает с чистой памяти.
+const stopLocalAlert = startLocalAlert(
+  (sid) => proxyClient.listSessions().find(s => s.sessionId === sid)?.pid ?? null,
+)
 
 // ═══ Module System ═══════════════════════════════════════════════
 //

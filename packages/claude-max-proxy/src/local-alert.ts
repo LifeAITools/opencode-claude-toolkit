@@ -32,6 +32,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { bus } from './event-bus.js'
+import { processAlive } from './session-tracker.js'
 
 /** Whether to deliver at all — off in tests, and a way out if it ever annoys. */
 const enabled = () => process.env.PROXY_LOCAL_ALERT !== '0'
@@ -42,15 +43,30 @@ const enabled = () => process.env.PROXY_LOCAL_ALERT !== '0'
  * running the suite. Override to capture instead; `null` restores the real
  * doors. Same underscore idiom as storm-watch's `_stormState`.
  */
-let delivery: ((subject: string, body: string) => void) | null = null
-export function _setAlertDelivery(fn: ((subject: string, body: string) => void) | null): void {
+let delivery: ((subject: string, body: string, journalOnly?: boolean) => void) | null = null
+export function _setAlertDelivery(
+  fn: ((subject: string, body: string, journalOnly?: boolean) => void) | null,
+): void {
   delivery = fn
 }
 
-/** Never let a notifier hold the service open or crash it. */
-function fire(subject: string, body: string): void {
+/**
+ * Жив ли процесс — тем же `kill -0`, что и у трекера, но через шов: испытанию
+ * нужно называть живых и мёртвых самому, а не заводить настоящие процессы.
+ */
+let aliveProbe: ((pid: number) => boolean) | null = null
+export function _setAliveProbe(fn: ((pid: number) => boolean) | null): void {
+  aliveProbe = fn
+}
+const isAlive = (pid: number): boolean =>
+  aliveProbe ? aliveProbe(pid) : processAlive(pid)
+
+/** Never let a notifier hold the service open or crash it.
+ *  `journalOnly` — для бухгалтерии: снятие с учёта обязано оставить след, но
+ *  будить человека всплывашкой ради «перестал стоять» незачем. */
+function fire(subject: string, body: string, journalOnly = false): void {
   if (!enabled()) return
-  if (delivery) { try { delivery(subject, body) } catch { /* a sink must not break the path */ } return }
+  if (delivery) { try { delivery(subject, body, journalOnly) } catch { /* a sink must not break the path */ } return }
   const line = `${subject} — ${body}`
   try {
     // Durable half: the system journal. `logger` is in coreutils-adjacent
@@ -59,6 +75,7 @@ function fire(subject: string, body: string): void {
       stdout: 'ignore', stderr: 'ignore',
     }).unref()
   } catch { /* a missing logger must not matter */ }
+  if (journalOnly) return
   try {
     // Immediate half: a desktop notification, best-effort. User systemd units
     // have XDG_RUNTIME_DIR, so point at the session bus the same way the
@@ -132,6 +149,15 @@ const BLOCKED_STATE_JSON = process.env.PROXY_BLOCKED_STATE_PATH
 /** Шаг напоминаний: чем дольше стоит, тем реже — но никогда не молча. */
 const STUCK_REMINDER_STEPS_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000, 24 * 60 * 60_000]
 const STUCK_SWEEP_INTERVAL_MS = 10 * 60_000
+// 🔴 ПОТОЛОК ДЛЯ ТЕХ, ЧЬЮ ЖИЗНЬ ПРОВЕРИТЬ НЕЧЕМ — и только для них.
+// Владельца опознать удаётся не всегда («порт источника не назван», «процесс по
+// порту не найден»), а утверждать девятые сутки то, что не проверял, нельзя:
+// это и есть та самая уверенная ложь, от которой мы лечим соседей. Поэтому у
+// неопознанного есть срок, и считается он от ПОСЛЕДНЕЙ ПОПЫТКИ, а не от начала
+// стояния: сессия, которую ещё пинают, отказывает снова и снова, а брошенная —
+// молчит. Тому, чей владелец ЖИВ, потолок не применяется вовсе: он может честно
+// стоять неделю и обязан звать всё это время.
+const STUCK_UNVERIFIABLE_CEILING_MS = 48 * 60 * 60_000
 interface StuckSession {
   since: number          // когда отказали в первый раз
   lastBlockAt: number    // последний отказ
@@ -139,6 +165,9 @@ interface StuckSession {
   announcements: number
   reason: string
   tokens: number
+  /** Владелец на момент отказа. null / поля нет — опознать не удалось.
+   *  Именно он переживает перезапуск службы и даёт обходу судить самому. */
+  pid?: number | null
 }
 const stuck = new Map<string, StuckSession>()
 
@@ -163,6 +192,30 @@ function saveStuck(): void {
 function sweepStuck(now: number): void {
   let changed = false
   for (const [sid, st] of stuck) {
+    // ── Сначала: а есть ли ещё кого звать? ──────────────────────────────
+    // 🔴 ПОЧЕМУ ЭТО ЗДЕСЬ, А НЕ НА СОБЫТИИ `SESSION_DEAD`. Снятие по событию
+    // работает ровно до первого перезапуска службы: `reapDead()` обходит ПАМЯТЬ
+    // трекера, а она умирает вместе с процессом, тогда как файл стоящих —
+    // переживает. Дальше о покойнике сказать некому: трекер о нём не знает, а
+    // обход ждёт события, которое уже не придёт. Замер 11.09.2026 по живому
+    // файлу: семь стоящих, живая одна, остальные шесть встали 02–05.09 и
+    // получили по 9–18 напоминаний каждая. Событие оставлено — оно снимает
+    // быстрее; но истина о жизни считается ЗДЕСЬ, из данных, лежащих на диске.
+    const pid = st.pid ?? null
+    if (pid !== null) {
+      if (!isAlive(pid)) {
+        stuck.delete(sid)
+        changed = true
+        retired(sid, st, now, `владельца (${pid}) больше нет — звать некого`)
+        continue
+      }
+    } else if (now - st.lastBlockAt > STUCK_UNVERIFIABLE_CEILING_MS) {
+      stuck.delete(sid)
+      changed = true
+      retired(sid, st, now, 'владелец не опознан, и попыток нет более двух суток —'
+        + ' утверждать, что она всё ещё стоит, стало нечем')
+      continue
+    }
     // Шаг берётся по числу УЖЕ СДЕЛАННЫХ напоминаний минус первое, прозвучавшее
     // на самом отказе: иначе первый повтор ушёл бы на час, а он нужен раньше —
     // пятнадцать минут это ещё то окно, в котором человек помнит, чем занимался.
@@ -176,11 +229,26 @@ function sweepStuck(now: number): void {
       `Агент стоит у сторожа кэша уже ${humanFor(now - st.since)}`,
       `сессия ${sid}: ${st.reason}; ход просит ${groupDigits(st.tokens)} токенов.`
       + ` Сама она выйти не может и БОЛЬШЕ НЕ ПЫТАЕТСЯ — молчание тут не признак здоровья.`
+      + (pid === null
+        ? ' Владелец не опознан, поэтому жив ли её процесс, проверить нечем — возможно, звать уже некого.'
+        : '')
       + ` Разрешить: context cache-rewrite-ok ${sid} --until-consumed`
       + ` — либо перезапустить её, если работа уже неактуальна.`,
     )
   }
   if (changed) saveStuck()
+}
+
+/** Снятие с учёта — в журнал, но НЕ всплывашкой: «перестал стоять» это не
+ *  тревога, а бухгалтерия. Без следа же выходит прежняя болезнь наизнанку —
+ *  замолчало, и объяснить это некому. */
+function retired(sid: string, st: StuckSession, now: number, why: string): void {
+  fire(
+    'Стоящая сессия снята с учёта',
+    `сессия ${sid}: ${why}. Простояла ${humanFor(now - st.since)},`
+    + ` напоминаний сделано ${st.announcements}.`,
+    true,
+  )
 }
 
 /** Испытательный шов: прогнать обход в названный момент и посмотреть состояние. */
@@ -203,7 +271,13 @@ function humanFor(ms: number): string {
  * Subscribe the alert path to the events worth waking a human for. Returns a
  * stop function (tests and shutdown use it).
  */
-export function startLocalAlert(): () => void {
+/**
+ * @param resolvePid — кто владеет этой сессией прямо сейчас. Передаётся снаружи
+ * (из server.ts, где живёт трекер), а не берётся отсюда: тревога не должна
+ * знать устройство трекера, ей нужен один факт — номер процесса, чтобы записать
+ * его рядом со стоящей сессией и пережить с ним перезапуск службы.
+ */
+export function startLocalAlert(resolvePid?: (sessionId: string) => number | null): () => void {
   const offBegan = bus.onKind('UPSTREAM_STORM_BEGAN' as never, (e: any) => {
     const b = e?.breakdown ?? {}
     fire(
@@ -248,6 +322,11 @@ export function startLocalAlert(): () => void {
     // сделает успешный ход или пока не умрёт её процесс.
     {
       const prev = stuck.get(sid)
+      // Владельца спрашиваем КАЖДЫЙ раз, а не только при первом отказе: после
+      // перезапуска агента у той же сессии он другой, а старый — покойник, по
+      // которому обход снял бы с учёта живого.
+      let pid: number | null = prev?.pid ?? null
+      try { pid = resolvePid?.(sid) ?? pid } catch { /* опознание не должно ронять тревогу */ }
       stuck.set(sid, {
         since: prev?.since ?? now,
         lastBlockAt: now,
@@ -255,6 +334,7 @@ export function startLocalAlert(): () => void {
         announcements: (prev?.announcements ?? 0) + 1,
         reason: rewriteReason(e?.rewriteClass, e?.spendKind),
         tokens: Number.isFinite(tokens) ? tokens : 0,
+        pid,
       })
       saveStuck()
     }

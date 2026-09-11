@@ -168,6 +168,17 @@ interface StuckSession {
   /** Владелец на момент отказа. null / поля нет — опознать не удалось.
    *  Именно он переживает перезапуск службы и даёт обходу судить самому. */
   pid?: number | null
+  /** Рабочий каталог владельца — то есть ПРОЕКТ, в котором стоит агент.
+   *  «Сессия d91694bb» человеку не говорит ничего; «сессия d91694bb,
+   *  /home/relishev/projects/vibe/photo3d» говорит всё. Путь идёт как есть:
+   *  выводить из него имя проекта значило бы гадать за реестр. */
+  cwd?: string | null
+}
+
+/** Кто владеет сессией прямо сейчас — номер процесса и его рабочий каталог. */
+export interface StuckOwner {
+  pid: number | null
+  cwd: string | null
 }
 const stuck = new Map<string, StuckSession>()
 
@@ -227,7 +238,8 @@ function sweepStuck(now: number): void {
     changed = true
     fire(
       `Агент стоит у сторожа кэша уже ${humanFor(now - st.since)}`,
-      `сессия ${sid}: ${st.reason}; ход просит ${groupDigits(st.tokens)} токенов.`
+      `сессия ${sid}${st.cwd ? ` (${st.cwd})` : ''}: ${st.reason};`
+      + ` ход просит ${groupDigits(st.tokens)} токенов.`
       + ` Сама она выйти не может и БОЛЬШЕ НЕ ПЫТАЕТСЯ — молчание тут не признак здоровья.`
       + (pid === null
         ? ' Владелец не опознан, поэтому жив ли её процесс, проверить нечем — возможно, звать уже некого.'
@@ -272,12 +284,13 @@ function humanFor(ms: number): string {
  * stop function (tests and shutdown use it).
  */
 /**
- * @param resolvePid — кто владеет этой сессией прямо сейчас. Передаётся снаружи
- * (из server.ts, где живёт трекер), а не берётся отсюда: тревога не должна
- * знать устройство трекера, ей нужен один факт — номер процесса, чтобы записать
- * его рядом со стоящей сессией и пережить с ним перезапуск службы.
+ * @param resolveOwner — кто владеет этой сессией прямо сейчас: номер процесса и
+ * его рабочий каталог. Передаётся снаружи (из server.ts, где живёт трекер), а не
+ * берётся отсюда: тревога не должна знать устройство трекера, ей нужны два факта
+ * — по номеру процесса она судит о жизни, а каталогом называет человеку ПРОЕКТ,
+ * в котором агент стоит. Оба ложатся на диск и переживают перезапуск службы.
  */
-export function startLocalAlert(resolvePid?: (sessionId: string) => number | null): () => void {
+export function startLocalAlert(resolveOwner?: (sessionId: string) => StuckOwner): () => void {
   const offBegan = bus.onKind('UPSTREAM_STORM_BEGAN' as never, (e: any) => {
     const b = e?.breakdown ?? {}
     fire(
@@ -326,7 +339,11 @@ export function startLocalAlert(resolvePid?: (sessionId: string) => number | nul
       // перезапуска агента у той же сессии он другой, а старый — покойник, по
       // которому обход снял бы с учёта живого.
       let pid: number | null = prev?.pid ?? null
-      try { pid = resolvePid?.(sid) ?? pid } catch { /* опознание не должно ронять тревогу */ }
+      let cwd: string | null = prev?.cwd ?? null
+      try {
+        const owner = resolveOwner?.(sid)
+        if (owner) { pid = owner.pid ?? pid; cwd = owner.cwd ?? cwd }
+      } catch { /* опознание не должно ронять тревогу */ }
       stuck.set(sid, {
         since: prev?.since ?? now,
         lastBlockAt: now,
@@ -335,12 +352,14 @@ export function startLocalAlert(resolvePid?: (sessionId: string) => number | nul
         reason: rewriteReason(e?.rewriteClass, e?.spendKind),
         tokens: Number.isFinite(tokens) ? tokens : 0,
         pid,
+        cwd,
       })
       saveStuck()
     }
     fire(
       'Агент стоит у сторожа кэша и ждёт согласия',
-      `сессия ${sid}: ${streak} хода подряд отказано, ${rewriteReason(e?.rewriteClass, e?.spendKind)};`
+      `сессия ${sid}${stuck.get(sid)?.cwd ? ` (${stuck.get(sid)!.cwd})` : ''}:`
+      + ` ${streak} хода подряд отказано, ${rewriteReason(e?.rewriteClass, e?.spendKind)};`
       + ` ход просит ${groupDigits(Number.isFinite(tokens) ? tokens : 0)} токенов.`
       + ` Сама она этого сделать не может — ход не доходит до модели.`
       + ` Разрешить: context cache-rewrite-ok ${sid}`,

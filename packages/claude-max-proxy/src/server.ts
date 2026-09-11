@@ -56,7 +56,7 @@ import { startStormWatch } from './storm-watch.js'
 import { startIdentityWatch } from './identity-watch.js'
 import { startLocalAlert } from './local-alert.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
-import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup } from '@life-ai-tools/claude-code-sdk'
+import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup, readOwnerPassport } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
 import { startStatsEmitter } from './stats-emitter.js'
 import { checkDeployDrift, resolveInstallDir } from './deploy-drift.js'
@@ -356,9 +356,13 @@ const stopIdentityWatch = startIdentityWatch()
 // notification on 2026-08-24. See local-alert.ts.
 // Распознаватель владельца: тревога записывает его рядом со стоящей сессией и
 // потому переживает перезапуск службы — трекер-то начинает с чистой памяти.
-const stopLocalAlert = startLocalAlert(
-  (sid) => proxyClient.listSessions().find(s => s.sessionId === sid)?.pid ?? null,
-)
+// Каталог читается по номеру процесса ЖИВЬЁМ, а не берётся из трекера: трекер
+// читает паспорт владельца один раз, при первом запросе сессии, и на диске его
+// не держит. Стоящей сессии каталог нужен позже и в другом процессе.
+const stopLocalAlert = startLocalAlert((sid) => {
+  const pid = proxyClient.listSessions().find(s => s.sessionId === sid)?.pid ?? null
+  return { pid, cwd: pid !== null ? (readOwnerPassport(pid)?.cwd ?? null) : null }
+})
 
 // ═══ Module System ═══════════════════════════════════════════════
 //

@@ -37,7 +37,14 @@ let alive = new Set<number>()
 
 function startWith(resolvePid: (sid: string) => number | null) {
   try { stop?.() } catch { /* ещё не поднимали */ }
-  stop = startLocalAlert(resolvePid)
+  stop = startLocalAlert((sid) => ({ pid: resolvePid(sid), cwd: null }))
+  _stuckState.clear()
+}
+
+/** Владелец целиком — номер процесса и его рабочий каталог. */
+function startWithOwner(resolve: (sid: string) => { pid: number | null; cwd: string | null }) {
+  try { stop?.() } catch { /* ещё не поднимали */ }
+  stop = startLocalAlert(resolve)
   _stuckState.clear()
 }
 
@@ -48,7 +55,7 @@ beforeEach(() => {
   _stuckState.clear()
   _setAlertDelivery((subject, body, journalOnly) => { fired.push({ subject, body, journalOnly: !!journalOnly }) })
   _setAliveProbe((pid) => alive.has(pid))
-  stop = startLocalAlert(() => null)
+  stop = startLocalAlert(() => ({ pid: null, cwd: null }))
   _stuckState.clear()
 })
 afterEach(() => {
@@ -152,11 +159,39 @@ describe('обход судит о жизни сам, не дожидаясь с
       },
     }), 'utf8')
     try { stop?.() } catch { /* ещё не поднимали */ }
-    stop = startLocalAlert(() => null)       // поднимает состояние с диска
+    stop = startLocalAlert(() => ({ pid: null, cwd: null }))   // поднимает состояние с диска
     expect(_stuckState.get('s-legacy')).toBeDefined()
     fired = []
     _stuckState.sweep(Date.now())
     expect(_stuckState.get('s-legacy')).toBeUndefined()
     expect(fired.filter(f => !f.journalOnly).length).toBe(0)
+  })
+
+  test('рабочий каталог владельца записывается рядом — карточке нужен ПРОЕКТ, а не голый номер', () => {
+    alive.add(555)
+    startWithOwner(() => ({ pid: 555, cwd: '/home/relishev/projects/vibe/photo3d' }))
+    block('s-cwd')
+    expect(_stuckState.get('s-cwd')!.cwd).toBe('/home/relishev/projects/vibe/photo3d')
+  })
+
+  test('и он же стоит в напоминании: «сессия abc» без проекта человеку ничего не говорит', () => {
+    alive.add(555)
+    startWithOwner(() => ({ pid: 555, cwd: '/home/relishev/projects/vibe/photo3d' }))
+    block('s-cwd2')
+    fired = []
+    _stuckState.sweep(Date.now() + 20 * 60_000)
+    expect(fired.find(f => !f.journalOnly)!.body).toContain('/home/relishev/projects/vibe/photo3d')
+  })
+
+  test('каталога нет — напоминание не ломается и лишнего не выдумывает', () => {
+    alive.add(555)
+    startWithOwner(() => ({ pid: 555, cwd: null }))
+    block('s-nocwd')
+    fired = []
+    _stuckState.sweep(Date.now() + 20 * 60_000)
+    const b = fired.find(f => !f.journalOnly)!.body
+    expect(b).toContain('s-nocwd')
+    expect(b).not.toContain('undefined')
+    expect(b).not.toContain('null')
   })
 })

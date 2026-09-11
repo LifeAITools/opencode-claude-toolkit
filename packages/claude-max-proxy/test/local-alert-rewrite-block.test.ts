@@ -33,7 +33,11 @@ let fired: Array<{ subject: string; body: string }> = []
 function arm() {
   fired = []
   _setAlertDelivery((subject, body) => { fired.push({ subject, body }) })
-  stop = startLocalAlert()
+  // 🔴 СВОЙ файл состояния ОБЯЗАТЕЛЕН, и это не аккуратность. Без него набор
+  // пишет в ЖИВОЙ ~/.claude-local/blocked-sessions.json: 11.09.2026 отсюда туда
+  // попали две выдуманные стоящие сессии (включая вот этот SID), и тревога
+  // принялась звать фаундера к агентам, которых не существует.
+  stop = startLocalAlert(undefined, { statePath: '/tmp/__test_blocked_rewrite.json' })
 }
 
 afterEach(() => {

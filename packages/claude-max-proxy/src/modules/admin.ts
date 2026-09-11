@@ -18,6 +18,7 @@ import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
+import { stuckSessionState } from '../local-alert.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -183,16 +184,31 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
         // second model.
         const ttlSec = resolveRewriteConsentTtlSec(body, guard.consentGrantTtlSec)
         grantConsent(guard.consentGrantPath, body.sessionId, ttlSec * 1000)
+        // 🔴 ЧТО МЫ ЗНАЕМ О ЭТОЙ СЕССИИ — и почему это не отказ, а справка.
+        // Спросил владелец роутера побудок: человек должен видеть разницу между
+        // «разрешил не тому» и «дверь лежит», а не одно слово на оба случая.
+        // Отказать нельзя: разрешать сессию, которую служба не видела с
+        // перезапуска, — законный и частый случай. Поэтому согласие пишется
+        // всегда, а рядом едет то, что известно, и решает рисующий карточку.
+        const st = stuckSessionState(body.sessionId)
+        const tracked = ctx.proxyClient.listSessions().some(s => s.sessionId === body.sessionId)
         return Response.json({
           ok: true,
           sessionId: body.sessionId,
+          session: st.stuck ? 'stuck' : (tracked ? 'tracked' : 'unknown'),
+          stuckForSec: st.stuckForSec,
           // Named so a receipt can never be mistaken for the quota guard's:
           // the two keep SEPARATE stores, and a grant for one is no grant for
           // the other.
           guard: 'cache',
           ttlSec,
           untilConsumed: !!body.untilConsumed,
-          note: 'single-use — consumed by this session\'s next proceeding rewrite',
+          note: st.stuck
+            ? 'single-use — consumed by this session\'s next proceeding rewrite'
+            : (tracked
+              ? 'granted, but this session is NOT currently held by the cache guard'
+              : 'granted, but NOTHING is known about this session here — check the id '
+                + 'before telling a person it is unblocked'),
         })
       },
     },

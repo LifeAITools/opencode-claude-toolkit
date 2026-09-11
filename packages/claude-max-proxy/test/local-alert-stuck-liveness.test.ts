@@ -23,8 +23,7 @@
 
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
 import { emit } from '../src/event-bus.js'
-process.env.PROXY_BLOCKED_STATE_PATH = '/tmp/__test_blocked_liveness.json'
-const { startLocalAlert, _setAlertDelivery, _setAliveProbe, _stuckState } =
+const { startLocalAlert, _setAlertDelivery, _setAliveProbe, _stuckState, stuckSessionState } =
   await import('../src/local-alert.js')
 
 let stop: (() => void) | null = null
@@ -37,14 +36,14 @@ let alive = new Set<number>()
 
 function startWith(resolvePid: (sid: string) => number | null) {
   try { stop?.() } catch { /* ещё не поднимали */ }
-  stop = startLocalAlert((sid) => ({ pid: resolvePid(sid), cwd: null }))
+  stop = startLocalAlert((sid) => ({ pid: resolvePid(sid), cwd: null }), { statePath: '/tmp/__test_blocked_liveness.json' })
   _stuckState.clear()
 }
 
 /** Владелец целиком — номер процесса и его рабочий каталог. */
 function startWithOwner(resolve: (sid: string) => { pid: number | null; cwd: string | null }) {
   try { stop?.() } catch { /* ещё не поднимали */ }
-  stop = startLocalAlert(resolve)
+  stop = startLocalAlert(resolve, { statePath: '/tmp/__test_blocked_liveness.json' })
   _stuckState.clear()
 }
 
@@ -55,7 +54,7 @@ beforeEach(() => {
   _stuckState.clear()
   _setAlertDelivery((subject, body, journalOnly) => { fired.push({ subject, body, journalOnly: !!journalOnly }) })
   _setAliveProbe((pid) => alive.has(pid))
-  stop = startLocalAlert(() => ({ pid: null, cwd: null }))
+  stop = startLocalAlert(() => ({ pid: null, cwd: null }), { statePath: '/tmp/__test_blocked_liveness.json' })
   _stuckState.clear()
 })
 afterEach(() => {
@@ -159,7 +158,7 @@ describe('обход судит о жизни сам, не дожидаясь с
       },
     }), 'utf8')
     try { stop?.() } catch { /* ещё не поднимали */ }
-    stop = startLocalAlert(() => ({ pid: null, cwd: null }))   // поднимает состояние с диска
+    stop = startLocalAlert(() => ({ pid: null, cwd: null }), { statePath: '/tmp/__test_blocked_liveness.json' })   // поднимает состояние с диска
     expect(_stuckState.get('s-legacy')).toBeDefined()
     fired = []
     _stuckState.sweep(Date.now())
@@ -193,5 +192,28 @@ describe('обход судит о жизни сам, не дожидаясь с
     expect(b).toContain('s-nocwd')
     expect(b).not.toContain('undefined')
     expect(b).not.toContain('null')
+  })
+})
+
+describe('дверь согласия должна знать, ЧТО ей известно о сессии', () => {
+  test('стоящая у сторожа — названа стоящей и со сроком', () => {
+    alive.add(31)
+    startWithOwner(() => ({ pid: 31, cwd: null }))
+    block('s-known')
+    const st = _stuckState.get('s-known')!
+    const now = st.since + 3 * HOUR
+    expect(stuckSessionState('s-known', now)).toEqual({ stuck: true, stuckForSec: 3 * 3600 })
+  })
+
+  test('незнакомая — сказано прямо, а не выдано за стоящую', () => {
+    expect(stuckSessionState('s-never-seen')).toEqual({ stuck: false, stuckForSec: null })
+  })
+
+  test('пошла дальше — перестаёт числиться стоящей в тот же миг', () => {
+    alive.add(31)
+    startWithOwner(() => ({ pid: 31, cwd: null }))
+    block('s-freed')
+    emit({ level: 'info', kind: 'REAL_REQUEST_COMPLETE', sessionId: 's-freed' } as never)
+    expect(stuckSessionState('s-freed').stuck).toBe(false)
   })
 })

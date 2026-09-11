@@ -18,9 +18,6 @@
 
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
 import { emit } from '../src/event-bus.js'
-// Свой файл состояния на весь набор: иначе обход читает живые сессии машины и
-// «сработало один раз» становится «сработало сколько-то».
-process.env.PROXY_BLOCKED_STATE_PATH = '/tmp/__test_blocked_sessions.json'
 const { startLocalAlert, _setAlertDelivery, _stuckState } = await import('../src/local-alert.js')
 
 let stop: (() => void) | null = null
@@ -33,7 +30,7 @@ beforeEach(() => {
   fired = []
   _stuckState.clear()
   _setAlertDelivery((subject, body) => { fired.push({ subject, body }) })
-  stop = startLocalAlert()
+  stop = startLocalAlert(undefined, { statePath: '/tmp/__test_blocked_sessions.json' })
   _stuckState.clear()          // startLocalAlert поднимает состояние с диска — начинаем с чистого
 })
 afterEach(() => {

@@ -30,7 +30,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { bus } from './event-bus.js'
 import { processAlive } from './session-tracker.js'
 
@@ -144,8 +144,18 @@ const quotaAnnouncedAt = new Map<string, number>()
 // Путь настраиваемый — иначе испытание пишет в ЖИВОЙ файл машины и, что хуже,
 // читает из него чужие сессии: обход шлёт уведомления по остаткам от флота, и
 // «сработало один раз» превращается в «сработало сколько-то раз».
-const BLOCKED_STATE_JSON = process.env.PROXY_BLOCKED_STATE_PATH
+// 🔴 ПУТЬ ПРИХОДИТ ИЗВНЕ, А НЕ ИЗ ПЕРЕМЕННОЙ ОКРУЖЕНИЯ — И ЭТО ЗАПЛАЧЕНО.
+// Прежде он вычислялся ОДИН РАЗ при загрузке модуля, а испытания подменяли
+// переменную перед импортом. В одиночку такой набор зелёный; в общем прогоне
+// модуль успевает загрузить кто-то раньше — и тогда испытания пишут в ЖИВОЙ
+// файл состояния машины. 11.09.2026 это случилось по-настоящему: после прогона
+// в живом файле оказался тестовый ключ `s-body`, то есть набор тестов правил
+// учёт стоящих сессий боевой службы. Зависимость, переданную аргументом,
+// подменить нельзя мимо — она видна в месте вызова.
+const defaultBlockedStatePath = () =>
+  process.env.PROXY_BLOCKED_STATE_PATH
   || join(homedir(), '.claude-local', 'blocked-sessions.json')
+let BLOCKED_STATE_JSON = defaultBlockedStatePath()
 /** Шаг напоминаний: чем дольше стоит, тем реже — но никогда не молча. */
 const STUCK_REMINDER_STEPS_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000, 24 * 60 * 60_000]
 const STUCK_SWEEP_INTERVAL_MS = 10 * 60_000
@@ -192,7 +202,7 @@ function loadStuck(): void {
 }
 function saveStuck(): void {
   try {
-    const dir = join(homedir(), '.claude-local')
+    const dir = dirname(BLOCKED_STATE_JSON)
     try { mkdirSync(dir, { recursive: true }) } catch { /* уже есть */ }
     writeFileSync(BLOCKED_STATE_JSON, JSON.stringify(Object.fromEntries(stuck)), 'utf8')
   } catch { /* учёт не должен ронять службу */ }
@@ -263,6 +273,27 @@ function retired(sid: string, st: StuckSession, now: number, why: string): void 
   )
 }
 
+/**
+ * Стоит ли эта сессия у сторожа кэша прямо сейчас, и сколько уже стоит.
+ *
+ * 🔴 ЗАЧЕМ ЭТО СНАРУЖИ, 11.09.2026. Владелец роутера побудок спросил: умеет ли
+ * дверь согласия отличить НЕЗНАКОМУЮ сессию от знакомой? Не умела — писала
+ * согласие любому набору знаков и отвечала «ок». Значит фаундер, нажавший
+ * кнопку на карточке с опечаткой в номере, увидел бы «разрешено», а разрешение
+ * легло бы в пустоту, и он ждал бы агента, которому ничего не разрешили.
+ *
+ * Отказывать при этом НЕЛЬЗЯ: человек у терминала законно разрешает сессию,
+ * которую служба не видела с последнего перезапуска. Поэтому дверь пишет
+ * согласие ВСЕГДА, но НАЗЫВАЕТ, что она знает о сессии, — и решение, показывать
+ * ли это человеку, остаётся тому, кто рисует карточку.
+ */
+export function stuckSessionState(sessionId: string, now: number = Date.now()):
+  { stuck: boolean; stuckForSec: number | null } {
+  const st = stuck.get(sessionId)
+  if (!st) return { stuck: false, stuckForSec: null }
+  return { stuck: true, stuckForSec: Math.max(0, Math.round((now - st.since) / 1000)) }
+}
+
 /** Испытательный шов: прогнать обход в названный момент и посмотреть состояние. */
 export const _stuckState = {
   sweep: (now: number) => sweepStuck(now),
@@ -290,7 +321,11 @@ function humanFor(ms: number): string {
  * — по номеру процесса она судит о жизни, а каталогом называет человеку ПРОЕКТ,
  * в котором агент стоит. Оба ложатся на диск и переживают перезапуск службы.
  */
-export function startLocalAlert(resolveOwner?: (sessionId: string) => StuckOwner): () => void {
+export function startLocalAlert(
+  resolveOwner?: (sessionId: string) => StuckOwner,
+  opts?: { statePath?: string },
+): () => void {
+  BLOCKED_STATE_JSON = opts?.statePath ?? defaultBlockedStatePath()
   const offBegan = bus.onKind('UPSTREAM_STORM_BEGAN' as never, (e: any) => {
     const b = e?.breakdown ?? {}
     fire(

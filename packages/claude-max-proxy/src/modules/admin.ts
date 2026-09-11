@@ -22,6 +22,30 @@ import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sd
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
 
+/** «Без часов» выражено годом ВНУТРИ существующей формы гранта — ровно так же,
+ *  как это делает команда (`_UNTIL_CONSUMED_MS`, lat_context/cli.py:993).
+ *  Расхождение здесь означало бы, что кнопка и команда дают разное согласие. */
+const UNTIL_CONSUMED_SEC = 365 * 24 * 60 * 60
+
+/**
+ * Сколько живёт согласие сторожа кэша — ОТДЕЛЬНО от двери, нарочно.
+ *
+ * Правило проверяемо без единой записи на диск: испытание, зовущее дверь ради
+ * срока, писало бы согласия в ЖИВОЙ склад машины (путь к настройкам берётся
+ * один раз при загрузке модуля, и подменить его в общем прогоне нельзя).
+ * Здесь же правило — чистая функция, и проверяется оно как правило.
+ */
+export function resolveRewriteConsentTtlSec(
+  body: { ttlSec?: number; untilConsumed?: boolean },
+  defaultTtlSec: number,
+): number {
+  if (body.untilConsumed) return UNTIL_CONSUMED_SEC
+  if (Number.isFinite(body.ttlSec) && (body.ttlSec as number) > 0) {
+    return Math.min(body.ttlSec as number, UNTIL_CONSUMED_SEC)
+  }
+  return defaultTtlSec
+}
+
 export function createAdminModule(onShutdown: () => void): ProxyModule {
   shutdownFn = onShutdown
 
@@ -121,6 +145,54 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
           sessionId: body.sessionId,
           ttlSec,
           note: 'single-use — consumed by this session\'s next real turn',
+        })
+      },
+    },
+
+    // Consent for ONE turn held back by the CACHE guard — the other half of the
+    // pair above.
+    //
+    // 🔴 WHY IT EXISTS, 2026-09-11. The wake-router's owner is building the
+    // executor behind the founder's "allow" tap and asked for three things: an
+    // address, a header, a body. There was NO address: this guard's consent had
+    // only ever been written by `context cache-rewrite-ok`, a command living in
+    // a repository we do not own. That would have made the executor depend on a
+    // third party's CLI being on its PATH — for a door we can simply hand over.
+    //
+    // 🔴 PARITY WITH THE COMMAND IS THE POINT, NOT A DETAIL. Two paths to one
+    // consent that hand out DIFFERENT lifetimes is a defect nobody reproduces:
+    // typed the command and it worked, tapped the button and it behaved
+    // otherwise. So the clocks here are copied from the command — 180 s by
+    // default and a year for "until consumed" (`_UNTIL_CONSUMED_MS`,
+    // lat_context/cli.py:993) — and both write the same grant shape.
+    //
+    // No header is needed from a caller on this machine: the control plane lets
+    // loopback through (control-auth.ts), and the wake-router is loopback.
+    {
+      method: 'POST',
+      path: '/admin/cache-rewrite-ok',
+      handler: async (req) => {
+        let body: { sessionId?: string; ttlSec?: number; untilConsumed?: boolean } = {}
+        try { body = await req.json() as any } catch { /* empty body handled below */ }
+        if (!body.sessionId) return Response.json({ error: 'sessionId required' }, { status: 400 })
+        const guard = loadKeepaliveConfig().rewriteGuard
+        // "Until consumed" is the grant's REAL semantics — it has always been
+        // single-use, and only the clock cut it short on an idle agent that
+        // takes no turns. Expressed as a year inside the existing shape, the
+        // same way the command expresses it, so neither side has to learn a
+        // second model.
+        const ttlSec = resolveRewriteConsentTtlSec(body, guard.consentGrantTtlSec)
+        grantConsent(guard.consentGrantPath, body.sessionId, ttlSec * 1000)
+        return Response.json({
+          ok: true,
+          sessionId: body.sessionId,
+          // Named so a receipt can never be mistaken for the quota guard's:
+          // the two keep SEPARATE stores, and a grant for one is no grant for
+          // the other.
+          guard: 'cache',
+          ttlSec,
+          untilConsumed: !!body.untilConsumed,
+          note: 'single-use — consumed by this session\'s next proceeding rewrite',
         })
       },
     },

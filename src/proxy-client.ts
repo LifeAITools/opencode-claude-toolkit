@@ -2003,6 +2003,12 @@ export class ProxyClient {
             // never has to parse prose or re-derive it from the class name.
             spendKind: isFirstWrite ? 'first-write' : 'rewrite',
             predictedTokens: rewriteAssessment.predictedTokens,
+            // Сколько кэша нет — тот самый срок, что стоит в прозе отказа
+            // («the cache expired ~4.8h ago»). Полем, а не разбором фразы:
+            // по нему тревога решает, что СОВЕТОВАТЬ человеку — разрешить
+            // покупку или перезапустить. До 1.1.9 он жил только в тексте,
+            // и совет пришлось бы выводить из прозы, то есть гадать.
+            idleMs,
             // Чей это ход — субагента или самой сессии. Без этого поля нельзя
             // было даже ПОСЧИТАТЬ, сколько отказов убивает субагентов.
             agentId: ctx.agentId ?? null,

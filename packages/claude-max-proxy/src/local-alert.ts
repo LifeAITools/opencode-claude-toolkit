@@ -22,10 +22,14 @@
  * One path for "I am in trouble", another for "I am gone". Neither can cover
  * the other's case.
  *
- * 🔴 WHAT THIS IS NOT. It is not a route to Telegram, where the founder
- * actually reads. That door belongs to the telegram surface and is asked for,
- * not taken. This is the floor under that conversation, so the alerts stop
- * being lost while it happens.
+ * 🔴 ТРЕТЬЯ ДВЕРЬ ПОЯВИЛАСЬ 15.09.2026 — И ПРЕЖНЯЯ ЗАПИСЬ ЗДЕСЬ БОЛЬШЕ НЕ ВЕРНА.
+ * На этом месте стояло «это НЕ путь в Telegram, та дверь чужая, её просят, а не
+ * берут». Просьба состоялась и удовлетворена: владелец сурфейса выкатил
+ * `POST :9810/hitl/stuck-session` 12.09.2026, и стоящая сессия теперь зовёт
+ * человека туда, где он читает. Само правило осталось прежним — дверь чужая, мы
+ * в неё СТУЧИМ (`surface-card.ts`), а рисует карточку и решает про имя агента
+ * её хозяин. Обе местные двери при этом на месте и от сети не зависят: сосед
+ * может быть выключен, а журнал обязан наполниться всё равно.
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -33,6 +37,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { bus } from './event-bus.js'
 import { processAlive } from './session-tracker.js'
+import { raiseStuckCard, adviceFor, type StuckCardAsk } from './surface-card.js'
 
 /** Whether to deliver at all — off in tests, and a way out if it ever annoys. */
 const enabled = () => process.env.PROXY_LOCAL_ALERT !== '0'
@@ -178,6 +183,13 @@ interface StuckSession {
   /** Владелец на момент отказа. null / поля нет — опознать не удалось.
    *  Именно он переживает перезапуск службы и даёт обходу судить самому. */
   pid?: number | null
+  /** Сколько кэша уже нет, на момент последнего отказа. По нему считается
+   *  СОВЕТ человеку: купить заново или перезапустить. `null`/поля нет — срок
+   *  неизвестен, и тогда совет не посылается вовсе, а не выдумывается. */
+  idleMs?: number | null
+  /** Первая это запись кэша или перезапись — вторая половина того же совета:
+   *  первая запись ничего не выбрасывает, и разрешить её дёшево. */
+  spendKind?: string | null
   /** Рабочий каталог владельца — то есть ПРОЕКТ, в котором стоит агент.
    *  «Сессия d91694bb» человеку не говорит ничего; «сессия d91694bb,
    *  /home/relishev/projects/vibe/photo3d» говорит всё. Путь идёт как есть:
@@ -208,6 +220,52 @@ function saveStuck(): void {
   } catch { /* учёт не должен ронять службу */ }
 }
 /** «6,7 суток» / «9,1 ч» / «22 мин» — человеку нужен срок, а не отметка времени. */
+/**
+ * Постучать в дверь сурфейса — поднять человеку карточку о стоящей сессии.
+ *
+ * 🔴 ПОЧЕМУ ЭТО ЗОВЁТСЯ ТАМ ЖЕ, ГДЕ И `fire`, А НЕ ВМЕСТО НЕЁ. Две местные двери
+ * (журнал и рабочий стол) ни от чего не зависят и наполняются всегда. Эта —
+ * сетевая и чужая: сосед может быть выключен, не настроен или молчать. Поэтому
+ * она идёт ПОСЛЕ, её исход пишется в журнал отдельной строкой, и провал в ней
+ * ничего не отменяет.
+ *
+ * Ничего не ждём: тревога живёт в обработчике события, и держать его ради чужой
+ * сети нельзя. Исход дописывается, когда придёт.
+ */
+function knock(sid: string, st: StuckSession, now: number): void {
+  const pid = st.pid ?? null
+  const ask: StuckCardAsk = {
+    sessionId: sid,
+    guard: 'cache',
+    reason: st.reason,
+    stuckForSec: Math.max(0, Math.round((now - st.since) / 1000)),
+    tokens: st.tokens,
+    lastBlockAt: st.lastBlockAt,
+    announcements: st.announcements,
+    // 🔴 «Проверить нечем» — это СВОЁ состояние, а не «наверное, жив». Владелец
+    // не опознан → говорим `unknown`, и карточка произносит это вслух.
+    liveness: pid === null ? 'unknown' : (isAlive(pid) ? 'alive' : 'dead'),
+    source: 'claude-max-proxy/local-alert',
+    ...(st.cwd ? { cwd: st.cwd } : {}),
+    ...(pid !== null ? { pid } : {}),
+    // Совет шлём ТОЛЬКО когда есть чем его обосновать: срок мёртвого кэша.
+    // Нет срока — нет и совета; выдуманный совет хуже отсутствующего, потому
+    // что человек примет его за замер.
+    ...(typeof st.idleMs === 'number' && st.idleMs >= 0
+      ? { advice: adviceFor(st.spendKind, st.idleMs) }
+      : {}),
+  }
+  void raiseStuckCard(ask).then((r) => {
+    fire(
+      r.raised ? 'Карточка о стоящей сессии поднята' : 'Карточку о стоящей сессии поднять не удалось',
+      `сессия ${sid}: ${r.raised
+        ? `человека спросили${r.interactionUuid ? `, взаимодействие ${r.interactionUuid}` : ''}`
+        : (r.reason ?? 'причина не названа')}.`,
+      true,
+    )
+  })
+}
+
 /** Один проход по стоящим. Время — АРГУМЕНТ: обход, читающий часы сам, в тесте
  *  можно только ждать, а шаг напоминания здесь измеряется сутками. */
 function sweepStuck(now: number): void {
@@ -257,6 +315,9 @@ function sweepStuck(now: number): void {
       + ` Разрешить: context cache-rewrite-ok ${sid} --until-consumed`
       + ` — либо перезапустить её, если работа уже неактуальна.`,
     )
+    // И туда же, где человек читает. Напоминание в журнал он может не увидеть
+    // вовсе — ровно та немота, ради которой напоминания и заведены.
+    knock(sid, st, now)
   }
   if (changed) saveStuck()
 }
@@ -414,6 +475,8 @@ export function startLocalAlert(
         announcements: (prev?.announcements ?? 0) + 1,
         reason: rewriteReason(e?.rewriteClass, e?.spendKind),
         tokens: Number.isFinite(tokens) ? tokens : 0,
+        idleMs: Number.isFinite(Number(e?.idleMs)) ? Number(e.idleMs) : null,
+        spendKind: typeof e?.spendKind === 'string' ? e.spendKind : null,
         pid,
         cwd,
       })
@@ -427,6 +490,11 @@ export function startLocalAlert(
       + ` Сама она этого сделать не может — ход не доходит до модели.`
       + ` Разрешить: context cache-rewrite-ok ${sid}`,
     )
+    // 🔴 И ТУТ ЖЕ — ЧЕЛОВЕКУ. Это и есть то, ради чего вся цепь: агент позвать
+    // не может (хода нет), журнал и рабочий стол ночью не читает никто, а
+    // карточка приходит туда, где фаундер есть.
+    const st = stuck.get(sid)
+    if (st) knock(sid, st, now)
   })
   // Запас окна кончился, и сторож остановил настоящие ходы, чтобы прогрев
   // дожил до сброса. Человеку это надо сказать ОДИН раз на аккаунт и сказать

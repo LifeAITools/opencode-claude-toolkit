@@ -126,3 +126,21 @@ describe('номер письма записывается ВСЕГДА, а не
     expect(done.requestId).toBe('req_011Cf5dUepurGuNzuGWJWRRi')
   })
 })
+
+describe('непотоковый ответ тоже называет своё письмо', () => {
+  test('🔴 одиночный JSON-ответ несёт messageId — иначе немым остаётся именно тот потребитель, что ходит без потока', async () => {
+    // Так отвечает апстрим на запрос БЕЗ stream:true — одно тело Message,
+    // без обрамления событий. Замер 15.09.2026: ровно такой ход оказался
+    // единственным из семи, оставшимся без номера письма.
+    const body = JSON.stringify({
+      id: 'msg_011CfNONSTREAMexample', type: 'message', role: 'assistant',
+      model: 'claude-haiku-4-5', content: [],
+      usage: { input_tokens: 42, output_tokens: 7 },
+    })
+    const said = await whatItSaid([body])
+    const done = said.find((e) => e.kind === 'REAL_REQUEST_COMPLETE')
+    expect(done.messageId).toBe('msg_011CfNONSTREAMexample')
+    // И расход при этом подхвачен — поле не должно стоить нам учёта.
+    expect(done.usage?.inputTokens ?? done.usage?.input_tokens).toBe(42)
+  })
+})

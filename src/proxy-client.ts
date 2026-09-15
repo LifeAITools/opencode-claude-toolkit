@@ -3256,6 +3256,13 @@ export class ProxyClient {
       if (!sawSseUsage) {
         try {
           const msg = JSON.parse(rawAll.trim())
+          // Тот же номер письма, что и у потокового ответа, только лежит он не
+          // в заголовочном событии, а прямо в теле. Без этой строки непотоковый
+          // потребитель (одноразовая сводка, agent-sidecar) остаётся ровно в той
+          // немоте, ради выхода из которой поле и заводилось: замер 15.09.2026
+          // после выкатки — шесть ходов из семи с номером, а седьмой как раз
+          // непотоковый (anon-mu2ylbub, claude-haiku-4-5).
+          if (typeof msg?.id === 'string') messageId = msg.id
           const u = msg?.usage
           if (u && typeof u === 'object') {
             usage = {

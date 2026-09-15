@@ -72,6 +72,7 @@ export type EventKind =
   | 'CACHE_REWRITE_BLOCKED'   // SDK: сторож остановил ход — согласие может дать только человек
   | 'QUOTA_GUARD_BLOCKED'     // SDK: запас окна на исходе — настоящий ход остановлен, прогрев идёт
   | 'KA_PARTIAL_REWRITE'      // SDK: прогрев не освежил кэш, а перекупил его — трата мимо сторожа
+  | 'UPSTREAM_MALFORMED_TOOL_ARGS' // SDK: доводы орудия приехали СВЕРХУ битыми — тело вниз мы не трогаем
   | 'KA_NOT_ARMED'            // SDK: прогрев по сессии не вооружился — с названной причиной
   | 'REQUEST_UNIDENTIFIED'    // SDK: запрос без имени сессии — подогрев по нему вооружить нечем
   | 'PROXY_WARMS_NOTHING'     // весь поток безымянный и ни одной вооружённой сессии
@@ -139,6 +140,7 @@ export const EVENT = {
   CACHE_REWRITE_BLOCKED: 'CACHE_REWRITE_BLOCKED',
   QUOTA_GUARD_BLOCKED: 'QUOTA_GUARD_BLOCKED',
   KA_PARTIAL_REWRITE: 'KA_PARTIAL_REWRITE',
+  UPSTREAM_MALFORMED_TOOL_ARGS: 'UPSTREAM_MALFORMED_TOOL_ARGS',
   KA_NOT_ARMED: 'KA_NOT_ARMED',
   REQUEST_UNIDENTIFIED: 'REQUEST_UNIDENTIFIED',
   PROXY_WARMS_NOTHING: 'PROXY_WARMS_NOTHING',

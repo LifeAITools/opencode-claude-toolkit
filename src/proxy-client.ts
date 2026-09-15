@@ -3091,6 +3091,25 @@ export class ProxyClient {
       // cache-metrics hitRate=0, even while Anthropic serves 40k+ cache reads.
       let rawAll = ''
       let sawSseUsage = false
+      // 🔴 ЧЕЙ ЭТО ОБРЕЗОК — НАШ ИЛИ ВЕРХНИЙ. Замер владельца kiberos-worker
+      // 15.09.2026: один прогон из восьми вернул HTTP 200 с ЦЕЛЫМ обрамлением
+      // (406 событий, последнее message_stop) и БИТЫМ JSON доводов орудия.
+      // Его движок упал громко и правильно, но назвать виновного не смог — и я
+      // в тот день тоже не смог: тело вниз мы отдаём байт в байт, а значит по
+      // своим записям отличить «пришло битым сверху» от «испортилось ниже нас»
+      // было НЕЧЕМ. Проверка по числу событий к этому слепа: у обрезанного
+      // потока обрамление целое.
+      //
+      // Поэтому считаем ЗДЕСЬ, на ветке разбора, то есть на тех самых байтах,
+      // что пришли сверху. Сработало — виноват верх (или сама модель), и у нас
+      // есть запись с номером письма и орудия. Не сработало, а потребитель
+      // всё же увидел мусор — беда НИЖЕ нас, и это тоже ответ.
+      //
+      // Копим только доводы орудий, а не весь ответ: они малы, а память
+      // на живой службе общая.
+      const toolArgs = new Map<number, { id: string; name: string; json: string }>()
+      let messageId: string | null = null
+      let malformedTools: Array<{ id: string; name: string; chars: number }> = []
       while (true) {
         let done: boolean, value: Uint8Array | undefined
         try {
@@ -3130,6 +3149,36 @@ export class ProxyClient {
           if (raw === '[DONE]') continue
           try {
             const p = JSON.parse(raw)
+            // Номер письма — то, чем сосед называет случай в своей беде. До
+            // сегодня я его не записывал вовсе, поэтому на вопрос «что было с
+            // msg_011Cf5d2WD26bH9582ECbXbs» ответить было нечем: поиск по
+            // журналу давал ноль, неотличимый от «такого не было».
+            if (p.type === 'message_start' && typeof p.message?.id === 'string') {
+              messageId = p.message.id
+            }
+            // Доводы орудия приезжают кусками и склеиваются; целым JSON они
+            // становятся только к закрытию блока — там и проверяем.
+            if (p.type === 'content_block_start' && p.content_block?.type === 'tool_use') {
+              toolArgs.set(Number(p.index), {
+                id: String(p.content_block.id ?? ''),
+                name: String(p.content_block.name ?? ''),
+                json: '',
+              })
+            } else if (p.type === 'content_block_delta' && p.delta?.type === 'input_json_delta') {
+              const slot = toolArgs.get(Number(p.index))
+              if (slot) slot.json += String(p.delta.partial_json ?? '')
+            } else if (p.type === 'content_block_stop') {
+              const slot = toolArgs.get(Number(p.index))
+              if (slot) {
+                toolArgs.delete(Number(p.index))
+                // Пустые доводы законны (орудие без параметров) — это не порча.
+                const body = slot.json.trim()
+                if (body !== '') {
+                  try { JSON.parse(body) }
+                  catch { malformedTools.push({ id: slot.id, name: slot.name, chars: body.length }) }
+                }
+              }
+            }
             if (p.type === 'message_start' && p.message?.usage) {
               sawSseUsage = true
               const u = p.message.usage
@@ -3172,6 +3221,38 @@ export class ProxyClient {
       // rolling metrics see the real cache tokens (otherwise REAL_REQUEST_COMPLETE
       // reports 0 and every request mispredicts cold-start).
       rawAll += decoder.decode()
+
+      // Орудия, чей блок так и не закрылся, — тоже улика, и другого рода:
+      // поток кончился посреди доводов. Их считаем отдельно, потому что
+      // «пришло битым» и «не приехало до конца» лечатся по-разному.
+      const unclosedTools = Array.from(toolArgs.values())
+        .filter((t) => t.json.trim() !== '')
+        .map((t) => ({ id: t.id, name: t.name, chars: t.json.length }))
+      if (malformedTools.length > 0 || unclosedTools.length > 0) {
+        this.events.emit({
+          level: 'error',
+          kind: 'UPSTREAM_MALFORMED_TOOL_ARGS',
+          sessionId,
+          messageId,
+          upstreamRequestId,
+          model,
+          malformedToolIds: malformedTools.map((t) => t.id),
+          unclosedToolIds: unclosedTools.map((t) => t.id),
+          msg: `upstream delivered tool arguments this proxy could not parse —`
+            + ` ${malformedTools.length} malformed, ${unclosedTools.length} left unclosed`
+            + ` (message ${messageId ?? 'unnamed'}, upstream request ${upstreamRequestId ?? 'unnamed'}).`
+            + ` The bytes were ALREADY broken when they arrived here: this proxy copies the`
+            + ` response body through untouched, so a consumer seeing the same breakage is seeing`
+            + ` UPSTREAM's, and a consumer seeing breakage we did NOT record is seeing its own path.`
+            + (malformedTools.length > 0
+              ? ` malformed=[${malformedTools.map((t) => `${t.name}#${t.id}:${t.chars}ch`).join(', ')}]`
+              : '')
+            + (unclosedTools.length > 0
+              ? ` unclosed=[${unclosedTools.map((t) => `${t.name}#${t.id}:${t.chars}ch`).join(', ')}]`
+              : ''),
+        })
+      }
+
       if (!sawSseUsage) {
         try {
           const msg = JSON.parse(rawAll.trim())

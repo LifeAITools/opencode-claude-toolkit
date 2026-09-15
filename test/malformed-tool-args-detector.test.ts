@@ -113,3 +113,16 @@ describe('битые доводы орудия называются, а целы
     expect(malformedEvents(said)[0].msg).toContain('copies the response body through untouched')
   })
 })
+
+describe('номер письма записывается ВСЕГДА, а не только при поломке', () => {
+  test('🔴 здоровый ход несёт messageId — иначе случай, названный номером письма, не найти', async () => {
+    const said = await whatItSaid(toolResponse(['{"command":', '"ls -la"}']))
+    const done = said.find((e) => e.kind === 'REAL_REQUEST_COMPLETE')
+    expect(done).toBeDefined()
+    // Контроль к самому себе: поиск по журналу вернул бы ноль, неотличимый от
+    // «такого случая не было», ровно потому, что раньше этого поля не было.
+    expect(done.messageId).toBe('msg_011Cf5d2WD26bH9582ECbXbs')
+    // И свой номер запроса остаётся рядом — он про другое и нужен обоим.
+    expect(done.requestId).toBe('req_011Cf5dUepurGuNzuGWJWRRi')
+  })
+})

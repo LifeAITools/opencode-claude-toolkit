@@ -3304,6 +3304,15 @@ export class ProxyClient {
         sessionId,
         // See the capture site above: the control group the failure-only ids lacked.
         requestId: upstreamRequestId,
+        // 🔴 НОМЕР ПИСЬМА — ТЕМ ЖЕ ИМЕНЕМ, КАКИМ СЛУЧАЙ НАЗЫВАЕТ ПОТРЕБИТЕЛЬ.
+        // Владелец kiberos-worker принёс 15.09.2026 беду и назвал её
+        // `msg_011Cf5d2WD26bH9582ECbXbs` — единственным, что у него было. Поиск
+        // по моему журналу дал ноль, и ноль был НЕ ответом: контроль показал,
+        // что `msg_01` не встречается там НИ РАЗУ, то есть я не записывал этот
+        // номер вовсе. Отсутствие улики читалось как отсутствие случая.
+        // Свой `requestId` (req_…) для этого не годится: потребитель его не
+        // видит, он живёт в заголовке ответа, а не в теле.
+        messageId,
         // lineageKey lets offline analysis attribute a cache hit/rewrite to a
         // specific agent (main vs each sub-agent) — needed to verify the main
         // agent's cache survives a sub-agent (Task-tool) excursion.

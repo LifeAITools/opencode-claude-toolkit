@@ -123,6 +123,15 @@ export declare class ProxyClient {
     private refreshVaultOrg;
     private handleOrg401;
     private resolveServedOrg;
+    quotaHoldFor(sessionId: string, now?: number): {
+        holding: boolean;
+        orgId: string | null;
+        util5h: number | null;
+        threshold: number;
+        resetAt: number | null;
+        resetInSec: number | null;
+        enabled: boolean;
+    };
     private getTokenForSession;
     private proactiveOrgSweep;
     _runOrgProactiveSweep(): Promise<void>;

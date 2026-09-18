@@ -1250,6 +1250,52 @@ export class ProxyClient {
   }
 
   /**
+   * WOULD the quota guard hold this session's NEXT real turn, and until when.
+   * READ-ONLY: it mirrors the guard's decision without taking it.
+   *
+   * 🔴 WHY THIS IS SEPARATE FROM THE STUCK LEDGER, 2026-09-19. The two guards
+   * keep state in DIFFERENT shapes, and a status door that reports only the
+   * cache one lies in exactly the case it was opened for. The cache guard
+   * remembers SESSIONS (they got refused and stopped), so a ledger answers it.
+   * The quota guard holds by ACCOUNT: it refuses every real turn on an org over
+   * the line and remembers no session at all — so nothing is written down, and
+   * an agent that simply has not tried yet is indistinguishable from a healthy
+   * one until it does.
+   *
+   * Hence a FORECAST, not a memory: same inputs as the guard itself (the org
+   * this session would spend from, that org's own 5h reading, the configured
+   * line), so the two can never drift apart. `holding:false` with a `null`
+   * reading means "no reading to judge on" — the guard lets those through, and
+   * this says so rather than implying health.
+   */
+  quotaHoldFor(sessionId: string, now: number = Date.now()): {
+    holding: boolean
+    orgId: string | null
+    util5h: number | null
+    threshold: number
+    resetAt: number | null
+    resetInSec: number | null
+    enabled: boolean
+  } {
+    const qGuard = loadKeepaliveConfig().quotaGuard
+    const orgId = this.lastServedOrg.get(sessionId)
+      ?? this.sessionPins.get(sessionId)?.orgId
+      ?? null
+    const reading = orgId ? this.rateLimitByOrg.get(orgId) : undefined
+    const util5h = reading?.utilization5h ?? null
+    const resetAt = reading?.resetAt ?? null
+    return {
+      holding: qGuard.enabled && util5h !== null && util5h >= qGuard.blockAtUtil5h,
+      orgId,
+      util5h,
+      threshold: qGuard.blockAtUtil5h,
+      resetAt,
+      resetInSec: resetAt ? Math.max(0, Math.round((resetAt * 1000 - now) / 1000)) : null,
+      enabled: qGuard.enabled,
+    }
+  }
+
+  /**
    * Resolve the org a session is CURRENTLY SERVING (mirror `selectSessionToken`:
    * a held cross-org session serves its pinned org; everything else serves the
    * active org) and return a FRESH token for it (M3). Used by the KA `getToken`

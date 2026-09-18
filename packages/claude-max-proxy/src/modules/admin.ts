@@ -18,7 +18,7 @@ import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
-import { stuckSessionState, dropStuck } from '../local-alert.js'
+import { stuckSessionState, stuckSessionReport, stuckSessionsAll, dropStuck } from '../local-alert.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -210,6 +210,73 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
               : 'granted, but NOTHING is known about this session here — check the id '
                 + 'before telling a person it is unblocked'),
         })
+      },
+    },
+
+    // ── СПРАВКА О СТОЯЩЕЙ СЕССИИ. ТОЛЬКО ЧИТАЕТ. ───────────────────────────
+    //
+    // 🔴 ЗАЧЕМ, 19.09.2026. Владелец телеграм-службы принёс случай фаундера:
+    // сессия соседа простояла у сторожа десять с половиной часов, а во всех
+    // приборах числилась живой и занятой — каждый отбитый ход пишет в
+    // стенограмму запись, а свежесть записей и есть то, по чему реестр судит о
+    // жизни. Дословно фаундер: «Почему агент показывает статус, что работает…
+    // но если он заблокирован, он не может ничего дёргать».
+    //
+    // 🔴 И ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ДВЕРЬ, А НЕ ПОЛЕ В СУЩЕСТВУЮЩЕЙ. Состояние у нас
+    // БЫЛО и выходило наружу единственным путём — справкой при ВЫДАЧЕ согласия
+    // (`/admin/cache-rewrite-ok`). То есть спросить «стоит ли он» было нельзя,
+    // не разрешив заодно трату: вопрос был неотличим от ответа. Эта дверь не
+    // пишет НИЧЕГО и ничего не разрешает — поэтому она GET.
+    //
+    // 🔴 ОТВЕЧАЕТ ПО ОБОИМ СТОРОЖАМ, И ЭТО НЕ ПОЛНОТА РАДИ ПОЛНОТЫ. Сторож кэша
+    // помнит СЕССИИ, сторож запаса держит ходы ПО АККАУНТУ и сессий не помнит
+    // вовсе. Дверь, отвечающая только по учёту стоящих, сказала бы «не стоит»
+    // ровно тому агенту, чьи ходы придержаны запасом, — то есть соврала бы в
+    // одном из двух случаев, ради которых её просили.
+    {
+      method: 'GET',
+      path: '/admin/stuck-session',
+      handler: async (req) => {
+        const sid = new URL(req.url).searchParams.get('sessionId') ?? ''
+        if (!sid) return Response.json({ error: 'sessionId required' }, { status: 400 })
+        const cache = stuckSessionReport(sid)
+        const quota = ctx.proxyClient.quotaHoldFor(sid)
+        const tracked = ctx.proxyClient.listSessions().some(s => s.sessionId === sid)
+        // Кто именно держит ход. Сторож кэша сильнее: он УЖЕ отбил ход этой
+        // сессии, тогда как запас — состояние аккаунта, под которое она только
+        // попадёт на следующем ходе.
+        const guard = cache ? 'cache' : (quota.holding ? 'quota' : null)
+        return Response.json({
+          sessionId: sid,
+          stuck: !!guard,
+          guard,
+          stuckForSec: cache?.stuckForSec ?? null,
+          tokens: cache?.tokens ?? null,
+          // 🔴 «Не стоит» и «я про неё ничего не знаю» — РАЗНЫЕ ответы, и тот,
+          // кто рисует карточку человеку, обязан их различать: во втором случае
+          // молчание прибора не означает здоровья.
+          known: !!cache || tracked,
+          cache,
+          quota,
+          note: cache
+            ? 'ход отбит сторожем кэша — сессия ждёт решения человека и сама выйти не может'
+            : (quota.holding
+              ? 'сторож запаса придержал настоящие ходы этого аккаунта; кэш при этом жив, ждать до сброса'
+              : (tracked
+                ? 'ход ничем не придержан — сессия на ходу'
+                : 'про эту сессию здесь не известно ничего: ни в учёте стоящих, ни среди живых')),
+        })
+      },
+    },
+
+    // Все стоящие разом — тому, кто рисует состояние ФЛОТА и не знает заранее,
+    // чьё имя спрашивать. Та же справка, тоже без единой записи.
+    {
+      method: 'GET',
+      path: '/admin/stuck-sessions',
+      handler: async () => {
+        const all = stuckSessionsAll()
+        return Response.json({ count: all.length, sessions: all })
       },
     },
 

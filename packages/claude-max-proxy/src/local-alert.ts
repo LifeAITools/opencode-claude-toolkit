@@ -197,6 +197,35 @@ interface StuckSession {
   cwd?: string | null
 }
 
+/**
+ * Всё, что служба знает о стоящей сессии, — для того, кто показывает это
+ * ЧЕЛОВЕКУ. Ни одного поля «на всякий случай»: каждое отвечает на вопрос,
+ * который человек задаёт, глядя на замерший разговор.
+ */
+export interface StuckReport {
+  sessionId: string
+  stuck: true
+  /** Какой сторож держит ход. Сегодня в этот учёт пишет только сторож кэша:
+   *  сторож запаса держит ходы ПО АККАУНТУ и сессий не помнит. */
+  guard: 'cache'
+  /** Сколько стоит — с ПЕРВОГО отказа, а не с последнего. */
+  stuckForSec: number
+  sinceAt: number
+  lastBlockAt: number
+  /** Давно ли стучался. Большой разрыв = агент перестал пробовать вовсе. */
+  lastBlockAgoSec: number
+  announcements: number
+  reason: string
+  /** Сколько токенов просит отбитый ход — размер беды человеческим числом. */
+  tokens: number
+  liveness: 'alive' | 'dead' | 'unknown'
+  pid: number | null
+  cwd: string | null
+  idleMs: number | null
+  spendKind: string | null
+  advice: 'grant' | 'restart' | null
+}
+
 /** Кто владеет сессией прямо сейчас — номер процесса и его рабочий каталог. */
 export interface StuckOwner {
   pid: number | null
@@ -353,6 +382,64 @@ export function stuckSessionState(sessionId: string, now: number = Date.now()):
   const st = stuck.get(sessionId)
   if (!st) return { stuck: false, stuckForSec: null }
   return { stuck: true, stuckForSec: Math.max(0, Math.round((now - st.since) / 1000)) }
+}
+
+/**
+ * ЧТО МЫ ЗНАЕМ О СТОЯЩЕЙ СЕССИИ — целиком и НИЧЕГО не меняя.
+ *
+ * 🔴 ЗАЧЕМ ОТДЕЛЬНАЯ ФУНКЦИЯ, 19.09.2026. Владелец телеграм-службы принёс
+ * случай фаундера: сессия соседа стояла у сторожа десять с половиной часов, а
+ * во всех приборах числилась ЖИВОЙ И ЗАНЯТОЙ — каждый отбитый ход пишет в
+ * стенограмму запись, а свежесть записей и есть то, по чему реестр судит о
+ * жизни. Дословно фаундер: «Почему агент показывает статус, что работает… но
+ * если он заблокирован, он не может ничего дёргать». Стук в стену неотличим от
+ * работы для того, кто считает только частоту.
+ *
+ * Состояние у нас БЫЛО, наружу не выходило: спросить «стоит ли» можно было
+ * только через `/admin/cache-rewrite-ok`, а та дверь ВЫДАЁТ СОГЛАСИЕ — то есть
+ * вопрос был неотличим от разрешения. Отсюда правило этой функции и двери над
+ * ней: она НИЧЕГО не пишет и ничего не разрешает.
+ *
+ * `null` — это «в учёте стоящих такой сессии нет», а не «всё хорошо»: сторож
+ * запаса держит ходы ПО АККАУНТУ и в этот учёт не пишет вовсе. Полный ответ
+ * человеку собирает дверь, складывая это с показанием запаса.
+ */
+export function stuckSessionReport(sessionId: string, now: number = Date.now()): StuckReport | null {
+  const st = stuck.get(sessionId)
+  if (!st) return null
+  const pid = st.pid ?? null
+  return {
+    sessionId,
+    stuck: true,
+    guard: 'cache',
+    stuckForSec: Math.max(0, Math.round((now - st.since) / 1000)),
+    sinceAt: st.since,
+    lastBlockAt: st.lastBlockAt,
+    lastBlockAgoSec: Math.max(0, Math.round((now - st.lastBlockAt) / 1000)),
+    announcements: st.announcements,
+    reason: st.reason,
+    tokens: st.tokens,
+    // 🔴 `unknown` — «проверить нечем», а НЕ «наверное, жив». Рисующий карточку
+    // обязан произнести это тем же словом, иначе вернётся ровно та беда, ради
+    // которой дверь и открыта: догадка, поданная как замер.
+    liveness: pid === null ? 'unknown' : (isAlive(pid) ? 'alive' : 'dead'),
+    pid,
+    cwd: st.cwd ?? null,
+    idleMs: typeof st.idleMs === 'number' ? st.idleMs : null,
+    spendKind: st.spendKind ?? null,
+    // Совет — только когда есть чем его обосновать (срок мёртвого кэша), тем же
+    // правилом, что и в карточке: выдуманный совет хуже отсутствующего.
+    advice: typeof st.idleMs === 'number' && st.idleMs >= 0 ? adviceFor(st.spendKind, st.idleMs) : null,
+  }
+}
+
+/** Все стоящие разом — тому, кто рисует состояние ФЛОТА и не знает заранее,
+ *  чьё имя спрашивать. Тот же отчёт, что и по одной, без единой записи. */
+export function stuckSessionsAll(now: number = Date.now()): StuckReport[] {
+  return [...stuck.keys()]
+    .map(sid => stuckSessionReport(sid, now))
+    .filter((r): r is StuckReport => r !== null)
+    .sort((a, b) => b.stuckForSec - a.stuckForSec)
 }
 
 /**

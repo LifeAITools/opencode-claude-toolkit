@@ -1272,9 +1272,15 @@ export class ProxyClient {
     holding: boolean
     orgId: string | null
     util5h: number | null
+    /** Недельное окно — ОТДЕЛЬНОЕ число с ОТДЕЛЬНЫМИ часами. Оно здесь потому,
+     *  что на вопрос «во что обошёлся этот ход» ответ по подписке даётся
+     *  движением ЭТИХ счётчиков, а не пересчётом токенов в деньги: читать кэш
+     *  по подписке бесплатно, и цены API к нам не применимы вовсе. */
+    util7d: number | null
     threshold: number
     resetAt: number | null
     resetInSec: number | null
+    resetAt7d: number | null
     enabled: boolean
   } {
     const qGuard = loadKeepaliveConfig().quotaGuard
@@ -1288,9 +1294,11 @@ export class ProxyClient {
       holding: qGuard.enabled && util5h !== null && util5h >= qGuard.blockAtUtil5h,
       orgId,
       util5h,
+      util7d: reading?.utilization7d ?? null,
       threshold: qGuard.blockAtUtil5h,
       resetAt,
       resetInSec: resetAt ? Math.max(0, Math.round((resetAt * 1000 - now) / 1000)) : null,
+      resetAt7d: reading?.resetAt7d ?? null,
       enabled: qGuard.enabled,
     }
   }

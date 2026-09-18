@@ -127,9 +127,11 @@ export declare class ProxyClient {
         holding: boolean;
         orgId: string | null;
         util5h: number | null;
+        util7d: number | null;
         threshold: number;
         resetAt: number | null;
         resetInSec: number | null;
+        resetAt7d: number | null;
         enabled: boolean;
     };
     private getTokenForSession;

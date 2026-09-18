@@ -186,26 +186,26 @@ describe('чужая дверь может подвести, и это не до
 })
 
 describe('🔴 сторож: прогон набора не стучится в живую дверь машины', () => {
-  test('без шва и без секрета карточка не уходит, а называет причину', async () => {
+  test('нет секрета — дверь идти НЕКУДА, и это видно без единого сетевого вызова', async () => {
+    // 🔴 РАНЬШЕ ЭТО ПРОВЕРЯЛОСЬ ЧЕРЕЗ САМУ ДВЕРЬ, И ИМЕННО ТАК ПРОТЕКЛО.
+    // Чтобы дойти до проверки секрета, испытание снимало замок прогона
+    // переменной окружения — и не вернуло её (восстановление писало значение
+    // назад, только если оно БЫЛО, а его не было). Весь остаток прогона шёл с
+    // открытым замком: десять настоящих стуков в живую комнату человека, с
+    // номерами сессий из рабочего учёта машины. Теперь замок неснимаем, а
+    // секрет проверяется НАПРЯМУЮ — дверь для этого трогать не нужно.
     const prevEnv = process.env.SURFACE_SPAWN_CONSENT_SECRET
     const prevFile = process.env.SURFACE_CONSENT_ENV
-    const prevOff = process.env.PROXY_SURFACE_CARD
-    delete process.env.PROXY_SURFACE_CARD   // проверяем именно отсутствие секрета
     delete process.env.SURFACE_SPAWN_CONSENT_SECRET
     process.env.SURFACE_CONSENT_ENV = join(tmpdir(), 'no-such-surface-consent.env')
-    const { raiseStuckCard, _forgetSecret } = await import('../src/surface-card.js')
+    const { _secretForTests, _forgetSecret } = await import('../src/surface-card.js')
     _forgetSecret()
     try {
-      const r = await raiseStuckCard({
-        sessionId: 's', guard: 'cache', reason: 'проверка', stuckForSec: 1,
-      })
-      expect(r.raised).toBe(false)
-      expect(r.reason).toContain('секрет не найден')
+      expect(_secretForTests()).toBeNull()
     } finally {
       if (prevEnv !== undefined) process.env.SURFACE_SPAWN_CONSENT_SECRET = prevEnv
       if (prevFile !== undefined) process.env.SURFACE_CONSENT_ENV = prevFile
       else delete process.env.SURFACE_CONSENT_ENV
-      if (prevOff !== undefined) process.env.PROXY_SURFACE_CARD = prevOff
       _forgetSecret()
     }
   })

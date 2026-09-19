@@ -364,9 +364,12 @@ describe('transformAnthropicSSEToOpenAI', () => {
     // Last data chunk (before [DONE]) should have usage + empty choices
     const usageChunk = chunks.find(c => c.usage && c.choices?.length === 0)
     expect(usageChunk).toBeDefined()
-    expect(usageChunk.usage.prompt_tokens).toBe(50)
+    // 🔴 ЗДЕСЬ БЫЛО 50, И ЭТО ЗАКРЕПЛЯЛО ОШИБКУ. Правится 19.09.2026 по замеру
+    // владельца kiberos-app: в формате OpenAI `prompt_tokens` — ВЕСЬ вход, а
+    // `cached_tokens` — его ЧАСТЬ. 50 свежих + 30 прочитанных = 80.
+    expect(usageChunk.usage.prompt_tokens).toBe(80)
     expect(usageChunk.usage.completion_tokens).toBe(1)
-    expect(usageChunk.usage.total_tokens).toBe(51)
+    expect(usageChunk.usage.total_tokens).toBe(81)
     expect(usageChunk.usage.prompt_tokens_details.cached_tokens).toBe(30)
   })
 
@@ -422,7 +425,8 @@ describe('bufferToNonStreaming', () => {
     expect(body.choices[0].message.refusal).toBeNull()
     expect(body.choices[0].message.annotations).toEqual([])
     expect(body.choices[0].finish_reason).toBe('stop')
-    expect(body.usage.prompt_tokens).toBe(20)
+    // Тем же правилом, что и выше: 20 свежих + 10 прочитанных = 30 весь вход.
+    expect(body.usage.prompt_tokens).toBe(30)
     expect(body.usage.completion_tokens).toBe(3)
     expect(body.usage.prompt_tokens_details.cached_tokens).toBe(10)
   })

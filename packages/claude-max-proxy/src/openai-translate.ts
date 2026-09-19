@@ -454,6 +454,57 @@ export interface TransformOpts {
   thinkingMode: 'strip' | 'field'
 }
 
+/**
+ * Учёт одного хода в правилах формата OpenAI.
+ *
+ * 🔴 ПОЧЕМУ `prompt_tokens` СКЛАДЫВАЕТСЯ ИЗ ТРЁХ СЛАГАЕМЫХ, 19.09.2026.
+ * Anthropic делит вход на три части: свежие токены (`input_tokens`), записанные
+ * в кэш (`cache_creation_input_tokens`) и прочитанные из него
+ * (`cache_read_input_tokens`). Все три — это текст, который модель прочитала на
+ * этом ходе. В формате OpenAI такого деления нет: там `prompt_tokens` — ВЕСЬ
+ * вход, а `cached_tokens` — та его ЧАСТЬ, что пришла из кэша.
+ *
+ * Отдавая наружу только свежие токены, мы говорили потребителю неправду его же
+ * словарём. Замер владельца kiberos-app: живой ход человека стоил 46 246
+ * токенов входа (2 свежих + 40 977 чтения + 5 267 записи), а его счётчик
+ * показал полторы тысячи — то есть человек видел «занято 0 %» и упирался в
+ * потолок внезапно. Складывать на своей стороне потребитель не может: он не
+ * знает, подмножество это или слагаемое, и при нашей будущей починке получил бы
+ * двойной счёт.
+ *
+ * 🔴 И ЗАПИСЬ КЭША ОТДАЁТСЯ ОТДЕЛЬНЫМ ЧИСЛОМ, ХОТЯ ШТАТНОГО ПОЛЯ ДЛЯ НЕЁ В ЭТОМ
+ * ФОРМАТЕ НЕТ. У OpenAI запись в кэш ничего не стоит, поэтому и поля не
+ * завели; у нас она самый дорогой вид входа и единственное, что двигает окно
+ * подписки. Потребитель, считающий расход без неё, недосчитывает именно там,
+ * где тот наибольший — поэтому число едет рядом с `cached_tokens`, под именем,
+ * которое говорит, что это.
+ */
+function buildOpenAIUsage(
+  freshTokens: number,
+  outputTokens: number,
+  cacheReadTokens: number,
+  cacheWriteTokens: number,
+  reasoningTokens: number,
+): {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  prompt_tokens_details: { cached_tokens: number; cache_creation_tokens: number }
+  completion_tokens_details: { reasoning_tokens: number }
+} {
+  const promptTokens = freshTokens + cacheReadTokens + cacheWriteTokens
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: outputTokens,
+    total_tokens: promptTokens + outputTokens,
+    prompt_tokens_details: {
+      cached_tokens: cacheReadTokens,
+      cache_creation_tokens: cacheWriteTokens,
+    },
+    completion_tokens_details: { reasoning_tokens: reasoningTokens },
+  }
+}
+
 export function transformAnthropicSSEToOpenAI(
   upstreamResponse: Response,
   opts: TransformOpts,
@@ -507,13 +558,7 @@ export function transformAnthropicSSEToOpenAI(
   }
 
   function buildUsage(): unknown {
-    return {
-      prompt_tokens: inputTokens,
-      completion_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      prompt_tokens_details: { cached_tokens: cacheReadTokens },
-      completion_tokens_details: { reasoning_tokens: reasoningTokens },
-    }
+    return buildOpenAIUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens)
   }
 
   const stream = new ReadableStream<Uint8Array>({
@@ -752,6 +797,7 @@ export async function bufferToNonStreaming(
   let inputTokens = 0
   let outputTokens = 0
   let cacheReadTokens = 0
+  let cacheWriteTokens = 0
   let reasoningTokens = 0
   let currentBlockType: string | null = null
 
@@ -778,6 +824,7 @@ export async function bufferToNonStreaming(
           if (u) {
             inputTokens = u.input_tokens ?? 0
             cacheReadTokens = u.cache_read_input_tokens ?? 0
+            cacheWriteTokens = u.cache_creation_input_tokens ?? 0
           }
           break
         }
@@ -856,13 +903,7 @@ export async function bufferToNonStreaming(
       finish_reason: finishReason,
       logprobs: null,
     }],
-    usage: {
-      prompt_tokens: inputTokens,
-      completion_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      prompt_tokens_details: { cached_tokens: cacheReadTokens },
-      completion_tokens_details: { reasoning_tokens: reasoningTokens },
-    },
+    usage: buildOpenAIUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens),
   }
 
   return new Response(JSON.stringify(response), {

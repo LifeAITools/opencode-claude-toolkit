@@ -1,4 +1,6 @@
 import { Database } from 'bun:sqlite'
+import { mkdirSync } from 'fs'
+import { dirname } from 'path'
 
 /**
  * stats-store — статистика расхода в SQLite (WAL), защищённая от параллельной записи.
@@ -44,6 +46,11 @@ CREATE INDEX IF NOT EXISTS idx_usage_session ON usage(session_id);
 `
 
 function open(path: string, readonly: boolean): Database {
+  // SQLite create:true не создаёт РОДИТЕЛЬСКУЮ папку — SQLITE_CANTOPEN. Создаём заранее,
+  // иначе первый запуск на чистой машине падает ещё до первого запроса.
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+  } catch {}
   return new Database(path, { create: true, readonly })
 }
 

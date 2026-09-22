@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { teeUsage } from '../src/sse-usage-tee.js'
-import { appendStatsLine, STATS_SCHEMA_VERSION } from '../src/stats-emitter.js'
+import { initStore, insertUsage, aggregateUsage } from '../src/stats-store.js'
 import { logLine } from '../src/jsonl-logger.js'
 import { readFileSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
@@ -61,38 +61,57 @@ describe('sse-usage-tee', () => {
   })
 })
 
-describe('stats-emitter', () => {
-  test('строка валидна и несёт v схемы', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'proxy-core-stats-'))
-    const path = join(dir, 'stats.jsonl')
-    appendStatsLine(path, {
-      v: STATS_SCHEMA_VERSION,
+describe('stats-store', () => {
+  function tmpDb(): string {
+    return join(mkdtempSync(join(tmpdir(), 'proxy-core-db-')), 'stats.sqlite')
+  }
+
+  test('insert + aggregate читают ту же строку', () => {
+    const path = tmpDb()
+    initStore(path)
+    insertUsage(path, {
       ts: new Date().toISOString(),
       pid: 1,
-      type: 'stream',
+      provider: 'openai-compat',
       model: 'coder-model',
-      usage: { in: 10, out: 2, cacheRead: 8, cacheWrite: 2 },
+      sessionId: 'ses_x',
+      inputTokens: 120,
+      outputTokens: 3,
+      cacheRead: 80,
+      cacheWrite: 40,
     })
-    const line = JSON.parse(readFileSync(path, 'utf8').trim())
-    expect(line.v).toBe(STATS_SCHEMA_VERSION)
-    expect(line.type).toBe('stream')
-    expect(line.usage).toEqual({ in: 10, out: 2, cacheRead: 8, cacheWrite: 2 })
-    rmSync(dir, { recursive: true, force: true })
+    const agg = aggregateUsage(path)
+    expect(agg.rows).toBe(1)
+    expect(agg.totalInput).toBe(120)
+    expect(agg.totalCacheRead).toBe(80)
+    rmSync(dirnameOnly(path), { recursive: true, force: true })
   })
 
-  test('отказ записи не бросает (read-only каталог)', () => {
-    // Путь через несуществующий корень: mkdirSync упадёт, append обёрнут — не должно бросить.
-    const path = '/proc/definitely-not-writable/stats.jsonl'
-    expect(() =>
-      appendStatsLine(path, {
-        v: STATS_SCHEMA_VERSION,
+  test('многократные записи не копят соединений и не падают с BUSY', () => {
+    const path = tmpDb()
+    initStore(path)
+    for (let i = 0; i < 100; i++) {
+      insertUsage(path, {
         ts: new Date().toISOString(),
-        pid: 1,
-        type: 'stream',
-        model: 'm',
-        usage: { in: 1, out: 1, cacheRead: 0, cacheWrite: 1 },
-      }),
-    ).not.toThrow()
+        pid: 2,
+        provider: 'openai-compat',
+        model: 'coder-model',
+        sessionId: null,
+        inputTokens: i,
+        outputTokens: 1,
+        cacheRead: 0,
+        cacheWrite: i,
+      })
+    }
+    expect(aggregateUsage(path).rows).toBe(100)
+    rmSync(dirnameOnly(path), { recursive: true, force: true })
+  })
+
+  test('initStore идемпотентен (повторный вызов не роняет)', () => {
+    const path = tmpDb()
+    initStore(path)
+    expect(() => initStore(path)).not.toThrow()
+    rmSync(dirnameOnly(path), { recursive: true, force: true })
   })
 })
 
@@ -109,3 +128,7 @@ describe('jsonl-logger', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+function dirnameOnly(p: string): string {
+  return p.slice(0, p.lastIndexOf('/'))
+}

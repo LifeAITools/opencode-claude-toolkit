@@ -4,29 +4,21 @@
  *
  * НЕ ЗНАЕТ провайдеров. Апстрим-адрес (`X-Upstream-Url`) и готовый `Authorization` приходят
  * от вызывающего (плагин/лаунчер); прокси ретранслирует и по пути ловит `usage` через ядро
- * `@kiberos/proxy-core`, дописывая строку в stats.jsonl.
+ * `@kiberos/proxy-core`, записывая строку в SQLite-стора (WAL, защищённый от параллельной записи).
  *
  * Рейлы (02.5):
  *   REQ-CORE-02 — слушает только 127.0.0.1, strip'ит X-Upstream-Url/Authorization перед апстримом;
- *   REQ-CORE-04 — порт и путь stats из env, литералы только fallback.
+ *   REQ-CORE-04 — порт и путь базы из env, литералы только fallback.
  */
 
-import {
-  appendStatsLine,
-  STATS_SCHEMA_VERSION,
-  teeUsage,
-  healthResponse,
-  writePidFile,
-  type OpenAIUsage,
-  type StatsLine,
-} from '@kiberos/proxy-core'
+import { initStore, insertUsage, teeUsage, healthResponse, writePidFile, type OpenAIUsage, type UsageRow } from '@kiberos/proxy-core'
 
 import { homedir } from 'os'
 import { join } from 'path'
 
 const PORT = parseInt(process.env.PROXY_PORT ?? '17100', 10)
-const STATS_JSONL =
-  process.env.PROXY_STATS_JSONL ?? join(homedir(), '.local', 'share', 'openai-compat-proxy', 'stats.jsonl')
+const STATS_DB = process.env.PROXY_STATS_DB ?? join(homedir(), '.local', 'share', 'openai-compat-proxy', 'stats.sqlite')
+const PROVIDER = process.env.PROXY_PROVIDER ?? 'openai-compat'
 const PID_FILE = process.env.PROXY_PID_FILE ?? join(process.env.TMPDIR ?? '/tmp', `openai-compat-proxy-${PORT}.pid`)
 
 /** Какие модели прокси объявляет наружу. Хранится В АДАПТЕРЕ, не в ядре (US-04). */
@@ -36,32 +28,26 @@ const MODELS = (process.env.PROXY_MODELS ?? 'qwen-portal/coder-model')
   .filter(Boolean)
   .map((id) => ({ id, object: 'model', owned_by: 'openai-compat' }))
 
-function projectUsage(model: string | undefined, usage: OpenAIUsage | undefined): StatsLine | null {
+function usageToRow(model: string | undefined, sessionId: string | undefined, usage: OpenAIUsage | undefined): UsageRow | null {
   if (!usage) return null
-  const inTokens = usage.prompt_tokens ?? 0
+  const input = usage.prompt_tokens ?? 0
   const cached = usage.prompt_tokens_details?.cached_tokens ?? 0
   return {
-    v: STATS_SCHEMA_VERSION,
     ts: new Date().toISOString(),
     pid: process.pid,
-    type: 'stream',
-    model: model ?? '?',
-    usage: {
-      in: inTokens,
-      out: usage.completion_tokens ?? 0,
-      cacheRead: cached,
-      // REQ-CORE-01: выводимый факт, пока апстрим не даёт cache_creation отдельно.
-      cacheWrite: Math.max(0, inTokens - cached),
-    },
+    provider: PROVIDER,
+    model: model ?? null,
+    sessionId: sessionId ?? null,
+    inputTokens: input,
+    outputTokens: usage.completion_tokens ?? 0,
+    cacheRead: cached,
+    // REQ-CORE-01: выводимый факт, пока апстрим не даёт cache_creation отдельно.
+    cacheWrite: Math.max(0, input - cached),
   }
 }
 
-function upstreamBase(req: Request): string | null {
-  return req.headers.get('x-upstream-url')
-}
-
 async function forward(request: Request, model: string | undefined): Promise<Response> {
-  const base = upstreamBase(request)
+  const base = request.headers.get('x-upstream-url')
   if (!base) {
     return new Response(JSON.stringify({ error: 'missing X-Upstream-Url header' }), {
       status: 400,
@@ -74,9 +60,10 @@ async function forward(request: Request, model: string | undefined): Promise<Res
   upstream.pathname = url.pathname.startsWith('/v1/') ? url.pathname : `/v1${url.pathname}`
   upstream.search = url.search
 
+  const sessionId = request.headers.get('x-session-id') ?? undefined
   const headers = new Headers(request.headers)
   // REQ-CORE-02: свои служебные заголовки и host не утекают апстриму.
-  for (const h of ['x-upstream-url', 'host', 'content-length', 'content-encoding', 'x-qwen-model']) headers.delete(h)
+  for (const h of ['x-upstream-url', 'x-session-id', 'host', 'content-length', 'content-encoding']) headers.delete(h)
 
   let bodyText: string | null = null
   let streamWanted = false
@@ -94,19 +81,25 @@ async function forward(request: Request, model: string | undefined): Promise<Res
   }
 
   const upstreamRes = await fetch(upstream, { method: request.method, headers, body: bodyText })
+  const write = (usage: OpenAIUsage) => {
+    const row = usageToRow(model, sessionId, usage)
+    if (row) {
+      try {
+        insertUsage(STATS_DB, row)
+      } catch {
+        /* наблюдательный слой — не ронять разговор */
+      }
+    }
+  }
 
   if (streamWanted && upstreamRes.body) {
-    const teed = teeUsage(upstreamRes.body, (usage) => {
-      const line = projectUsage(model, usage)
-      if (line) appendStatsLine(STATS_JSONL, line)
-    })
+    const teed = teeUsage(upstreamRes.body, write)
     return new Response(teed, { status: upstreamRes.status, headers: upstreamRes.headers })
   }
 
   try {
     const text = await upstreamRes.text()
-    const line = projectUsage(model, (JSON.parse(text) as { usage?: OpenAIUsage }).usage)
-    if (line) appendStatsLine(STATS_JSONL, line)
+    write((JSON.parse(text) as { usage?: OpenAIUsage }).usage as OpenAIUsage)
     return new Response(text, { status: upstreamRes.status, headers: { 'content-type': 'application/json' } })
   } catch {
     return upstreamRes
@@ -118,7 +111,7 @@ const server = Bun.serve({
   hostname: '127.0.0.1',
   fetch(req) {
     const url = new URL(req.url)
-    if (url.pathname === '/health') return healthResponse({ port: PORT, stats: STATS_JSONL })
+    if (url.pathname === '/health') return healthResponse({ port: PORT, stats: STATS_DB })
     if (url.pathname === '/v1/models') return Response.json({ object: 'list', data: MODELS })
     if (req.method === 'POST' && (url.pathname.endsWith('/chat/completions') || url.pathname.endsWith('/responses'))) {
       return forward(req, undefined)
@@ -130,5 +123,6 @@ const server = Bun.serve({
   },
 })
 
+initStore(STATS_DB)
 writePidFile(PID_FILE)
-console.log(`openai-compat-proxy listening on 127.0.0.1:${PORT} (stats → ${STATS_JSONL})`)
+console.log(`openai-compat-proxy listening on 127.0.0.1:${PORT} (stats → ${STATS_DB})`)

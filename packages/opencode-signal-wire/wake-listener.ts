@@ -14,7 +14,7 @@
  * Engine routing: optional SignalWireEngine via config (duck-typed, no direct import).
  */
 
-import { mkdirSync, writeFileSync, readFileSync, unlinkSync, appendFileSync, renameSync } from 'fs'
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync, appendFileSync, renameSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -1945,13 +1945,44 @@ export async function startWakeListener(
     _currentSubscribePreset = config.subscribePreset ?? null
     _currentMemberType = resolvedIdentity.memberType
 
+    // 🔴 ADOPT THE BINDING SEAT'S memberId WHEN ONE EXISTS FOR THIS PID
+    // (dual-discovery, 2026-09-22). lat-context writes `{pid}-{binding}.json`
+    // with the REAL SynqTask member; this listener's own config.memberId often
+    // resolves to a harness identity (`SYNQTASK_MEMBER_ID` = Collaboration
+    // Harness), which used to stamp `memberId: e1ea44e3…` on the HTTP file —
+    // a phantom seat under the wrong UUID. Prefer the binding sibling's
+    // memberId when present so both files for one process name the same member;
+    // fall back to the resolved identity when there is no sibling (standalone
+    // HTTP agent with no lat-context spawn).
+    let discoveryMemberId = resolvedIdentity.memberId
+    let discoveryMemberName = resolvedIdentity.memberName ?? _agentIdentity?.name ?? resolvedIdentity.memberId
+    try {
+      const siblings = readdirSync(resolvedDiscoveryDir)
+      // File names are `{pid}-{binding|sessionId}.json` — match by pid prefix.
+      const pidPrefix = `${process.pid}-`
+      for (const name of siblings) {
+        if (!name.startsWith(pidPrefix) || !name.endsWith('.json')) continue
+        if (name === `${process.pid}-${config.sessionId}.json`) continue
+        const raw = readFileSync(join(resolvedDiscoveryDir, name), 'utf-8')
+        const sib = JSON.parse(raw) as { pid?: number; memberId?: string; memberName?: string; tmux_binding_id?: string }
+        if (sib.pid !== process.pid) continue
+        // Binding-keyed sibling (lat-context) carries tmux_binding_id + a real member.
+        if (sib.tmux_binding_id && typeof sib.memberId === 'string' && sib.memberId && sib.memberId !== 'unknown') {
+          discoveryMemberId = sib.memberId
+          discoveryMemberName = sib.memberName ?? discoveryMemberName
+          dbg(`discovery: adopting binding sibling memberId=${sib.memberId} from ${name}`)
+          break
+        }
+      }
+    } catch { /* no sibling / unreadable — keep resolved identity */ }
+
     const discoveryData: DiscoveryFile = {
       port: actualPort,
       token,
       sessionId: config.sessionId,
       agentInstanceId: config.agentInstanceId,
-      memberId: resolvedIdentity.memberId,
-      memberName: resolvedIdentity.memberName ?? _agentIdentity?.name ?? resolvedIdentity.memberId,
+      memberId: discoveryMemberId,
+      memberName: discoveryMemberName,
       pid: process.pid,
       startedAt: new Date().toISOString(),
       transport: 'http',

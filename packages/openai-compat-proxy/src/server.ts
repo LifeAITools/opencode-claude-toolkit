@@ -47,18 +47,18 @@ function usageToRow(model: string | undefined, sessionId: string | undefined, us
 }
 
 async function forward(request: Request, model: string | undefined): Promise<Response> {
-  const base = request.headers.get('x-upstream-url')
+  const base = request.headers.get('x-upstream-url') ?? process.env.PROXY_UPSTREAM_BASE ?? null
   if (!base) {
-    return new Response(JSON.stringify({ error: 'missing X-Upstream-Url header' }), {
+    return new Response(JSON.stringify({ error: 'missing X-Upstream-Url header or PROXY_UPSTREAM_BASE env' }), {
       status: 400,
       headers: { 'content-type': 'application/json' },
     })
   }
 
   const url = new URL(request.url)
-  const upstream = new URL(base.replace(/\/+$/, ''))
-  upstream.pathname = url.pathname.startsWith('/v1/') ? url.pathname : `/v1${url.pathname}`
-  upstream.search = url.search
+  // Конкатенация, а не new URL: апстрим-префикс может нести собственный путь
+  // (напр. `/compatible-mode/v1` у Alibaba), и перезапись `pathname` его теряет (→404).
+  const target = base.replace(/\/+$/, '') + (url.pathname.startsWith('/v1/') ? url.pathname : `/v1${url.pathname}`) + url.search
 
   const sessionId = request.headers.get('x-session-id') ?? undefined
   const headers = new Headers(request.headers)
@@ -80,7 +80,7 @@ async function forward(request: Request, model: string | undefined): Promise<Res
     /* не-JSON тело — шлём как есть */
   }
 
-  const upstreamRes = await fetch(upstream, { method: request.method, headers, body: bodyText })
+  const upstreamRes = await fetch(target, { method: request.method, headers, body: bodyText })
   const write = (usage: OpenAIUsage) => {
     const row = usageToRow(model, sessionId, usage)
     if (row) {

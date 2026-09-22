@@ -1,10 +1,12 @@
-import { spawn } from 'bun'
+import { spawn } from 'node:child_process'
 
 /**
  * launch — авто-старт: проверить `/health` → нет → detached spawn → poll до ready.
  *
- * Паттерн `opencode-proxy/launch.ts`, вынесенный в общее: expensive fetch'ем апстрима не
- * должен быть риск, а повторный запрос к живому прокси не плодит второй процесс.
+ * Паттерн `opencode-proxy/launch.ts`, вынесенный в общее. Написан на `node:child_process`,
+ * а не на `bun` — чтобы клиент (плагин opencode) мог тянуть этот модуль, не таща за собой
+ * bun-типы и `bun:sqlite` остального ядра. Повторный `/health` на живом прокси не плодит
+ * второй процесс (REQ-CORE-03).
  */
 
 export interface LaunchSpec {
@@ -14,21 +16,22 @@ export interface LaunchSpec {
   pollIntervalMs?: number
 }
 
-export async function ensureRunning(spec: LaunchSpec): Promise<{ url: string; alreadyRunning: boolean }> {
+export async function ensureRunning(spec: LaunchSpec): Promise<{ alreadyRunning: boolean }> {
   const timeoutMs = spec.readyTimeoutMs ?? 5_000
   const pollMs = spec.pollIntervalMs ?? 100
 
   if (await healthy(spec.healthUrl, 500)) {
-    return { url: spec.healthUrl, alreadyRunning: true }
+    return { alreadyRunning: true }
   }
 
-  const child = spawn({ cmd: spec.spawnCmd, stdout: 'ignore', stderr: 'ignore', detached: true })
-  child.unref?.()
+  const [cmd, ...args] = spec.spawnCmd
+  const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
+  child.unref()
 
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (await healthy(spec.healthUrl, pollMs)) {
-      return { url: spec.healthUrl, alreadyRunning: false }
+      return { alreadyRunning: false }
     }
     await sleep(pollMs)
   }

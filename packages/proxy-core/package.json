@@ -4,8 +4,15 @@
   "description": "Переиспользуемое ядро тонких прокси: stats-emitter, sse-usage-tee, launch, health, jsonl-logger. Без провайдерной специфики.",
   "type": "module",
   "private": true,
-  "files": ["src/**/*.ts"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./launch": "./dist/launch.js"
+  },
+  "files": ["dist", "src/**/*.ts"],
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

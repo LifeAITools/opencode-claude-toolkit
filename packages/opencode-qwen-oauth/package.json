@@ -1,0 +1,24 @@
+{
+  "name": "@kiberos/opencode-qwen-oauth",
+  "version": "0.2.0",
+  "description": "Qwen OAuth plugin for opencode — наводит fetch на тонкий openai-compat-proxy (учёт usage + авто-старт).",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@kiberos/proxy-core": "file:../proxy-core",
+    "@opencode-ai/plugin": "^1.18.32"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.6",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
+  }
+}

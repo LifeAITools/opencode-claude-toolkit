@@ -22,7 +22,14 @@ WARN  UNKNOWN_MODEL_PASSTHROUGH model=claude-XXX
    per Mtok, context window, max output, thinking/sampling support, breaking quirks.
 2. **Native CLI binary** (`grep -a '<model-id>' $(readlink -f ~/.local/bin/claude)`)
    — confirms the id ships on the Max subscription.
-3. Cache cost convention: `cacheRead = 0.1 × input`, `cacheWrite = 1.25 × input`.
+3. Cache cost convention: `cacheRead = 0.1 × input`, `cacheWrite = 1.25 × input` —
+   **but check the price card first**: fable-5-1 reads at $0.25 and opus-5-5 at $0.20,
+   neither is 0.1×. A convention applied blindly is exactly how the display lies.
+4. Thinking shape: set `thinkingDefault` ('on' if an omitted `thinking` runs adaptive)
+   and `thinkingCanDisable: false` if `{type:"disabled"}` is a 400 — the request-validity
+   repair in `subscription-compat.ts` reads both.
+5. **Point releases go ABOVE their base model** in `MAX_MODELS`: the fuzzy matcher
+   walks in insertion order and `claude-opus-5-5` contains `claude-opus-5`.
 
 ## Edits (in order)
 

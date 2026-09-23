@@ -21,6 +21,8 @@
  * это осознанный выбор: движок не тащит за собой ничью шину событий.
  */
 
+import { getModelMetadata } from './models.js'
+
 /** Куда движок сообщает о своих правках — шина вызывающего, если он её дал. */
 export type CompatEmit = (
   event: { level: 'error' | 'info' | 'debug'; kind: string } & Record<string, unknown>,
@@ -176,7 +178,8 @@ export interface AnthropicEnrichResult {
 
 /**
  * Lower `output_config.effort` to 'high' when thinking is disabled. Mutates `body`.
- * Returns the previous value when it clamped, else null.
+ * Returns the previous value when it clamped, else null. On a model that cannot disable
+ * thinking at all, drops the `{type:"disabled"}` field instead and returns 'disabled'.
  *
  * 🔴 MUST RUN ON EVERY REQUEST, INCLUDING NATIVE CLAUDE CODE. The first version of this
  * lived inside `enrichAnthropicRequest`, which `modules/anthropic.ts` calls only for
@@ -193,9 +196,28 @@ export function clampEffortIfThinkingDisabled(
   body: Record<string, unknown>,
   emit?: CompatEmit,
 ): string | null {
+  const model = String(body.model ?? '')
+  const meta = getModelMetadata(model)
+  const explicitlyDisabled = (body.thinking as { type?: string } | null)?.type === 'disabled'
+
+  // Always-thinking models (fable-5/5-1, opus-5-5) reject {type:"disabled"} as such, at
+  // EVERY effort — clamping effort would not save the call. The API's own remedy is to
+  // omit the field, which runs adaptive; there is no thinking-off shape to preserve.
+  if (explicitlyDisabled && meta?.thinkingCanDisable === false) {
+    delete body.thinking
+    emit?.({
+      level: 'info',
+      kind: 'THINKING_DISABLE_DROPPED',
+      msg: `thinking {type:"disabled"} dropped — ${model} always thinks and rejects the field with 400; omitted so the call succeeds`,
+      model,
+    })
+    return 'disabled'
+  }
+
   const carrier = body.output_config as { effort?: string } | undefined
-  const thinkingOff =
-    !body.thinking || (body.thinking as { type?: string } | null)?.type === 'disabled'
+  // An OMITTED field means "off" only on models whose default is off (opus-4-8/4-7);
+  // on opus-5/sonnet-5 it runs adaptive, and lowering effort there cost quality for nothing.
+  const thinkingOff = explicitlyDisabled || (!body.thinking && meta?.thinkingDefault !== 'on')
   if (!carrier?.effort || !thinkingOff || !EFFORT_ABOVE_HIGH.has(carrier.effort)) return null
   const was = carrier.effort
   carrier.effort = 'high'
@@ -203,7 +225,7 @@ export function clampEffortIfThinkingDisabled(
     level: 'info',
     kind: 'EFFORT_CLAMPED',
     msg: `effort ${was}->high (thinking disabled) — the API rejects '${was}' without thinking; clamped so the call succeeds`,
-    model: String(body.model ?? ''),
+    model,
     from: was,
     to: 'high',
   })

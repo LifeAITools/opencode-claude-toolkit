@@ -18,6 +18,13 @@ import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker
  */
 export const EFFORT_ABOVE_HIGH_RE = /"effort"\s*:\s*"(xhigh|max)"/
 
+/**
+ * Вторая форма, которую движок правит: `thinking:{type:"disabled"}` у модели, которая
+ * без размышления не работает вовсе (fable-5/5-1, opus-5-5 — там это 400 при ЛЮБОМ
+ * усилии, так что первой проверки мало). Без слова "disabled" в теле правки не будет.
+ */
+export const THINKING_DISABLED_RE = /"type"\s*:\s*"disabled"/
+
 let ctx: ModuleContext
 
 export function createAnthropicModule(): ProxyModule {
@@ -82,16 +89,17 @@ export function createAnthropicModule(): ProxyModule {
           // мы разбирали два мегабайта в объектное дерево, чтобы убедиться, что делать
           // нечего.
           //
-          // Поправка возможна ТОЛЬКО когда усилие выше 'high' (см. EFFORT_ABOVE_HIGH в
-          // движке), поэтому дешёвая проверка по тексту строго эквивалентна: нет xhigh
-          // и нет max — разбирать нечего. Пробел и перенос строки допускаются на случай
+          // Поправка возможна ТОЛЬКО в двух формах: усилие выше 'high' (см. EFFORT_ABOVE_HIGH
+          // в движке) или явное {type:"disabled"} у модели, которая всегда размышляет
+          // (с 23.09.2026, opus-5-5 / fable-5-1). Поэтому дешёвая проверка по тексту строго
+          // эквивалентна: нет xhigh, нет max и нет "disabled" — разбирать нечего. Пробел и перенос строки допускаются на случай
           // чужого клиента, который печатает JSON с отступами.
           //
           // Повод: сосед из tixi-cold замерил у себя ~30 МБ пика на ход при потолке в
           // гигабайт (их профиль — единицы сессий с огромным контекстом). Это первая
           // работа, которую можно было убрать целиком, не потеряв поведения.
           try {
-            if (EFFORT_ABOVE_HIGH_RE.test(rawBodyStr)) {
+            if (EFFORT_ABOVE_HIGH_RE.test(rawBodyStr) || THINKING_DISABLED_RE.test(rawBodyStr)) {
               const parsed = JSON.parse(rawBodyStr) as Record<string, unknown>
               if (clampEffortIfThinkingDisabled(parsed)) forwardBody = JSON.stringify(parsed)
             }

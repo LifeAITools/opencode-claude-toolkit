@@ -108,6 +108,8 @@ const GPT_TO_CLAUDE: Record<string, string> = {
 }
 
 const PROXY_MODEL_MAP: Record<string, string> = {
+  'claude-v5.1-fable': 'claude-fable-5-1',
+  'claude-v5.5-opus': 'claude-opus-5-5',
   'claude-v5-fable': 'claude-fable-5',
   'claude-v5-opus': 'claude-opus-5',
   'claude-v5-sonnet': 'claude-sonnet-5',
@@ -119,6 +121,8 @@ const PROXY_MODEL_MAP: Record<string, string> = {
 }
 
 const DIRECT_MODEL_MAP: Record<string, string> = {
+  'claude-fable-5-1': 'claude-fable-5-1',
+  'claude-opus-5-5': 'claude-opus-5-5',
   'claude-fable-5': 'claude-fable-5',
   'claude-opus-5': 'claude-opus-5',
   'claude-sonnet-5': 'claude-sonnet-5',
@@ -158,6 +162,8 @@ export function resolveModel(model: string): string {
 
 export const SUPPORTED_MODELS = [
   // Claude native names
+  { id: 'claude-fable-5-1', name: 'Claude Fable 5.1' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
   { id: 'claude-fable-5', name: 'Claude Fable 5' },
   { id: 'claude-opus-5', name: 'Claude Opus 5' },
   { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
@@ -167,6 +173,8 @@ export const SUPPORTED_MODELS = [
   { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
   { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
   // Proxy-style IDs
+  { id: 'claude-v5.1-fable', name: 'Claude V5.1 Fable' },
+  { id: 'claude-v5.5-opus', name: 'Claude V5.5 Opus' },
   { id: 'claude-v5-fable', name: 'Claude V5 Fable' },
   { id: 'claude-v5-opus', name: 'Claude V5 Opus' },
   { id: 'claude-v5-sonnet', name: 'Claude V5 Sonnet' },

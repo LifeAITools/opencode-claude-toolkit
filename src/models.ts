@@ -52,6 +52,19 @@ export interface ModelMetadata {
    * Removed (400 if sent) on opus-4-7+, opus-4-8 and fable-5.
    */
   samplingParams: boolean
+  /**
+   * What an OMITTED `thinking` field means on this model. 'on' = the model runs
+   * adaptive thinking by default (opus-5, sonnet-5, fable-5/5.1, opus-5-5);
+   * 'off' = it runs without thinking (opus-4-8/4-7 and older).
+   * Absent = 'off' (the historical behaviour).
+   */
+  thinkingDefault?: 'on' | 'off'
+  /**
+   * False when an explicit `thinking: {type: "disabled"}` is REJECTED with a 400
+   * (fable-5, fable-5-1, opus-5-5) — thinking is always on and the field must be
+   * omitted. Absent = true.
+   */
+  thinkingCanDisable?: boolean
   /** Equivalent API pricing (USD per million tokens) — for savings display on Max subscription */
   cost: {
     input: number
@@ -69,6 +82,39 @@ export interface ModelMetadata {
  * Max/Pro subscription.
  */
 export const MAX_MODELS: Record<string, ModelMetadata> = {
+  // 🔴 ORDER MATTERS: getModelMetadata() fuzzy-matches by substring in insertion
+  // order, and 'claude-opus-5-5-…' also contains 'claude-opus-5'. Point releases
+  // go ABOVE their base model.
+  //
+  // Fable 5.1 — successor to Fable 5, same tier and per-token price, but cache
+  // reads are $0.25 (NOT the 0.1× convention). Thinking always on ({type:"disabled"}
+  // → 400), forced tool_choice any/tool → 400.
+  'claude-fable-5-1': {
+    name: 'Claude Fable 5.1',
+    context: 1_000_000,
+    defaultOutput: 64_000,
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    thinkingDefault: 'on',
+    thinkingCanDisable: false,
+    cost: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+  },
+  // Opus 5.5 — released 2026-09-22; successor to Opus 5 at a lower price.
+  // Cache reads $0.20 (NOT 0.1× = 0.40). Thinking can't be disabled at any
+  // effort ({type:"disabled"} → 400); effort defaults to 'medium'; forced
+  // tool_choice any/tool → 400. Needs Claude Code ≥ 2.1.280 (server-side gate).
+  'claude-opus-5-5': {
+    name: 'Claude Opus 5.5',
+    context: 1_000_000,
+    defaultOutput: 64_000,
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    thinkingDefault: 'on',
+    thinkingCanDisable: false,
+    cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+  },
   // Fable 5 — new tier above Opus. Adaptive-only thinking; sampling params
   // (temperature/top_p/top_k) and budget_tokens are REMOVED (400 if sent).
   // Quirk vs opus-4-7/4-8: an explicit thinking:{type:"disabled"} also 400s —
@@ -80,6 +126,8 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     maxOutput: 128_000,
     adaptiveThinking: true,
     samplingParams: false,
+    thinkingDefault: 'on',
+    thinkingCanDisable: false,
     cost: { input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
   },
   // Opus 5 — released 2026-07-24; replaces Opus 4.8 as the flagship Opus tier.
@@ -93,6 +141,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     maxOutput: 128_000,
     adaptiveThinking: true,
     samplingParams: false,
+    thinkingDefault: 'on',   // unlike opus-4-8/4-7, omitting `thinking` runs adaptive
     cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   },
   // Sonnet 5 — released 2026-07-24; near-Opus quality in the Sonnet tier.
@@ -106,6 +155,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     maxOutput: 128_000,
     adaptiveThinking: true,
     samplingParams: false,
+    thinkingDefault: 'on',
     cost: { input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 },
   },
   'claude-opus-4-8': {

@@ -5,6 +5,8 @@ export interface ModelMetadata {
     maxOutput: number;
     adaptiveThinking: boolean;
     samplingParams: boolean;
+    thinkingDefault?: "on" | "off";
+    thinkingCanDisable?: boolean;
     cost: {
         input: number;
         output: number;

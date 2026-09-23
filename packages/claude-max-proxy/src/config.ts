@@ -187,7 +187,9 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
       ? read('OPENAI_COMPAT_THINKING', 'strip', fileEnv)
       : 'strip') as 'strip' | 'field',
 
-    ccCompatVersion: read('CC_COMPAT_VERSION', '2.1.152', fileEnv),
+    // Floor only — the installed Claude Code wins when newer (cc-version.ts). Sidecars have
+    // no Claude Code, so this default IS their version: 2.1.280 is the minimum for opus-5-5.
+    ccCompatVersion: read('CC_COMPAT_VERSION', '2.1.280', fileEnv),
     extraBetaFlags: read('EXTRA_BETA_FLAGS', '', fileEnv)
       .split(',').map(s => s.trim()).filter(Boolean),
   }

@@ -129,7 +129,12 @@ export function createOpenAICompatModule(): ProxyModule {
             level: 'error', kind: EVENT.OPENAI_COMPAT_ERROR, sessionId,
             status: upstreamResponse.status, msg: errMessage.slice(0, 200),
           })
-          return openaiErrorResponse(upstreamResponse.status, errMessage, errType)
+          // The wait is known upstream (retry-after names the window that refused — 5h or
+          // 7d); dropping it left the consumer's user with "try again later" while the
+          // real answer was "Tuesday" (kiberos-app, 19.09: retry-after 420352 s swallowed).
+          const retryAfter = upstreamResponse.headers.get('retry-after')
+          return openaiErrorResponse(upstreamResponse.status, errMessage, errType, undefined,
+            retryAfter ? { 'retry-after': retryAfter } : undefined)
         }
 
         const transformOpts: TransformOpts = {

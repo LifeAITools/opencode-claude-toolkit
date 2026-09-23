@@ -948,6 +948,7 @@ export function openaiErrorResponse(
   message: string,
   type: string,
   code?: string,
+  extraHeaders?: Record<string, string>,
 ): Response {
   return new Response(JSON.stringify({
     error: { message, type, code: code ?? null },
@@ -956,6 +957,7 @@ export function openaiErrorResponse(
     headers: {
       'content-type': 'application/json',
       'access-control-allow-origin': '*',
+      ...extraHeaders,
     },
   })
 }

@@ -154,8 +154,16 @@ OnFailure=claude-max-proxy-alert@%n.service
 [Service]
 Type=simple
 ExecStart=$INSTALLED/bin/claude-max-proxy
-Restart=on-failure
+# Restart=always, not on-failure (2026-09-23): on 20.09 the proxy went silent at 07:34 UTC
+# and stayed DOWN for 4h14m — every agent on the machine got "Connection refused". Its log
+# ends mid-stream with no shutdown line, and on-failure does NOT restart a clean exit (code
+# 0). An explicit \`systemctl stop\` still stops it; only an unasked-for exit is restarted.
+Restart=always
 RestartSec=2
+# Why it died must outlive the systemd journal, which on this machine keeps only hours
+# (the 20.09 cause was already unrecoverable three days later). systemd hands the verdict
+# to ExecStopPost; we append it to OUR log, where the reader of the outage will look.
+ExecStopPost=/bin/sh -c 'echo "\$(date -u +%%H:%%M:%%S) INFO  PROXY_EXITED           result=\$SERVICE_RESULT code=\$EXIT_CODE status=\$EXIT_STATUS" >> $HOME/.claude/claude-max-proxy.log'
 StandardOutput=append:$HOME/.claude/claude-max-proxy.log
 StandardError=append:$HOME/.claude/claude-max-proxy.log
 Environment=LOG_LEVEL=info

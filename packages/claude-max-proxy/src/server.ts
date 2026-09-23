@@ -371,14 +371,21 @@ const stopLocalAlert = startLocalAlert((sid) => {
 
 import { loadModules, matchRoute, type ModuleContext } from './module.js'
 import { setCompatVersion } from './openai-translate.js'
+import { detectInstalledCcVersion, resolveCompatVersion } from './cc-version.js'
 import { createHealthModule } from './modules/health.js'
 import { createAdminModule } from './modules/admin.js'
 import { createMcpControlModule } from './modules/mcp-control.js'
 import { createAnthropicModule } from './modules/anthropic.js'
 import { createOpenAICompatModule } from './modules/openai-compat.js'
 
-// Apply config-driven compat version
-if (cfg.ccCompatVersion) setCompatVersion(cfg.ccCompatVersion)
+// Compat version: configured value is the FLOOR; the installed Claude Code wins when
+// newer (the API gates new models on client version — see cc-version.ts).
+{
+  const installed = detectInstalledCcVersion()
+  const { version, source } = resolveCompatVersion(cfg.ccCompatVersion, installed)
+  setCompatVersion(version)
+  emit({ level: 'info', kind: 'CC_COMPAT_VERSION', msg: `presenting non-native clients as claude-cli/${version} (from ${source}; configured ${cfg.ccCompatVersion}, installed ${installed ?? 'none'})`, version, source })
+}
 
 // Module context — shared across all modules
 const moduleCtx: ModuleContext = {

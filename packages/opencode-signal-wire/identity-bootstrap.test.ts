@@ -74,3 +74,17 @@ describe('отказ роутера запоминается', () => {
     expect(existsSync(join(home, '.opencode', 'agent-identity'))).toBe(true)
   })
 })
+
+describe('имя по общему правилу SynqTask (@kiberos/signal-wire-core/naming)', () => {
+  test('длинное имя укорачивается ровно как у kiberos — эталон из ядра', async () => {
+    const { computeDeterministicKey } = await import('./identity-bootstrap')
+    const { key } = computeDeterministicKey('/home/relishev/projects/vibe/odoo-agent-surface', { cwd: '/x', envOverride: {} })
+    expect(key).toBe('vibe-odoo-agent-developer-1ae2a0')
+    expect(key.length).toBeLessThanOrEqual(32)
+  })
+  test('короткое имя не меняется', async () => {
+    const { computeDeterministicKey } = await import('./identity-bootstrap')
+    const { key } = computeDeterministicKey('/home/relishev/packages/signal-wire-core', { cwd: '/x', envOverride: { SYNQTASK_AGENT_ROLE: 'owner' } })
+    expect(key).toBe('packages-signal-wire-core-owner')
+  })
+})

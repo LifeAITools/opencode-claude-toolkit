@@ -29,6 +29,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'fs'
 import { join, dirname } from 'path'
 import { opencodeHome } from './domain-constants'
+import { composeSynqtaskAgentName } from '@kiberos/signal-wire-core/naming'
 
 export interface ResolvedIdentity {
   memberId: string
@@ -122,6 +123,13 @@ export function slugifyCwd(cwd: string): string {
     .slice(0, 80)
 }
 
+/** Две последние части пути — организация и проект; путь из одной части — как раньше. */
+function composedNameFromCwd(cwd: string, role: string): string {
+  const parts = cwd.split('/').filter(p => p.length > 0).map(slugifyCwd).filter(Boolean)
+  if (parts.length < 2) return `${slugifyCwd(cwd)}-${role}`
+  return composeSynqtaskAgentName(parts[parts.length - 2]!, parts[parts.length - 1]!, role)
+}
+
 function parseDotEnv(content: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const line of content.split('\n')) {
@@ -162,7 +170,10 @@ export function computeDeterministicKey(cwd: string, opts: BootstrapOptions = { 
   const explicitName = getEnv('SYNQTASK_AGENT_NAME', opts, cwdEnv)
   const role = getEnv('SYNQTASK_AGENT_ROLE', opts, cwdEnv) ?? 'developer'
 
-  const key = explicitName ?? `${slugifyCwd(cwd)}-${role}`
+  // Имя — ОБЩИМ правилом SynqTask (@kiberos/signal-wire-core/naming), тем же, что у kiberos:
+  // до 32 знаков, длинное — с укороченной серединой и хешем. Своя склейка давала имена длиннее
+  // 32, и SynqTask отверг их 3 088 раз за 11 часов (2026-09-24). Короткие имена не меняются.
+  const key = explicitName ?? composedNameFromCwd(cwd, role)
   return { key, role }
 }
 

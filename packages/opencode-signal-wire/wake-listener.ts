@@ -1998,7 +1998,7 @@ export async function startWakeListener(
       memberType: _currentMemberType,
       contract: 'agent-presence/1',
       harness: 'opencode',
-      ...(process.env.KIBEROS_BINDING_ID ? { bindingId: process.env.KIBEROS_BINDING_ID } : {}),
+      ...(process.env.KIBEROS_BINDING_ID ? { binding_id: process.env.KIBEROS_BINDING_ID } : {}),
       door: { kind: 'http', port: actualPort },
     }
     // Atomic write: tmp → rename (safe against partial writes)

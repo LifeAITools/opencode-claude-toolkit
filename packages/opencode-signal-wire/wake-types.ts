@@ -161,11 +161,11 @@ export interface DiscoveryFile {
    * Договор agent-presence/1 (claude-code-sdk/PRPs/agent-platform-ssot/06-wake-delivery-contract.md):
    * запись САМА называет программу, место агента и свою дверь, чтобы роутер не угадывал.
    * Живая проба 2026-09-24: без места роутер не связывал приёмник с окном и клал побудку в ящик,
-   * который opencode не читает. Место берётся из KIBEROS_BINDING_ID; нет его — поля нет.
+   * который opencode не читает. Место берётся из KIBEROS_BINDING_ID в поле binding_id (так его читает роутер); нет его — поля нет.
    */
   contract?: 'agent-presence/1'
   harness?: 'opencode'
-  bindingId?: string
+  binding_id?: string
   door?: { kind: 'http'; port: number }
   /**
    * Phase 5.3: Heartbeat-driven liveness signal. Plugin updates this every

@@ -28,7 +28,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'fs'
 import { join, dirname } from 'path'
-import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
+import { opencodeHome } from './domain-constants'
 
 export interface ResolvedIdentity {
   memberId: string
@@ -102,8 +102,10 @@ interface RouterDiscoveryData {
   version: string
 }
 
-const ROUTER_JSON_PATH = join(WAKE_ROOT, 'router.json')
-const IDENTITY_CACHE_DIR = AGENT_IDENTITY_DIR
+// Пути вычисляются при каждом вызове (см. opencodeHome): иначе тест с OPENCODE_SW_HOME,
+// загруженный после соседей, читал настоящий router.json.
+const routerJsonPath = (): string => join(opencodeHome(), 'wake', 'router.json')
+const identityCacheDir = (): string => join(opencodeHome(), 'agent-identity')
 
 /**
  * Slugify a cwd path for use in deterministic key. Strategy:
@@ -167,7 +169,7 @@ export function computeDeterministicKey(cwd: string, opts: BootstrapOptions = { 
 function cachePath(deterministicKey: string): string {
   // Sanitize: cache files should be plain alphanumeric+hyphen
   const safe = deterministicKey.replace(/[^a-z0-9/_-]/gi, '_')
-  return join(IDENTITY_CACHE_DIR, `${safe}.json`)
+  return join(identityCacheDir(), `${safe}.json`)
 }
 
 function readCache(deterministicKey: string): CachedIdentity | null {
@@ -193,9 +195,43 @@ function writeCache(entry: CachedIdentity): void {
   renameSync(tmp, p)
 }
 
+/**
+ * ОТКАЗ РОУТЕРА ЗАПОМИНАЕТСЯ (замер vibe-yjs-todo-sync-owner 2026-09-24: 3 088 отказов
+ * `invalid_name` за 11 часов). Каждый запуск `opencode serve` со стороны lat-context повторял
+ * заведомо отвергнутый запрос, потому что отказ нигде не хранился. Теперь отказ 4xx пишется
+ * рядом с кэшем личности, и повтор раньше REFUSAL_RETRY_MS не делается — с предупреждением.
+ * Сетевые сбои и 5xx не запоминаются: они не говорят о запросе ничего окончательного.
+ */
+const REFUSAL_RETRY_MS = 60 * 60 * 1000
+
+interface CachedRefusal { status: number; error: string; at: string }
+
+function refusalPath(deterministicKey: string): string {
+  return cachePath(deterministicKey).replace(/\.json$/, '.refused.json')
+}
+
+function readRefusal(deterministicKey: string, now: number): CachedRefusal | null {
+  try {
+    const r = JSON.parse(readFileSync(refusalPath(deterministicKey), 'utf-8')) as CachedRefusal
+    return now - new Date(r.at).getTime() < REFUSAL_RETRY_MS ? r : null
+  } catch {
+    return null
+  }
+}
+
+function writeRefusal(deterministicKey: string, r: CachedRefusal): void {
+  try {
+    const p = refusalPath(deterministicKey)
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, JSON.stringify(r, null, 2))
+  } catch (e: any) {
+    console.warn(`[identity-bootstrap] refusal cache write failed: ${e?.message ?? String(e)}`)
+  }
+}
+
 function readRouterDiscovery(): RouterDiscoveryData | null {
   try {
-    return JSON.parse(readFileSync(ROUTER_JSON_PATH, 'utf-8')) as RouterDiscoveryData
+    return JSON.parse(readFileSync(routerJsonPath(), 'utf-8')) as RouterDiscoveryData
   } catch {
     return null
   }
@@ -257,6 +293,34 @@ export async function bootstrapIdentity(opts: BootstrapOptions): Promise<Resolve
   const { detectRunMode } = await import('./run-mode')
   const runMode = detectRunMode()
 
+  // 0. ЛИЧНОСТЬ ИЗ ОКРУЖЕНИЯ — первым шагом. `kiberos start` уже кладёт готовую личность:
+  // SYNQTASK_AGENT_UUID (номер участника) и SYNQTASK_AGENT_SECRET; SYNQTASK_AGENT_ID у kiberos —
+  // ИМЯ агента. Раньше модуль этого не читал, заводил личность заново по имени папки (живая
+  // проба home-relishev-general 2026-09-23: «opencode:unknown», новая личность по папке, письмо
+  // в чужую дверь) и слал имена длиннее 32 знаков, которые SynqTask отвергал.
+  // Запущен через kiberos, но номера нет — новую личность НЕ заводим: ею владеет kiberos.
+  const env = opts.envOverride ?? process.env
+  if (env.SYNQTASK_AGENT_ID || env.SYNQTASK_AGENT_UUID) {
+    if (env.SYNQTASK_AGENT_UUID && env.SYNQTASK_AGENT_SECRET) {
+      return {
+        memberId: env.SYNQTASK_AGENT_UUID,
+        secret: env.SYNQTASK_AGENT_SECRET,
+        deterministicKey,
+        role,
+        cwd,
+        isNewlyProvisioned: false,
+        team: null,
+        runMode: runMode.mode,
+        runModeScore: runMode.score,
+      }
+    }
+    console.warn(
+      `[identity-bootstrap] launched under kiberos (SYNQTASK_AGENT_ID=${env.SYNQTASK_AGENT_ID ?? '-'}) ` +
+        'but SYNQTASK_AGENT_UUID/SECRET incomplete — NOT provisioning a second identity',
+    )
+    return null
+  }
+
   // 1. Cache lookup
   if (!opts.forceProvision) {
     const cached = readCache(deterministicKey)
@@ -298,11 +362,20 @@ export async function bootstrapIdentity(opts: BootstrapOptions): Promise<Resolve
   // 2. Router discovery + provisioning
   const router = readRouterDiscovery()
   if (!router) {
-    console.warn(`[identity-bootstrap] router.json not found at ${ROUTER_JSON_PATH}; identity provisioning unavailable`)
+    console.warn(`[identity-bootstrap] router.json not found at ${routerJsonPath()}; identity provisioning unavailable`)
     return null
   }
 
   const parentMemberId = (opts.envOverride?.SPAWN_PARENT_MEMBER_ID ?? process.env.SPAWN_PARENT_MEMBER_ID) ?? null
+
+  const refused = readRefusal(deterministicKey, Date.now())
+  if (refused) {
+    console.warn(
+      `[identity-bootstrap] router refused '${deterministicKey}' at ${refused.at} (${refused.status}: ${refused.error.slice(0, 120)}) — ` +
+        `not retrying for ${REFUSAL_RETRY_MS / 60000} min`,
+    )
+    return null
+  }
 
   const result = await provisionViaRouter(router, {
     name: deterministicKey,
@@ -313,6 +386,9 @@ export async function bootstrapIdentity(opts: BootstrapOptions): Promise<Resolve
 
   if ('error' in result) {
     console.warn(`[identity-bootstrap] provisioning failed: ${result.error}`)
+    if (typeof result.status === 'number' && result.status >= 400 && result.status < 500) {
+      writeRefusal(deterministicKey, { status: result.status, error: result.error, at: new Date().toISOString() })
+    }
     return null
   }
 

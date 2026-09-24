@@ -15,11 +15,28 @@ import { join } from 'node:path'
 
 // ─── Wake/discovery paths (DC-03..DC-06, DC-10, DC-11, DC-13) ────────────────
 
+/**
+ * Корень для ~/.opencode. OPENCODE_SW_HOME — только для тестов и проб: в Bun `os.homedir()`
+ * не следует за переменной HOME, и тест, подменивший HOME, всё равно читал НАСТОЯЩИЙ
+ * router.json и писал в настоящий кэш личностей (замер 2026-09-24).
+ */
+const SW_HOME = process.env.OPENCODE_SW_HOME || homedir()
+
+/**
+ * Тот же корень, но вычисляемый при КАЖДОМ вызове. Константы выше фиксируются при первой
+ * загрузке модуля, а в одном процессе тестов модуль грузит тот, кто пришёл первым, — тест,
+ * задавший OPENCODE_SW_HOME позже, всё равно получал настоящий каталог. Кто читает или пишет
+ * личность и router.json, берёт пути отсюда.
+ */
+export function opencodeHome(): string {
+  return join(process.env.OPENCODE_SW_HOME || homedir(), '.opencode')
+}
+
 /** Root directory for wake-router runtime state. (DC-10) */
-export const WAKE_ROOT = join(homedir(), '.opencode', 'wake')
+export const WAKE_ROOT = join(SW_HOME, '.opencode', 'wake')
 
 /** Cached agent identity blobs, one file per deterministic key. (DC-11) */
-export const AGENT_IDENTITY_DIR = join(homedir(), '.opencode', 'agent-identity')
+export const AGENT_IDENTITY_DIR = join(SW_HOME, '.opencode', 'agent-identity')
 
 /** Per-agent discovery files: ~/.opencode/wake/agents/<member_id>.json. (DC-03) */
 export const WAKE_DISCOVERY_DIR = join(WAKE_ROOT, 'agents')

@@ -970,6 +970,17 @@ export class ProxyClient {
       const { orgId, orgName, accountEmail } = readOrgInfoFromConfig()
       const resolvedOrg = orgId ?? this.orgIdResolver.current()
       if (!resolvedOrg || !token) return
+      // 🔴 capturedAt IS THE TOKEN'S BIRTH, NOT THE MOMENT WE LOOKED AT IT.
+      // isRefreshDueByExpiry estimates lifetime as expiresAt − capturedAt, and this
+      // snapshot runs lazily on EVERY real request. Re-stamping the same token with
+      // "now" collapsed the estimated lifetime toward the remaining time, so the
+      // proactive threshold (0.2 × lifetime) shrank below whatever was left and the
+      // sweep never fired until the 5-min floor. Measured 23.09: the active token
+      // counted down 58 → 6.5 min with no refresh; native Claude Code rescued it at
+      // 21:53, and the tixi prod copy (20-min sync) was expired for 3 min. On 24.09
+      // the vault showed life_h=1.24 for an 8-h token. Same token → keep its birth.
+      const prev = this.orgVault.get(resolvedOrg)
+      const capturedAt = prev && prev.accessToken === token ? prev.capturedAt : Date.now()
       this.orgVault.upsert({
         orgId: resolvedOrg,
         orgName: orgName ?? undefined,
@@ -977,7 +988,7 @@ export class ProxyClient {
         accessToken: token,
         refreshToken: this.credentials.currentRefreshToken?.() ?? null,
         expiresAt: this.credentials.currentExpiresAt?.() ?? null,
-        capturedAt: Date.now(),
+        capturedAt,
       })
       this.events.emit({ level: 'debug', kind: 'ORG_VAULT_SNAPSHOT', orgId: resolvedOrg, reason })
     } catch { /* fail-soft */ }

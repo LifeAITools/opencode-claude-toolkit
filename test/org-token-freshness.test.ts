@@ -376,3 +376,46 @@ describe('T4.3 — session-pin GC', () => {
     expect(vault.list().length).toBe(2)
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────
+// Lifetime estimate survives re-snapshot (23.09.2026 — the late-refresh incident)
+// ──────────────────────────────────────────────────────────────────────────
+
+describe('proactive refresh is not starved by re-snapshotting the same token', () => {
+  test('a lazy snapshot of an UNCHANGED token keeps its birth time, so the sweep still fires early', async () => {
+    const tmp = mkTmp('otf-birth-')
+    const configDir = join(tmp, '.claude')
+    mkdirSync(configDir, { recursive: true })
+    const credPath = join(configDir, '.credentials.json')
+    const born = Date.now()
+    // An 8-h token, now 30 min from expiry — well inside the proactive window
+    // (min(kaInterval+margin, 0.2 × 8h) ≈ 40 min).
+    const now = born + 7.5 * HOUR
+    writeFileSync(credPath, JSON.stringify({
+      claudeAiOauth: { accessToken: 'ACT-8h', refreshToken: 'ACT-rt', expiresAt: born + 8 * HOUR, scopes: ['user:inference'] },
+    }))
+    // snapshotCurrentAccount keys by the account-config org when one exists on
+    // this machine; resolve the SAME org so the test is machine-independent.
+    const { readOrgInfoFromConfig } = await import('../src/org-identity.js')
+    const org = readOrgInfoFromConfig().orgId ?? 'org-active'
+    const vault = new OrgVault(join(tmp, 'vault.json'))
+    vault.upsert({ orgId: org, accessToken: 'ACT-8h', refreshToken: 'ACT-rt', expiresAt: born + 8 * HOUR, capturedAt: born })
+
+    const refresher = fakeRefresher(() => ({ accessToken: 'ACT-new', refreshToken: 'ACT-rt-new', expiresAt: now + 8 * HOUR }))
+    const c = mkClient({
+      credentialsProvider: new FileCredentialsProvider({ path: credPath }),
+      orgIdResolver: { current: () => org, invalidate() {} },
+      orgVault: vault, oauthRefresher: refresher,
+      claudeConfigDir: configDir, credentialsPath: credPath,
+    }, tmp)
+
+    setSystemTime(now)
+    // Every real request snapshots the current account — the same token, again.
+    await c.snapshotCurrentAccount('lazy')
+    expect(vault.get(org)!.capturedAt).toBe(born)
+
+    await c._runOrgProactiveSweep()
+    expect(refresher.calls.length).toBe(1)
+    expect(JSON.parse(readFileSync(credPath, 'utf8')).claudeAiOauth.accessToken).toBe('ACT-new')
+  })
+})

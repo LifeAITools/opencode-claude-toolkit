@@ -1996,6 +1996,10 @@ export async function startWakeListener(
       subscribe: _currentSubscribe ?? undefined,
       subscribePreset: _currentSubscribePreset ?? undefined,
       memberType: _currentMemberType,
+      contract: 'agent-presence/1',
+      harness: 'opencode',
+      ...(process.env.KIBEROS_BINDING_ID ? { bindingId: process.env.KIBEROS_BINDING_ID } : {}),
+      door: { kind: 'http', port: actualPort },
     }
     // Atomic write: tmp → rename (safe against partial writes)
     const tmpPath = discoveryPath + '.tmp'

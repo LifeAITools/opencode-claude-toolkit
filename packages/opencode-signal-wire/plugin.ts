@@ -451,7 +451,10 @@ export default {
     const cwd = input.directory ?? process.cwd()
     const serverUrl = getServerUrl(input)
     const sessionId = input.sessionID ?? 'unknown'
-    let agentInstanceId = process.env.OPENCODE_AGENT_INSTANCE_ID ?? `opencode:${sessionId}:${process.pid}`
+    // Номер экземпляра: при неизвестной сессии — от места агента (KIBEROS_BINDING_ID), а не
+    // 'opencode:unknown:<pid>' — живая проба 2026-09-24 видела ровно это в записи приёмника.
+    const instanceAnchor = sessionId !== 'unknown' ? sessionId : (process.env.KIBEROS_BINDING_ID || sessionId)
+    let agentInstanceId = process.env.OPENCODE_AGENT_INSTANCE_ID ?? `opencode:${instanceAnchor}:${process.pid}`
     // Phase 2.4: Identity bootstrap (read router.json + provision or cache hit).
     //
     // Sets SYNQTASK_MEMBER_ID/SECRET in process.env when provisioning succeeds.

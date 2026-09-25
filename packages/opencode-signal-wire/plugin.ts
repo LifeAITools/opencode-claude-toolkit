@@ -740,6 +740,35 @@ export default {
             })
           }
         }
+        // ─── session.idle → в правила (договор стыка, часть 2: signal-wire-core/docs/harness-adapter-contract.md) ───
+        // До 2026-09-25 общий поток `event` в правила не отдавался вовсе, и четыре правила флота на конце
+        // хода у агентов opencode не срабатывали: сохранение памяти (memory-session-autostore), сверка
+        // реестра сессий (session-reconcile-on-event), зеркало памяти (memory-mirror-on-stop) и подсказка
+        // session-stop-review. Побочные действия выполняет ядро; ПОДСКАЗКИ здесь НЕ вставляются, и это
+        // сказано в журнале: у session-stop-review нет перезарядки, и тихая вставка на каждом конце хода
+        // дописывала бы в разговор по сообщению на ход. Номера сессии нет — события нет (REQ-LOOP-14).
+        if (eventType === 'session.idle' && signalWireEngine) {
+          const idleSession = sessionFromEvent(event).id ?? boundSessionId ?? undefined
+          if (idleSession) {
+            try {
+              const results = await signalWireEngine.evaluateHook({
+                source: 'plugin',
+                type: 'session.idle',
+                sessionId: idleSession,
+                timestamp: Date.now(),
+                payload: {},
+              })
+              const hintsNotDelivered = results.filter((r: any) =>
+                r?.success && r?.hintText && (r.type === 'hint' || r.type === 'respond' || (r.type === 'exec' && r.inject === true)),
+              ).length
+              logStep('SESSION_IDLE_EVALUATED', { sessionId: idleSession, results: results.length, hintsNotDelivered })
+            } catch (e: any) {
+              logStep('SESSION_IDLE_EVAL_FAILED', { sessionId: idleSession, error: e?.message ?? String(e) })
+            }
+          } else {
+            logStep('SESSION_IDLE_SKIPPED', { reason: 'no_session_id' })
+          }
+        }
         if (eventType === 'app.exit' || eventType === 'server.stop') {
           try {
             if (wakeHandle) {

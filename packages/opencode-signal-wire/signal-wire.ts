@@ -590,6 +590,11 @@ export class SignalWire {
       }
     }
     if (this.lastModel) meta.model = this.lastModel
+    // Имя агента в SynqTask — по нему правило адресуется одному агенту (`runtime_meta_is: {agentName}`,
+    // договор стыка, часть 2). Под kiberos `SYNQTASK_AGENT_ID` — ИМЯ агента (identity-bootstrap.ts), и
+    // живёт оно в окружении ЭТОГО процесса opencode, а не чужого демона. Нет имени — поля нет.
+    const agentName = process.env.SYNQTASK_AGENT_ID?.trim()
+    if (agentName) meta.agentName = agentName
     if (this.lastQuotaUtil5h != null) meta.quotaUtil5h = this.lastQuotaUtil5h
     if (this.lastQuotaUtil7d != null) meta.quotaUtil7d = this.lastQuotaUtil7d
 

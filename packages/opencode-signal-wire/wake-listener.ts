@@ -1513,18 +1513,56 @@ export async function injectContextEvent(
   }
 }
 
+/**
+ * Open a session for an actionable wake when the agent's directory has NONE.
+ *
+ * 🔴 Measured 2026-09-25 (home-relishev-general's probe, pid 2894815): an opencode
+ * window started with no session accepted the wake, failed to inject ("no session
+ * ID yet"), queued it and answered `{accepted, queued}` — the router counted it
+ * delivered, and no turn ever came until a human opened a session by hand. Same
+ * trace on 23–24.06. A wake exists to make the agent act; with no session there is
+ * nothing to act IN, so the listener opens one in the agent's own directory.
+ *
+ * Only when there are ZERO sessions for the directory: several = ambiguous, and
+ * guessing would put the wake into the wrong conversation (resolveSessionId's rule).
+ */
+async function createSessionForWake(event: WakeEvent): Promise<string | null> {
+  if (!_sdkClient || !_agentDirectory) return null
+  try {
+    const { data: sessions } = await _sdkClient.session.list()
+    if (Array.isArray(sessions) && sessions.some((s: any) => s.directory === _agentDirectory)) return null
+    const { data: created, error } = await _sdkClient.session.create({
+      body: { title: `wake: ${event.type}` },
+      query: { directory: _agentDirectory },
+    })
+    if (error || !created?.id) { dbg(`SESSION_CREATE_FOR_WAKE failed: ${error ?? 'no id'}`); return null }
+    const id = String(created.id)
+    _cachedSessionId = id
+    updateBoundSessionGlobal(id)
+    updateDiscoverySession(id)
+    dbg(`SESSION_CREATED_FOR_WAKE session=${id} directory=${_agentDirectory} event=${event.eventId}`)
+    return id
+  } catch (e: any) {
+    dbg(`SESSION_CREATE_FOR_WAKE error: ${e?.message}`)
+    return null
+  }
+}
+
+/** Why an actionable wake did or did not reach the agent — the router needs the difference. */
+export type InjectOutcome = 'ok' | 'no_session' | 'failed'
+
 async function injectWakeEvent(
   event: WakeEvent,
   sessionId: string,
-): Promise<boolean> {
-  const resolvedSessionId = await resolveSessionId(sessionId)
+): Promise<InjectOutcome> {
+  const resolvedSessionId = (await resolveSessionId(sessionId)) ?? (await createSessionForWake(event))
   if (!resolvedSessionId) {
     dbg(`INJECT_DEFERRED_NO_SESSION event=${event.eventId}`)
-    return false
+    return 'no_session'
   }
   if (!_sdkClient) {
     dbg('inject: no sdkClient')
-    return false
+    return 'failed'
   }
 
   const text = formatWakeMessage(event, _agentIdentity)
@@ -1539,13 +1577,13 @@ async function injectWakeEvent(
       await syncTaskStart(event, 'start_injected')
       await syncLifecycle({ action: 'online', event, currentTaskId: extractWakeTaskId(event) })
       dbg(`inject OK: session=${resolvedSessionId}`)
-      return true
+      return 'ok'
     }
     dbg(`inject failed: ${error}`)
-    return false
+    return 'failed'
   } catch (e: any) {
     dbg(`inject error: ${e?.message}`)
-    return false
+    return 'failed'
   }
 }
 
@@ -1679,7 +1717,7 @@ export async function startWakeListener(
 
         if (await isAgentBusy()) {
           queueWakeEvent(event, `fallback_${reason}`)
-        } else if (await injectWakeEvent(event, config.sessionId)) {
+        } else if ((await injectWakeEvent(event, config.sessionId)) === 'ok') {
           rememberWakeEvent(event)
         } else {
           queueWakeEvent(event, `fallback_${reason}_inject_failed`)
@@ -1896,13 +1934,13 @@ export async function startWakeListener(
       await syncLifecycle({ action: 'busy', event, currentTaskId: extractWakeTaskId(event), reason: 'queued' })
       dbg(`wake: agent busy, queued at position ${pos}`)
       return Response.json(
-        { accepted: true, queued: true, queuePosition: pos } satisfies WakeResponse,
+        { accepted: true, queued: true, queuePosition: pos, reason: 'busy' } satisfies WakeResponse,
       )
     }
 
     // Agent idle — inject immediately
-    const injected = await injectWakeEvent(event, config.sessionId)
-    if (injected) {
+    const outcome = await injectWakeEvent(event, config.sessionId)
+    if (outcome === 'ok') {
       rememberWakeEvent(event)
       dbg(`wake: injected ${event.eventId}`)
       return Response.json(
@@ -1914,8 +1952,11 @@ export async function startWakeListener(
     const queuePosition = queueWakeEvent(event, 'inject_failed')
     await syncLifecycle({ action: 'busy', event, currentTaskId: extractWakeTaskId(event), reason: 'inject_failed_queued' })
     dbg(`wake: inject failed, queued at position ${queuePosition}`)
+    // The reason is named so the router can tell "a turn will come when the agent frees
+    // up" from "no turn will come until someone opens a session" — the same bare
+    // {queued:true} used to answer both.
     return Response.json(
-      { accepted: true, queued: true, queuePosition } satisfies WakeResponse,
+      { accepted: true, queued: true, queuePosition, reason: outcome === 'no_session' ? 'no_session' : 'inject_failed' } satisfies WakeResponse,
     )
   }
 
@@ -2020,7 +2061,7 @@ export async function startWakeListener(
     try {
       if (await isAgentBusy()) return
       const event = queue.shift()!
-      const ok = await injectWakeEvent(event, config.sessionId)
+      const ok = (await injectWakeEvent(event, config.sessionId)) === 'ok'
       if (queue.length === 0) await syncLifecycle({ action: 'resting', event, currentTaskId: extractWakeTaskId(event), reason: ok ? 'queue_drained' : 'queue_empty_after_failed_drain' })
       dbg(`drain: ${event.eventId} ${ok ? 'injected' : 'failed'}`)
     } catch (e: any) {
@@ -2138,3 +2179,17 @@ export function getSubscriptionState(): {
     memberName: _agentIdentity?.name ?? null,
   }
 }
+
+// ─── Test seams ─────────────────────────────────────────────────────
+// Drive the actionable-wake injection path WITHOUT starting a listener: a started
+// listener writes a real discovery file the live router would route to.
+
+/** Set the module state injectWakeEvent reads; `null` resets it. */
+export function _setInjectStateForTests(state: { sdkClient: any; agentDirectory: string | null; sessionId?: string | null } | null): void {
+  _sdkClient = state?.sdkClient ?? null
+  _agentDirectory = state?.agentDirectory ?? null
+  _cachedSessionId = state?.sessionId ?? null
+}
+
+export const _injectWakeEventForTests = (event: WakeEvent, sessionId: string): Promise<InjectOutcome> =>
+  injectWakeEvent(event, sessionId)

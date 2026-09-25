@@ -269,6 +269,12 @@ export interface WakeResponse {
   queued?: boolean
   /** Position in queue (if queued) */
   queuePosition?: number
+  /**
+   * Why it was queued: 'busy' — a turn will come when the agent frees up;
+   * 'no_session' — none will come until a session exists (and none could be opened);
+   * 'inject_failed' — the session exists but the prompt call failed.
+   */
+  reason?: 'busy' | 'no_session' | 'inject_failed'
   /** Error message (if not accepted) */
   error?: string
 }

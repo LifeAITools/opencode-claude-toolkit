@@ -56,6 +56,17 @@ cp -a "$INSTALLED/package.json" "$BK/package.json"
 [ -d "$INSTALLED/bin" ] && cp -a "$INSTALLED/bin" "$BK/bin"
 log "backup -> $BK"
 
+# 1b. Keep only the newest deploy backups. Each one is ~274 MB (two compiled
+#     binaries), and until 2026-09-25 NOTHING pruned them: 160 deploys = 34 GB,
+#     with the system disk at 99% (measured by vibe-kibctl-owner). Rollback needs
+#     the last few; anything older is a rebuild from git.
+KEEP_DEPLOY_BACKUPS=${KEEP_DEPLOY_BACKUPS:-10}
+pruned=0
+while IFS= read -r old; do
+  rm -rf -- "$BACKUP_ROOT/$old"; pruned=$((pruned + 1))
+done < <(ls -1 "$BACKUP_ROOT" | grep -E '^deploy-[0-9]{8}-[0-9]{6}$' | sort -r | tail -n +$((KEEP_DEPLOY_BACKUPS + 1)))
+[ "$pruned" -gt 0 ] && log "pruned $pruned old deploy backup(s), keeping newest $KEEP_DEPLOY_BACKUPS"
+
 # 2. Sync src (recursive, incl. modules/). Additive — NOT --delete: the live
 #    tree holds non-source state that must survive (.claude/ hook state, *.bak
 #    manual backups). Stale source-removed files are surfaced by the dry-run diff
@@ -209,6 +220,11 @@ UNIT
 
 systemctl --user daemon-reload
 log "systemd units regenerated (binary ExecStart + OnFailure alert)"
+
+# 4c. Hourly dump/backup rotation backstop — installed from source, never hand-edited
+#     (it lived only in ~/.local/bin until 2026-09-25, invisible to review).
+install -m 0755 "$PROXY_PKG_DIR/scripts/prune-claude-body-dumps.sh" "$HOME/.local/bin/prune-claude-body-dumps.sh"
+log "prune backstop installed -> ~/.local/bin/prune-claude-body-dumps.sh"
 
 # 5a. Guard: port 5050 must belong to the systemd unit. A stray manual
 #     instance survives `systemctl restart` and EADDRINUSE-crash-loops

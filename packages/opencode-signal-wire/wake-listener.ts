@@ -30,7 +30,13 @@ import { FNV_32_PRIME } from './domain-constants'
 
 // ─── Constants ────────────────────────────────────────────
 
-const DEBUG = process.env.WAKE_LISTENER_DEBUG !== '0'
+// A test run must not write into the LIVE log: on 2026-09-25 two SESSION_CREATED_FOR_WAKE
+// lines from a test (directory=/work/agent-dir) sat in ~/.claude/wake-listener-debug.log
+// next to a real probe and were read as its evidence. Under `bun test` the log is off
+// unless WAKE_LISTENER_DEBUG=1 is asked for explicitly.
+const DEBUG = process.env.NODE_ENV === 'test'
+  ? process.env.WAKE_LISTENER_DEBUG === '1'
+  : process.env.WAKE_LISTENER_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'wake-listener-debug.log')
 const MAX_QUEUE_DEFAULT = 50
 const BUSY_RETRY_INTERVAL_DEFAULT = 5 // seconds
@@ -383,8 +389,26 @@ let _currentSubscribe: string[] | null = null
 let _currentSubscribePreset: string | null = null
 let _currentMemberType: 'human' | 'agent' | 'unknown' = 'unknown'
 
-function readSynqtaskBearerToken(): string {
-  let bearerToken = process.env.SYNQTASK_BEARER_TOKEN ?? ''
+/**
+ * Auth for the listener's own SynqTask calls — the AGENT as itself first.
+ *
+ * 🔴 Measured 2026-09-25 (home-relishev-general's probe): every lifecycle update
+ * (lastActive, metadata) returned HTTP 401. Those calls carried only the bearer from
+ * opencode's mcp-auth.json — the HUMAN's OAuth token — so an agent reported its state
+ * under someone else's identity, and failed whenever that token expired. The identity
+ * this process runs as (kiberos env, or bootstrap's SYNQTASK_MEMBER_*) goes first; the
+ * bearer stays only as the fallback for a process with no agent identity at all.
+ */
+export function synqtaskAuthHeaders(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const id = env.SYNQTASK_MEMBER_ID || env.SYNQTASK_AGENT_UUID || env.SYNQTASK_AGENT_ID
+  const secret = env.SYNQTASK_MEMBER_SECRET || env.SYNQTASK_AGENT_SECRET
+  if (id && secret) return { 'X-Agent-Id': id, 'X-Agent-Secret': secret }
+  const bearerToken = readSynqtaskBearerToken(env)
+  return bearerToken ? { 'Authorization': `Bearer ${bearerToken}` } : {}
+}
+
+function readSynqtaskBearerToken(env: NodeJS.ProcessEnv = process.env): string {
+  let bearerToken = env.SYNQTASK_BEARER_TOKEN ?? ''
   if (bearerToken) return bearerToken
   try {
     const authPath = join(homedir(), '.local', 'share', 'opencode', 'mcp-auth.json')
@@ -403,9 +427,8 @@ async function callSynqtaskMcp<T = any>(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Accept': 'application/json, text/event-stream',
+    ...synqtaskAuthHeaders(),
   }
-  const bearerToken = readSynqtaskBearerToken()
-  if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`
 
   const res = await fetch(`${url}/mcp`, {
     method: 'POST',
@@ -433,10 +456,7 @@ async function callSynqtaskMcp<T = any>(
 }
 
 function synqtaskRestHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Accept': 'application/json' }
-  const bearerToken = readSynqtaskBearerToken()
-  if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`
-  return headers
+  return { 'Accept': 'application/json', ...synqtaskAuthHeaders() }
 }
 
 function rememberWakeEvent(event: WakeEvent): void {
@@ -782,7 +802,7 @@ async function fetchIdentity(
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json, text/event-stream',
-            ...(readSynqtaskBearerToken() ? { Authorization: `Bearer ${readSynqtaskBearerToken()}` } : {}),
+            ...synqtaskAuthHeaders(),
           },
           body: JSON.stringify({
             jsonrpc: '2.0', id: 2,
@@ -812,7 +832,7 @@ async function fetchIdentity(
                     headers: {
                       'Content-Type': 'application/json',
                       'Accept': 'application/json, text/event-stream',
-                      ...(readSynqtaskBearerToken() ? { Authorization: `Bearer ${readSynqtaskBearerToken()}` } : {}),
+                      ...synqtaskAuthHeaders(),
                     },
                     body: JSON.stringify({
                       jsonrpc: '2.0', id: 3,

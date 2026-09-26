@@ -465,6 +465,29 @@ export interface RateLimitSnapshot {
   utilization7d: number | null
 }
 
+/**
+ * Пятичасовая выработка аккаунта, которой ещё можно верить в момент `now`.
+ *
+ * 🔴 ЧИСЛО ОПИСЫВАЕТ ОКНО, А НЕ АККАУНТ. Показание приходит заголовком в ответе
+ * и живёт до следующего ответа; после `resetAt` оно говорит об окне, которого
+ * уже нет. Замер владельца телеграм-службы 26.09.2026: сессия `b86b8146`
+ * получила «окно потрачено на 95%, сброс в 21:10» в 18:11:29Z — через минуту
+ * после сброса (18:10Z), и отказы шли, пока свежее число не принёс прогрев
+ * (18:11:40Z; снимок в 18:13Z — 0.01). Свежего числа из настоящего хода не
+ * будет в принципе, пока сторож не пропустит хоть один: круг замыкается сам.
+ *
+ * Поэтому после сброса — `null`, «судить не по чему», как до первого ответа, а
+ * НЕ ноль: ноль был бы замером, которого никто не делал. Сторож и прогноз
+ * `quotaHoldFor` читают ОДНУ эту функцию, чтобы не разойтись.
+ */
+export function live5hUtilization(reading: RateLimitSnapshot | undefined, now: number): number | null {
+  const util = reading?.utilization5h ?? null
+  if (util === null) return null
+  const resetAt = reading?.resetAt ?? null
+  if (resetAt !== null && now >= resetAt * 1000) return null
+  return util
+}
+
 // ═══ ProxyClient ═══════════════════════════════════════════════════
 
 /**
@@ -1299,8 +1322,8 @@ export class ProxyClient {
       ?? this.sessionPins.get(sessionId)?.orgId
       ?? null
     const reading = orgId ? this.rateLimitByOrg.get(orgId) : undefined
-    const util5h = reading?.utilization5h ?? null
-    const resetAt = reading?.resetAt ?? null
+    const util5h = live5hUtilization(reading, now)
+    const resetAt = util5h === null ? null : (reading?.resetAt ?? null)
     return {
       holding: qGuard.enabled && util5h !== null && util5h >= qGuard.blockAtUtil5h,
       orgId,
@@ -1847,7 +1870,7 @@ export class ProxyClient {
         ?? this.sessionPins.get(sessionId)?.orgId
         ?? null
       const orgReading = spendOrg ? this.rateLimitByOrg.get(spendOrg) : undefined
-      const util5h = orgReading?.utilization5h ?? null
+      const util5h = live5hUtilization(orgReading, Date.now())
       if (qGuard.enabled && util5h !== null && util5h >= qGuard.blockAtUtil5h) {
         // Same two consent channels as the cache guard: a marker in the turn
         // being sent, or an out-of-band grant for callers that cannot write

@@ -28,7 +28,7 @@ const TMP = mkdtempSync(join(tmpdir(), 'quota-guard-'))
 let seq = 0
 
 /** Upstream that answers like Anthropic near (or far from) the 5h ceiling. */
-function quotaUpstream(util5h: number, org = 'org-full') {
+function quotaUpstream(util5h: number, org = 'org-full', resetInSec = 1800) {
   return {
     fetch: async () => new Response(
       'event: message_stop\ndata: {"type":"message_stop"}\n\n',
@@ -38,7 +38,7 @@ function quotaUpstream(util5h: number, org = 'org-full') {
           'content-type': 'text/event-stream',
           'anthropic-organization-id': org,
           'anthropic-ratelimit-unified-5h-utilization': String(util5h),
-          'anthropic-ratelimit-unified-5h-reset': String(Math.floor(Date.now() / 1000) + 1800),
+          'anthropic-ratelimit-unified-5h-reset': String(Math.floor(Date.now() / 1000) + resetInSec),
           'anthropic-ratelimit-unified-status': util5h >= 0.9 ? 'allowed_warning' : 'allowed',
         },
       },
@@ -91,6 +91,34 @@ describe('quota guard (e2e via handleRequest, guard enabled by fixture at 0.95)'
     expect(j.error.type).toBe('quota_guard')
     expect(j.error.util5h).toBeCloseTo(0.97, 5)
     expect(j.error.threshold).toBeCloseTo(0.95, 5)
+    await c.stop()
+  })
+
+  // 🔴 Замер 26.09.2026 (b86b8146): отказ «95%, сброс в 21:10» пришёл через
+  // минуту ПОСЛЕ сброса — сторож верил числу окна, которого уже не было.
+  test('after the window reset time the old reading no longer holds turns', async () => {
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 3600 },
+      credentialsProvider: { getAccessToken: async () => 'fake-token', invalidate() {} },
+      upstreamFetcher: quotaUpstream(0.97, 'org-full', -60),   // сброс был минуту назад
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-full' },
+      rewriteBlockDumpDir: join(TMP, 'dumps'),
+      proxyStartedAt: 0,
+    })
+    await prime(c, 'qg-reset-passed')
+    const r = await c.handleRequest(body(), {}, { sessionId: 'qg-reset-passed' })
+    expect(r.status).not.toBe(400)
+    const hold = c.quotaHoldFor('qg-reset-passed')
+    expect(hold.holding).toBe(false)
+    expect(hold.util5h).toBeNull()
+    await c.stop()
+  })
+
+  test('before the reset time the same reading still holds', async () => {
+    const c = mkClient(0.97)
+    await prime(c, 'qg-reset-ahead')
+    expect(c.quotaHoldFor('qg-reset-ahead').holding).toBe(true)
     await c.stop()
   })
 

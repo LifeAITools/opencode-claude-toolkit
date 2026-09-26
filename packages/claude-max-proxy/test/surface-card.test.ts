@@ -19,7 +19,7 @@ import { describe, test, expect, afterEach } from 'bun:test'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { startLocalAlert, _setAlertDelivery, _setAliveProbe, _stuckState } from '../src/local-alert.js'
+import { startLocalAlert, _setAlertDelivery, _setAliveProbe, _stuckState, type StuckOwner } from '../src/local-alert.js'
 import { _setCardSender, adviceFor, type StuckCardAsk } from '../src/surface-card.js'
 import { emit } from '../src/event-bus.js'
 
@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 /** Тревога на СВОЁМ файле состояния — живой файл машины не в игре. */
-function arm(owner?: { pid: number | null; cwd: string | null }): void {
+function arm(owner?: StuckOwner): void {
   dir = mkdtempSync(join(tmpdir(), 'surface-card-'))
   const statePath = join(dir, 'blocked-sessions.json')
   // Одной строкой НАРОЧНО: сторож `local-alert-never-writes-live-state` читает
@@ -97,6 +97,54 @@ describe('стоящая сессия зовёт человека, а не то�
     expect(seen[0].cwd).toBe('/home/relishev/projects/vibe/tixi-cold')
     expect(seen[0].pid).toBe(4242)
     expect(seen[0].liveness).toBe('alive')
+  })
+
+  // 🔴 Замер 26.09.2026: в папке promptera-api жили три Claude с тремя личностями, и
+  // карточка по каталогу назвала здорового владельца проекта вместо запасной сессии
+  // главного агента. Клеймо запуска говорит КТО, каталог — только ГДЕ.
+  test('клеймо запуска едет в карточке — агента называют по личности, а не по папке', async () => {
+    _setAlertDelivery(() => {})
+    arm({
+      pid: 4242,
+      cwd: '/mnt/d/Vibe_coding_projects/promptera-api',
+      identity: { agentName: 'external-scratch-general', bindingId: 'external_scratch_general_02' },
+    })
+    const seen = capture()
+    blocked()
+    await Promise.resolve()
+
+    expect(seen[0].launchIdentity).toEqual({ agentName: 'external-scratch-general', bindingId: 'external_scratch_general_02' })
+    expect(seen[0].cwd).toBe('/mnt/d/Vibe_coding_projects/promptera-api')
+  })
+
+  test('клейма нет → поля нет, а не пустая личность', async () => {
+    _setAlertDelivery(() => {})
+    arm({ pid: 4242, cwd: '/tmp/x', identity: null })
+    const seen = capture()
+    blocked()
+    await Promise.resolve()
+
+    expect('launchIdentity' in seen[0]).toBe(false)
+  })
+
+  test('процесс сменился → клеймо покойника не наследуется', async () => {
+    _setAlertDelivery(() => {})
+    let owner: StuckOwner = { pid: 1, cwd: '/tmp/x', identity: { agentName: 'old-agent' } }
+    dir = mkdtempSync(join(tmpdir(), 'surface-card-'))
+    const statePath = join(dir, 'blocked-sessions.json')
+    stop = startLocalAlert(() => owner, { statePath })
+    const seen = capture()
+    blocked()
+    await Promise.resolve()
+    // Перезапуск тревоги снимает паузу между объявлениями; учёт едет с диска.
+    stop()
+    owner = { pid: 2, cwd: '/tmp/x' }
+    stop = startLocalAlert(() => owner, { statePath })
+    blocked({ consecutiveBlocks: 4 })
+    await Promise.resolve()
+
+    expect(seen[0].launchIdentity).toEqual({ agentName: 'old-agent' })
+    expect(_stuckState.get('sess-stuck-1')?.identity ?? null).toBeNull()
   })
 
   test('владельца опознать не удалось → liveness говорит «проверить нечем», а не «жив»', async () => {

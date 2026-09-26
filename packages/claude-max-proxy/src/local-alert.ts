@@ -38,6 +38,7 @@ import { join, dirname } from 'node:path'
 import { bus } from './event-bus.js'
 import { processAlive } from './session-tracker.js'
 import { raiseStuckCard, adviceFor, type StuckCardAsk } from './surface-card.js'
+import type { LaunchIdentity } from './launch-identity.js'
 
 /** Whether to deliver at all — off in tests, and a way out if it ever annoys. */
 const enabled = () => process.env.PROXY_LOCAL_ALERT !== '0'
@@ -195,6 +196,9 @@ interface StuckSession {
    *  /home/relishev/projects/vibe/photo3d» говорит всё. Путь идёт как есть:
    *  выводить из него имя проекта значило бы гадать за реестр. */
   cwd?: string | null
+  /** КТО запущен в процессе — клеймо из окружения (launch-identity.ts). Папка
+   *  говорит, где агент работает, а не кто он: в одной папке бывает три Claude. */
+  identity?: LaunchIdentity | null
 }
 
 /**
@@ -221,6 +225,7 @@ export interface StuckReport {
   liveness: 'alive' | 'dead' | 'unknown'
   pid: number | null
   cwd: string | null
+  identity: LaunchIdentity | null
   idleMs: number | null
   spendKind: string | null
   advice: 'grant' | 'restart' | null
@@ -230,6 +235,8 @@ export interface StuckReport {
 export interface StuckOwner {
   pid: number | null
   cwd: string | null
+  /** Клеймо запуска. Поля нет — опознающий его не умеет, и это то же «не знаем». */
+  identity?: LaunchIdentity | null
 }
 const stuck = new Map<string, StuckSession>()
 
@@ -277,6 +284,7 @@ function knock(sid: string, st: StuckSession, now: number): void {
     source: 'claude-max-proxy/local-alert',
     ...(st.cwd ? { cwd: st.cwd } : {}),
     ...(pid !== null ? { pid } : {}),
+    ...(st.identity ? { launchIdentity: st.identity } : {}),
     // Совет шлём ТОЛЬКО когда есть чем его обосновать: срок мёртвого кэша.
     // Нет срока — нет и совета; выдуманный совет хуже отсутствующего, потому
     // что человек примет его за замер.
@@ -425,6 +433,7 @@ export function stuckSessionReport(sessionId: string, now: number = Date.now()):
     liveness: pid === null ? 'unknown' : (isAlive(pid) ? 'alive' : 'dead'),
     pid,
     cwd: st.cwd ?? null,
+    identity: st.identity ?? null,
     idleMs: typeof st.idleMs === 'number' ? st.idleMs : null,
     spendKind: st.spendKind ?? null,
     // Совет — только когда есть чем его обосновать (срок мёртвого кэша), тем же
@@ -551,9 +560,14 @@ export function startLocalAlert(
       // которому обход снял бы с учёта живого.
       let pid: number | null = prev?.pid ?? null
       let cwd: string | null = prev?.cwd ?? null
+      let identity: LaunchIdentity | null = prev?.identity ?? null
       try {
         const owner = resolveOwner?.(sid)
-        if (owner) { pid = owner.pid ?? pid; cwd = owner.cwd ?? cwd }
+        if (owner) {
+          // Сменился процесс — прежнее клеймо принадлежало покойнику, не наследуем его.
+          if (owner.pid != null && owner.pid !== pid) identity = null
+          pid = owner.pid ?? pid; cwd = owner.cwd ?? cwd; identity = owner.identity ?? identity
+        }
       } catch { /* опознание не должно ронять тревогу */ }
       stuck.set(sid, {
         since: prev?.since ?? now,
@@ -566,6 +580,7 @@ export function startLocalAlert(
         spendKind: typeof e?.spendKind === 'string' ? e.spendKind : null,
         pid,
         cwd,
+        identity,
       })
       saveStuck()
     }

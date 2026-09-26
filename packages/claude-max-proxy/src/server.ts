@@ -55,6 +55,7 @@ import { startHeartbeat } from './heartbeat.js'
 import { startStormWatch } from './storm-watch.js'
 import { startIdentityWatch } from './identity-watch.js'
 import { startLocalAlert } from './local-alert.js'
+import { readLaunchIdentity } from './launch-identity.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup, readOwnerPassport } from '@life-ai-tools/claude-code-sdk'
 import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
@@ -361,7 +362,11 @@ const stopIdentityWatch = startIdentityWatch()
 // не держит. Стоящей сессии каталог нужен позже и в другом процессе.
 const stopLocalAlert = startLocalAlert((sid) => {
   const pid = proxyClient.listSessions().find(s => s.sessionId === sid)?.pid ?? null
-  return { pid, cwd: pid !== null ? (readOwnerPassport(pid)?.cwd ?? null) : null }
+  return {
+    pid,
+    cwd: pid !== null ? (readOwnerPassport(pid)?.cwd ?? null) : null,
+    identity: pid !== null ? readLaunchIdentity(pid) : null,
+  }
 })
 
 // ═══ Module System ═══════════════════════════════════════════════

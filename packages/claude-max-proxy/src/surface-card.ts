@@ -37,6 +37,7 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type { LaunchIdentity } from './launch-identity.js'
 
 /** Дверь сурфейса. Переопределяется переменной — у другой машины она другая. */
 const doorUrl = (): string =>
@@ -84,6 +85,9 @@ export interface StuckCardAsk {
   announcements?: number
   cwd?: string
   pid?: number
+  /** КТО запущен в процессе — клеймо запуска из его окружения. Сильнее каталога:
+   *  в одной папке бывает несколько агентов (замер 26.09.2026, promptera-api). */
+  launchIdentity?: LaunchIdentity
   /** 🔴 `unknown` — это «проверить нечем», а НЕ «почти жив». Так и рисуется. */
   liveness?: 'alive' | 'dead' | 'unknown'
   /** Совет, а не решение: старый мёртвый кэш дешевле перезапустить, чем купить. */

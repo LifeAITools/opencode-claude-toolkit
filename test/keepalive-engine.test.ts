@@ -672,6 +672,50 @@ describe('KeepaliveEngine Layer 2: heaviest-wins snapshot registry', () => {
     e.stop()
   })
 
+  test('warm-set: прежние головы main не вытесняют свежего помощника — защищена одна текущая', () => {
+    // Замер 27.09.2026 (4a635bf3): шесть веток main держали лимит насовсем, и
+    // помощник вытеснялся сразу после записи — 713 раз за день.
+    const e = mkEngine({ minTokens: 100 })
+    const mainTools = [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }]
+    for (let i = 1; i <= 5; i++) {
+      e.notifyRealRequestStart('m', { system: [{ type: 'text', text: `MAIN${i}` }], tools: mainTools }, {})
+      e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })
+      e._ageLineages(60_000)               // каждая следующая голова свежее прежней
+    }
+    const mainKeys = Array.from(e._registry.entries()).filter(([, x]) => x.role === 'main').map(([k]) => k)
+    const newestMain = mainKeys[mainKeys.length - 1]
+    e.notifyRealRequestStart('m',
+      { system: [{ type: 'text', text: 'HELPER' }], tools: [{ name: 'x' }] },
+      { 'x-claude-code-agent-id': 'a2e5b826614f73d58' })
+    e.notifyRealRequestComplete({ inputTokens: 10000, outputTokens: 1 })
+    expect(e._registry.size).toBe(4)
+    const roles = Array.from(e._registry.values()).map((x) => x.role)
+    expect(roles).toContain('sub')                     // помощник пережил лимит
+    expect(e._registry.has(newestMain)).toBe(true)     // текущая голова цела
+    e.stop()
+  })
+
+  test('warm-set: давность — по настоящему ходу, прогрев её не освежает', () => {
+    const e = mkEngine({ minTokens: 100 })
+    const mainTools = [...Array.from({ length: 19 }, (_, i) => ({ name: `t${i}` })), { name: 'Agent' }]
+    e.notifyRealRequestStart('m', { system: [{ type: 'text', text: 'MAIN' }], tools: mainTools }, {})
+    e.notifyRealRequestComplete({ inputTokens: 50000, outputTokens: 1 })
+    for (let i = 1; i <= 3; i++) {
+      e.notifyRealRequestStart('m', { system: [{ type: 'text', text: `SUB${i}` }], tools: [{ name: 'x' }] },
+        { 'x-claude-code-agent-id': `s${i}` })
+      e.notifyRealRequestComplete({ inputTokens: 10000, outputTokens: 1 })
+    }
+    const sub1 = Array.from(e._registry.entries()).find(([, x]) => x.role === 'sub')![0]
+    e._ageLineages(10 * 60_000)
+    // Прогрев освежил только часы прогрева первого помощника, настоящего хода не было.
+    ;(e._lineageStats.get(sub1) as { lastWarmedAt: number }).lastWarmedAt = Date.now()
+    e.notifyRealRequestStart('m', { system: [{ type: 'text', text: 'SUB4' }], tools: [{ name: 'x' }] },
+      { 'x-claude-code-agent-id': 's4' })
+    e.notifyRealRequestComplete({ inputTokens: 10000, outputTokens: 1 })
+    expect(e._registry.has(sub1)).toBe(false)
+    e.stop()
+  })
+
   test('below minTokens threshold — not registered at all', () => {
     const e = mkEngine({ minTokens: 5000 })
     e.notifyRealRequestStart('claude-opus-4-7', { messages: [] }, {})

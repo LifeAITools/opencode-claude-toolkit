@@ -1184,19 +1184,36 @@ export class KeepaliveEngine {
         // (model/tool churn + delegated sub-agents that may be re-delegated). Keep
         // the most-recently-warmed K; LRU-evict the oldest NON-main lineage beyond
         // K — a re-delegation to a RECENT worker stays warm, an ancient one falls
-        // cold (acceptable). Main is NEVER evicted by the bound. Cost is ~free
-        // reads, so this is registry/fire hygiene, not a quota lever. Cap read
-        // from the hot-reloadable SSOT (same as roleDetector).
+        // cold (acceptable). Cost is ~free reads, so this is registry/fire
+        // hygiene, not a quota lever. Cap read from the hot-reloadable SSOT
+        // (same as roleDetector).
+        //
+        // 🔴 ЗАЩИЩЁН ОДИН ГЛАВНЫЙ — ТЕКУЩИЙ, И ДАВНОСТЬ СЧИТАЕТСЯ ПО НАСТОЯЩЕМУ
+        // ХОДУ, А НЕ ПО ПРОГРЕВУ. Замер 27.09.2026 (myfamily-quest, 4a635bf3):
+        // у сессии шесть веток с ролью main — прежние головы разговора после
+        // смены набора инструментов, — и прежнее «главный неприкосновенен»
+        // держало их ВСЕ. Лимит 4 был занят ими насовсем, и каждая ветка
+        // помощника вытеснялась сразу после записи: 713 вытеснений за день,
+        // ноль выстрелов прогрева по помощникам, помощник после 1 ч 48 мин
+        // простоя упёрся в сторожа. А мерить по lastWarmedAt нельзя: прогрев
+        // сам его обновляет, и ветку, которую держит только прогрев, правило
+        // принимало за свежую. Поэтому неприкосновенна одна ветка main с самым
+        // свежим настоящим ходом, остальные — прежние головы и помощники —
+        // соревнуются по lastSeenAt.
         const warmCap = loadKeepaliveConfig().maxWarmLineagesPerSession
+        const seenAt = (k: string) => this.lineageStats.get(k)?.lastSeenAt ?? 0
         while (this.registry.size > warmCap) {
-          let victim: string | null = null
-          let oldestWarmedAt = Infinity
+          let head: string | null = null
           for (const [k, e2] of this.registry) {
-            if (e2.role === 'main') continue            // never evict main
-            const warmedAt = this.lineageStats.get(k)?.lastWarmedAt ?? 0
-            if (warmedAt < oldestWarmedAt) { oldestWarmedAt = warmedAt; victim = k }
+            if (e2.role === 'main' && (head === null || seenAt(k) > seenAt(head))) head = k
           }
-          if (victim === null) break                    // only main lineages remain
+          let victim: string | null = null
+          let oldestSeenAt = Infinity
+          for (const k of this.registry.keys()) {
+            if (k === head) continue                    // the current main head is never evicted
+            if (seenAt(k) < oldestSeenAt) { oldestSeenAt = seenAt(k); victim = k }
+          }
+          if (victim === null) break                    // only the head remains
           this.registry.delete(victim)
           this.lastSnapshots.delete(victim)
           this.notifyRegistryChanged()

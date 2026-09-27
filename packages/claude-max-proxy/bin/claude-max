@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file
 /**
  * claude-max — the ONE command to keep Claude Code cache warm.
  *
@@ -25,6 +25,10 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSy
 import { homedir, platform } from 'os'
 import { join, dirname, resolve as pathResolve } from 'path'
 import { withInstallLock, decideInstallOutcome } from './install-lock.ts'
+import { ensureNoDotenv } from './dotenv-isolation.ts'
+
+// Before anything reads process.env: the project's .env is not ours to load.
+ensureNoDotenv()
 
 // ═══ Paths ════════════════════════════════════════════════════════════
 

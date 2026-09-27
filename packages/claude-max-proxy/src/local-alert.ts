@@ -174,6 +174,18 @@ const STUCK_SWEEP_INTERVAL_MS = 10 * 60_000
 // молчит. Тому, чей владелец ЖИВ, потолок не применяется вовсе: он может честно
 // стоять неделю и обязан звать всё это время.
 const STUCK_UNVERIFIABLE_CEILING_MS = 48 * 60 * 60_000
+// 🔴 ПОМОЩНИК (субагент) — НЕ ПОВОД ЗВАТЬ ЧЕЛОВЕКА. Замер владельца
+// телеграм-службы 27.09.2026: 4a635bf3 — помощник myfamily-quest, ход 52 387
+// токенов после 1 ч 48 мин простоя, пока главный поток работал на тёплом кэше.
+// Карточка пришла с одним номером сессии, сурфейс опознал её по клейму процесса
+// как САМОГО агента и предложил «перезапустить не спрашивая» — то есть стереть
+// живую работу ради кэша помощника. Отказ помощника получает его РОДИТЕЛЬ, у
+// которого ходы есть, вместе с рецептом согласия (proxy-client, NOTE для
+// субагента); через ~46 с всё пошло само. Поэтому помощник пишется в журнал и
+// в учёт (с `subagentId`, чтобы дверь отчёта его различала), но карточки,
+// всплывашки и напоминаний не получает. А снимается с учёта, когда затих:
+// родитель помощника жив, и снятие «по смерти владельца» его не снимет никогда.
+const STUCK_SUBAGENT_QUIET_MS = 60 * 60_000
 interface StuckSession {
   since: number          // когда отказали в первый раз
   lastBlockAt: number    // последний отказ
@@ -199,6 +211,8 @@ interface StuckSession {
   /** КТО запущен в процессе — клеймо из окружения (launch-identity.ts). Папка
    *  говорит, где агент работает, а не кто он: в одной папке бывает три Claude. */
   identity?: LaunchIdentity | null
+  /** Чей ход отбит: номер помощника (субагента). Поля нет — главный поток. */
+  subagentId?: string | null
 }
 
 /**
@@ -229,6 +243,9 @@ export interface StuckReport {
   idleMs: number | null
   spendKind: string | null
   advice: 'grant' | 'restart' | null
+  /** Номер помощника (субагента), чей ход отбит; `null` — главный поток агента.
+   *  Перезапуск процесса ради помощника стёр бы живую работу самого агента. */
+  subagentId: string | null
 }
 
 /** Кто владеет сессией прямо сейчас — номер процесса и его рабочий каталог. */
@@ -318,6 +335,15 @@ function sweepStuck(now: number): void {
     // получили по 9–18 напоминаний каждая. Событие оставлено — оно снимает
     // быстрее; но истина о жизни считается ЗДЕСЬ, из данных, лежащих на диске.
     const pid = st.pid ?? null
+    if (st.subagentId) {
+      if (now - st.lastBlockAt > STUCK_SUBAGENT_QUIET_MS) {
+        stuck.delete(sid)
+        changed = true
+        retired(sid, st, now, `помощник ${st.subagentId} больше не стучится — его родитель`
+          + ' разрешил, перезапустил его или бросил')
+      }
+      continue
+    }
     if (pid !== null) {
       if (!isAlive(pid)) {
         stuck.delete(sid)
@@ -439,6 +465,7 @@ export function stuckSessionReport(sessionId: string, now: number = Date.now()):
     // Совет — только когда есть чем его обосновать (срок мёртвого кэша), тем же
     // правилом, что и в карточке: выдуманный совет хуже отсутствующего.
     advice: typeof st.idleMs === 'number' && st.idleMs >= 0 ? adviceFor(st.spendKind, st.idleMs) : null,
+    subagentId: st.subagentId ?? null,
   }
 }
 
@@ -551,6 +578,7 @@ export function startLocalAlert(
     if (announced !== undefined && now - announced < REWRITE_ALERT_COOLDOWN_MS) return
     rewriteAnnouncedAt.set(sid, now)
     const tokens = Number(e?.predictedTokens ?? 0)
+    const subagentId = typeof e?.agentId === 'string' && e.agentId ? e.agentId : null
     // Запомнить СОСТОЯНИЕ: с этой минуты сессия считается стоящей, пока не
     // сделает успешный ход или пока не умрёт её процесс.
     {
@@ -581,8 +609,20 @@ export function startLocalAlert(
         pid,
         cwd,
         identity,
+        ...(subagentId ? { subagentId } : {}),
       })
       saveStuck()
+    }
+    if (subagentId) {
+      fire(
+        'Помощник агента стоит у сторожа кэша',
+        `сессия ${sid}${stuck.get(sid)?.cwd ? ` (${stuck.get(sid)!.cwd})` : ''}, помощник ${subagentId}:`
+        + ` ${streak} хода подряд отказано, ${rewriteReason(e?.rewriteClass, e?.spendKind)};`
+        + ` ход просит ${groupDigits(Number.isFinite(tokens) ? tokens : 0)} токенов.`
+        + ` Отказ получил родитель вместе с рецептом согласия; сам агент работает, человека не зовём.`,
+        true,
+      )
+      return
     }
     fire(
       'Агент стоит у сторожа кэша и ждёт согласия',

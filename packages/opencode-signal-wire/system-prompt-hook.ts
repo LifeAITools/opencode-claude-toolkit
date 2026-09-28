@@ -31,6 +31,7 @@
  */
 
 import { getBriefForSession, claimBriefForSubSession } from './spawn-brief-applier'
+import { startupTextForSession } from './startup-context-hook'
 import { AGENT_IDENTITY_DIR } from './domain-constants'
 
 interface SystemTransformInput {
@@ -165,9 +166,14 @@ export async function systemTransformHook(
     }
 
     // PATH 2: Parent session — synthesize from provisioned identity
+    // Стартовый контекст (бриф, прайминг, рельсы) — независимо от кэша личности: он приходит с
+    // сервера SynqTask по KIBEROS_BINDING_ID и ключу проекта. Кладётся ПОСЛЕДНИМ, чтобы не сдвигать
+    // ни умолчание opencode, ни ролевой блок; строка за сессию одна и та же.
+    const startup = await startupTextForSession(sessionID)
     const identity = getParentIdentity()
     if (!identity?.orgRole) {
-      // No identity or no role data → no-op. Hook should not break opencode.
+      // No identity or no role data → only the startup context (if any).
+      if (startup) output.system.push(startup)
       return
     }
 
@@ -182,6 +188,7 @@ export async function systemTransformHook(
       // Append (default) — preserves opencode cache prefix at [0]
       output.system.push(roleBlock)
     }
+    if (startup) output.system.push(startup)
   } catch (e: any) {
     // Log to stderr but never throw — hook must not break opencode
     console.error(`[system-prompt-hook] error (non-fatal): ${e?.message ?? String(e)}`)

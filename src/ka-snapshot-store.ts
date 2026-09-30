@@ -89,6 +89,8 @@ export interface PersistedRegistryEntry {
    * Необязательны: снимки прежних версий их не несут и восстанавливаются по-старому.
    */
   cacheWrittenAt?: number
+  /** Срок жизни кэша этой ветки из её меток (RegistryEntry.cacheTtlMs); нет — срок движка. */
+  cacheTtlMs?: number | null
   lastSeenAt?: number
   lastWarmedAt?: number
   firstSeenAt?: number

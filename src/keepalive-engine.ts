@@ -223,6 +223,18 @@ interface RegistryEntry {
    * прочитали.
    */
   cacheWrittenAt: number
+  /**
+   * СРОК ЖИЗНИ КЭША ИМЕННО ЭТОЙ ВЕТКИ — из её собственных меток cache_control, а не общий на сессию.
+   *
+   * Требование фаундера 30.09.2026 голосом: «писать себе отметки времени, когда в последний раз мы
+   * её грели, и сколько у нас по каждой ветке с этими маркерами — 5 минут или 1 час… чтобы если
+   * перезагрузка была, мы не теряли таймеры… чтобы не промахнуться и не записать случайно кэш,
+   * который уже не нужен, и наоборот, случайно не профукать». До того срок был ОДИН на сессию —
+   * самый короткий из всех когда-либо виденных меток: одна пятиминутная ветка делала «мёртвыми»
+   * через пять минут и все часовые, а ветку со сроком короче шага прогрева никто не успевал греть.
+   * null — меток не было, берётся срок движка.
+   */
+  cacheTtlMs: number | null
 }
 
 /** A snapshot primed by notifyRealRequestStart, awaiting its completion. */
@@ -239,6 +251,9 @@ interface PendingSnapshot {
    * от которой мы уходим.
    */
   hasAnyCacheControl: boolean
+  /** Срок жизни кэша ЭТОЙ ветки — самый короткий из её собственных меток (5 мин без ttl, 1 ч при
+   *  ttl:'1h'); null — меток нет. См. RegistryEntry.cacheTtlMs. */
+  cacheTtlMs: number | null
   debugMeta: Record<string, unknown>
 }
 
@@ -605,6 +620,9 @@ export class KeepaliveEngine {
    * See KeepaliveConfig.cacheTtlMs (types.ts) for full rationale.
    */
   private readonly cacheTtlOverridden: boolean
+  /** Срок, заданный потребителем при создании (не сниженный подсмотренными метками) — по нему
+   *  режется общий шаг прогрева; null — не задан. */
+  private readonly pinnedTtlMs: number | null
   /**
    * Set to true when wire-autoscan (detectCacheTtlFromBody, called in
    * notifyRealRequestStart) observes a `cache_control` marker shorter than
@@ -838,9 +856,11 @@ export class KeepaliveEngine {
     if (typeof ka.cacheTtlMs === 'number' && Number.isFinite(ka.cacheTtlMs) && ka.cacheTtlMs > 0) {
       this.cacheTtlMs = ka.cacheTtlMs
       this.cacheTtlOverridden = true
+      this.pinnedTtlMs = ka.cacheTtlMs
     } else {
       this.cacheTtlMs = ssot.cacheTtlMs
       this.cacheTtlOverridden = false
+      this.pinnedTtlMs = null
     }
     this.safetyMarginMs = ssot.safetyMarginMs
     this.retryDelaysMs = ssot.retryDelaysMs
@@ -971,12 +991,14 @@ export class KeepaliveEngine {
     // Повод: у соседа из tixi-cold экземпляр убило ядро за память при потолке
     // в гигабайт; их профиль — единицы сессий с огромными телами, то есть
     // ровно тот случай, где эта работа стоила больше всего.
+    const ownScan = detectCacheTtlFromBody(body)
     this.pendingSnapshots.set(key, {
       model,
       body: JSON.stringify(body),
       headers: { ...headers },
       role,
-      hasAnyCacheControl: detectCacheTtlFromBody(body).hasAnyCacheControl,
+      hasAnyCacheControl: ownScan.hasAnyCacheControl,
+      cacheTtlMs: ownScan.minTtlMs,
       debugMeta: this.buildSnapshotMeta(model, body),
     })
     this._legacyPendingLineage = key
@@ -1126,7 +1148,7 @@ export class KeepaliveEngine {
     // same-org), which is the single source of truth.
     const pending = key ? this.pendingSnapshots.get(key) : undefined
     if (pending) {
-      const { model, body, headers, role, hasAnyCacheControl, debugMeta } = pending
+      const { model, body, headers, role, hasAnyCacheControl, cacheTtlMs: ownTtlMs, debugMeta } = pending
       const totalTokens = (usage.inputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0)
       // Layer 3 input: does the snapshot carry any cache_control markers? If
       // not, a KA fire refreshes nothing on Anthropic's side — skipped in tick().
@@ -1175,6 +1197,8 @@ export class KeepaliveEngine {
           // Этот ход и записал кэш ветки — её собственные часы стартуют здесь,
           // независимо от того, что происходит у соседних веток.
           cacheWrittenAt: now,
+          // И её собственный срок — из её меток, а не общий на сессию.
+          cacheTtlMs: ownTtlMs,
         }
         this.registry.set(key, entry)
         this.lastSnapshots.set(key, entry) // retain for self-heal re-prime
@@ -1436,9 +1460,19 @@ export class KeepaliveEngine {
   // Internal: timer & tick
   // ────────────────────────────────────────────────────────────
 
+  /** Срок жизни кэша ветки: её собственный из меток, иначе срок движка. */
+  private ttlOfLineage(e: RegistryEntry): number {
+    return typeof e.cacheTtlMs === 'number' && e.cacheTtlMs > 0 ? e.cacheTtlMs : this.cacheTtlMs
+  }
+
+  /** Шаг, с которым движок просыпается проверить ветки. */
+  private get tickMs(): number {
+    return Math.min(30_000, Math.max(5_000, Math.floor(this.config.intervalMs / 6)))
+  }
+
   private startTimer(): void {
     if (this.timer) return
-    const TICK_MS = Math.min(30_000, Math.max(5_000, Math.floor(this.config.intervalMs / 6)))
+    const TICK_MS = this.tickMs
     // tick() is async; the interval callback drops its promise, so a reject
     // (e.g. an upstream throw or transient null-deref during a KA fire) would
     // surface as a global unhandledRejection. Contain it via logAsyncReject.
@@ -1595,14 +1629,21 @@ export class KeepaliveEngine {
     // SSOT's intervalClampMax reflects SSOT's longer TTL and would let the
     // KA interval exceed our actual cache lifetime. That's the exact wire
     // mismatch from the 2026-05-17 incident — fire after cache is long dead.
-    const ttlLocked = this.cacheTtlOverridden || this.cacheTtlObservedLocked
+    // Подсмотренный в запросах короткий срок (cacheTtlObservedLocked) шаг БОЛЬШЕ не режет: с 30.09.2026
+    // момент выстрела считается у каждой ветки от ЕЁ срока (dueAfterMs в tick), и одна пятиминутная
+    // ветка не должна заставлять часовые греться каждые две с половиной минуты. Режет только срок,
+    // заданный самим потребителем при создании движка.
+    // И при заданном сроке шаг режется по ЗАДАННОМУ сроку, а не по сниженному подсмотренными метками:
+    // живой прокси задаёт час, и одна пятиминутная ветка иначе снижала бы шаг всех часовых.
+    const ttlLocked = this.cacheTtlOverridden
+    const lockTtlMs = this.pinnedTtlMs ?? this.cacheTtlMs
     const effectiveClampMax = ttlLocked
-      ? Math.max(liveConfig.intervalClampMin + 1, this.cacheTtlMs - this.safetyMarginMs - 60_000)
+      ? Math.max(liveConfig.intervalClampMin + 1, lockTtlMs - this.safetyMarginMs - 60_000)
       : liveConfig.intervalClampMax
     // When SSOT intervalMs is too large for our effective TTL (e.g. SSOT=1800s
     // but TTL=300s), use TTL/2 as the default instead of accepting SSOT.intervalMs.
     const effectiveTargetInterval = ttlLocked
-      ? Math.min(liveConfig.intervalMs, Math.max(liveConfig.intervalClampMin, Math.floor(this.cacheTtlMs / 2)))
+      ? Math.min(liveConfig.intervalMs, Math.max(liveConfig.intervalClampMin, Math.floor(lockTtlMs / 2)))
       : liveConfig.intervalMs
     const newInterval = Math.max(liveConfig.intervalClampMin,
       Math.min(effectiveTargetInterval, effectiveClampMax))
@@ -1702,10 +1743,15 @@ export class KeepaliveEngine {
     // Eligible = every cache_control lineage whose per-lineage idle crossed the
     // fire threshold. Ordered main→heaviest→most-stale so the most valuable
     // caches are warmed first when the per-tick cap bites.
+    // Когда ветке пора: по общему шагу прогрева — но НЕ ПОЗЖЕ, чем за запас до конца ЕЁ
+    // собственного срока (плюс один шаг пробуждения, чтобы тик не проскочил момент). Часовые ветки
+    // греются в прежнем ритме; ветка со сроком короче шага успевает получить выстрел, пока жива.
+    const dueAfterMs = (e: RegistryEntry): number =>
+      Math.min(fireThresholdMs, Math.max(0, this.ttlOfLineage(e) - this.safetyMarginMs - this.tickMs))
     let eligible = Array.from(this.registry.values())
       .filter((e) => e.hasCacheControl)
       .map((e) => ({ entry: e, idle: lineageIdle(e) }))
-      .filter((x) => x.idle >= fireThresholdMs)
+      .filter((x) => x.idle >= dueAfterMs(x.entry))
       .sort((a, b) => {
         const am = a.entry.role === 'main' ? 1 : 0
         const bm = b.entry.role === 'main' ? 1 : 0
@@ -1731,7 +1777,7 @@ export class KeepaliveEngine {
     for (const x of eligible) {
       const writtenAt = x.entry.cacheWrittenAt
       if (writtenAt <= 0) continue          // возраст неизвестен — не нам решать
-      if (Date.now() - writtenAt >= this.cacheTtlMs - this.safetyMarginMs) {
+      if (Date.now() - writtenAt >= this.ttlOfLineage(x.entry) - this.safetyMarginMs) {
         deadAtGate.push(x.entry.lineageKey)
       }
     }
@@ -1742,7 +1788,7 @@ export class KeepaliveEngine {
           appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
             `[${new Date().toISOString()}] KA_LINEAGE_DROPPED_CACHE_DEAD pid=${process.pid} ${RUNTIME_IDENTITY}`
             + ` lineage=${key} cacheAgeSec=${e ? Math.round((Date.now() - e.cacheWrittenAt) / 1000) : -1}`
-            + ` cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} regSize=${this.registry.size}`
+            + ` cacheTtlSec=${Math.round((e ? this.ttlOfLineage(e) : this.cacheTtlMs) / 1000)} regSize=${this.registry.size}`
             + ' — снята: её префикс мёртв, выстрел был бы покупкой, а не прогревом\n')
         } catch { /* logging best-effort */ }
         this.registry.delete(key)
@@ -1789,9 +1835,13 @@ export class KeepaliveEngine {
     // (915579 + 4x182781, byte-identical every time), and only AFTER the fires
     // did the engine announce cacheAgeSec=10800 against cacheTtlSec=300. The
     // check has to stand in front of the spend, not behind it.
+    // Общие часы движка — время самой свежей записи среди всех веток; сравниваются они с САМЫМ
+    // ДЛИННЫМ сроком среди готовых к выстрелу веток: если даже он истёк, мертвы все. Общий
+    // короткий срок здесь убивал бы часовые ветки через пять минут из-за одной пятиминутной.
+    const longestDueTtlMs = eligible.reduce((m, x) => Math.max(m, this.ttlOfLineage(x.entry)), 0) || this.cacheTtlMs
     if (this.cacheWrittenAt > 0) {
       const ageAtFire = Date.now() - this.cacheWrittenAt
-      if (ageAtFire >= this.cacheTtlMs - this.safetyMarginMs) {
+      if (ageAtFire >= longestDueTtlMs - this.safetyMarginMs) {
         try {
           appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
             `[${new Date().toISOString()}] KA_FIRE_SKIPPED_CACHE_DEAD pid=${process.pid} ${RUNTIME_IDENTITY} cacheAgeSec=${Math.round(ageAtFire / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} regSize=${this.registry.size} — refusing to cold-write a dead prefix\n`)
@@ -3118,12 +3168,14 @@ export class KeepaliveEngine {
   get _intervalMs(): number { return this.config.intervalMs }
   _setPendingSnapshot(model: string, body: Record<string, unknown>, headers: Record<string, string>): void {
     const key = lineageKey(body)
+    const ownScan = detectCacheTtlFromBody(body)
     this.pendingSnapshots.set(key, {
       model,
       body: JSON.stringify(body),
       headers,
       role: 'main',
-      hasAnyCacheControl: detectCacheTtlFromBody(body).hasAnyCacheControl,
+      hasAnyCacheControl: ownScan.hasAnyCacheControl,
+      cacheTtlMs: ownScan.minTtlMs,
       debugMeta: this.buildSnapshotMeta(model, body),
     })
     this._legacyPendingLineage = key
@@ -3245,6 +3297,7 @@ export class KeepaliveEngine {
           cacheWrittenAt: typeof e.cacheWrittenAt === 'number' && e.cacheWrittenAt > 0
             ? e.cacheWrittenAt
             : state.cacheWrittenAt,
+          cacheTtlMs: typeof e.cacheTtlMs === 'number' && e.cacheTtlMs > 0 ? e.cacheTtlMs : null,
           lastFireColdWrote: false,
         })
         if (typeof e.lastWarmedAt === 'number' && e.lastWarmedAt > 0 && !this.lineageStats.has(e.lineageKey)) {
@@ -3298,8 +3351,9 @@ export class KeepaliveEngine {
         ttlEverObserved: this.ttlEverObserved,
         lastKnownCacheTokensByModel: Object.fromEntries(this.lastKnownCacheTokensByModel),
         registry: Array.from(this.registry.values()).map((e) => ({
-          // Свои часы ветки — см. PersistedRegistryEntry.cacheWrittenAt.
+          // Свои часы и свой срок ветки — см. PersistedRegistryEntry.cacheWrittenAt.
           cacheWrittenAt: e.cacheWrittenAt,
+          cacheTtlMs: e.cacheTtlMs,
           ...(() => {
             const st = this.lineageStats.get(e.lineageKey)
             return st ? { lastSeenAt: st.lastSeenAt, lastWarmedAt: st.lastWarmedAt, firstSeenAt: st.firstSeenAt } : {}

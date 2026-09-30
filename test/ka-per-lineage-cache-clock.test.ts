@@ -29,7 +29,9 @@
  */
 
 import { describe, test, expect } from 'bun:test'
+import { readFileSync, writeFileSync, utimesSync } from 'node:fs'
 import { KeepaliveEngine } from '../src/keepalive-engine.js'
+import { getConfigPath } from '../src/keepalive-config.js'
 import type { RateLimitInfo, StreamEvent } from '../src/types.js'
 
 /** Тело со своим маркером — разный текст даёт разную родословную. */
@@ -203,5 +205,83 @@ describe('у каждого снимка своё время, от которо�
     after.revive(saved)
     expect(Array.from(after._registry.keys())).toContain(key)
     after.stop()
+  })
+
+  describe('у каждой ветки свой срок из её меток — требование фаундера 30.09', () => {
+    // «сколько у нас по каждой ветке с этими маркерами — 5 минут или 1 час… чтобы не промахнуться и
+    // не записать случайно кэш, который уже не нужен, и наоборот, случайно не профукать».
+    const body5m = (tag: string) => ({
+      system: [{ type: 'text', text: `sys-${tag}`, cache_control: { type: 'ephemeral' } }],   // без ttl = 5 мин
+    })
+    function arm5m(e: KeepaliveEngine, tag: string): string {
+      const key = e.notifyRealRequestStart('claude-opus-5', body5m(tag) as any, {})
+      e.notifyRealRequestComplete({ inputTokens: 200_000, outputTokens: 10, cacheReadInputTokens: 0 } as any, key)
+      e._setLineageRole(key, 'main')
+      return key
+    }
+
+    test('пятиминутная ветка получает выстрел до конца своих пяти минут, часовая — в своём ритме', async () => {
+      // Движок перечитывает настройки на каждом пробуждении, а общие настройки испытаний держат шаг в
+      // минуту — при нём любая ветка готова почти сразу, и разницы не видно. На время испытания —
+      // живые числа: срок час, шаг 30 минут. Прежнее содержимое возвращается в finally.
+      const cfgPath = getConfigPath()
+      const original = readFileSync(cfgPath, 'utf8')
+      writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(original), cacheTtlSec: 3600, intervalSec: 1800 }))
+      const later = new Date(Date.now() + 5_000)
+      utimesSync(cfgPath, later, later)   // другое время изменения — движок увидит новое содержимое
+      try {
+      const seen = { keys: [] as string[] }
+      // Живой шаг прогрева — 30 минут: при нём пятиминутная ветка по общему шагу умерла бы
+      // шесть раз, прежде чем до неё дошла бы очередь.
+      const e = new KeepaliveEngine({
+        // Как живой прокси: срок задан явно (час), шаг — 30 минут.
+        config: { cacheTtlMs: 3_600_000, intervalMs: 1_800_000 },
+        getToken: async () => 'tok',
+        doFetch: buyingFetch(seen) as any,
+        getRateLimitInfo: () => rl,
+      })
+      const short = arm5m(e, 'short')
+      arm(e, 'long')
+      e._ageLineages(4.5 * 60_000)         // 4,5 минуты простоя у обеих
+      await e._tick()
+      expect(seen.keys).toContain('sys-short')     // успела, пока жива
+      expect(seen.keys).not.toContain('sys-long')  // часовой ещё рано — ритм прежний
+      void short
+      e.stop()
+      } finally {
+        writeFileSync(cfgPath, original)
+        const back = new Date(Date.now() + 10_000)
+        utimesSync(cfgPath, back, back)
+      }
+    })
+
+    test('часовая ветка не объявляется мёртвой из-за пятиминутной соседки', async () => {
+      const seen = { keys: [] as string[] }
+      const e = mkEngine(seen)
+      arm5m(e, 'short')                            // сводит общий срок движка к 5 минутам
+      const long = arm(e, 'long')
+      e._setLineageCacheWrittenAt(long, Date.now() - 20 * 60_000)   // 20 минут — для часовой жива
+      e._ageLineage(long, 60 * 60_000)     // пора стрелять только часовой
+      await e._tick()
+      expect(Array.from(e._registry.keys())).toContain(long)
+      expect(seen.keys).toContain('sys-long')
+      e.stop()
+    })
+
+    test('собственный срок ветки переживает перезапуск', () => {
+      const e = mkEngine({ keys: [] })
+      const short = arm5m(e, 'short')
+      const long = arm(e, 'long')
+      const saved = JSON.parse(JSON.stringify(e.serializeState()))
+      e.stop()
+      const ttl = Object.fromEntries(saved.registry.map((r: any) => [r.lineageKey, r.cacheTtlMs]))
+      expect(ttl[short]).toBe(5 * 60_000)
+      expect(ttl[long]).toBe(60 * 60_000)
+      const after = mkEngine({ keys: [] })
+      after.revive(saved)
+      const back = JSON.parse(JSON.stringify(after.serializeState()))
+      expect(Object.fromEntries(back.registry.map((r: any) => [r.lineageKey, r.cacheTtlMs]))).toEqual(ttl)
+      after.stop()
+    })
   })
 })

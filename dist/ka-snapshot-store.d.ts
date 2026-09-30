@@ -9,6 +9,11 @@ export interface PersistedRegistryEntry {
     role: string;
     inputTokens: number;
     hasCacheControl: boolean;
+    cacheWrittenAt?: number;
+    cacheTtlMs?: number | null;
+    lastSeenAt?: number;
+    lastWarmedAt?: number;
+    firstSeenAt?: number;
 }
 export interface PersistedEngineState {
     cacheWrittenAt: number;

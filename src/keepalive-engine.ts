@@ -1966,6 +1966,7 @@ export class KeepaliveEngine {
       const firedStat = this.lineageStats.get(best.lineageKey)
       if (firedStat) firedStat.lastWarmedAt = Date.now()
 
+      const provenBeforeFire = best.provenAlive
       // A fire that READ its cache back is direct proof this prefix exists
       // upstream — stronger evidence than the real request that first handed us
       // the snapshot. Without this, a lineage revived after a restart stayed
@@ -1993,6 +1994,9 @@ export class KeepaliveEngine {
         model: best.model,
         lineageKey: best.lineageKey,
         role: best.role,
+        provenBeforeFire,
+        lineageTtlMs: this.ttlOfLineage(best),
+        lineageTokens: best.inputTokens,
         rateLimit: {
           status: rl.status,
           claim: rl.claim,

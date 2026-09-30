@@ -2735,6 +2735,9 @@ export class ProxyClient {
             sessionId,
             lineageKey: stats.lineageKey,
             role: stats.role ?? null,
+            provenBeforeFire: stats.provenBeforeFire ?? null,
+            lineageTtlMs: stats.lineageTtlMs ?? null,
+            lineageTokens: stats.lineageTokens ?? null,
             // Org of the session's pinned token (multi-org quota attribution).
             // The account that ACTUALLY served this fire — the pin when the session has
             // one, otherwise whichever account the pool is currently serving. The

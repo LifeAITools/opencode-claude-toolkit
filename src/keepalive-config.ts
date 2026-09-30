@@ -163,6 +163,10 @@ export interface ResolvedKeepaliveConfig {
    *  See QuotaGuardConfig. */
   readonly quotaGuard: QuotaGuardConfig
 
+  /** Строка фаундеру на каждую запись кэша прогревом выше порога — `keepalive.json` →
+   *  `kaPurchaseNotice`. См. KaPurchaseNoticeConfig. */
+  readonly kaPurchaseNotice: KaPurchaseNoticeConfig
+
   /** Context tokens above which rotation enters deferred mode (REQ-06). Default 150000. */
   readonly tokenRotationContextThreshold: number
 
@@ -347,6 +351,31 @@ export interface QuotaGuardConfig {
   readonly consentGrantPath: string
 }
 
+/**
+ * Строка о покупке кэша прогревом. Прогрев по смыслу кэш ЧИТАЕТ; запись значит, что он купил
+ * префикс заново, и это надо видеть сразу, а не находить в журнале. Решение фаундера 30.09.2026:
+ * «Да, присылать» на каждую запись больше 50 тысяч — «сначала логика по веткам, потом уведомления,
+ * и уведомления через сурфейс». За 40 часов до того таких было четыре, все после выкаток.
+ */
+export interface KaPurchaseNoticeConfig {
+  readonly enabled: boolean
+  /** Запись кэша одним выстрелом прогрева, от которой шлётся строка. Default 50 000. */
+  readonly minWriteTokens: number
+  /** Форум и тема — комната проекта claude-code-sdk (-1004351473367 / 9090). */
+  readonly chatId: string
+  readonly threadId: string
+  /** Не больше стольких строк в час: после перезапуска их может прийти пачка. Default 10. */
+  readonly maxPerHour: number
+}
+
+const DEFAULT_KA_PURCHASE_NOTICE: KaPurchaseNoticeConfig = {
+  enabled: true,
+  minWriteTokens: 50_000,
+  chatId: '-1004351473367',
+  threadId: '9090',
+  maxPerHour: 10,
+}
+
 const DEFAULT_QUOTA_GUARD: QuotaGuardConfig = {
   enabled: false,
   blockAtUtil5h: 0.95,
@@ -398,6 +427,7 @@ const LEGACY_DEFAULTS: Omit<ResolvedKeepaliveConfig, '_source' | 'intervalClampM
   roleDetector:              DEFAULT_ROLE_WEIGHTS,
   rewriteGuard:              DEFAULT_REWRITE_GUARD,
   quotaGuard:                DEFAULT_QUOTA_GUARD,
+  kaPurchaseNotice:          DEFAULT_KA_PURCHASE_NOTICE,
   // Token-rotation defaults (REQ-13). Hot-reloadable via ~/.claude/keepalive.json.
   tokenRotationContextThreshold: 150_000,
   tokenRotationPollIntervalMs:   30_000,
@@ -688,6 +718,17 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
       : DEFAULT_QUOTA_GUARD.consentGrantPath,
   }
 
+  const kn = (raw?.kaPurchaseNotice && typeof raw.kaPurchaseNotice === 'object')
+    ? raw.kaPurchaseNotice as Record<string, unknown> : {}
+  const kaPurchaseNotice: KaPurchaseNoticeConfig = {
+    enabled: bool(kn.enabled, DEFAULT_KA_PURCHASE_NOTICE.enabled),
+    minWriteTokens: num(kn.minWriteTokens, 'kaPurchaseNotice.minWriteTokens',
+      DEFAULT_KA_PURCHASE_NOTICE.minWriteTokens, 1_000, 10_000_000),
+    chatId: typeof kn.chatId === 'string' && kn.chatId ? kn.chatId : DEFAULT_KA_PURCHASE_NOTICE.chatId,
+    threadId: typeof kn.threadId === 'string' && kn.threadId ? kn.threadId : DEFAULT_KA_PURCHASE_NOTICE.threadId,
+    maxPerHour: num(kn.maxPerHour, 'kaPurchaseNotice.maxPerHour', DEFAULT_KA_PURCHASE_NOTICE.maxPerHour, 1, 1_000),
+  }
+
   const config: ResolvedKeepaliveConfig = {
     cacheTtlMs,
     safetyMarginMs,
@@ -736,6 +777,7 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     roleDetector,
     rewriteGuard,
     quotaGuard,
+    kaPurchaseNotice,
     // Token-rotation knobs (REQ-13, CR-08). Hot-reloaded via mtime cache.
     tokenRotationContextThreshold: num(
       raw?.tokenRotationContextThreshold,

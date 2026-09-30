@@ -234,3 +234,67 @@ export function adviceFor(
   if (cacheDeadForMs !== null && cacheDeadForMs >= ttlMs) return 'restart'
   return 'grant'
 }
+
+// ─── Системная строка сурфейса ─────────────────────────────────────────────
+//
+// Вторая дверь того же хозяина: `POST :9810/system-notice` — системный голос сурфейса, без имени
+// агента, без кнопок и без побудки кого-либо (названо владельцем сурфейса 30.09.2026). Тот же
+// секрет. Тело {chatId, threadId, text}, text — markdown, рисуется богато; ответ {ok,
+// telegram_message_id, thread_id}. Первый потребитель — строка о покупке кэша прогревом
+// (ka-purchase-notice.ts), по «да» фаундера 30.09.
+
+export interface SystemNotice {
+  chatId: string
+  threadId: string
+  text: string
+  /** Приложить к строке двери управления этим агентом (memberId) — сурфейс делает это сам. */
+  menuAbout?: string
+}
+
+export interface SystemNoticeResult {
+  sent: boolean
+  reason?: string
+  messageId?: number
+}
+
+const noticeUrl = (): string =>
+  process.env.SURFACE_NOTICE_URL || 'http://127.0.0.1:9810/system-notice'
+
+let noticeSender: ((n: SystemNotice) => Promise<SystemNoticeResult>) | null = null
+/** Шов испытаний: подменить отправку системной строки; null — настоящая дверь. */
+export function _setNoticeSender(fn: ((n: SystemNotice) => Promise<SystemNoticeResult>) | null): void {
+  noticeSender = fn
+}
+
+export async function postSystemNotice(n: SystemNotice): Promise<SystemNoticeResult> {
+  if (noticeSender) return noticeSender(n)
+  if (!enabled()) return { sent: false, reason: 'выключено: PROXY_SURFACE_CARD=0' }
+  if (process.env.NODE_ENV === 'test') {
+    return { sent: false, reason: 'прогон испытаний — живая дверь не зовётся (шов: _setNoticeSender)' }
+  }
+  const key = secret()
+  if (!key) return { sent: false, reason: `секрет не найден — ни в окружении, ни в ${SECRET_FILE()}` }
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS)
+  try {
+    const res = await fetch(noticeUrl(), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-executor-secret': key },
+      body: JSON.stringify(n),
+      signal: ctl.signal,
+    })
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null
+    if (!res.ok || body?.ok === false) {
+      const named = typeof body?.error === 'string' ? body.error : `HTTP ${res.status}`
+      return { sent: false, reason: `дверь отказала: ${named}` }
+    }
+    return {
+      sent: true,
+      ...(typeof body?.telegram_message_id === 'number' ? { messageId: body.telegram_message_id } : {}),
+    }
+  } catch (e) {
+    return { sent: false, reason: ctl.signal.aborted ? `дверь молчит дольше ${TIMEOUT_MS} мс` : String(e) }
+  } finally {
+    clearTimeout(timer)
+  }
+}

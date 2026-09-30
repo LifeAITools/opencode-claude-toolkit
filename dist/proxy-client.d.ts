@@ -3,6 +3,7 @@ import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionSto
 import { type OrgIdResolver } from "./org-identity.js";
 import { OrgVault } from "./org-vault.js";
 import { type RefreshedTokens } from "./auth.js";
+import { type StopLine } from "./quota-stop-line.js";
 export interface ProxyClientConfig {
     anthropicBaseUrl?: string;
     kaCacheTtlSec?: number;
@@ -53,6 +54,7 @@ export interface RateLimitSnapshot {
     utilization5h: number | null;
     utilization7d: number | null;
 }
+export declare function live5hUtilization(reading: RateLimitSnapshot | undefined, now: number): number | null;
 export declare class ProxyClient {
     private readonly config;
     private readonly metrics;
@@ -81,6 +83,7 @@ export declare class ProxyClient {
     private readonly orgRotateConsent;
     private readonly lastServedOrg;
     private readonly rateLimitByOrg;
+    private readonly kaSpend;
     private readonly orgRefreshInflight;
     private readonly orgLastRefreshAt;
     private readonly orgRefreshCooldown;
@@ -129,11 +132,14 @@ export declare class ProxyClient {
         util5h: number | null;
         util7d: number | null;
         threshold: number;
+        thresholdBasis: StopLine["basis"];
+        kaNeedToReset: number | null;
         resetAt: number | null;
         resetInSec: number | null;
         resetAt7d: number | null;
         enabled: boolean;
     };
+    private quotaStopLineFor;
     private getTokenForSession;
     private proactiveOrgSweep;
     _runOrgProactiveSweep(): Promise<void>;

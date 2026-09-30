@@ -120,6 +120,9 @@ export interface KeepaliveStats {
     model: string;
     lineageKey?: string;
     role?: AgentRole;
+    provenBeforeFire?: boolean;
+    lineageTtlMs?: number;
+    lineageTokens?: number;
     rateLimit?: {
         status: string | null;
         claim: string | null;

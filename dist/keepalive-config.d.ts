@@ -32,6 +32,7 @@ export interface ResolvedKeepaliveConfig {
     readonly roleDetector: RoleWeights;
     readonly rewriteGuard: RewriteGuardConfig;
     readonly quotaGuard: QuotaGuardConfig;
+    readonly kaPurchaseNotice: KaPurchaseNoticeConfig;
     readonly tokenRotationContextThreshold: number;
     readonly tokenRotationPollIntervalMs: number;
     readonly orgIdCacheTtlMs: number;
@@ -53,8 +54,20 @@ export interface RewriteGuardConfig {
 export interface QuotaGuardConfig {
     readonly enabled: boolean;
     readonly blockAtUtil5h: number;
+    readonly maxBlockAtUtil5h: number;
+    readonly lagMarginUtil: number;
+    readonly readTokensPerPoint: number;
+    readonly writeTokensPerPoint: number;
+    readonly outputTokensPerPoint: number;
     readonly overrideMarker: string;
     readonly consentGrantPath: string;
+}
+export interface KaPurchaseNoticeConfig {
+    readonly enabled: boolean;
+    readonly minWriteTokens: number;
+    readonly chatId: string;
+    readonly threadId: string;
+    readonly maxPerHour: number;
 }
 export declare const RECOMMENDED_1H_CONFIG: {
     readonly cacheTtlSec: 3600;

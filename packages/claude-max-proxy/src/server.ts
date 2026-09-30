@@ -55,6 +55,7 @@ import { startHeartbeat } from './heartbeat.js'
 import { startStormWatch } from './storm-watch.js'
 import { startIdentityWatch } from './identity-watch.js'
 import { startLocalAlert } from './local-alert.js'
+import { startKaPurchaseNotice } from './ka-purchase-notice.js'
 import { readLaunchIdentity } from './launch-identity.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup, readOwnerPassport } from '@life-ai-tools/claude-code-sdk'
@@ -369,6 +370,15 @@ const stopLocalAlert = startLocalAlert((sid) => {
   }
 })
 
+// Строка фаундеру, когда прогрев купил кэш (ka-purchase-notice.ts; «да» фаундера 30.09.2026).
+const stopKaPurchaseNotice = startKaPurchaseNotice(
+  (sid) => {
+    const pid = proxyClient.listSessions().find(s => s.sessionId === sid)?.pid ?? null
+    return pid !== null ? readLaunchIdentity(pid) : null
+  },
+  (line) => console.error(`[claude-max-proxy] ${line}`),
+)
+
 // ═══ Module System ═══════════════════════════════════════════════
 //
 // Each endpoint family is a self-contained module with its own routes.
@@ -630,6 +640,7 @@ async function shutdown(): Promise<void> {
   stopStormWatch()
   stopIdentityWatch()
   stopLocalAlert()
+  stopKaPurchaseNotice()
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.
   proxyClient.stop()
   if (DRAIN_MS > 0) {

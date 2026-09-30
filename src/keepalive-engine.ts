@@ -1724,8 +1724,9 @@ export class KeepaliveEngine {
     //
     // Мёртвую ветку СНИМАЕМ, а не глушим ею весь движок: соседние кэши той же
     // сессии живы, и лишать их тепла из-за одной забытой ветки — та самая
-    // потеря, ради которой ворота и ставились. Если после отсева не осталось
-    // ничего, ниже отработает прежний путь с полной остановкой.
+    // потеря, ради которой ворота и ставились. Полная остановка — только если
+    // после отсева в РЕГИСТРЕ не осталось ни одной ветки, а не когда просто
+    // никому больше не пора стрелять.
     const deadAtGate: string[] = []
     for (const x of eligible) {
       const writtenAt = x.entry.cacheWrittenAt
@@ -1749,9 +1750,19 @@ export class KeepaliveEngine {
       this.notifyRegistryChanged()
       const survivors = new Set(this.registry.keys())
       eligible = eligible.filter((x) => survivors.has(x.entry.lineageKey))
+      if (eligible.length === 0 && this.registry.size > 0) {
+        // К выстрелу подошла только мёртвая ветка, но в регистре остались
+        // ЖИВЫЕ — им просто ещё рано. Их не трогаем: ждём следующего тика.
+        // До 1.1.27 здесь стояло одно `eligible.length === 0`, и «никто не
+        // подошёл к выстрелу сейчас» читалось как «никто не жив»: 30.09
+        // kiberos-app потерял главную ветку с 48 минутами жизни кэша вместе с
+        // мёртвой соседкой, и через полтора часа сторож остановил его на
+        // перезаписи ~472 тыс. токенов (замер vibe-telegram-mcp-service-owner).
+        return
+      }
       if (eligible.length === 0) {
-        // Живых веток не осталось — дальше прежний путь: движок замолкает и
-        // называет причину, как и раньше.
+        // Живых веток не осталось вовсе — дальше прежний путь: движок
+        // замолкает и называет причину, как и раньше.
         this.logClearDiag('cache_dead_at_fire_gate', {
           cacheAgeMs: this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1,
           cacheTtlMs: this.cacheTtlMs,
@@ -3089,6 +3100,11 @@ export class KeepaliveEngine {
 
   /** @internal — for tests: age every lineage's warm clock by `ms`, the only
    *  way to make a lineage fire-eligible without faking wall time. */
+  /** @internal — состарить ОДНУ ветку (простой считается по её собственным часам). */
+  _ageLineage(key: string, ms: number): void {
+    const st = this.lineageStats.get(key)
+    if (st) { st.lastWarmedAt -= ms; st.lastSeenAt -= ms }
+  }
   _ageLineages(ms: number): void {
     for (const st of this.lineageStats.values()) {
       st.lastWarmedAt -= ms

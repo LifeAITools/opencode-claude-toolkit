@@ -1,4 +1,6 @@
 [test]
 # Preload runs once before any test module is imported. Sets
 # CLAUDE_KEEPALIVE_CONFIG_PATH so SSOT reads a fixture, not host config.
-preload = ["./test/_setup-keepalive-fixture.ts"]
+# The opencode plugin's tests also run from here: its setup keeps them out of the
+# live fleet heartbeat dir and the lat-context registry (see that file).
+preload = ["./test/_setup-keepalive-fixture.ts", "./packages/opencode-signal-wire/test-setup-heartbeat-dir.ts"]

@@ -136,4 +136,36 @@ describe('у каждого снимка своё время, от которо�
     expect(seen.keys).not.toContain('sys-stale')  // чужая свежесть её не воскресила
     e.stop()
   })
+
+  test('мёртвая ветка, подошедшая к выстрелу одна, не уносит живые, которым ещё рано', async () => {
+    // 30.09.2026, kiberos-app (сессия 193c3134): к выстрелу подошла ТОЛЬКО
+    // мёртвая ветка, живая главная (48 мин жизни кэша) ещё не простаивала
+    // достаточно. После снятия мёртвой список подошедших опустел — и движок
+    // прочёл это как «живых нет»: clearRegistry()+stop(). Главная пропала,
+    // через полтора часа сторож отбил перезапись ~472 тыс. токенов.
+    let disarmed = 0
+    const seen = { keys: [] as string[] }
+    const e = new KeepaliveEngine({
+      config: { cacheTtlMs: 3_600_000, intervalMs: 60_000 },
+      getToken: async () => 'tok',
+      doFetch: buyingFetch(seen) as any,
+      getRateLimitInfo: () => rl,
+      onDisarmed: () => { disarmed++ },
+    } as any)
+
+    const stale = arm(e, 'stale')
+    e._setLineageCacheWrittenAt(stale, Date.now() - 3_600_000 - 60_000)  // мёртв
+    const fresh = arm(e, 'fresh')
+    e._setLineageCacheWrittenAt(fresh, Date.now() - 12 * 60_000)          // жив, 48 мин впереди
+
+    e._ageLineage(stale, 3_600_000)  // пора стрелять только мёртвой
+    await e._tick()
+
+    const keys = Array.from(e._registry.keys())
+    expect(keys).not.toContain(stale)   // мёртвая снята, как и прежде
+    expect(keys).toContain(fresh)       // СУТЬ: живая осталась в регистре
+    expect(disarmed).toBe(0)            // и движок не разоружён
+    expect(seen.keys).toHaveLength(0)   // выстрелов не было: живой ещё рано
+    e.stop()
+  })
 })

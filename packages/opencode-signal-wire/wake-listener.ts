@@ -1595,6 +1595,47 @@ export function discoveryFilePath(dir: string, pid: number, bindingId: string | 
   return byBinding
 }
 
+/**
+ * Есть ли у этого процесса ОКНО (TUI). У `opencode serve | web | run | acp` окна нет: там сессию для
+ * побудки можно открыть самим. В окне — нельзя: 30.09 пилот SynqTalk работал в окне в сессии
+ * `ses_f0e72908…`, а приёмник, не узнав её, открыл для письма вторую, `ses_f0da8e6f…`, и один агент
+ * отвечал человеку из двух разговоров сразу, противореча себе (замер vibe-yjs-todo-sync-owner).
+ * Одна личность — один разговор.
+ */
+let _argvOverride: string[] | null = null
+function processArgv(): readonly string[] { return _argvOverride ?? process.argv }
+
+export function launchedWithWindow(argv: readonly string[]): boolean {
+  const headless = new Set(['serve', 'web', 'run', 'acp'])
+  return !argv.slice(1).some((a) => headless.has(a))
+}
+
+/**
+ * Отдать текст в окно: вставить в строку ввода и отправить. Окно пишет в свою текущую сессию, а если
+ * её ещё нет — открывает её само, на глазах у человека, и она остаётся единственной.
+ */
+async function submitToWindow(text: string): Promise<boolean> {
+  const tui = _sdkClient?.tui
+  if (!tui) { dbg('WINDOW_SUBMIT_FAILED no tui client'); return false }
+  try {
+    const a = await tui.appendPrompt({ body: { text } })
+    if (a?.error) { dbg(`WINDOW_SUBMIT_FAILED append: ${JSON.stringify(a.error)}`); return false }
+    const r = await tui.submitPrompt()
+    if (r?.error) { dbg(`WINDOW_SUBMIT_FAILED submit: ${JSON.stringify(r.error)}`); return false }
+    dbg('WINDOW_SUBMITTED wake delivered through the window (no session known yet)')
+    return true
+  } catch (e: any) {
+    dbg(`WINDOW_SUBMIT_FAILED ${e?.message}`)
+    return false
+  }
+}
+
+/** Открыть сессию для побудки — только без окна; в окне сессию заводит само окно (submitToWindow). */
+async function openSessionIfHeadless(reason: string): Promise<string | null> {
+  if (launchedWithWindow(processArgv())) return null
+  return createSessionForWake(reason)
+}
+
 /** Why an actionable wake did or did not reach the agent — the router needs the difference. */
 export type InjectOutcome = 'ok' | 'no_session' | 'failed'
 
@@ -1602,8 +1643,17 @@ async function injectWakeEvent(
   event: WakeEvent,
   sessionId: string,
 ): Promise<InjectOutcome> {
-  const resolvedSessionId = (await resolveSessionId(sessionId)) ?? (await createSessionForWake(`${event.type} ${event.eventId}`))
+  const resolvedSessionId = (await resolveSessionId(sessionId)) ?? (await openSessionIfHeadless(`${event.type} ${event.eventId}`))
   if (!resolvedSessionId) {
+    if (launchedWithWindow(processArgv())) {
+      await syncLifecycle({ action: 'injecting', event, currentTaskId: extractWakeTaskId(event) })
+      if (await submitToWindow(formatWakeMessage(event, _agentIdentity))) {
+        await syncTaskStart(event, 'start_injected')
+        await syncLifecycle({ action: 'online', event, currentTaskId: extractWakeTaskId(event) })
+        return 'ok'
+      }
+      return 'failed'
+    }
     dbg(`INJECT_DEFERRED_NO_SESSION event=${event.eventId}`)
     return 'no_session'
   }
@@ -2128,7 +2178,8 @@ export async function startWakeListener(
         knownSessionId: () => (_cachedSessionId && _cachedSessionId !== 'unknown' ? _cachedSessionId : null),
         isBusy: isAgentBusy,
         resolveSession: () => resolveSessionId(config.sessionId),
-        openSession: () => createSessionForWake('file-door'),
+        openSession: () => openSessionIfHeadless('file-door'),
+        sendToWindow: launchedWithWindow(processArgv()) ? submitToWindow : undefined,
         send: async (sessionId, text) => {
           if (!_sdkClient) { dbg('FILE_WAKE_SEND_FAILED no sdkClient'); return false }
           const { error } = await _sdkClient.session.promptAsync({
@@ -2145,6 +2196,7 @@ export async function startWakeListener(
         lastFileDoorKept = outcome.reason
       } else {
         lastFileDoorKept = ''
+        if (outcome.kind === 'window') dbg(`FILE_WAKE_TO_WINDOW delivered=${outcome.result.delivered} kept=${outcome.result.kept}`)
         if (outcome.kind === 'drained') dbg(`FILE_WAKE_DRAINED session=${outcome.sessionId} delivered=${outcome.result.delivered} kept=${outcome.result.kept} bad=${outcome.result.bad}`)
       }
     } catch (e: any) {
@@ -2272,7 +2324,8 @@ export function getSubscriptionState(): {
 // listener writes a real discovery file the live router would route to.
 
 /** Set the module state injectWakeEvent reads; `null` resets it. */
-export function _setInjectStateForTests(state: { sdkClient: any; agentDirectory: string | null; sessionId?: string | null } | null): void {
+export function _setInjectStateForTests(state: { sdkClient: any; agentDirectory: string | null; sessionId?: string | null; argv?: string[] } | null): void {
+  _argvOverride = state?.argv ?? null
   _sdkClient = state?.sdkClient ?? null
   _agentDirectory = state?.agentDirectory ?? null
   _cachedSessionId = state?.sessionId ?? null

@@ -58,6 +58,24 @@ describe('opencode: файловая дверь побудки', () => {
     }
   })
 
+  test('окно без сессии — одно письмо уходит в окно, остальные ждут, пока окно назовёт сессию', async () => {
+    const { home, file } = setup()
+    writeFileSync(file.replace('0001', '0002'), JSON.stringify({ summary: 'второе', member_id: 'm', event_id: 'e2' }))
+    const toWindow: string[] = []
+    const { d, sent, receipts } = deps(home, {
+      resolveSession: async () => null,
+      openSession: async () => null,
+      sendToWindow: async (t) => { toWindow.push(t); return true },
+    })
+    const out = await pollFileDoor(d)
+    expect(out.kind).toBe('window')
+    expect(toWindow).toHaveLength(1)
+    expect(sent).toHaveLength(0)
+    expect(receipts).toEqual(['e1'])
+    expect(existsSync(file)).toBe(false)
+    expect(existsSync(file.replace('0001', '0002'))).toBe(true)
+  })
+
   test('агент занят — письмо лежит в файле, сервер о сессии не спрашивают', async () => {
     const { home, file } = setup()
     let asked = false

@@ -13,8 +13,9 @@
  * удаляет файл только ПОСЛЕ того, как opencode принял текст. Пока агент занят, сессии нет или
  * отправка упала — письмо лежит в файле, а не в памяти процесса: ни сбой, ни смерть его не теряют.
  *
- * Кому писать — те же правила, что у HTTP-двери (wake-listener.ts): одна сессия каталога — ей;
- * ни одной — открыть; несколько — не угадывать.
+ * Кому писать — те же правила, что у HTTP-двери (wake-listener.ts): известная или единственная
+ * сессия — ей; несколько — не угадывать; ни одной — в окно, если оно есть (окно заведёт сессию само),
+ * и открыть новую, только если окна нет. Сессию рядом с окном не заводим: один агент — один разговор.
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { drainWakeDirsAsync, postReceipt, wakeDirs, type DrainResult, type WakeEnvelope } from '@kiberos/signal-wire-core'
@@ -27,8 +28,13 @@ export interface FileDoorDeps {
   isBusy: () => Promise<boolean>
   /** Сессия для письма: известная или единственная в каталоге агента; неоднозначно — null. */
   resolveSession: () => Promise<string | null>
-  /** Открыть сессию, если в каталоге агента нет ни одной; иначе null. */
+  /** Открыть сессию, если в каталоге агента нет ни одной и у процесса НЕТ окна; иначе null. */
   openSession: () => Promise<string | null>
+  /**
+   * Процесс с окном и без известной сессии: отдать письмо в окно, оно заведёт сессию само. За проход
+   * уходит ОДНО письмо — остальные дождутся, когда окно назовёт свою сессию.
+   */
+  sendToWindow?: (text: string) => Promise<boolean>
   /**
    * Отправить текст ходом в сессию и дождаться, что opencode его ПРИНЯЛ (не ответа модели).
    * true — файл удаляется и уходит квитанция; false или исключение — письмо лежит до следующего прохода.
@@ -43,6 +49,7 @@ export type FileDoorOutcome =
   | { kind: 'idle' }
   | { kind: 'kept'; reason: 'busy' | 'no_session' }
   | { kind: 'drained'; sessionId: string; result: DrainResult }
+  | { kind: 'window'; result: DrainResult }
 
 function hasWakeFiles(dirs: string[]): boolean {
   for (const d of dirs) {
@@ -61,7 +68,21 @@ export async function pollFileDoor(deps: FileDoorDeps): Promise<FileDoorOutcome>
   if (!hasWakeFiles(dirs)) return { kind: 'idle' }
   if (await deps.isBusy()) return { kind: 'kept', reason: 'busy' }
   const sessionId = (await deps.resolveSession()) ?? (await deps.openSession())
-  if (!sessionId) return { kind: 'kept', reason: 'no_session' }
+  if (!sessionId) {
+    const toWindow = deps.sendToWindow
+    if (!toWindow) return { kind: 'kept', reason: 'no_session' }
+    let sent = false
+    const result = await drainWakeDirsAsync(dirs, {
+      deliver: async (text) => {
+        if (sent) return false
+        sent = await toWindow(text)
+        return sent
+      },
+      receipt: deps.receipt ?? ((w) => postReceipt(w)),
+      log: deps.log,
+    })
+    return { kind: 'window', result }
+  }
   const result = await drainWakeDirsAsync(dirs, {
     deliver: (text) => deps.send(sessionId, text),
     receipt: deps.receipt ?? ((w) => postReceipt(w)),

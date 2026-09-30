@@ -40,6 +40,7 @@ import {
 import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
 import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
+import { sessionFromArgv } from './session-argv'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -450,7 +451,10 @@ export default {
     const pkg = readOwnPackage()
     const cwd = input.directory ?? process.cwd()
     const serverUrl = getServerUrl(input)
-    const sessionId = input.sessionID ?? 'unknown'
+    // Номер сессии: от opencode, иначе из командной строки пускателя (`--session <id>`) — по папке
+    // продолженную сессию не найти, если она начата в другом месте проекта (session-argv.ts).
+    const argvSessionId = sessionFromArgv(process.argv)
+    const sessionId = input.sessionID ?? argvSessionId ?? 'unknown'
     // Номер экземпляра: при неизвестной сессии — от места агента (KIBEROS_BINDING_ID), а не
     // 'opencode:unknown:<pid>' — живая проба 2026-09-24 видела ровно это в записи приёмника.
     const instanceAnchor = sessionId !== 'unknown' ? sessionId : (process.env.KIBEROS_BINDING_ID || sessionId)

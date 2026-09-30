@@ -3236,13 +3236,29 @@ export class KeepaliveEngine {
           inputTokens: e.inputTokens,
           hasCacheControl: e.hasCacheControl,
           provenAlive: false,   // resurrected — nothing has proven it yet
-          // Воскрешённая ветка наследует время записи из сохранённого
-          // состояния: другого достоверного мы о ней не знаем, а поставить
-          // «сейчас» значило бы омолодить мёртвый префикс и заплатить за него
-          // первым же выстрелом — ровно тот случай, что эти часы и ловят.
-          cacheWrittenAt: state.cacheWrittenAt,
+          // Воскрешённая ветка берёт СВОЁ сохранённое время записи. Общее
+          // время сессии — это время самой свежей ветки: отдать его всем значило
+          // омолодить мёртвые и купить их первым же выстрелом после перезапуска
+          // (замер 30.09.2026, PersistedRegistryEntry.cacheWrittenAt). Снимки
+          // прежних версий своих часов не несут — для них остаётся общее время,
+          // иначе ближайшая выкатка оставила бы без прогрева все сессии разом.
+          cacheWrittenAt: typeof e.cacheWrittenAt === 'number' && e.cacheWrittenAt > 0
+            ? e.cacheWrittenAt
+            : state.cacheWrittenAt,
           lastFireColdWrote: false,
         })
+        if (typeof e.lastWarmedAt === 'number' && e.lastWarmedAt > 0 && !this.lineageStats.has(e.lineageKey)) {
+          // Своё время простоя: иначе ветка считается простаивающей от общего
+          // lastActivityAt и попадает под выстрел вместе со всеми.
+          const seen = typeof e.lastSeenAt === 'number' && e.lastSeenAt > 0 ? e.lastSeenAt : e.lastWarmedAt
+          this.lineageStats.set(e.lineageKey, {
+            firstSeenAt: typeof e.firstSeenAt === 'number' && e.firstSeenAt > 0 ? e.firstSeenAt : seen,
+            lastSeenAt: seen,
+            lastWarmedAt: e.lastWarmedAt,
+            maxToolCount: 0,
+            resumedAfterIdle: false,
+          })
+        }
       }
       if (this.registry.size > 0) {
         this.notifyRegistryChanged()
@@ -3282,6 +3298,12 @@ export class KeepaliveEngine {
         ttlEverObserved: this.ttlEverObserved,
         lastKnownCacheTokensByModel: Object.fromEntries(this.lastKnownCacheTokensByModel),
         registry: Array.from(this.registry.values()).map((e) => ({
+          // Свои часы ветки — см. PersistedRegistryEntry.cacheWrittenAt.
+          cacheWrittenAt: e.cacheWrittenAt,
+          ...(() => {
+            const st = this.lineageStats.get(e.lineageKey)
+            return st ? { lastSeenAt: st.lastSeenAt, lastWarmedAt: st.lastWarmedAt, firstSeenAt: st.firstSeenAt } : {}
+          })(),
           body: e.body,
           // Credentials are NEVER written to disk. The header is rebuilt from
           // getToken() on every fire anyway, so persisting it bought nothing and

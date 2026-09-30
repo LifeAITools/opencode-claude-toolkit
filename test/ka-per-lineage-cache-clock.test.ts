@@ -168,4 +168,40 @@ describe('у каждого снимка своё время, от которо�
     expect(seen.keys).toHaveLength(0)   // выстрелов не было: живой ещё рано
     e.stop()
   })
+
+  test('после перезапуска мёртвая ветка остаётся мёртвой: у снимка на диске СВОИ часы ветки', async () => {
+    // 30.09.2026: за 40 часов прогрев писал в кэш только сразу после выкаток —
+    // воскрешённые ветки получали общее время сессии (время самой свежей) и
+    // первый выстрел покупал давно мёртвые: 86 110, 324 830, 64 664, 345 324.
+    const seenBefore = { keys: [] as string[] }
+    const before = mkEngine(seenBefore)
+    const stale = arm(before, 'stale')
+    before._setLineageCacheWrittenAt(stale, Date.now() - 3_600_000 - 60_000)  // мёртв
+    const fresh = arm(before, 'fresh')
+    before._setLineageCacheWrittenAt(fresh, Date.now() - 5 * 60_000)           // жив
+    const saved = JSON.parse(JSON.stringify(before.serializeState()))          // как на диск и обратно
+    before.stop()
+
+    const seen = { keys: [] as string[] }
+    const after = mkEngine(seen)
+    after.revive(saved)
+    after._ageLineages(3_600_000)   // обеим пора стрелять по простою
+    await after._tick()
+
+    expect(seen.keys).not.toContain('sys-stale')   // СУТЬ: мёртвую не купили
+    expect(Array.from(after._registry.keys())).not.toContain(stale)
+    after.stop()
+  })
+
+  test('снимок прежней версии без своих часов восстанавливается как раньше — прогрев не пропадает', () => {
+    const e = mkEngine({ keys: [] })
+    const key = arm(e, 'legacy')
+    const saved = JSON.parse(JSON.stringify(e.serializeState()))
+    e.stop()
+    for (const r of saved.registry) { delete r.cacheWrittenAt; delete r.lastSeenAt; delete r.lastWarmedAt; delete r.firstSeenAt }
+    const after = mkEngine({ keys: [] })
+    after.revive(saved)
+    expect(Array.from(after._registry.keys())).toContain(key)
+    after.stop()
+  })
 })

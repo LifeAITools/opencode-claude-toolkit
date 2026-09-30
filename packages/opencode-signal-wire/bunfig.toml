@@ -1,0 +1,4 @@
+[test]
+# Preload runs once before any test module is imported. Points the fleet heartbeat
+# directory at a scratch dir, so a test session never shows up as a live agent.
+preload = ["./test-setup-heartbeat-dir.ts"]

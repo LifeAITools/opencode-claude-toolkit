@@ -22,6 +22,8 @@ import {
   coreIdentityTag,
   contextToEvent,
   translateLegacyRules,
+  touchHeartbeat,
+  HARNESS,
   type Rule as CoreRule,
   type SignalWireEvent,
   type EmitResult,
@@ -813,6 +815,40 @@ export class SignalWire {
   private attachRuntimeMeta(event: SignalWireEvent): void {
     this.refreshTokensFromStatsFile()
     event.runtimeMeta = this.getRuntimeMeta() as SignalWireEvent['runtimeMeta']
+    this.touchLife(event)
+  }
+
+  /**
+   * След жизни сессии (договор стыка, часть 5): одна отметка на сессию в общем каталоге флота,
+   * перезаписываемая на каждом событии конвейера. По ней роутер побудок и поверхность Telegram
+   * видят, что агент жив; без неё живой агент opencode числится «агента сейчас нет».
+   * Все четыре пути в конвейер идут через attachRuntimeMeta, поэтому звать здесь — значит на
+   * каждом событии. Формат и каталог — ядра (`touchHeartbeat`), своего у адаптера нет.
+   * Нет настоящего номера сессии — отметки нет. Ошибка файловой системы — строка журнала, не
+   * падение хода.
+   */
+  private touchLife(event: SignalWireEvent): void {
+    const sessionId = this.sessionId && this.sessionId !== 'unknown' ? this.sessionId : null
+    if (!sessionId) return
+    const measured = this.contextPosition > 0 && this.lastContextWindow != null && this.lastModel
+    try {
+      touchHeartbeat({
+        harness: HARNESS.OPENCODE,
+        sessionId,
+        cwd: process.cwd(),
+        event: event.type,
+        context: measured
+          ? {
+              tokens: this.contextPosition,
+              window: this.lastContextWindow!,
+              percent: Math.min(100, Math.round((this.contextPosition / this.lastContextWindow!) * 100)),
+              model: this.lastModel!,
+            }
+          : null,
+      })
+    } catch (e) {
+      swLog(`HEARTBEAT_WRITE_FAILED pid=${process.pid} session=${sessionId} err=${(e as Error)?.message ?? String(e)}`)
+    }
   }
 
   evaluate(ctx: SignalWireContext): SignalWireResult | null {

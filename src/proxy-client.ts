@@ -1316,6 +1316,10 @@ export class ProxyClient {
      *  по подписке бесплатно, и цены API к нам не применимы вовсе. */
     util7d: number | null
     threshold: number
+    /** Откуда линия: измерена по расходу прогрева или зажата границами (src/quota-stop-line.ts). */
+    thresholdBasis: StopLine['basis']
+    /** Сколько окна прогрев съест до сброса по текущему расходу; null — не измерено. */
+    kaNeedToReset: number | null
     resetAt: number | null
     resetInSec: number | null
     resetAt7d: number | null
@@ -1335,6 +1339,8 @@ export class ProxyClient {
       util5h,
       util7d: reading?.utilization7d ?? null,
       threshold: stop.line,
+      thresholdBasis: stop.basis,
+      kaNeedToReset: stop.kaNeedToReset,
       resetAt,
       resetInSec: resetAt ? Math.max(0, Math.round((resetAt * 1000 - now) / 1000)) : null,
       resetAt7d: reading?.resetAt7d ?? null,

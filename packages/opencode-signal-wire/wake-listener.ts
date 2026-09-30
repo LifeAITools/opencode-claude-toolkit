@@ -28,6 +28,7 @@ import type {
 import { DISCOVERY_DIR, discoveryDir, WAKE_EVENT_TYPES, WARM_CHANNEL_TTL_MS } from './wake-types'
 import { FNV_32_PRIME } from './domain-constants'
 import { pollFileDoor } from './wake-file-door'
+import { hasWindow } from './launch-kind'
 
 // ─── Constants ────────────────────────────────────────────
 
@@ -1606,8 +1607,7 @@ let _argvOverride: string[] | null = null
 function processArgv(): readonly string[] { return _argvOverride ?? process.argv }
 
 export function launchedWithWindow(argv: readonly string[]): boolean {
-  const headless = new Set(['serve', 'web', 'run', 'acp'])
-  return !argv.slice(1).some((a) => headless.has(a))
+  return hasWindow(argv)
 }
 
 /**
@@ -1634,6 +1634,21 @@ async function submitToWindow(text: string): Promise<boolean> {
 async function openSessionIfHeadless(reason: string): Promise<string | null> {
   if (launchedWithWindow(processArgv())) return null
   return createSessionForWake(reason)
+}
+
+/**
+ * На SIGTERM/SIGINT — убрать за собой и НЕ отменить выход. Обработчик сигнала в Node/Bun заменяет выход
+ * по умолчанию: прежний `process.on('SIGTERM', cleanup)` прибирал и оставлял процесс жить — 30.09
+ * `timeout 240 opencode run …` проработал больше 6 минут, снял только kill -9. Если сигнал слушает
+ * кто-то ещё (сам opencode), выход — его забота; если никто — повторяем сигнал уже без себя.
+ */
+export function exitAfterCleanupOnSignal(cleanup: () => void): void {
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(sig, () => {
+      try { cleanup() } catch { /* уборка — лучшее усилие, выход важнее */ }
+      if (process.listenerCount(sig) === 0) process.kill(process.pid, sig)
+    })
+  }
 }
 
 /** Why an actionable wake did or did not reach the agent — the router needs the difference. */
@@ -2226,8 +2241,7 @@ export async function startWakeListener(
   }
 
   process.on('exit', cleanup)
-  process.on('SIGTERM', cleanup)
-  process.on('SIGINT', cleanup)
+  exitAfterCleanupOnSignal(cleanup)
 
   // ─── Return handle ───────────────────────────
 

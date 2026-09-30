@@ -391,8 +391,9 @@ export interface SignalWireConfig {
    * След жизни и привязка сессии к агенту — их ставит конвейер ядра на каждом событии с настоящим
    * номером сессии (договор стыка, часть 5; ядро ≥ 0.16.0). По умолчанию — из окружения пускателя
    * kiberos; тесты передают `attach: false`, чтобы не писать в живой реестр lat-context.
+   * `false` — ни следа, ни привязки: разовый `opencode run` не место агента (launch-kind.ts).
    */
-  lifeTrace?: LifeTraceConfig
+  lifeTrace?: LifeTraceConfig | false
 }
 
 // ─── Adapter ───────────────────────────────────────────────
@@ -465,7 +466,7 @@ export class SignalWire {
       stateBackend: new MemoryBackend(),
       sessionId: this.sessionId || 'opencode-claude',
       serverUrl: config.serverUrl,
-      lifeTrace: config.lifeTrace ?? {
+      lifeTrace: config.lifeTrace === false ? undefined : config.lifeTrace ?? {
         ...lifeTraceFromEnv(HARNESS.OPENCODE),
         context: (event) => this.heartbeatContext(event),
         onAttach: (r, sid) => swLog(`SESSION_ATTACH status=${r.status} session=${sid} detail="${r.detail}"`),

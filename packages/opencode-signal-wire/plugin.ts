@@ -41,6 +41,7 @@ import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
 import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
+import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
@@ -166,9 +167,11 @@ export function warnIfExecSuppressedInLiveSession(): void {
   console.error(line)
 }
 
-function createSignalWire(serverUrl: string, sessionId: string, sdkClient: any): SignalWire {
+function createSignalWire(serverUrl: string, sessionId: string, sdkClient: any, oneShot: boolean): SignalWire {
   warnIfExecSuppressedInLiveSession()
-  const signalWire = new SignalWire({ serverUrl, sessionId })
+  // Разовый `opencode run` не место агента: без отметки жизни и без привязки сессии к агенту — иначе
+  // прогон, запущенный из сессии агента, перепишет в реестре его настоящую сессию своей.
+  const signalWire = new SignalWire({ serverUrl, sessionId, ...(oneShot ? { lifeTrace: false as const } : {}) })
   signalWire.setSdkClient(sdkClient)
   return signalWire
 }
@@ -502,6 +505,9 @@ export default {
     // Номер сессии: от opencode, иначе из командной строки пускателя (`--session <id>`) — по папке
     // продолженную сессию не найти, если она начата в другом месте проекта (session-argv.ts).
     const argvSessionId = sessionFromArgv(process.argv)
+    // Разовый прогон (`opencode run`) — правила signal-wire работают, но двери агента не открываются:
+    // ни приёмника побудок, ни файловой двери, ни наблюдателя квоты, ни следа, ни привязки (launch-kind.ts).
+    const oneShot = isOneShotRun(process.argv)
     const sessionId = input.sessionID ?? argvSessionId ?? 'unknown'
     // Номер экземпляра: при неизвестной сессии — от места агента (KIBEROS_BINDING_ID), а не
     // 'opencode:unknown:<pid>' — живая проба 2026-09-24 видела ровно это в записи приёмника.
@@ -604,7 +610,7 @@ export default {
       subscribe: subscribe ?? 'default',
     })
 
-    const signalWire = serverUrl ? createSignalWire(serverUrl, sessionId, input.client) : null
+    const signalWire = serverUrl ? createSignalWire(serverUrl, sessionId, input.client, oneShot) : null
     logStep('SIGNAL_WIRE_ENGINE', {
       created: Boolean(signalWire),
       reason: signalWire ? 'serverUrl_present' : 'serverUrl_absent',
@@ -720,7 +726,9 @@ export default {
     let quotaHandle: QuotaWatcherHandle | null = null
 
     const singletons = processSingletons()
-    if (serverUrl) {
+    if (oneShot) {
+      logStep('WAKE_LISTENER_SKIPPED', { reason: 'one_shot_run', sessionId })
+    } else if (serverUrl) {
       let startError: unknown = null
       const { handle, shared } = processWakeListener(() => {
         logStep('WAKE_LISTENER_STARTING', { sessionId, agentInstanceId })
@@ -770,7 +778,9 @@ export default {
     // when serverUrl is absent — quota-status.json is local and only needs
     // signalWire engine for routing. Will degrade gracefully (direct-
     // inject via injectContextEvent) if signalWire is null.
-    if (singletons.quota !== undefined) {
+    if (oneShot) {
+      logStep('QUOTA_WATCHER_SKIPPED', { reason: 'one_shot_run' })
+    } else if (singletons.quota !== undefined) {
       quotaHandle = singletons.quota
       logStep('QUOTA_WATCHER_SHARED', { pid: process.pid })
     } else try {

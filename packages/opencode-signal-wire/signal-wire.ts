@@ -419,6 +419,8 @@ export class SignalWire {
   private lastQuotaUtil5h: number | undefined
   private lastQuotaUtil7d: number | undefined
   private lastContextWindow: number | undefined
+  /** Окна моделей из каталога opencode, по id модели. */
+  private readonly catalogWindows = new Map<string, number>()
 
   // ─── Diagnostic logging state (added 2026-05-13) ─────────
   // Track last-logged context snapshot to rate-limit CTX_SNAPSHOT lines:
@@ -557,7 +559,9 @@ export class SignalWire {
     // contextPercent was 5× inflated. At 142K real tokens, agents saw "71%
     // full" instead of "14% full", causing premature session wrap-up.
     // Bug fix 2026-05-13.
-    const window = resolveContextWindow(modelId)
+    // Каталог opencode (trackContextWindow) — первым: он знает любую модель провайдера, а таблица
+    // ниже — только модели Claude.
+    const window = this.catalogWindows.get(modelId) ?? resolveContextWindow(modelId)
     if (window) this.lastContextWindow = window
     // else: leave previous value — don't overwrite with stale data
 
@@ -565,6 +569,19 @@ export class SignalWire {
     // mismatches between processes. One line per pid per unique model.
     if (prevModel !== modelId || prevWindow !== this.lastContextWindow) {
       swLog(`TRACK_MODEL pid=${process.pid} session=${this.sessionId || '?'} model=${modelId} window=${this.lastContextWindow ?? 'unknown'} resolved_from=${window ? 'table' : 'fallback'}`)
+    }
+  }
+
+  /**
+   * Окно модели из каталога opencode (`limit.context`) — источник важнее встроенной таблицы, которая
+   * знает только модели Claude. Применяется сразу, если модель уже текущая.
+   */
+  trackContextWindow(modelId: string, window: number): void {
+    if (typeof modelId !== 'string' || !modelId || !(window > 0)) return
+    this.catalogWindows.set(modelId, window)
+    if (this.lastModel === modelId && this.lastContextWindow !== window) {
+      this.lastContextWindow = window
+      swLog(`TRACK_MODEL pid=${process.pid} session=${this.sessionId || '?'} model=${modelId} window=${window} resolved_from=opencode_catalog`)
     }
   }
 

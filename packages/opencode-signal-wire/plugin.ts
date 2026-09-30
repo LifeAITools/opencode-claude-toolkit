@@ -41,6 +41,7 @@ import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
 import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
+import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -621,6 +622,7 @@ export default {
       try { setCurrentSignalWire(signalWire as any) } catch { /* */ }
     }
 
+    const resolveModelWindow = createModelWindowResolver(() => input.client?.config?.providers?.())
     const signalWireEngine = signalWire
       ? {
           evaluateExternal: async (event: any) => {
@@ -791,6 +793,18 @@ export default {
           eventType,
           keys: event && typeof event === 'object' ? Object.keys(event).slice(0, 10) : [],
         })
+        const usage = usageFromMessageEvent(event)
+        if (usage && signalWire && (!boundSessionId || usage.sessionId === boundSessionId)) {
+          // Только своя сессия: помощники в том же процессе шлют свои ответы, и их заполнение — не наше.
+          try {
+            signalWire.trackModel(usage.modelId)
+            const window = await resolveModelWindow(usage.providerId, usage.modelId)
+            if (window) signalWire.trackContextWindow(usage.modelId, window)
+            signalWire.trackTokens({ inputTokens: usage.promptTokens })
+          } catch (e: any) {
+            logStep('CONTEXT_USAGE_TRACK_FAILED', { error: e?.message ?? String(e) })
+          }
+        }
         if (eventType === 'session.created' || eventType === 'session.updated') {
           const session = sessionFromEvent(event)
           if (session.id && (!session.directory || session.directory === cwd)) {
@@ -938,24 +952,9 @@ export default {
           if (typeof modelId === 'string' && modelId.length > 0) {
             try { (signalWireEngine as any).trackModel?.(modelId) } catch { /* tracking is best-effort */ }
           }
-          // Coarse context-position estimate from text part lengths.
-          // ~4 chars/token (Anthropic Claude tokenizer rule of thumb).
-          // This is a fallback so context-percent rules can fire even when
-          // sdk-provided trackTokens is not wired. Real usage data (from
-          // RAW_USAGE log) supersedes this when sdk hooks land.
-          try {
-            let totalChars = 0
-            const parts = (output as any)?.parts
-            if (Array.isArray(parts)) {
-              for (const p of parts) {
-                const t = (p as any)?.text
-                if (typeof t === 'string') totalChars += t.length
-              }
-            }
-            if (totalChars > 0) {
-              ;(signalWireEngine as any).trackTokens?.({ inputTokens: Math.ceil(totalChars / 4) })
-            }
-          } catch { /* best-effort */ }
+          // Заполнение контекста НЕ оценивается здесь по длине сообщения человека: до 0.3.24 так и было
+          // (символы/4), и «контекстом» становился размер одной реплики. Настоящий замер приходит
+          // событием message.updated (context-usage.ts), а для запросов через прокси — из его журнала.
           const results = await signalWireEngine.evaluateHook(event)
           const matched = results.length
           if (matched > 0) {

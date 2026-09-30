@@ -117,6 +117,7 @@ import {
 } from './ka-snapshot-store.js'
 import { readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
+import { KaSpendMeter, quotaStopLine, type StopLine } from './quota-stop-line.js'
 import { join } from 'path'
 import {
   HEADER_AUTHORIZATION,
@@ -622,6 +623,9 @@ export class ProxyClient {
    *  account that has 2/3 of its window free — measured 2026-09-03, when one
    *  account sat at 0.98 while the other was at 0.33. */
   private readonly rateLimitByOrg: Map<string, RateLimitSnapshot> = new Map()
+  /** Сколько окна ест прогрев по каждому аккаунту за скользящий час — для линии сторожа запаса
+   *  (src/quota-stop-line.ts). Пишется на каждом KA_FIRE_COMPLETE. */
+  private readonly kaSpend = new KaSpendMeter()
   /** Single-flight refresh guard per orgId. */
   private readonly orgRefreshInflight: Map<string, Promise<void>> = new Map()
   /** Last successful refresh (epoch ms) per orgId — the H2 min-interval floor. */
@@ -1324,17 +1328,35 @@ export class ProxyClient {
     const reading = orgId ? this.rateLimitByOrg.get(orgId) : undefined
     const util5h = live5hUtilization(reading, now)
     const resetAt = util5h === null ? null : (reading?.resetAt ?? null)
+    const stop = this.quotaStopLineFor(orgId, resetAt, now)
     return {
-      holding: qGuard.enabled && util5h !== null && util5h >= qGuard.blockAtUtil5h,
+      holding: qGuard.enabled && util5h !== null && util5h >= stop.line,
       orgId,
       util5h,
       util7d: reading?.utilization7d ?? null,
-      threshold: qGuard.blockAtUtil5h,
+      threshold: stop.line,
       resetAt,
       resetInSec: resetAt ? Math.max(0, Math.round((resetAt * 1000 - now) / 1000)) : null,
       resetAt7d: reading?.resetAt7d ?? null,
       enabled: qGuard.enabled,
     }
+  }
+
+  /** Линия сторожа запаса для аккаунта сейчас: между `blockAtUtil5h` и `maxBlockAtUtil5h`, по
+   *  времени до сброса и расходу прогрева (src/quota-stop-line.ts). */
+  private quotaStopLineFor(orgId: string | null, resetAt: number | null, now: number): StopLine {
+    const q = loadKeepaliveConfig().quotaGuard
+    return quotaStopLine({
+      floor: q.blockAtUtil5h,
+      ceiling: q.maxBlockAtUtil5h,
+      lagMargin: q.lagMarginUtil,
+      resetInMs: resetAt ? resetAt * 1000 - now : null,
+      kaUtilPerHour: this.kaSpend.utilPerHour(orgId, now, {
+        readTokensPerPoint: q.readTokensPerPoint,
+        writeTokensPerPoint: q.writeTokensPerPoint,
+        outputTokensPerPoint: q.outputTokensPerPoint,
+      }),
+    })
   }
 
   /**
@@ -1871,7 +1893,10 @@ export class ProxyClient {
         ?? null
       const orgReading = spendOrg ? this.rateLimitByOrg.get(spendOrg) : undefined
       const util5h = live5hUtilization(orgReading, Date.now())
-      if (qGuard.enabled && util5h !== null && util5h >= qGuard.blockAtUtil5h) {
+      // Линия стены — по времени до сброса: там, где остатка окна хватает прогреву до сброса
+      // (src/quota-stop-line.ts). Не измерен расход — прежний порог blockAtUtil5h.
+      const stop = this.quotaStopLineFor(spendOrg, orgReading?.resetAt ?? null, Date.now())
+      if (qGuard.enabled && util5h !== null && util5h >= stop.line) {
         // Same two consent channels as the cache guard: a marker in the turn
         // being sent, or an out-of-band grant for callers that cannot write
         // one (sub-agents, tool-result continuations, programmatic clients).
@@ -1891,13 +1916,15 @@ export class ProxyClient {
             sessionId,
             orgId: spendOrg,
             util5h,
-            threshold: qGuard.blockAtUtil5h,
+            threshold: stop.line,
+            thresholdBasis: stop.basis,
+            kaNeedToReset: stop.kaNeedToReset,
             resetAt,
             resetInSec: resetsInSec === null ? null : Math.round(resetsInSec),
             agentId: ctx.agentId ?? null,
             msg: `quota guard blocked a real turn — account ${(spendOrg ?? 'unknown').slice(0, 8)} `
               + `is at ${(util5h * 100).toFixed(0)}% of its 5h window (threshold `
-              + `${(qGuard.blockAtUtil5h * 100).toFixed(0)}%)`
+              + `${(stop.line * 100).toFixed(0)}%)`
               + (resetLocal ? `, resets ${resetLocal}` : '')
               + ' — keepalive keeps warming this session, so its cache survives the wall',
           })
@@ -1906,7 +1933,9 @@ export class ProxyClient {
               type: 'quota_guard',
               orgId: spendOrg,
               util5h,
-              threshold: qGuard.blockAtUtil5h,
+              threshold: stop.line,
+            thresholdBasis: stop.basis,
+            kaNeedToReset: stop.kaNeedToReset,
               resetAt,
               resetInSec: resetsInSec === null ? null : Math.round(resetsInSec),
               consent: {
@@ -1925,7 +1954,7 @@ export class ProxyClient {
               // refusals apart is this opening marker. Pinned by test.
               message: `Quota guard: the 5h window on account `
                 + `${(spendOrg ?? 'unknown').slice(0, 8)} is ${(util5h * 100).toFixed(0)}% spent `
-                + `(stop line ${(qGuard.blockAtUtil5h * 100).toFixed(0)}%)`
+                + `(stop line ${(stop.line * 100).toFixed(0)}%)`
                 + (resetLocal ? `, and it resets at ${resetLocal}` : '')
                 + '. This turn is held back so the account does not hit Anthropic\'s own 429 — '
                 + 'which would refuse KEEPALIVE too and let every cached session on this account '
@@ -2681,6 +2710,12 @@ export class ProxyClient {
           }
           // Record KA fire into metrics — they're the canonical hit-rate signal
           // since they replay the exact prompt prefix.
+          this.kaSpend.record(this.resolveServedOrg(sessionId), {
+            atMs: Date.now(),
+            read: stats.usage.cacheReadInputTokens ?? 0,
+            write: stats.usage.cacheCreationInputTokens ?? 0,
+            output: stats.usage.outputTokens ?? 0,
+          })
           this.metrics.recordRequest({
             kind: 'ka',
             cacheRead: stats.usage.cacheReadInputTokens ?? 0,

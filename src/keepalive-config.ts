@@ -323,6 +323,21 @@ export interface QuotaGuardConfig {
    *  fleet jumps over between two reads. Five points of headroom is what
    *  buys the caches their survival. */
   readonly blockAtUtil5h: number
+  /** Upper bound of the stop line (default 0.98). Between `blockAtUtil5h`
+   *  (the floor) and this, the line follows the time left to the reset: it sits
+   *  where the rest of the window still covers keepalive until the reset plus
+   *  `lagMarginUtil` (src/quota-stop-line.ts). Equal to the floor = the old
+   *  fixed line. */
+  readonly maxBlockAtUtil5h: number
+  /** Headroom for the counter lagging one in-flight turn (default 0.01). */
+  readonly lagMarginUtil: number
+  /** Measured rates, tokens per ONE point (0.01) of the 5h window — moved
+   *  by the subscription counter itself, never API prices. Read: ~44M
+   *  (30.09, keepalive-only hour at the wall); write 493 672 and output
+   *  75 278 (regression over 209 counter steps, 11.09). */
+  readonly readTokensPerPoint: number
+  readonly writeTokensPerPoint: number
+  readonly outputTokensPerPoint: number
   /** Substring in the LATEST user message that overrides the block for that
    *  turn — the same fresh-consent shape the cache guard uses. Default below. */
   readonly overrideMarker: string
@@ -335,6 +350,11 @@ export interface QuotaGuardConfig {
 const DEFAULT_QUOTA_GUARD: QuotaGuardConfig = {
   enabled: false,
   blockAtUtil5h: 0.95,
+  maxBlockAtUtil5h: 0.98,
+  lagMarginUtil: 0.01,
+  readTokensPerPoint: 44_000_000,
+  writeTokensPerPoint: 493_672,
+  outputTokensPerPoint: 75_278,
   overrideMarker: '[%quota-ok%]',
   consentGrantPath: join(homedir(), '.claude-local', 'quota-guard-grants.json'),
 }
@@ -647,6 +667,19 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     // a guard that fires there has no work left to do.
     blockAtUtil5h: num(qg.blockAtUtil5h, 'quotaGuard.blockAtUtil5h',
       DEFAULT_QUOTA_GUARD.blockAtUtil5h, 0.50, 0.99),
+    // Never below the floor: a ceiling under it would silently turn the
+    // time-aware line into a STRICTER wall than the one configured.
+    maxBlockAtUtil5h: Math.max(
+      num(qg.blockAtUtil5h, 'quotaGuard.blockAtUtil5h', DEFAULT_QUOTA_GUARD.blockAtUtil5h, 0.50, 0.99),
+      num(qg.maxBlockAtUtil5h, 'quotaGuard.maxBlockAtUtil5h', DEFAULT_QUOTA_GUARD.maxBlockAtUtil5h, 0.50, 0.99),
+    ),
+    lagMarginUtil: num(qg.lagMarginUtil, 'quotaGuard.lagMarginUtil', DEFAULT_QUOTA_GUARD.lagMarginUtil, 0, 0.10),
+    readTokensPerPoint: num(qg.readTokensPerPoint, 'quotaGuard.readTokensPerPoint',
+      DEFAULT_QUOTA_GUARD.readTokensPerPoint, 1_000_000, 1_000_000_000),
+    writeTokensPerPoint: num(qg.writeTokensPerPoint, 'quotaGuard.writeTokensPerPoint',
+      DEFAULT_QUOTA_GUARD.writeTokensPerPoint, 10_000, 100_000_000),
+    outputTokensPerPoint: num(qg.outputTokensPerPoint, 'quotaGuard.outputTokensPerPoint',
+      DEFAULT_QUOTA_GUARD.outputTokensPerPoint, 1_000, 100_000_000),
     overrideMarker: (typeof qg.overrideMarker === 'string' && qg.overrideMarker.length > 0)
       ? qg.overrideMarker
       : DEFAULT_QUOTA_GUARD.overrideMarker,

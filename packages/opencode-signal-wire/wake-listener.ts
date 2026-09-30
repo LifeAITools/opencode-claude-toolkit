@@ -1571,6 +1571,30 @@ async function createSessionForWake(reason: string): Promise<string | null> {
   }
 }
 
+/**
+ * Имя записи присутствия: `{pid}-{привязка}.json`, как у агентов Claude Code, — по нему читатели
+ * lat-context находят агента (`*-<привязка>.json`). До 0.3.20 имя бралось из номера сессии, а на
+ * старте плагина он ещё `unknown`: 30.09 пилот SynqTalk лежал как `30234-unknown.json`, и
+ * присутствие звало живого агента offline (замер packages-lat-context-owner).
+ *
+ * Без привязки (агент поднят не пускателем kiberos) — прежнее имя по номеру сессии. Если файл с
+ * именем привязки уже есть и написан НЕ этим плагином (его кладёт `context agent spawn` со своей
+ * дверью tmux), он не затирается: два писателя одного файла перебивали бы друг друга.
+ */
+export function discoveryFilePath(dir: string, pid: number, bindingId: string | undefined, sessionId: string): string {
+  const legacy = join(dir, `${pid}-${sessionId}.json`)
+  if (!bindingId) return legacy
+  const byBinding = join(dir, `${pid}-${bindingId.replace(/\//g, '_')}.json`)
+  try {
+    const existing = JSON.parse(readFileSync(byBinding, 'utf-8')) as { harness?: string; transport?: string }
+    if (existing.harness !== 'opencode' || existing.transport !== 'http') {
+      dbg(`DISCOVERY_NAME_TAKEN ${byBinding} (harness=${existing.harness ?? '-'} transport=${existing.transport ?? '-'}) — writing ${legacy}`)
+      return legacy
+    }
+  } catch { /* файла нет или он нечитаем — имя свободно */ }
+  return byBinding
+}
+
 /** Why an actionable wake did or did not reach the agent — the router needs the difference. */
 export type InjectOutcome = 'ok' | 'no_session' | 'failed'
 
@@ -1998,10 +2022,7 @@ export async function startWakeListener(
   // runner with isolated HOME) are honored even if this module was
   // imported before the env var was set.
   const resolvedDiscoveryDir = discoveryDir()
-  const discoveryPath = join(
-    resolvedDiscoveryDir,
-    `${process.pid}-${config.sessionId}.json`,
-  )
+  const discoveryPath = discoveryFilePath(resolvedDiscoveryDir, process.pid, process.env.KIBEROS_BINDING_ID, config.sessionId)
   try {
     mkdirSync(resolvedDiscoveryDir, { recursive: true })
     // Set module state from config/reconciled identity
@@ -2026,7 +2047,7 @@ export async function startWakeListener(
       const pidPrefix = `${process.pid}-`
       for (const name of siblings) {
         if (!name.startsWith(pidPrefix) || !name.endsWith('.json')) continue
-        if (name === `${process.pid}-${config.sessionId}.json`) continue
+        if (join(resolvedDiscoveryDir, name) === discoveryPath) continue
         const raw = readFileSync(join(resolvedDiscoveryDir, name), 'utf-8')
         const sib = JSON.parse(raw) as { pid?: number; memberId?: string; memberName?: string; tmux_binding_id?: string }
         if (sib.pid !== process.pid) continue

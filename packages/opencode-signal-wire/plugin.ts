@@ -797,7 +797,7 @@ export default {
         if (usage && signalWire && (!boundSessionId || usage.sessionId === boundSessionId)) {
           // Только своя сессия: помощники в том же процессе шлют свои ответы, и их заполнение — не наше.
           try {
-            signalWire.trackModel(usage.modelId)
+            signalWire.trackModel(usage.modelId, usage.providerId)
             const window = await resolveModelWindow(usage.providerId, usage.modelId)
             if (window) signalWire.trackContextWindow(usage.modelId, window)
             signalWire.trackTokens({ inputTokens: usage.promptTokens })
@@ -950,7 +950,7 @@ export default {
           // and template interpolation in this and following turns.
           const modelId = input?.model?.modelID
           if (typeof modelId === 'string' && modelId.length > 0) {
-            try { (signalWireEngine as any).trackModel?.(modelId) } catch { /* tracking is best-effort */ }
+            try { (signalWireEngine as any).trackModel?.(modelId, input?.model?.providerID) } catch { /* tracking is best-effort */ }
           }
           // Заполнение контекста НЕ оценивается здесь по длине сообщения человека: до 0.3.24 так и было
           // (символы/4), и «контекстом» становился размер одной реплики. Настоящий замер приходит

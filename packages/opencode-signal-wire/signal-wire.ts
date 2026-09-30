@@ -24,6 +24,7 @@ import {
   translateLegacyRules,
   HARNESS,
   lifeTraceFromEnv,
+  heartbeatContextFromRuntimeMeta,
   type LifeTraceConfig,
   type Rule as CoreRule,
   type SignalWireEvent,
@@ -419,6 +420,8 @@ export class SignalWire {
   private lastQuotaUtil5h: number | undefined
   private lastQuotaUtil7d: number | undefined
   private lastContextWindow: number | undefined
+  /** Провайдер текущей модели (`zai-coding-plan`, `anthropic`…) — из ответа opencode. */
+  private lastProvider: string | undefined
   /** Окна моделей из каталога opencode, по id модели. */
   private readonly catalogWindows = new Map<string, number>()
 
@@ -464,6 +467,7 @@ export class SignalWire {
       serverUrl: config.serverUrl,
       lifeTrace: config.lifeTrace ?? {
         ...lifeTraceFromEnv(HARNESS.OPENCODE),
+        context: (event) => this.heartbeatContext(event),
         onAttach: (r, sid) => swLog(`SESSION_ATTACH status=${r.status} session=${sid} detail="${r.detail}"`),
       },
     })
@@ -548,8 +552,9 @@ export class SignalWire {
    * Also captures the implicit context window for the model (200k for
    * Claude Opus/Sonnet, 128k for Haiku) — used to compute contextPercent.
    */
-  trackModel(modelId: string): void {
+  trackModel(modelId: string, providerId?: string): void {
     if (typeof modelId !== 'string' || modelId.length === 0) return
+    if (typeof providerId === 'string' && providerId.length > 0) this.lastProvider = providerId
     const prevModel = this.lastModel
     const prevWindow = this.lastContextWindow
     this.lastModel = modelId
@@ -570,6 +575,18 @@ export class SignalWire {
     if (prevModel !== modelId || prevWindow !== this.lastContextWindow) {
       swLog(`TRACK_MODEL pid=${process.pid} session=${this.sessionId || '?'} model=${modelId} window=${this.lastContextWindow ?? 'unknown'} resolved_from=${window ? 'table' : 'fallback'}`)
     }
+  }
+
+  /**
+   * Замер для отметки жизни. Модель едет как `провайдер/модель` — так её набирает пускатель
+   * (`opencode -m zai-coding-plan/glm-5.3`, `member.launch`), и реестр сравнивает выбранную с
+   * работающей строка в строку (просьба фаундера 30.09 через vibe-yjs-todo-sync-owner). В правила
+   * (`runtimeMeta.model`) модель по-прежнему идёт без провайдера: на это имя опираются их условия.
+   */
+  private heartbeatContext(event: SignalWireEvent) {
+    const c = heartbeatContextFromRuntimeMeta(event)
+    if (!c) return null
+    return this.lastProvider && !c.model.includes('/') ? { ...c, model: `${this.lastProvider}/${c.model}` } : c
   }
 
   /**

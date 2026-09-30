@@ -50,7 +50,7 @@ describe('opencode: замер заполнения из message.updated', () =>
   test('сквозь адаптер: модель не из таблицы Claude, окно из каталога — отметка жизни несёт замер', async () => {
     const sid = 'ses_ctx_glm'
     const sw = new SignalWire({ serverUrl: 'http://127.0.0.1:0', sessionId: sid, rulesPath: join(process.env.SW_HEARTBEAT_DIR!, 'none.json'), platform: 'opencode' })
-    sw.trackModel('glm-5.3')
+    sw.trackModel('glm-5.3', 'zai-coding-plan')
     sw.trackContextWindow('glm-5.3', 1_000_000)
     sw.trackTokens({ inputTokens: 294_608 })
     await sw.evaluateHook({ source: 'plugin', type: 'session.idle', sessionId: sid, timestamp: Date.now(), payload: {} } as any)
@@ -59,7 +59,10 @@ describe('opencode: замер заполнения из message.updated', () =>
     expect(hb.context_tokens).toBe(294_608)
     expect(hb.context_window).toBe(1_000_000)
     expect(hb.context_percent).toBe(29)
-    expect(hb.context_model).toBe('glm-5.3')
+    // Модель — как её набирает пускатель, чтобы реестр сравнил выбранную с работающей строка в строку.
+    expect(hb.context_model).toBe('zai-coding-plan/glm-5.3')
+    // А в правила — без провайдера: на это имя опираются их условия.
+    expect(sw.getCurrentRuntimeMeta().model).toBe('glm-5.3')
   })
 
   test('окно каталога важнее таблицы и переживает повторный trackModel', () => {

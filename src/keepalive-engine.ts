@@ -1952,9 +1952,17 @@ export class KeepaliveEngine {
       const t0 = Date.now()
       let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 }
 
+      let sawStop = false
       for await (const event of this.doFetch(body, headers, controller.signal)) {
-        if (event.type === 'message_stop') usage = event.usage
+        if (event.type === 'message_stop') { usage = event.usage; sawStop = true }
+        // Ошибка посреди потока — это НЕУДАЧНЫЙ выстрел, а не удачный с нулями. До 30.09.2026 цикл
+        // её пропускал: выстрел без единого числа (вход, выхлоп, чтение и запись — нули, 445 мс)
+        // засчитывался прогревом, часы ветки сдвигались на «только что грели», и следующий выстрел
+        // ждал полчаса, пока кэш умирал. Замер: 6 таких из 2548 за день, 4 у одной сессии
+        // (2bc6fa4e), и её ветка 0ca417102da8 в 18:52:23Z купила 367 046 заново.
+        else if (event.type === 'error') throw event.error
       }
+      if (!sawStop) throw new Error('keepalive fire ended without message_stop — nothing was warmed')
 
       const durationMs = Date.now() - t0
       // Update fire timer (for spacing keepalives) but NOT realActivityAt
@@ -2631,9 +2639,14 @@ export class KeepaliveEngine {
         const controller = new AbortController()
         this.abortController = controller
 
+        // Как и в основном выстреле: ошибка посреди потока или поток без завершения — неудача,
+        // а не прогрев (см. tick, «Ошибка посреди потока»).
+        let sawStop = false
         for await (const event of this.doFetch(body, headers, controller.signal)) {
-          void event  // drain
+          if (event.type === 'message_stop') sawStop = true
+          else if (event.type === 'error') throw event.error
         }
+        if (!sawStop) throw new Error('keepalive retry ended without message_stop — nothing was warmed')
 
         this.lastActivityAt = Date.now()
         this.cacheWrittenAt = Date.now()

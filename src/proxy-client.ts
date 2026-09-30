@@ -4133,6 +4133,14 @@ function inspectLastUserMessage(
  * cares about usage. Other events (content_block_delta etc) are drained but
  * not yielded.
  */
+/** Ошибка ответа на выстрел прогрева: не сетевая и не 429 — движок пойдёт своим путём неудачи. */
+function kaResponseError(message: string): Error {
+  return Object.assign(new Error(message), { status: 502 })
+}
+
+/** @internal — испытания разбора ответа на выстрел прогрева. */
+export { parseSSEToEvents as _parseKaResponseForTests }
+
 async function* parseSSEToEvents(
   body: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
@@ -4196,6 +4204,12 @@ async function* parseSSEToEvents(
         } else if (p.type === 'message_stop') {
           yieldedStop = true
           yield { type: 'message_stop', usage, stopReason: null }
+        } else if (p.type === 'error') {
+          // Ошибка внутри ответа 200 (перегрузка и т.п.) — выстрел НЕ удался. До 30.09.2026 это
+          // событие не читалось, и ниже подставлялось завершение с нулями: прогрев засчитывался,
+          // а кэш не продлевался (см. ka-fire-empty-stream.test.ts).
+          yield { type: 'error', error: kaResponseError(`upstream error event: ${raw.slice(0, 300)}`) }
+          return
         }
       }
     }
@@ -4205,10 +4219,25 @@ async function* parseSSEToEvents(
     // engine waits for — so KA fires report real cacheRead and the eviction guard
     // can distinguish a healthy refresh from a stale-snapshot miss.
     if (!yieldedStop) {
-      try {
-        const msg = JSON.parse(rawAll.trim())
-        const u = msg?.usage
-        if (u && typeof u === 'object') {
+      // Ответ, в котором нет чисел, — не прогрев. Раньше здесь подставлялось завершение с нулями
+      // «чтобы движок всё равно завершил»: 30.09.2026 так засчитались 7 пустых выстрелов, и одна
+      // ветка купила свой кэш заново (367 046). Теперь это ошибка с началом текста ответа.
+      let msg: any
+      try { msg = JSON.parse(rawAll.trim()) } catch {
+        yield { type: 'error', error: kaResponseError(`keepalive response is neither SSE nor JSON: ${rawAll.slice(0, 300)}`) }
+        return
+      }
+      if (msg?.type === 'error') {
+        yield { type: 'error', error: kaResponseError(`upstream error body: ${rawAll.slice(0, 300)}`) }
+        return
+      }
+      if (!msg?.usage || typeof msg.usage !== 'object') {
+        yield { type: 'error', error: kaResponseError(`keepalive response carried no usage: ${rawAll.slice(0, 300)}`) }
+        return
+      }
+      {
+        const u = msg.usage
+        {
           usage = {
             inputTokens: u.input_tokens ?? 0,
             outputTokens: u.output_tokens ?? 0,
@@ -4223,7 +4252,7 @@ async function* parseSSEToEvents(
           }
           if (typeof u.cache_deleted_input_tokens === 'number') usage.cacheDeletedInputTokens = u.cache_deleted_input_tokens
         }
-      } catch { /* not JSON — yield the zero-usage terminal so the engine still completes */ }
+      }
       yield { type: 'message_stop', usage, stopReason: null }
     }
   } finally {

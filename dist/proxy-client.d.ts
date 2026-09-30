@@ -1,5 +1,6 @@
 import { KeepaliveEngine } from "./keepalive-engine.js";
 import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, Session } from "./proxy-ports.js";
+import type { StreamEvent } from "./types.js";
 import { type OrgIdResolver } from "./org-identity.js";
 import { OrgVault } from "./org-vault.js";
 import { type RefreshedTokens } from "./auth.js";
@@ -204,3 +205,5 @@ export declare class ProxyClient {
 }
 export declare function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot;
 export declare function extractSessionIdFromBody(rawBody: ArrayBuffer | Uint8Array | string): string | null;
+export { parseSSEToEvents as _parseKaResponseForTests };
+declare function parseSSEToEvents(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<StreamEvent>;

@@ -27,6 +27,7 @@ import type {
 } from './wake-types'
 import { DISCOVERY_DIR, discoveryDir, WAKE_EVENT_TYPES, WARM_CHANNEL_TTL_MS } from './wake-types'
 import { FNV_32_PRIME } from './domain-constants'
+import { pollFileDoor } from './wake-file-door'
 
 // ─── Constants ────────────────────────────────────────────
 
@@ -40,6 +41,8 @@ const DEBUG = process.env.NODE_ENV === 'test'
 const LOG_FILE = join(homedir(), '.claude', 'wake-listener-debug.log')
 const MAX_QUEUE_DEFAULT = 50
 const BUSY_RETRY_INTERVAL_DEFAULT = 5 // seconds
+/** File wake door poll — same cadence class as dsh's (1.5 s); idle polls touch only the filesystem. */
+const FILE_DOOR_POLL_MS = Number(process.env.OPENCODE_SW_WAKE_POLL_MS ?? 2000)
 const STARTUP_TS = Date.now()
 const FALLBACK_REPLAY_LIMIT = 20
 const FALLBACK_REPLAY_TIMEOUT_MS = 3000
@@ -1546,13 +1549,13 @@ export async function injectContextEvent(
  * Only when there are ZERO sessions for the directory: several = ambiguous, and
  * guessing would put the wake into the wrong conversation (resolveSessionId's rule).
  */
-async function createSessionForWake(event: WakeEvent): Promise<string | null> {
+async function createSessionForWake(reason: string): Promise<string | null> {
   if (!_sdkClient || !_agentDirectory) return null
   try {
     const { data: sessions } = await _sdkClient.session.list()
     if (Array.isArray(sessions) && sessions.some((s: any) => s.directory === _agentDirectory)) return null
     const { data: created, error } = await _sdkClient.session.create({
-      body: { title: `wake: ${event.type}` },
+      body: { title: `wake: ${reason}` },
       query: { directory: _agentDirectory },
     })
     if (error || !created?.id) { dbg(`SESSION_CREATE_FOR_WAKE failed: ${error ?? 'no id'}`); return null }
@@ -1560,7 +1563,7 @@ async function createSessionForWake(event: WakeEvent): Promise<string | null> {
     _cachedSessionId = id
     updateBoundSessionGlobal(id)
     updateDiscoverySession(id)
-    dbg(`SESSION_CREATED_FOR_WAKE session=${id} directory=${_agentDirectory} event=${event.eventId}`)
+    dbg(`SESSION_CREATED_FOR_WAKE session=${id} directory=${_agentDirectory} reason=${reason}`)
     return id
   } catch (e: any) {
     dbg(`SESSION_CREATE_FOR_WAKE error: ${e?.message}`)
@@ -1575,7 +1578,7 @@ async function injectWakeEvent(
   event: WakeEvent,
   sessionId: string,
 ): Promise<InjectOutcome> {
-  const resolvedSessionId = (await resolveSessionId(sessionId)) ?? (await createSessionForWake(event))
+  const resolvedSessionId = (await resolveSessionId(sessionId)) ?? (await createSessionForWake(`${event.type} ${event.eventId}`))
   if (!resolvedSessionId) {
     dbg(`INJECT_DEFERRED_NO_SESSION event=${event.eventId}`)
     return 'no_session'
@@ -2089,6 +2092,48 @@ export async function startWakeListener(
     }
   }, retryInterval * 1000)
 
+  // ─── File wake door (signal-wire-core ≥ 0.17.0) ───
+  // Letters the router left as files — including before this plugin came up — are
+  // drained here; the HTTP door above never sees them. See wake-file-door.ts.
+
+  let fileDoorRunning = false
+  let lastFileDoorKept = ''
+  const fileDoorInterval = setInterval(async () => {
+    if (fileDoorRunning) return
+    fileDoorRunning = true
+    try {
+      const outcome = await pollFileDoor({
+        bindingId: () => process.env.KIBEROS_BINDING_ID || null,
+        knownSessionId: () => (_cachedSessionId && _cachedSessionId !== 'unknown' ? _cachedSessionId : null),
+        isBusy: isAgentBusy,
+        resolveSession: () => resolveSessionId(config.sessionId),
+        openSession: () => createSessionForWake('file-door'),
+        send: (sessionId, text) => {
+          if (!_sdkClient) { dbg('FILE_WAKE_SEND_FAILED no sdkClient'); return }
+          _sdkClient.session.promptAsync({
+            path: { id: sessionId },
+            body: { noReply: false, parts: [{ type: 'text', text }] },
+          }).then((r: any) => {
+            if (r?.error) dbg(`FILE_WAKE_SEND_FAILED session=${sessionId}: ${r.error}`)
+          }).catch((e: any) => dbg(`FILE_WAKE_SEND_FAILED session=${sessionId}: ${e?.message}`))
+        },
+        log: (line) => dbg(line),
+      })
+      if (outcome.kind === 'kept') {
+        if (outcome.reason !== lastFileDoorKept) dbg(`FILE_WAKE_KEPT reason=${outcome.reason}`)
+        lastFileDoorKept = outcome.reason
+      } else {
+        lastFileDoorKept = ''
+        if (outcome.kind === 'drained') dbg(`FILE_WAKE_DRAINED session=${outcome.sessionId} delivered=${outcome.result.delivered} bad=${outcome.result.bad}`)
+      }
+    } catch (e: any) {
+      dbg('file door error:', e?.message)
+    } finally {
+      fileDoorRunning = false
+    }
+  }, FILE_DOOR_POLL_MS)
+  ;(fileDoorInterval as any).unref?.()
+
   // ─── Cleanup on exit ─────────────────────────
 
   let cleaned = false
@@ -2096,6 +2141,7 @@ export async function startWakeListener(
     if (cleaned) return
     cleaned = true
     clearInterval(drainInterval)
+    clearInterval(fileDoorInterval)
     void syncLifecycle({ action: 'offline', reason: 'listener_stop', force: true })
     try {
       if (_discoveryPath) unlinkSync(_discoveryPath)

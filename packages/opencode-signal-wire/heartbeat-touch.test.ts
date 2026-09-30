@@ -2,6 +2,7 @@
  * След жизни сессии opencode (договор стыка signal-wire, часть 5:
  * /home/relishev/packages/signal-wire-core/docs/harness-adapter-contract.md).
  *
+ * С ядра 0.16 отметку ставит сам конвейер (`lifeTrace`), адаптер только объявляет программу.
  * Без отметки поверхность Telegram отвечала фаундеру «агента сейчас нет» про живого агента
  * opencode (пилот vibe-synqtalk-owner, 30.09.2026): у Claude Code и dsh файлы
  * session-heartbeat-*.json были, у opencode — ни одного.
@@ -26,9 +27,10 @@ function event(sessionId: string, type = 'chat.message') {
 }
 
 describe('opencode: след жизни на каждом событии', () => {
-  test('прогон пишет в песочницу, а не в общий каталог флота', () => {
+  test('прогон пишет в песочницу, а не в общий каталог флота, и не привязывает сессии', () => {
     expect(dir()).toBeTruthy()
     expect(dir()).not.toBe(join(homedir(), '.claude', 'hooks', 'state'))
+    expect(process.env.KIBEROS_BINDING_ID).toBeUndefined()
   })
 
   test('событие конвейера кладёт отметку с harness=opencode и своим событием', async () => {
@@ -57,9 +59,18 @@ describe('opencode: след жизни на каждом событии', () =>
     expect(hb.context_model).toBe('claude-sonnet-5')
   })
 
-  test('без номера сессии отметки нет', async () => {
+  test('без номера сессии отметки нет — ни от заглушки unknown, ни от пустого', async () => {
     const sw = make('unknown')
     await sw.evaluateHook(event('unknown'))
+    await sw.evaluate({ event: 'chat.message', prompt: 'x' } as any)
+    await new Promise((r) => setTimeout(r, 20))
     expect(existsSync(heartbeatPath(dir(), 'unknown'))).toBe(false)
+    expect(existsSync(heartbeatPath(dir(), 'opencode-claude'))).toBe(false)
+  })
+
+  test('след ставит конвейер ядра: harness объявлен один раз, а не своим вызовом адаптера', () => {
+    const src = readFileSync(join(import.meta.dir, 'signal-wire.ts'), 'utf-8')
+    expect(src).toContain('lifeTraceFromEnv(HARNESS.OPENCODE)')
+    expect(src).not.toMatch(/touchHeartbeat\(/)
   })
 })

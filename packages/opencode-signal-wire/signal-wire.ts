@@ -22,8 +22,9 @@ import {
   coreIdentityTag,
   contextToEvent,
   translateLegacyRules,
-  touchHeartbeat,
   HARNESS,
+  lifeTraceFromEnv,
+  type LifeTraceConfig,
   type Rule as CoreRule,
   type SignalWireEvent,
   type EmitResult,
@@ -385,6 +386,12 @@ export interface SignalWireConfig {
   rulesPath?: string
   platform?: string
   maxRulesPerFire?: number
+  /**
+   * След жизни и привязка сессии к агенту — их ставит конвейер ядра на каждом событии с настоящим
+   * номером сессии (договор стыка, часть 5; ядро ≥ 0.16.0). По умолчанию — из окружения пускателя
+   * kiberos; тесты передают `attach: false`, чтобы не писать в живой реестр lat-context.
+   */
+  lifeTrace?: LifeTraceConfig
 }
 
 // ─── Adapter ───────────────────────────────────────────────
@@ -453,6 +460,10 @@ export class SignalWire {
       stateBackend: new MemoryBackend(),
       sessionId: this.sessionId || 'opencode-claude',
       serverUrl: config.serverUrl,
+      lifeTrace: config.lifeTrace ?? {
+        ...lifeTraceFromEnv(HARNESS.OPENCODE),
+        onAttach: (r, sid) => swLog(`SESSION_ATTACH status=${r.status} session=${sid} detail="${r.detail}"`),
+      },
     })
   }
 
@@ -815,40 +826,9 @@ export class SignalWire {
   private attachRuntimeMeta(event: SignalWireEvent): void {
     this.refreshTokensFromStatsFile()
     event.runtimeMeta = this.getRuntimeMeta() as SignalWireEvent['runtimeMeta']
-    this.touchLife(event)
-  }
-
-  /**
-   * След жизни сессии (договор стыка, часть 5): одна отметка на сессию в общем каталоге флота,
-   * перезаписываемая на каждом событии конвейера. По ней роутер побудок и поверхность Telegram
-   * видят, что агент жив; без неё живой агент opencode числится «агента сейчас нет».
-   * Все четыре пути в конвейер идут через attachRuntimeMeta, поэтому звать здесь — значит на
-   * каждом событии. Формат и каталог — ядра (`touchHeartbeat`), своего у адаптера нет.
-   * Нет настоящего номера сессии — отметки нет. Ошибка файловой системы — строка журнала, не
-   * падение хода.
-   */
-  private touchLife(event: SignalWireEvent): void {
-    const sessionId = this.sessionId && this.sessionId !== 'unknown' ? this.sessionId : null
-    if (!sessionId) return
-    const measured = this.contextPosition > 0 && this.lastContextWindow != null && this.lastModel
-    try {
-      touchHeartbeat({
-        harness: HARNESS.OPENCODE,
-        sessionId,
-        cwd: process.cwd(),
-        event: event.type,
-        context: measured
-          ? {
-              tokens: this.contextPosition,
-              window: this.lastContextWindow!,
-              percent: Math.min(100, Math.round((this.contextPosition / this.lastContextWindow!) * 100)),
-              model: this.lastModel!,
-            }
-          : null,
-      })
-    } catch (e) {
-      swLog(`HEARTBEAT_WRITE_FAILED pid=${process.pid} session=${sessionId} err=${(e as Error)?.message ?? String(e)}`)
-    }
+    // Заглушка загрузки 'unknown' — не номер сессии. Ядро не считает сессией только пустое и
+    // `__no-session__`, поэтому без этой замены след жизни лёг бы в session-heartbeat-unknown.json.
+    if (event.sessionId === 'unknown') event.sessionId = null
   }
 
   evaluate(ctx: SignalWireContext): SignalWireResult | null {

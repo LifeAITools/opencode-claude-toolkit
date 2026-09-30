@@ -443,6 +443,53 @@ async function handlePreToolUseSpawnCheck(
   return routeTaskThroughEngine(toolName, sessionId, input, undefined)
 }
 
+/**
+ * ОДИН ПРИЁМНИК ПОБУДОК И ОДИН НАБЛЮДАТЕЛЬ КВОТЫ НА ПРОЦЕСС, сколько бы раз opencode ни поднял плагин.
+ *
+ * opencode заводит отдельный экземпляр на каждую папку проекта и в каждом заново зовёт `server()`.
+ * 30.09 пилот SynqTalk, поднятый `--session` на разговор, начатый в старой папке проекта, получил два
+ * экземпляра (/mnt/d/Vibe_coding_projects/synqtalk и ~/projects/vibe/synqtalk) — и два приёмника на
+ * портах 34841 и 38139. Второй перезаписал запись присутствия, первый остался слушать без адреса.
+ * Агент в процессе один — значит, и дверь к нему одна. Держим в globalThis, а не в переменной модуля:
+ * модуль может быть загружен дважды, если путь к плагину записан в настройках двумя написаниями.
+ */
+type ProcessSingletons = {
+  wake?: Promise<WakeListenerHandle | null>
+  quota?: QuotaWatcherHandle | null
+  /** Сколько экземпляров opencode держат общие двери; закрывает их последний уходящий. */
+  users?: number
+}
+const PROCESS_SINGLETONS_KEY = '__opencodeSignalWireProcessSingletons'
+function processSingletons(): ProcessSingletons {
+  const g = globalThis as Record<string, unknown>
+  return (g[PROCESS_SINGLETONS_KEY] ??= {}) as ProcessSingletons
+}
+/**
+ * Приёмник побудок процесса: первый вызов запускает `start`, остальные получают тот же. Сбой запуска
+ * отдаётся всем как null — следующий экземпляр не пытается открыть вторую дверь поверх упавшей.
+ */
+export function processWakeListener(
+  start: () => Promise<WakeListenerHandle>,
+): { handle: Promise<WakeListenerHandle | null>; shared: boolean } {
+  const s = processSingletons()
+  s.users = (s.users ?? 0) + 1
+  if (s.wake) return { handle: s.wake, shared: true }
+  s.wake = start().catch(() => null)
+  return { handle: s.wake, shared: false }
+}
+
+/** Экземпляр уходит. true — он был последним, и общие двери пора закрыть. */
+export function releaseProcessWakeListener(): boolean {
+  const s = processSingletons()
+  s.users = Math.max(0, (s.users ?? 0) - 1)
+  return s.users === 0
+}
+
+/** Закрыть общие двери процесса: на выходе процесса и в тестах. */
+export function resetProcessSingletons(): void {
+  delete (globalThis as Record<string, unknown>)[PROCESS_SINGLETONS_KEY]
+}
+
 export default {
   id: 'opencode-signal-wire',
   server: async (input: any) => {
@@ -670,10 +717,12 @@ export default {
 
     let quotaHandle: QuotaWatcherHandle | null = null
 
+    const singletons = processSingletons()
     if (serverUrl) {
-      try {
+      let startError: unknown = null
+      const { handle, shared } = processWakeListener(() => {
         logStep('WAKE_LISTENER_STARTING', { sessionId, agentInstanceId })
-        wakeHandle = await startWakeListener({
+        return startWakeListener({
           serverUrl,
           sessionId,
           agentInstanceId,
@@ -693,17 +742,23 @@ export default {
             description: agentRegistration?.description ?? process.env.SYNQTASK_AGENT_DESCRIPTION,
             spaceId: agentRegistration?.spaceId ?? process.env.SYNQTASK_SPACE_ID,
           },
-        })
+        }).catch((e) => { startError = e; throw e })
+      })
+      wakeHandle = await handle
+      if (shared) {
+        // Второй экземпляр opencode в том же процессе: дверь к агенту уже открыта.
+        logStep('WAKE_LISTENER_SHARED', { port: wakeHandle?.port ?? null, directory: cwd, sessionId })
+      } else if (wakeHandle) {
         logStep('WAKE_LISTENER_STARTED', {
           port: wakeHandle.port,
           sessionId,
           agentInstanceId,
           token: wakeHandle.token ? `${wakeHandle.token.slice(0, 8)}...` : 'absent',
         })
-        scheduleSessionBindRetries()
-      } catch (e: any) {
-        logStep('WAKE_LISTENER_FAILED_OPEN', { error: e?.message ?? String(e) })
+      } else {
+        logStep('WAKE_LISTENER_FAILED_OPEN', { error: (startError as any)?.message ?? String(startError) })
       }
+      if (wakeHandle) scheduleSessionBindRetries()
     } else {
       logStep('WAKE_LISTENER_SKIPPED', { reason: 'serverUrl_absent', sessionId })
     }
@@ -713,14 +768,19 @@ export default {
     // when serverUrl is absent — quota-status.json is local and only needs
     // signalWire engine for routing. Will degrade gracefully (direct-
     // inject via injectContextEvent) if signalWire is null.
-    try {
+    if (singletons.quota !== undefined) {
+      quotaHandle = singletons.quota
+      logStep('QUOTA_WATCHER_SHARED', { pid: process.pid })
+    } else try {
       quotaHandle = startQuotaWatcher({
         signalWire: signalWireEngine,
         resolveSessionId: () => boundSessionId ?? (sessionId !== 'unknown' ? sessionId : null),
         log: (msg) => dbg(msg),
       })
+      singletons.quota = quotaHandle
       logStep('QUOTA_WATCHER_STARTED', { pid: process.pid })
     } catch (e: any) {
+      singletons.quota = null
       logStep('QUOTA_WATCHER_FAILED_OPEN', { error: e?.message ?? String(e) })
     }
 
@@ -774,6 +834,12 @@ export default {
           }
         }
         if (eventType === 'app.exit' || eventType === 'server.stop') {
+          // Двери общие для всех экземпляров процесса: закрывает их только последний уходящий.
+          if (!releaseProcessWakeListener()) {
+            logStep('WAKE_LISTENER_KEPT_FOR_SIBLING', { eventType, directory: cwd })
+            return
+          }
+          resetProcessSingletons()
           try {
             if (wakeHandle) {
               stopWakeListener(wakeHandle)

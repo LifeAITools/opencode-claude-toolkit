@@ -27,7 +27,7 @@ function deps(home: string, over: Partial<FileDoorDeps> = {}) {
     isBusy: async () => false,
     resolveSession: async () => 'ses_one',
     openSession: async () => null,
-    send: (sid, text) => { sent.push([sid, text]) },
+    send: async (sid, text) => { sent.push([sid, text]); return true },
     receipt: (w) => { receipts.push(String(w.event_id)) },
     ...over,
   }
@@ -45,6 +45,17 @@ describe('opencode: файловая дверь побудки', () => {
     expect(sent[0]![1]).toContain('письмо до подъёма')
     expect(receipts).toEqual(['e1'])
     expect(existsSync(file)).toBe(false)
+  })
+
+  test('opencode не принял текст или отправка упала — письмо лежит, квитанции нет', async () => {
+    for (const send of [async () => false, async () => { throw new Error('сервер недоступен') }]) {
+      const { home, file } = setup()
+      const { d, receipts } = deps(home, { send })
+      const out = await pollFileDoor(d)
+      expect(out.kind).toBe('drained')
+      expect(existsSync(file)).toBe(true)
+      expect(receipts).toHaveLength(0)
+    }
   })
 
   test('агент занят — письмо лежит в файле, сервер о сессии не спрашивают', async () => {

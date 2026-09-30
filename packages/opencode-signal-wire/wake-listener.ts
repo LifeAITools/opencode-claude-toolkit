@@ -2108,14 +2108,14 @@ export async function startWakeListener(
         isBusy: isAgentBusy,
         resolveSession: () => resolveSessionId(config.sessionId),
         openSession: () => createSessionForWake('file-door'),
-        send: (sessionId, text) => {
-          if (!_sdkClient) { dbg('FILE_WAKE_SEND_FAILED no sdkClient'); return }
-          _sdkClient.session.promptAsync({
+        send: async (sessionId, text) => {
+          if (!_sdkClient) { dbg('FILE_WAKE_SEND_FAILED no sdkClient'); return false }
+          const { error } = await _sdkClient.session.promptAsync({
             path: { id: sessionId },
             body: { noReply: false, parts: [{ type: 'text', text }] },
-          }).then((r: any) => {
-            if (r?.error) dbg(`FILE_WAKE_SEND_FAILED session=${sessionId}: ${r.error}`)
-          }).catch((e: any) => dbg(`FILE_WAKE_SEND_FAILED session=${sessionId}: ${e?.message}`))
+          })
+          if (error) { dbg(`FILE_WAKE_SEND_FAILED session=${sessionId}: ${error}`); return false }
+          return true
         },
         log: (line) => dbg(line),
       })
@@ -2124,7 +2124,7 @@ export async function startWakeListener(
         lastFileDoorKept = outcome.reason
       } else {
         lastFileDoorKept = ''
-        if (outcome.kind === 'drained') dbg(`FILE_WAKE_DRAINED session=${outcome.sessionId} delivered=${outcome.result.delivered} bad=${outcome.result.bad}`)
+        if (outcome.kind === 'drained') dbg(`FILE_WAKE_DRAINED session=${outcome.sessionId} delivered=${outcome.result.delivered} kept=${outcome.result.kept} bad=${outcome.result.bad}`)
       }
     } catch (e: any) {
       dbg('file door error:', e?.message)

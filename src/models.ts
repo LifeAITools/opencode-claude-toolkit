@@ -144,6 +144,24 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     thinkingDefault: 'on',   // unlike opus-4-8/4-7, omitting `thinking` runs adaptive
     cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   },
+  // Sonnet 5.5 — shipped in Claude Code 2.1.284 (2026-09-30) as the default Sonnet.
+  // Facts from the CLI's baked model catalog (2.1.286): 1M native, 128k output
+  // default = upper, pricing tier_2_10 (cache_write_5m 2.5, cache_read 0.2 — the
+  // 0.1× convention would say 0.2 here, it happens to hold), capability
+  // `rejects_disabled_thinking` ({type:"disabled"} → 400, like opus-5-5), default
+  // effort 'medium'. Must sit ABOVE claude-sonnet-5: the fuzzy matcher otherwise
+  // lands it on Sonnet 5 — 3/15 price and a thinking repair that never fires.
+  'claude-sonnet-5-5': {
+    name: 'Claude Sonnet 5.5',
+    context: 1_000_000,
+    defaultOutput: 128_000,
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    thinkingDefault: 'on',
+    thinkingCanDisable: false,
+    cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  },
   // Sonnet 5 — released 2026-07-24; near-Opus quality in the Sonnet tier.
   // Adaptive thinking on by default; sampling params + budget_tokens REMOVED
   // (400 if sent). Standard price $3/$15 (intro $2/$10 through 2026-08-31 —

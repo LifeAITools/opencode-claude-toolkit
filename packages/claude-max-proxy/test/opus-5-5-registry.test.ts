@@ -27,7 +27,19 @@ describe('registry: point releases resolve to themselves, not to the base model'
     expect(getModelMetadata('claude-opus-5-5[1m]')?.name).toBe('Claude Opus 5.5')
     expect(getModelMetadata('claude-opus-5[1m]')?.name).toBe('Claude Opus 5')
   })
+  test('sonnet-5-5 carries its own price and refuses disabled thinking, not sonnet-5’s', () => {
+    // Born 2026-10-01: Claude Code 2.1.284 made it the default Sonnet; until this entry
+    // the fuzzy matcher landed it on claude-sonnet-5 (3/15, thinking repair never fired).
+    expect(getModelMetadata('claude-sonnet-5-5')?.name).toBe('Claude Sonnet 5.5')
+    expect(getModelMetadata('claude-sonnet-5-5[1m]')?.name).toBe('Claude Sonnet 5.5')
+    expect(MAX_MODELS['claude-sonnet-5-5']!.cost).toEqual({ input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 })
+    expect(MAX_MODELS['claude-sonnet-5-5']!.thinkingCanDisable).toBe(false)
+    expect(getModelMetadata('claude-sonnet-5')?.name).toBe('Claude Sonnet 5')
+  })
   test('reachable through the OpenAI surface', () => {
+    expect(resolveModel('claude-sonnet-5-5')).toBe('claude-sonnet-5-5')
+    expect(resolveModel('claude-v5.5-sonnet')).toBe('claude-sonnet-5-5')
+    expect(SUPPORTED_MODELS.some(m => m.id === 'claude-sonnet-5-5')).toBe(true)
     expect(resolveModel('claude-opus-5-5')).toBe('claude-opus-5-5')
     expect(resolveModel('claude-v5.5-opus')).toBe('claude-opus-5-5')
     expect(resolveModel('claude-v5.1-fable')).toBe('claude-fable-5-1')
@@ -41,6 +53,11 @@ describe('thinking repair is model-aware', () => {
     expect(clampEffortIfThinkingDisabled(b)).toBe('disabled')
     expect(b.thinking).toBeUndefined()
     expect((b.output_config as { effort: string }).effort).toBe('xhigh')
+  })
+  test('sonnet-5-5 with explicit disabled is DROPPED (rejects_disabled_thinking)', () => {
+    const b: Record<string, unknown> = { model: 'claude-sonnet-5-5', thinking: { type: 'disabled' } }
+    expect(clampEffortIfThinkingDisabled(b)).toBe('disabled')
+    expect(b.thinking).toBeUndefined()
   })
   test('fable-5-1 with disabled at low effort is repaired too (400 at every effort)', () => {
     const b: Record<string, unknown> = { model: 'claude-fable-5-1', thinking: { type: 'disabled' } }

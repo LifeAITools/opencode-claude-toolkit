@@ -3151,7 +3151,11 @@ export class ProxyClient {
         this.lastRateLimit = rl
         // Attach to the thrown error so the KA engine can apply smart-pause
         // policy (cache_dies_at vs resetAt) instead of plain retry-chain.
-        err.resetAt = rl.resetAt
+        // The window that REFUSED decides when the quota returns — not always the 5h one.
+        // 01.10.2026: the week ran out (util7d 1.00) with 5h at 0.12, and the engine was told
+        // «back at 03:40» (5h reset, 50 min) instead of «back in 5.8 days» — it paused, woke,
+        // took another 429 per session, and only then let the lineages go.
+        err.resetAt = quotaReturnsAtSec(rl, Date.now() / 1000)
         err.retryAfterSec = rl.retryAfter
         this.events.emit({
           level: 'error',
@@ -3893,6 +3897,23 @@ function serverToolCounts(u: Record<string, unknown> | null | undefined):
   if (typeof o.web_search_requests === 'number') out.webSearchRequests = o.web_search_requests
   if (typeof o.web_fetch_requests === 'number') out.webFetchRequests = o.web_fetch_requests
   return out
+}
+
+/**
+ * When a refused quota comes back, in epoch SECONDS: the latest of (the reset of every window
+ * at or over its limit; the upstream's own retry-after). With no window at the limit and no
+ * retry-after, the 5h reset as before — a 429 for some other reason keeps its old reading.
+ */
+export function quotaReturnsAtSec(
+  rl: Pick<RateLimitSnapshot, 'resetAt' | 'resetAt7d' | 'utilization5h' | 'utilization7d' | 'retryAfter'>,
+  nowSec: number,
+): number | null {
+  const candidates: number[] = []
+  if ((rl.utilization5h ?? 0) >= 1 && rl.resetAt) candidates.push(rl.resetAt)
+  if ((rl.utilization7d ?? 0) >= 1 && rl.resetAt7d) candidates.push(rl.resetAt7d)
+  if (rl.retryAfter && rl.retryAfter > 0) candidates.push(Math.ceil(nowSec + rl.retryAfter))
+  if (candidates.length > 0) return Math.max(...candidates)
+  return rl.resetAt ?? null
 }
 
 export function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {

@@ -203,6 +203,7 @@ export declare class ProxyClient {
     private commitPrefixHistory;
     private handleNetworkError;
 }
+export declare function quotaReturnsAtSec(rl: Pick<RateLimitSnapshot, "resetAt" | "resetAt7d" | "utilization5h" | "utilization7d" | "retryAfter">, nowSec: number): number | null;
 export declare function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot;
 export declare function extractSessionIdFromBody(rawBody: ArrayBuffer | Uint8Array | string): string | null;
 export { parseSSEToEvents as _parseKaResponseForTests };

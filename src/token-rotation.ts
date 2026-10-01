@@ -42,6 +42,7 @@
  *                 - T8 (close + audit-log helpers)
  */
 
+import { debugLogPath } from './debug-log-path.js'
 import { watch, appendFileSync, statSync, existsSync, renameSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -765,7 +766,7 @@ export class TokenRotationManager {
    */
   private logBestEffort(line: string): void {
     try {
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'), line + '\n')
+      appendFileSync(debugLogPath(), line + '\n')
     } catch {
       /* logging best-effort — swallow per NFR-05 */
     }

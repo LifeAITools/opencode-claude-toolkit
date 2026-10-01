@@ -1,3 +1,4 @@
+import { debugLogPath } from './debug-log-path.js'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { readFileSync, writeFileSync, chmodSync, mkdirSync, rmdirSync, statSync, unlinkSync, appendFileSync } from 'fs'
 import { join } from 'path'
@@ -125,7 +126,7 @@ async function pruneOldBodyDumps(dumpDir: string): Promise<void> {
   try {
     entries = readdirSync(dumpDir).filter((n: string) => n.endsWith('.json'))
   } catch (e: any) {
-    appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+    appendFileSync(debugLogPath(),
       `[${new Date().toISOString()}] BODY_DUMP_PRUNE_FAILED pid=${process.pid} err=readdir:${e?.message}\n`)
     return
   }
@@ -177,7 +178,7 @@ async function pruneOldBodyDumps(dumpDir: string): Promise<void> {
 
   if (deletedAge > 0 || deletedCap > 0) {
     try {
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] BODY_DUMP_PRUNE pid=${process.pid} ` +
         `scanned=${files.length} deletedAge=${deletedAge} bytesAge=${bytesAge} ` +
         `deletedCap=${deletedCap} bytesCap=${bytesCap} ` +
@@ -552,7 +553,7 @@ export class ClaudeCodeSDK {
       const sizeMb = (bodyStr.length / 1024 / 1024).toFixed(1)
       try {
         const { appendFileSync } = require('fs')
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] BODY_TOO_LARGE pid=${process.pid} bodyLen=${bodyStr.length} (${sizeMb}MB) — refusing to send (would 413)\n`)
       } catch {}
       const msgCount = (body.messages as unknown[])?.length ?? 0
@@ -566,12 +567,12 @@ export class ClaudeCodeSDK {
 
     try {
       const { appendFileSync } = require('fs')
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] API_START pid=${process.pid} model=${body.model} msgs=${(body.messages as unknown[])?.length ?? 0}\n`)
       // Dump full request for diagnostics
       const toolNames = (body.tools as any[])?.map((t: any) => t.name).join(',') ?? 'none'
       const sysPreview = typeof body.system === 'string' ? body.system.substring(0, 200) : JSON.stringify(body.system)?.substring(0, 200)
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] API_REQ pid=${process.pid} headers=${JSON.stringify(headers).substring(0, 300)} tools=[${toolNames.substring(0, 500)}] sys=${sysPreview} bodyLen=${bodyStr.length}\n`)
       // Full request body dump (sans messages content for size) — enable with CLAUDE_MAX_DUMP_REQUESTS=1
       if (process.env.CLAUDE_MAX_DUMP_REQUESTS === '1') {
@@ -611,7 +612,7 @@ export class ClaudeCodeSDK {
           const turn = (globalThis as any).__claudeMaxBodyTurn = ((globalThis as any).__claudeMaxBodyTurn ?? 0) + 1
           const fname = `${process.pid}-${turn.toString().padStart(4, '0')}-${Date.now()}.json`
           writeFileSync(join(dumpDir, fname), bodyStr)
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] BODY_DUMPED pid=${process.pid} turn=${turn} bytes=${bodyStr.length} file=${fname}\n`)
 
           // ── Rotation: opportunistic, async, every PRUNE_EVERY_N writes ──
@@ -623,7 +624,7 @@ export class ClaudeCodeSDK {
           }
         } catch (e: any) {
           // Disk-full / permissions — log but don't break the request
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] BODY_DUMP_FAILED pid=${process.pid} err=${e?.message}\n`)
         }
       }
@@ -641,7 +642,7 @@ export class ClaudeCodeSDK {
       clearTimeout(timeoutId)
       try {
         const { appendFileSync } = require('fs')
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] API_ERROR pid=${process.pid} ttfb=${Date.now()-t0}ms err=${(err as Error).message}\n`)
       } catch {}
       throw new ClaudeCodeSDKError('Network error', err)
@@ -664,7 +665,7 @@ export class ClaudeCodeSDK {
       }
       appendFileSync(join(homedir(), '.claude', 'claude-max-api-responses.log'),
         JSON.stringify(responseLog) + '\n')
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] API_RESPONSE pid=${process.pid} status=${response.status} ttfb=${Date.now()-t0}ms\n`)
     } catch {}
 
@@ -791,7 +792,7 @@ export class ClaudeCodeSDK {
               }
               // Log full raw usage including 1h cache fields for debugging
               try {
-                appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+                appendFileSync(debugLogPath(),
                   `[${new Date().toISOString()}] RAW_USAGE: ${JSON.stringify(u)}\n`)
               } catch {}
             }
@@ -1220,7 +1221,7 @@ export class ClaudeCodeSDK {
           // TOKEN_LOADED.
           try {
             const oldHint = tokenHint(this.accessToken)  // 8 chars after "sk-ant-oat01-"
-            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            appendFileSync(debugLogPath(),
               `[${new Date().toISOString()}] TOKEN_FILE_CHANGED pid=${process.pid} oldHint=${oldHint} reason=mtime_diff_in_fast_path action=invalidate_in_memory_token\n`)
           } catch { /* logging best-effort */ }
 
@@ -1234,7 +1235,7 @@ export class ClaudeCodeSDK {
         // hasChanged errored (race on rename?) — fall through to fast path,
         // any real failure will surface on next loadFromStore.
         try {
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] TOKEN_MTIME_CHECK_FAILED pid=${process.pid} error=${e?.message ?? String(e)}\n`)
         } catch {}
       }
@@ -1313,14 +1314,14 @@ export class ClaudeCodeSDK {
     try {
       const newHint = tokenHint(creds.accessToken)
       if (!prevToken) {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=initial newHint=${newHint} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}\n`)
       } else if (prevToken !== creds.accessToken) {
         const oldHint = tokenHint(prevToken)
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=rotation oldHint=${oldHint} newHint=${newHint} expiresInSec=${Math.round((this.expiresAt - Date.now()) / 1000)}\n`)
       } else {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] TOKEN_LOADED pid=${process.pid} reason=reload hint=${newHint}\n`)
       }
     } catch { /* logging best-effort */ }
@@ -1735,7 +1736,7 @@ export class ClaudeCodeSDK {
   // Debug helper for token rotation
   private dbg(msg: string): void {
     try {
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] TOKEN_ROTATION pid=${process.pid} ${msg}\n`)
     } catch {}
   }
@@ -2064,7 +2065,7 @@ export class ClaudeCodeSDK {
       this.refreshToken = recoveryCreds.refreshToken
       this.expiresAt = recoveryCreds.expiresAt
       try {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] TOKEN_REFRESH_RACE_RECOVERY pid=${process.pid}\n`)
       } catch {}
       return

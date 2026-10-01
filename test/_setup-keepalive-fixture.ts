@@ -52,3 +52,8 @@ process.env.CLAUDE_KEEPALIVE_CONFIG_PATH = FIXTURE_PATH
 // back on stop(). Measured 2026-08-18: a fresh test suite revived 30+ live
 // sessions before the first assertion ran.
 process.env.CLAUDE_KA_SNAPSHOT_PATH = '/tmp/__test_ka_snapshots_global.json'
+
+// Debug log — the LIVE ~/.claude/claude-max-debug.log is what incident analysis reads.
+// Measured 2026-10-01: a single suite run appended hundreds of fake KA_* / TOKEN_ROTATION
+// lines there, labelled only by `prog=<test file>`. See src/debug-log-path.ts.
+process.env.CLAUDE_MAX_DEBUG_LOG = '/tmp/__test_claude_max_debug.log'

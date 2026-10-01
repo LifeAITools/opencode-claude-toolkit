@@ -30,6 +30,7 @@
  *     current cacheTtlMs at construction (legacy: [60s, 240s] for 5m TTL)
  */
 
+import { debugLogPath } from './debug-log-path.js'
 import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import { homedir } from 'os'
@@ -1033,7 +1034,7 @@ export class KeepaliveEngine {
             })
           } catch { /* observer best-effort */ }
           try {
-            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            appendFileSync(debugLogPath(),
               `[${new Date().toISOString()}] KA_TTL_SCAN pid=${process.pid} ${RUNTIME_IDENTITY} minMs=${scan.minTtlMs} prevMs=${previousTtlMs} hasCC=${scan.hasAnyCacheControl} minMin=${scan.minTtlMs === null ? 'na' : Math.round(scan.minTtlMs / 60000)} source=request_scan\n`)
           } catch { /* logging best-effort */ }
         }
@@ -1074,7 +1075,7 @@ export class KeepaliveEngine {
           // overrode SSOT (e.g. proxy intercepts native CC traffic, sees
           // 5min markers, locks down from 1h SSOT default).
           try {
-            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            appendFileSync(debugLogPath(),
               `[${new Date().toISOString()}] KA_TTL_OBSERVED_DOWNLOCK pid=${process.pid} ${RUNTIME_IDENTITY} oldMs=${oldTtl} newMs=${minTtlMs} oldMin=${Math.round(oldTtl / 60000)} newMin=${Math.round(minTtlMs / 60000)} source=request_scan\n`)
           } catch { /* logging best-effort */ }
         }
@@ -1243,7 +1244,7 @@ export class KeepaliveEngine {
           this.notifyRegistryChanged()
           // No silent truncation — record which warm lineage the bound dropped.
           try {
-            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            appendFileSync(debugLogPath(),
               `[${new Date().toISOString()}] KA_WARMSET_EVICTED pid=${process.pid} ${RUNTIME_IDENTITY} cap=${warmCap} evicted=${victim} regSize=${this.registry.size}\n`)
           } catch { /* logging best-effort */ }
         }
@@ -1497,7 +1498,7 @@ export class KeepaliveEngine {
       // lineages are kept warm (the latter being the 2026-06-13 re-delegation fix).
       let warmMain = 0, warmSub = 0
       for (const e2 of this.registry.values()) { if (e2.role === 'main') warmMain++; else warmSub++ }
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] KA_HEARTBEAT pid=${process.pid} ${RUNTIME_IDENTITY} state=${state} regSize=${this.registry.size} warmMain=${warmMain} warmSub=${warmSub} idleSec=${idleSec} nextFireSec=${nextFireSec} cacheAgeSec=${cacheAge < 0 ? 'na' : Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} ttlSrc=${this.cacheTtlObservedLocked ? 'wire' : (this.cacheTtlOverridden ? 'pin' : 'ssot')} intervalSec=${Math.round(this.config.intervalMs / 1000)}\n`)
     } catch { /* logging best-effort */ }
 
@@ -1545,7 +1546,7 @@ export class KeepaliveEngine {
         //   - Stale-config bug (cacheAge tiny, cacheTtlMs is from old default)
         //   - Sleep/wake edge case (cacheAge huge from machine sleep)
         try {
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] KA_DISARM_CACHE_EXPIRED pid=${process.pid} ${RUNTIME_IDENTITY} cacheAgeSec=${Math.round(cacheAge / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} overSec=${Math.round((cacheAge - this.cacheTtlMs) / 1000)}\n`)
         } catch { /* logging best-effort */ }
         this.logClearDiag('cache_expired_during_sleep', { overSec: Math.round((cacheAge - this.cacheTtlMs) / 1000) })
@@ -1610,7 +1611,7 @@ export class KeepaliveEngine {
       // works (was previously silent on the readonly field — bug visible
       // only via observed disarm pattern).
       try {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] CACHE_TTL_RELOADED pid=${process.pid} ${RUNTIME_IDENTITY} oldMs=${oldTtl} newMs=${liveConfig.cacheTtlMs} oldMin=${Math.round(oldTtl / 60000)} newMin=${Math.round(liveConfig.cacheTtlMs / 60000)}\n`)
       } catch { /* logging best-effort */ }
     }
@@ -1618,7 +1619,7 @@ export class KeepaliveEngine {
       const oldMargin = this.safetyMarginMs
       this.safetyMarginMs = liveConfig.safetyMarginMs
       try {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] SAFETY_MARGIN_RELOADED pid=${process.pid} ${RUNTIME_IDENTITY} oldMs=${oldMargin} newMs=${liveConfig.safetyMarginMs}\n`)
       } catch { /* logging best-effort */ }
     }
@@ -1723,7 +1724,7 @@ export class KeepaliveEngine {
         // Layer 3 audit — visible reason we didn't fire. Operator sees "engine
         // had snapshots but none had cache_control" instead of silent no-op.
         try {
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] KA_FIRE_SKIPPED pid=${process.pid} ${RUNTIME_IDENTITY} reason=no_cache_control_in_any_snapshot skippedEntries=${skippedNoCacheControl}\n`)
         } catch { /* logging best-effort */ }
       }
@@ -1785,7 +1786,7 @@ export class KeepaliveEngine {
       for (const key of deadAtGate) {
         const e = this.registry.get(key)
         try {
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] KA_LINEAGE_DROPPED_CACHE_DEAD pid=${process.pid} ${RUNTIME_IDENTITY}`
             + ` lineage=${key} cacheAgeSec=${e ? Math.round((Date.now() - e.cacheWrittenAt) / 1000) : -1}`
             + ` cacheTtlSec=${Math.round((e ? this.ttlOfLineage(e) : this.cacheTtlMs) / 1000)} regSize=${this.registry.size}`
@@ -1843,7 +1844,7 @@ export class KeepaliveEngine {
       const ageAtFire = Date.now() - this.cacheWrittenAt
       if (ageAtFire >= longestDueTtlMs - this.safetyMarginMs) {
         try {
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] KA_FIRE_SKIPPED_CACHE_DEAD pid=${process.pid} ${RUNTIME_IDENTITY} cacheAgeSec=${Math.round(ageAtFire / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} regSize=${this.registry.size} — refusing to cold-write a dead prefix\n`)
         } catch { /* logging best-effort */ }
         this.logClearDiag('cache_dead_at_fire_gate', {
@@ -1866,7 +1867,7 @@ export class KeepaliveEngine {
     const toFire = eligible.slice(0, cap)
     if (eligible.length > toFire.length) {
       try {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] KA_FIRE_CAPPED pid=${process.pid} ${RUNTIME_IDENTITY} eligible=${eligible.length} fired=${toFire.length} deferred=${eligible.length - toFire.length} cap=${cap}\n`)
       } catch { /* logging best-effort */ }
     }
@@ -2058,7 +2059,7 @@ export class KeepaliveEngine {
       if (cw > EVICTION_CW_THRESHOLD && !(cr < cw * EVICTION_CR_RATIO_MAX)) {
         const msSinceReal = firedStat ? Date.now() - firedStat.lastSeenAt : Infinity
         try {
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] KA_FIRE_PARTIAL_REWRITE pid=${process.pid} ${RUNTIME_IDENTITY} lineage=${best.lineageKey} cr=${cr} cw=${cw} keptHead=${cr} rewroteTail=${cw} msSinceRealRequest=${msSinceReal === Infinity ? 'never' : Math.round(msSinceReal / 1000) + 's'} — head survived, tail paid for again\n`)
         } catch { /* logging best-effort */ }
         try {
@@ -2074,7 +2075,7 @@ export class KeepaliveEngine {
       }
       if (cw > EVICTION_CW_THRESHOLD && cr < cw * EVICTION_CR_RATIO_MAX) {
         try {
-          appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+          appendFileSync(debugLogPath(),
             `[${new Date().toISOString()}] KA_FIRE_EVICTION_DETECTED pid=${process.pid} ${RUNTIME_IDENTITY} cw=${cw} cr=${cr} ratio=${(cr/cw).toFixed(3)} — disarming to prevent cascade\n`)
         } catch { /* logging best-effort */ }
         // Trip the SHARED fleet breaker — but ONLY for a genuine server-side
@@ -2132,7 +2133,7 @@ export class KeepaliveEngine {
         })
         if (fate === 'keep-warm') {
           try {
-            appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+            appendFileSync(debugLogPath(),
               `[${new Date().toISOString()}] KA_EVICTION_KEEP_WARM pid=${process.pid} ${RUNTIME_IDENTITY} lineage=${best.lineageKey} cw=${cw} intervalSec=${Math.round(this.config.intervalMs / 1000)} cacheTtlSec=${Math.round(this.cacheTtlMs / 1000)} — cache just paid for, next fire lands inside its life\n`)
           } catch { /* logging best-effort */ }
           // No bookkeeping needed here: the fire SUCCEEDED (it wrote), so the
@@ -2276,7 +2277,7 @@ export class KeepaliveEngine {
         ...extra,
       }
       const line = Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(' ')
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] KA_CLEAR_DIAG pid=${process.pid} ${RUNTIME_IDENTITY} ${line}\n`)
     } catch { /* logging best-effort */ }
   }
@@ -2419,7 +2420,7 @@ export class KeepaliveEngine {
 
     if (action === 'disarm') {
       try {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] KA_DISARM_EVICTION_BREAKER pid=${process.pid} ${RUNTIME_IDENTITY} regSize=${this.registry.size} cooldownRemainingSec=${Math.round(cooldownRemainingMs / 1000)} cacheAgeSec=${Math.round(cacheAgeMs / 1000)} — cache cannot survive the hold; disarming\n`)
       } catch { /* logging best-effort */ }
       this.logClearDiag('eviction_breaker_tripped', {
@@ -2448,7 +2449,7 @@ export class KeepaliveEngine {
     this.evictionHoldUntil = now + holdMs
 
     try {
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] KA_HOLD_EVICTION_BREAKER pid=${process.pid} ${RUNTIME_IDENTITY} regSize=${this.registry.size} holdSec=${Math.round(holdMs / 1000)} cacheAgeSec=${Math.round(cacheAgeMs / 1000)} — snapshot KEPT, resuming by timer\n`)
     } catch { /* logging best-effort */ }
     this.logClearDiag('eviction_hold_began', { holdMs, cacheAgeMs, jitterMs, regSize: this.registry.size })
@@ -2853,7 +2854,7 @@ export class KeepaliveEngine {
       (this.rearmTimer as any).unref()
     }
     try {
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] KA_REARM_SCHEDULED pid=${process.pid} ${RUNTIME_IDENTITY} attempt=${this.rearmAttempt} mode=${mode} delaySec=${Math.round(delay / 1000)} regSize=${this.registry.size} ttlRemainingSec=${Math.round(timeToDeath / 1000)}\n`)
     } catch { /* logging best-effort */ }
   }
@@ -3013,7 +3014,7 @@ export class KeepaliveEngine {
       const err = e as { message?: string; stack?: string } | null
       const msg = err?.message ?? String(e)
       const stack = (err?.stack ?? '').split('\n').slice(0, 4).join(' | ')
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] KA_ASYNC_REJECT pid=${process.pid} ${RUNTIME_IDENTITY} tag=${tag} msg=${msg} stack=${stack}\n`)
     } catch { /* logging best-effort */ }
   }
@@ -3249,7 +3250,7 @@ export class KeepaliveEngine {
     for (const [k, entry] of this.lastSnapshots) this.registry.set(k, entry)
     this.notifyRegistryChanged()
     try {
-      appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+      appendFileSync(debugLogPath(),
         `[${new Date().toISOString()}] KA_SELF_HEAL pid=${process.pid} ${RUNTIME_IDENTITY} reprimed=${this.lastSnapshots.size} cacheAgeSec=${Math.round(cacheAge / 1000)} — live idle session re-warmed without a real request\n`)
     } catch { /* logging best-effort */ }
     return true
@@ -3345,7 +3346,7 @@ export class KeepaliveEngine {
       // So a failed revive says so. It still never throws — the caller's other
       // sessions must revive regardless.
       try {
-        appendFileSync(join(homedir(), '.claude', 'claude-max-debug.log'),
+        appendFileSync(debugLogPath(),
           `[${new Date().toISOString()}] KA_REVIVE_FAILED pid=${process.pid} ${RUNTIME_IDENTITY} lineages=${state?.registry?.length ?? 'na'} err=${e instanceof Error ? e.message : String(e)} — this session will NOT be kept warm until a real request arrives\n`)
       } catch { /* logging best-effort */ }
     }

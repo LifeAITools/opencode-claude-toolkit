@@ -817,7 +817,11 @@ export function _resolve(raw: Record<string, unknown> | null): ResolvedKeepalive
     _source: source,
   }
 
-  _cachedConfig = config
+  // 🔴 NO `_cachedConfig = config` here. _resolve is a pure parser — tests call it with
+  // arbitrary raw objects, and this assignment let them overwrite the live cache while
+  // the file's mtime stayed the same, so the next loadKeepaliveConfig() served THEIR
+  // numbers (found 2026-10-01: a later suite got intervalMs 225000 against a fixture
+  // saying 60s, depending only on test-file order). loadKeepaliveConfig owns the cache.
   return config
 }
 

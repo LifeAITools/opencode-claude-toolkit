@@ -9,7 +9,7 @@
  */
 // Test isolation via bunfig.toml preload (see test/_setup-keepalive-fixture.ts).
 import { describe, test, expect } from 'bun:test'
-import { _resolve, RECOMMENDED_1H_CONFIG, getConfigPath } from '../src/keepalive-config.js'
+import { _resolve, RECOMMENDED_1H_CONFIG, getConfigPath, loadKeepaliveConfig } from '../src/keepalive-config.js'
 
 describe('keepalive-config: defaults (no file)', () => {
   test('resolves to 5m TTL by default', () => {
@@ -211,5 +211,16 @@ describe('keepalive-config: rewriteGuard', () => {
   test('reloadMarker is file-overridable; empty falls back to default', () => {
     expect(_resolve({ rewriteGuard: { reloadMarker: '[%switch-org%]' } }).rewriteGuard.reloadMarker).toBe('[%switch-org%]')
     expect(_resolve({ rewriteGuard: { reloadMarker: '' } }).rewriteGuard.reloadMarker).toBe('[%reload-ok%]')
+  })
+})
+
+describe('keepalive-config: _resolve is pure', () => {
+  // 2026-10-01: _resolve wrote its result into the live cache, so a test resolving
+  // intervalSec 1800 made the NEXT loadKeepaliveConfig() — file unchanged — serve 1800.
+  // 16 engine tests failed or passed depending only on test-file order.
+  test('resolving arbitrary raw does not change what loadKeepaliveConfig serves', () => {
+    const before = loadKeepaliveConfig()
+    _resolve({ cacheTtlSec: 3600, intervalSec: 1800 })
+    expect(loadKeepaliveConfig()).toBe(before)
   })
 })

@@ -256,6 +256,9 @@ export {
   enrichAnthropicRequest,
   clampEffortIfThinkingDisabled,
   injectCacheMarkers,
+  withBillingBlock,
+  cacheInjectionDisabled,
+  CACHE_OPT_OUT_HEADER,
   hasAnyCacheControl,
   setCompatVersion,
 } from './subscription-compat.js'

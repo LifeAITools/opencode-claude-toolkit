@@ -1,4 +1,5 @@
 import { debugLogPath } from './debug-log-path.js'
+import { withBillingBlock } from './subscription-compat.js'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { readFileSync, writeFileSync, chmodSync, mkdirSync, rmdirSync, statSync, unlinkSync, appendFileSync } from 'fs'
 import { join } from 'path'
@@ -937,12 +938,8 @@ export class ClaudeCodeSDK {
     let system: unknown = undefined
     if (alreadyHasBilling) {
       system = options.system
-    } else if (typeof options.system === 'string') {
-      system = attributionHeader + '\n' + options.system
-    } else if (Array.isArray(options.system)) {
-      system = [{ type: 'text', text: attributionHeader }, ...options.system]
     } else {
-      system = attributionHeader
+      system = withBillingBlock(options.system, attributionHeader)
     }
 
     const body: Record<string, unknown> = {

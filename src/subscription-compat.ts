@@ -52,6 +52,30 @@ export type CompatEmit = (
 
 const CACHE_MARKER = { cache_control: { type: 'ephemeral' as const, ttl: '1h' as const } }
 
+/**
+ * Opt-out of marker injection, per request. 🔴 WHY (2026-10-01, vibe-kiberos-app-owner):
+ * a chat's web-search service sends one-off bodies (fresh pages every call) with no
+ * cache_control, so the injection above bought a 1h cache write on every turn that no
+ * later call could ever read — cache_read 0, cache_write up to 17k per turn. Writes move
+ * the subscription's 5h window; reads that never come cannot pay it back. Only the client
+ * knows its traffic is one-off, so the client says so. The header is consumed here and
+ * never forwarded upstream.
+ */
+export const CACHE_OPT_OUT_HEADER = 'x-claude-max-cache'
+
+/** True when the consumer asked for no injected cache markers (`x-claude-max-cache: none`). */
+export function cacheInjectionDisabled(headers: Record<string, string | undefined> | Headers | undefined): boolean {
+  if (!headers) return false
+  let v: string | null | undefined
+  if (typeof (headers as Headers).get === 'function') v = (headers as Headers).get(CACHE_OPT_OUT_HEADER)
+  else {
+    const h = headers as Record<string, string | undefined>
+    const key = Object.keys(h).find(k => k.toLowerCase() === CACHE_OPT_OUT_HEADER)
+    v = key ? h[key] : undefined
+  }
+  return (v ?? '').trim().toLowerCase() === 'none'
+}
+
 /** True when ANY cache_control mark exists in system ⊕ tools ⊕ messages. */
 export function hasAnyCacheControl(body: Record<string, unknown>): boolean {
   const blockHas = (b: unknown): boolean =>
@@ -232,6 +256,27 @@ export function clampEffortIfThinkingDisabled(
   return was
 }
 
+/**
+ * Put the billing attribution line in FRONT of a system prompt, as its OWN text block.
+ *
+ * 🔴 NEVER GLUE IT ONTO THE CLIENT'S TEXT. Measured live 2026-10-01: with the line
+ * prepended into the same string, the model did not see the client's system at all
+ * (asked for a secret word from it: «NONE»; the same text as an array block: «ZEBRA»;
+ * a 13.6k-token system was billed as 9 input tokens). The block carrying the billing
+ * line is consumed upstream, so whatever shares it vanishes. Every string-system
+ * client was affected — the OpenAI surface always sends one. This is the single
+ * place that builds the shape; sdk.ts, the proxy and the opencode plugin call it.
+ */
+export function withBillingBlock(system: unknown, billingLine: string): unknown {
+  if (typeof system === 'string') {
+    return system.length > 0
+      ? [{ type: 'text', text: billingLine }, { type: 'text', text: system }]
+      : billingLine
+  }
+  if (Array.isArray(system)) return [{ type: 'text', text: billingLine }, ...system]
+  return billingLine
+}
+
 export function enrichAnthropicRequest(
   rawBody: string,
   consumerHeaders: Record<string, string>,
@@ -288,7 +333,7 @@ export function enrichAnthropicRequest(
   const headers: Record<string, string> = {}
   for (const [k, v] of Object.entries(consumerHeaders)) {
     const lk = k.toLowerCase()
-    if (lk === 'x-api-key' || lk === 'authorization') continue
+    if (lk === 'x-api-key' || lk === 'authorization' || lk === CACHE_OPT_OUT_HEADER) continue
     headers[k] = v
   }
   headers['content-type'] = 'application/json'
@@ -317,11 +362,7 @@ export function enrichAnthropicRequest(
   if (body.system !== undefined) {
     const sysStr = typeof body.system === 'string' ? body.system : JSON.stringify(body.system)
     if (!sysStr.includes('x-anthropic-billing-header')) {
-      if (typeof body.system === 'string') {
-        body.system = billingHeader + '\n' + body.system
-      } else if (Array.isArray(body.system)) {
-        body.system = [{ type: 'text', text: billingHeader }, ...body.system]
-      }
+      body.system = withBillingBlock(body.system, billingHeader)
     }
   } else {
     body.system = billingHeader
@@ -331,7 +372,7 @@ export function enrichAnthropicRequest(
   // Anthropic SDK users rarely set cache_control — without markers, no
   // caching and no KA protection. injectCacheMarkers respects existing
   // markers (won't overwrite if client already set them).
-  injectCacheMarkers(body)
+  if (!cacheInjectionDisabled(consumerHeaders)) injectCacheMarkers(body)
 
   return { body: JSON.stringify(body), headers }
 }

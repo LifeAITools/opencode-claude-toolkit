@@ -200,7 +200,10 @@ export const SUPPORTED_MODELS = [
 
 // ═══ Request Translation ════════════════════════════════════════════
 
-export function translateToAnthropicBody(req: OAIChatRequest): TranslationResult {
+export function translateToAnthropicBody(
+  req: OAIChatRequest,
+  opts: { injectCache?: boolean } = {},
+): TranslationResult {
   const model = resolveModel(req.model)
   const system = extractSystem(req.messages)
   const messages = toAnthropicMessages(req.messages)
@@ -274,8 +277,9 @@ export function translateToAnthropicBody(req: OAIChatRequest): TranslationResult
 
   // Inject cache markers at strategic breakpoints so Anthropic caches the
   // prefix and KA engine can keep it warm. OpenAI clients never send
-  // cache_control — without this, every request is uncached.
-  injectCacheMarkers(body)
+  // cache_control — without this, every request is uncached. A client that sent
+  // `x-claude-max-cache: none` (one-off traffic) opts out — see cacheInjectionDisabled.
+  if (opts.injectCache !== false) injectCacheMarkers(body)
 
   return { body: JSON.stringify(body), model, isJsonSchema, schemaToolName }
 }
@@ -999,6 +1003,7 @@ import {
 export {
   hasAnyCacheControl,
   setCompatVersion,
+  cacheInjectionDisabled,
 } from '@life-ai-tools/claude-code-sdk'
 export { injectCacheMarkers }
 export type { AnthropicEnrichResult } from '@life-ai-tools/claude-code-sdk'

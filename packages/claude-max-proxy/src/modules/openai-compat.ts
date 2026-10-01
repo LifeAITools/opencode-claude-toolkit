@@ -19,6 +19,7 @@ import {
   openaiErrorResponse,
   corsPreflightResponse,
   enrichAnthropicRequest,
+  cacheInjectionDisabled,
   type TransformOpts,
 } from '../openai-translate.js'
 
@@ -98,7 +99,7 @@ export function createOpenAICompatModule(): ProxyModule {
 
         // Translate OpenAI → Anthropic
         let translation
-        try { translation = translateToAnthropicBody(body) }
+        try { translation = translateToAnthropicBody(body, { injectCache: !cacheInjectionDisabled(req.headers) }) }
         catch (err: any) { return openaiErrorResponse(400, `Translation error: ${err?.message}`, 'invalid_request_error') }
 
         // Enrich with subscription betas/billing/cache

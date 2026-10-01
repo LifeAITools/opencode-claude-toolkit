@@ -39,5 +39,5 @@ export { ANTHROPIC_API_HOST, ANTHROPIC_API_BASE, ANTHROPIC_API_MESSAGES, ANTHROP
 export { ANTHROPIC_API_VERSION, API_VERSION, HEADER_CONTENT_TYPE, HEADER_AUTHORIZATION, HEADER_ACCEPT, HEADER_USER_AGENT, HEADER_ANTHROPIC_VERSION, HEADER_ANTHROPIC_BETA, HEADER_ANTHROPIC_DANGEROUS_DIRECT_BROWSER_ACCESS, HEADER_X_APP, HEADER_X_CLAUDE_CODE_SESSION_ID, CONTENT_TYPE_JSON, ACCEPT_JSON_SSE, CONTENT_TYPE_TEXT_HTML, ANTHROPIC_HEADERS, } from "./anthropic-headers.js";
 export { connectVoiceStream, transcribeFile, transcribeAudioFile, startMicRecording, checkVoiceDeps, } from "./voice.js";
 export type { VoiceStreamCallbacks, VoiceStreamConnection, VoiceStreamOptions, TranscribeFileOptions, } from "./voice.js";
-export { enrichAnthropicRequest, clampEffortIfThinkingDisabled, injectCacheMarkers, hasAnyCacheControl, setCompatVersion, } from "./subscription-compat.js";
+export { enrichAnthropicRequest, clampEffortIfThinkingDisabled, injectCacheMarkers, withBillingBlock, cacheInjectionDisabled, CACHE_OPT_OUT_HEADER, hasAnyCacheControl, setCompatVersion, } from "./subscription-compat.js";
 export type { AnthropicEnrichResult, CompatEmit } from "./subscription-compat.js";

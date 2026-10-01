@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, statSync
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import {
+  withBillingBlock,
   ANTHROPIC_PLATFORM_BASE,
   ANTHROPIC_OAUTH_AUTHORIZE_URL,
   ANTHROPIC_OAUTH_TOKEN_URL,
@@ -372,13 +373,9 @@ export default {
                   }
 
                   // Prepend billing header to system prompt
-                  if (typeof body.system === 'string') {
-                    body.system = billingHeader + '\n' + body.system
-                  } else if (Array.isArray(body.system)) {
-                    body.system = [{ type: 'text', text: billingHeader }, ...body.system]
-                  } else {
-                    body.system = billingHeader
-                  }
+                  // Own block, never glued on — see withBillingBlock (the glued form hid the
+                  // whole system prompt from the model, measured 2026-10-01).
+                  body.system = withBillingBlock(body.system, billingHeader)
 
                   init = { ...init, body: JSON.stringify(body) }
                 } catch { /* non-JSON body, pass through */ }

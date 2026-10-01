@@ -13,6 +13,7 @@
 
 import { initStore, insertUsage, teeUsage, healthResponse, writePidFile, type OpenAIUsage, type UsageRow } from '@kiberos/proxy-core'
 
+import { UpstreamModelGate } from './model-gate.js'
 import { homedir } from 'os'
 import { join } from 'path'
 
@@ -27,6 +28,14 @@ const MODELS = (process.env.PROXY_MODELS ?? 'qwen-portal/coder-model')
   .map((id) => id.trim())
   .filter(Boolean)
   .map((id) => ({ id, object: 'model', owned_by: 'openai-compat' }))
+
+/** Модель вне /models апстрима — громкий отказ (см. model-gate.ts). Выключается PROXY_ENFORCE_MODELS=0. */
+const ENFORCE_MODELS = process.env.PROXY_ENFORCE_MODELS !== '0'
+const modelGate = new UpstreamModelGate()
+
+function upstreamBase(request: Request): string | null {
+  return request.headers.get('x-upstream-url') ?? process.env.PROXY_UPSTREAM_BASE ?? null
+}
 
 function usageToRow(model: string | undefined, sessionId: string | undefined, usage: OpenAIUsage | undefined): UsageRow | null {
   if (!usage) return null
@@ -47,7 +56,7 @@ function usageToRow(model: string | undefined, sessionId: string | undefined, us
 }
 
 async function forward(request: Request, model: string | undefined): Promise<Response> {
-  const base = request.headers.get('x-upstream-url') ?? process.env.PROXY_UPSTREAM_BASE ?? null
+  const base = upstreamBase(request)
   if (!base) {
     return new Response(JSON.stringify({ error: 'missing X-Upstream-Url header or PROXY_UPSTREAM_BASE env' }), {
       status: 400,
@@ -80,6 +89,11 @@ async function forward(request: Request, model: string | undefined): Promise<Res
     /* не-JSON тело — шлём как есть */
   }
 
+  if (ENFORCE_MODELS) {
+    const refusal = await modelGate.check(base, request.headers.get('authorization'), model)
+    if (refusal) return refusal
+  }
+
   const upstreamRes = await fetch(target, { method: request.method, headers, body: bodyText })
   const write = (usage: OpenAIUsage) => {
     const row = usageToRow(model, sessionId, usage)
@@ -106,13 +120,21 @@ async function forward(request: Request, model: string | undefined): Promise<Res
   }
 }
 
+/** Список апстрима для этого ключа, когда он доступен; иначе — объявленный в PROXY_MODELS. */
+async function listModels(req: Request): Promise<Response> {
+  const base = upstreamBase(req)
+  const ids = base ? await modelGate.models(base, req.headers.get('authorization')) : null
+  if (!ids) return Response.json({ object: 'list', data: MODELS })
+  return Response.json({ object: 'list', data: [...ids].sort().map((id) => ({ id, object: 'model', owned_by: 'upstream' })) })
+}
+
 const server = Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
   fetch(req) {
     const url = new URL(req.url)
     if (url.pathname === '/health') return healthResponse({ port: PORT, stats: STATS_DB })
-    if (url.pathname === '/v1/models') return Response.json({ object: 'list', data: MODELS })
+    if (url.pathname === '/v1/models') return listModels(req)
     if (req.method === 'POST' && (url.pathname.endsWith('/chat/completions') || url.pathname.endsWith('/responses'))) {
       return forward(req, undefined)
     }

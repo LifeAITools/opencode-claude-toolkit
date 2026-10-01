@@ -1,6 +1,6 @@
 {
   "name": "@kiberos/openai-compat-proxy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Тонкий OpenAI→OpenAI pipe для любого OpenAI-совместимого апстрима (Qwen, DeepSeek, …). Апстрим — конфиг/заголовок, провайдер — не код.",
   "type": "module",
   "private": true,

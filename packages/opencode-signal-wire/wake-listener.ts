@@ -852,6 +852,24 @@ function formatMeasuredAt(issuedAt: unknown, eventTimestamp?: string): string {
   return `${raw} (${ageHuman})`
 }
 
+/**
+ * Готовый текст побудки от роутера (wake-router, план wake-text-one-renderer, 02.10.2026) —
+ * `rendered: {v: 1, brief, full, parts}`. Рисует ОДИН рисовальщик для всех программ; адаптер только
+ * ПЕРЕВОДИТ: `full` — на границе хода (побудка открывает ход), `brief` — посреди хода (совет без
+ * ответа может прийти, пока агент работает). Поля нет или форма другая — прежний formatWakeMessage
+ * (переходный путь, снимается, когда роутер кладёт поле всем).
+ */
+export function wakeText(event: WakeEvent, mode: 'full' | 'brief', identity?: AgentIdentity | null): string {
+  const r = ((event as any).rendered ?? (event.payload as any)?.rendered) as
+    | { v?: unknown; full?: unknown; brief?: unknown }
+    | undefined
+  if (r && r.v === 1) {
+    const text = mode === 'brief' ? r.brief : r.full
+    if (typeof text === 'string' && text.length > 0) return text
+  }
+  return formatWakeMessage(event, identity)
+}
+
 /** Format wake event with actionable instructions per event type.
  *  Standalone — no imports from signal-wire.ts (avoids circular deps).
  *
@@ -1256,7 +1274,7 @@ export async function injectContextEvent(
     dbg('context inject: no sdkClient')
     return false
   }
-  const text = formatWakeMessage(event, _agentIdentity)
+  const text = wakeText(event, 'brief', _agentIdentity)
   try {
     const { error } = await _sdkClient.session.prompt({
       path: { id: resolvedSessionId },
@@ -1398,7 +1416,7 @@ async function injectWakeEvent(
   const resolvedSessionId = (await resolveSessionId(sessionId)) ?? (await openSessionIfHeadless(`${event.type} ${event.eventId}`))
   if (!resolvedSessionId) {
     if (launchedWithWindow(processArgv())) {
-      if (await submitToWindow(formatWakeMessage(event, _agentIdentity))) {
+      if (await submitToWindow(wakeText(event, 'full', _agentIdentity))) {
         return 'ok'
       }
       return 'failed'
@@ -1411,7 +1429,7 @@ async function injectWakeEvent(
     return 'failed'
   }
 
-  const text = formatWakeMessage(event, _agentIdentity)
+  const text = wakeText(event, 'full', _agentIdentity)
 
   try {
     const { error } = await _sdkClient.session.promptAsync({

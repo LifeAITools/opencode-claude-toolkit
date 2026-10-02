@@ -95,3 +95,25 @@ describe('приёмник не пишет в SynqTask за агента', () =>
     expect(src).not.toContain('Starting work on')
   })
 })
+
+describe('готовый текст побудки от роутера (rendered v1)', () => {
+  // План wake-text-one-renderer (02.10): текст рисует роутер; адаптер только выбирает full/brief.
+  const base = channelMessageEvent({ channelId: 'c1', authorName: 'agent-ceo', text: 'привет' })
+  const { wakeText } = require('./wake-listener')
+  test('поле есть — вставляется как есть: full на границе хода, brief посреди', () => {
+    const ev = { ...base, payload: { ...base.payload, rendered: { v: 1, full: 'ПОЛНЫЙ', brief: 'КОРОТКИЙ', parts: {} } } }
+    expect(wakeText(ev, 'full')).toBe('ПОЛНЫЙ')
+    expect(wakeText(ev, 'brief')).toBe('КОРОТКИЙ')
+  })
+  test('поля нет или версия другая — прежний текст адаптера', () => {
+    // Прежний текст адаптера узнаём по его обёртке и автору (вариант канала зависит от того, видел ли
+    // процесс этот канал раньше, — это не предмет этого испытания).
+    const own = wakeText(base, 'full')
+    expect(own.startsWith('<system-reminder type="wake"')).toBe(true)
+    expect(own).toContain('agent-ceo')
+    const v2 = { ...base, payload: { ...base.payload, rendered: { v: 2, full: 'X', brief: 'Y' } } }
+    const fallback = wakeText(v2, 'full')
+    expect(fallback.startsWith('<system-reminder type="wake"')).toBe(true)
+    expect(fallback).not.toBe('X')
+  })
+})

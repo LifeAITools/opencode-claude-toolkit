@@ -62,3 +62,21 @@ describe('formatWakeMessage — channel_message author resolution', () => {
     expect(text).toContain('Channel Message from unknown')
   })
 })
+
+describe('formatWakeMessage — настроечные данные не повторяются в каждой побудке', () => {
+  // Слово фаундера 02.10: блок «кто ты, роль, команда, напарники» приходил с каждым сообщением,
+  // у одиночки — «Team: none. Teammates: none.». Роль агент получает один раз на старте сессии
+  // стартовым контекстом ядра; в побудке её больше нет, даже если личность известна.
+  test('с известной личностью — ни блока, ни роли, ни напарников', () => {
+    const identity = {
+      name: 'vibe-synqtalk-owner', roleName: 'Project Owner', rolePrompt: 'You own the project.',
+      teamName: null, teammates: [], budget: { maxSubagents: 5, maxSpawnDepth: 2 },
+    } as any
+    const text = formatWakeMessage(channelMessageEvent({ channelId: 'c1', authorName: 'agent-ceo', text: 'привет' }), identity)
+    expect(text).not.toContain('<agent-identity')
+    expect(text).not.toContain('You own the project.')
+    expect(text).not.toContain('Teammates')
+    expect(text).toContain('Channel Message from agent-ceo')
+    expect(text.startsWith('<system-reminder type="wake"')).toBe(true)
+  })
+})

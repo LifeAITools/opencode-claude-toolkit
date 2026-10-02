@@ -1121,25 +1121,13 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
   const tag = `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}" emitted-at="${esc(emittedAt)}"${measuredAtRaw ? ` measured-at="${esc(measuredAtRaw)}"` : ''}>`
   const end = `</system-reminder>`
 
-  // ── CR-01, DB-05: Prepend <agent-identity> block if identity is available ──
-  // CN-02: identity block target ≤60 words (≈80 tokens). rolePrompt is the variable part.
-  let identityBlock = ''
-  if (identity) {
-    const teammatesList = identity.teammates.length > 0
-      ? identity.teammates.map(t => `${t.name} (${t.roleName ?? '?'})`).join(', ')
-      : 'none'
-    const identityLines = [
-      `<agent-identity name="${identity.name}" role="${identity.roleName ?? 'unassigned'}" team="${identity.teamName ?? 'none'}">`,
-      `You are ${identity.name}. ${identity.rolePrompt ?? 'No role assigned.'}`,
-      `Team: ${identity.teamName ?? 'none'}. Teammates: ${teammatesList}.`,
-    ]
-    if (identity.budget) {
-      // Budget line only shown when budget fields exist (Stage 2)
-      identityLines.push(`Helpers: max ${identity.budget.maxSubagents} concurrent, depth ${identity.budget.maxSpawnDepth}. Делегирование коллегам: SynqTask todo_tasks delegate.`)
-    }
-    identityLines.push(`</agent-identity>`)
-    identityBlock = identityLines.join('\n')
-  }
+  // 🔴 НИКАКОГО <agent-identity> В ПОБУДКЕ (слово фаундера 02.10: «настроечные данные — один раз на
+  // сессию, не каждый раз»). Блок «кто ты, роль целиком, команда, напарники» клеился к КАЖДОЙ
+  // побудке — у одиночки ещё и «Team: none. Teammates: none.». Роль агент получает один раз на
+  // старте сессии стартовым контекстом ядра (startup-context-hook.ts → fetchStartupContext, текст
+  // рисует сервер SynqTask). Что и как часто добавлять агенту, решает сервер (договор адаптеров v2),
+  // а не адаптер. `identity` остаётся в подписи ради вызывающих, в тексте не используется.
+  void identity
 
   let body: string
 
@@ -1336,7 +1324,7 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
       body = `Event: ${event.type}\n${JSON.stringify(p, null, 2)}`
   }
 
-  return identityBlock ? `${identityBlock}\n${tag}\n${body}\n${end}` : `${tag}\n${body}\n${end}`
+  return `${tag}\n${body}\n${end}`
 }
 
 // ─── Busy Detection ─────────────────────────────────────────────────

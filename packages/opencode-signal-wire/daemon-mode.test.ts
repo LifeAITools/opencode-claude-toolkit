@@ -95,6 +95,16 @@ describe('сервер решает', () => {
     expect(JSON.stringify(d.seen[0])).toContain(root)
   })
 
+  test('позиция в токенах доходит до сервера — иначе правило с cooldown_tokens замолкает навсегда', async () => {
+    // Ядро 0.22.1: сервер без позиции считал её нулём, и правило, показавшись раз, молчало до
+    // конца сессии. Позицию клиент берёт из runtimeMeta.contextTokens, его заполняет адаптер.
+    const d = await fakeDaemon([])
+    const sw = adapter(d.path)
+    sw.trackTokens({ inputTokens: 123_456 })
+    await sw.evaluateHook(toolBefore('ses_daemon_probe'))
+    expect(d.seen[0].params.input.tokenPosition).toBe(123_456)
+  })
+
   test('сокета нет — встроенная копия, решает «local»', () => {
     const sw = adapter(join(tmpdir(), 'no-such-dir-xyz', 'rpc.sock'))
     expect(sw.decidedBy).toBe('local')

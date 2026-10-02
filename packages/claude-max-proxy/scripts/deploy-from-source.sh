@@ -218,8 +218,40 @@ Type=oneshot
 ExecStart=$INSTALLED/bin/proxy-failure-alert.sh %i
 UNIT
 
+# Alibaba Token Plan quota collector (2026-10-02) — writes ~/.claude-local/quota-status-alibaba.json
+# for lat-context (footer of OpenCode agents on Alibaba models). A 200-line oneshot runs from the
+# synced src under bun on purpose: a third compiled binary would cost ~90 MB in every one of the
+# 10 kept deploy backups, and a failed run here costs one missed sample, not a dead service.
+cat > "$UNIT_DIR/claude-max-alibaba-quota.service" <<UNIT
+[Unit]
+Description=claude-max-alibaba-quota — Alibaba Token Plan remaining quota -> quota-status-alibaba.json
+Documentation=file://$INSTALLED/src/alibaba-quota.ts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$BUN $INSTALLED/src/alibaba-quota.ts
+StandardOutput=append:$HOME/.claude/claude-max-alibaba-quota.log
+StandardError=append:$HOME/.claude/claude-max-alibaba-quota.log
+UNIT
+
+cat > "$UNIT_DIR/claude-max-alibaba-quota.timer" <<UNIT
+[Unit]
+Description=Refresh Alibaba Token Plan quota every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=claude-max-alibaba-quota.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl --user daemon-reload
-log "systemd units regenerated (binary ExecStart + OnFailure alert)"
+systemctl --user enable --now claude-max-alibaba-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-alibaba-quota.timer"
+log "systemd units regenerated (binary ExecStart + OnFailure alert + alibaba quota timer)"
 
 # 4c. Hourly dump/backup rotation backstop — installed from source, never hand-edited
 #     (it lived only in ~/.local/bin until 2026-09-25, invisible to review).

@@ -116,6 +116,7 @@ import {
   TOKEN_EVENTS_JSONL,
   STATS_SCHEMA_VERSION,
   orgKeyFromOauth,
+  classifyLevel,
 } from './quota-paths.js'
 
 // ─── Paths ────────────────────────────────────────────────────────────
@@ -148,14 +149,6 @@ const PID_STATE_PRUNE_AFTER_MS = 30 * 60_000  // forget pids silent >30min
  *  old; this window governs when we stop answering at all, not how fresh we
  *  claim the answer is. */
 const SESSION_STATE_PRUNE_AFTER_MS = 12 * 60 * 60_000  // 12h
-// 0.98 → 0.90 (2026-08-16, founder directive): agents given the critical signal at
-// 98% could not finish their current step in the remaining 2% and ran into 100%
-// and a 429 storm. 10% headroom buys a lossless wrap-up. Mirrors the engine-side
-// stop wall (signal-wire quota-critical-5h, also 0.90).
-const UTIL5H_CRITICAL = 0.90
-const UTIL7D_CRITICAL = 0.99
-const UTIL5H_WARNING = 0.85
-const UTIL7D_WARNING = 0.95
 const TOKEN_REFRESH_DELTA_MS = 60_000          // expiresAt jump > 60s = real change
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -704,16 +697,6 @@ function ingestStatsLine(line: StatsLine): void {
   }
 }
 
-function classifyLevel(
-  util5h: number | null,
-  util7d: number | null,
-): 'ok' | 'warning' | 'critical' {
-  const u5 = util5h ?? 0
-  const u7 = util7d ?? 0
-  if (u5 >= UTIL5H_CRITICAL || u7 >= UTIL7D_CRITICAL) return 'critical'
-  if (u5 >= UTIL5H_WARNING || u7 >= UTIL7D_WARNING) return 'warning'
-  return 'ok'
-}
 
 // Account hint: sha256 over (util5h-bucket, util7d-bucket, resetAt-bucket).
 // Bucket coarsening: util5h to 2 decimal places, resetAt to nearest hour.

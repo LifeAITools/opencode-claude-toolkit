@@ -56,3 +56,29 @@ export function orgKeyFromOauth(
   if (!basis) return null
   return 'org-' + createHash('sha256').update(basis).digest('hex').slice(0, 12)
 }
+
+// ─── Level classification — part of the quota-status file contract ─────────
+// Every producer of a quota-status file (the Claude watcher, the Alibaba Token
+// Plan collector) must call the same levels, so readers compare like with like.
+// 0.98 → 0.90 (2026-08-16, founder directive): agents given the critical signal at
+// 98% could not finish their current step in the remaining 2% and ran into 100%
+// and a 429 storm. 10% headroom buys a lossless wrap-up. Mirrors the engine-side
+// stop wall (signal-wire quota-critical-5h, also 0.90).
+export const UTIL5H_CRITICAL = 0.90
+export const UTIL7D_CRITICAL = 0.99
+export const UTIL5H_WARNING = 0.85
+export const UTIL7D_WARNING = 0.95
+
+export function classifyLevel(
+  util5h: number | null,
+  util7d: number | null,
+): 'ok' | 'warning' | 'critical' {
+  const u5 = util5h ?? 0
+  const u7 = util7d ?? 0
+  if (u5 >= UTIL5H_CRITICAL || u7 >= UTIL7D_CRITICAL) return 'critical'
+  if (u5 >= UTIL5H_WARNING || u7 >= UTIL7D_WARNING) return 'warning'
+  return 'ok'
+}
+
+/** Stage-2 contract for the Alibaba Token Plan collector: same shape, `provider: "alibaba"`. */
+export const QUOTA_STATUS_ALIBABA_JSON = join(CLAUDE_LOCAL, 'quota-status-alibaba.json')

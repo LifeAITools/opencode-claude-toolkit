@@ -18,3 +18,8 @@ delete process.env.KIBEROS_BINDING_ID
 const dir = mkdtempSync(join(tmpdir(), 'oc-sw-heartbeat-'))
 process.env.SW_HEARTBEAT_DIR = dir
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }))
+
+// Сервер правил машины — боевой. Прогон испытаний не должен отдавать ему выдуманные события:
+// их записал бы демон, и правила с побочными действиями (запись памяти, побудки) сработали бы
+// по-настоящему. Испытание режима сервера поднимает свой поддельный сокет и задаёт его явно.
+process.env.OPENCODE_SW_LOCAL = '1'

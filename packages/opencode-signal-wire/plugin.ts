@@ -167,11 +167,12 @@ export function warnIfExecSuppressedInLiveSession(): void {
   console.error(line)
 }
 
-function createSignalWire(serverUrl: string, sessionId: string, sdkClient: any, oneShot: boolean): SignalWire {
+function createSignalWire(serverUrl: string, sessionId: string, sdkClient: any, oneShot: boolean, projectRoot: string): SignalWire {
   warnIfExecSuppressedInLiveSession()
   // Разовый `opencode run` не место агента: без отметки жизни и без привязки сессии к агенту — иначе
   // прогон, запущенный из сессии агента, перепишет в реестре его настоящую сессию своей.
-  const signalWire = new SignalWire({ serverUrl, sessionId, ...(oneShot ? { lifeTrace: false as const } : {}) })
+  // Корень проекта — каталог этого окна: по нему сервер находит правила папки (.sw).
+  const signalWire = new SignalWire({ serverUrl, sessionId, projectRoot, ...(oneShot ? { lifeTrace: false as const } : {}) })
   signalWire.setSdkClient(sdkClient)
   return signalWire
 }
@@ -610,7 +611,7 @@ export default {
       subscribe: subscribe ?? 'default',
     })
 
-    const signalWire = serverUrl ? createSignalWire(serverUrl, sessionId, input.client, oneShot) : null
+    const signalWire = serverUrl ? createSignalWire(serverUrl, sessionId, input.client, oneShot, cwd) : null
     logStep('SIGNAL_WIRE_ENGINE', {
       created: Boolean(signalWire),
       reason: signalWire ? 'serverUrl_present' : 'serverUrl_absent',
@@ -855,6 +856,20 @@ export default {
             }
           } else {
             logStep('SESSION_IDLE_SKIPPED', { reason: 'no_session_id' })
+          }
+        }
+        // ─── session.compacted → серверу (договор адаптеров v2, часть 4) ───
+        // Сжатие у opencode заменяет историю; перезарядку и кольцо петли этой сессии обнуляет ядро
+        // само по событию. Своего счёта у адаптера нет — только передать.
+        if (eventType === 'session.compacted' && signalWireEngine) {
+          const compactedSession = sessionFromEvent(event).id ?? boundSessionId ?? undefined
+          if (compactedSession) {
+            try {
+              await signalWireEngine.evaluateHook({ source: 'plugin', type: 'session.compacted', sessionId: compactedSession, timestamp: Date.now(), payload: {} })
+              logStep('SESSION_COMPACTED_FORWARDED', { sessionId: compactedSession })
+            } catch (e: any) {
+              logStep('SESSION_COMPACTED_FORWARD_FAILED', { sessionId: compactedSession, error: e?.message ?? String(e) })
+            }
           }
         }
         if (eventType === 'app.exit' || eventType === 'server.stop') {

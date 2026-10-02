@@ -25,6 +25,9 @@ import {
   HARNESS,
   lifeTraceFromEnv,
   heartbeatContextFromRuntimeMeta,
+  DaemonEvaluator,
+  DaemonUnavailableError,
+  rpcSocketPath,
   type LifeTraceConfig,
   type Rule as CoreRule,
   type SignalWireEvent,
@@ -394,12 +397,35 @@ export interface SignalWireConfig {
    * `false` — ни следа, ни привязки: разовый `opencode run` не место агента (launch-kind.ts).
    */
   lifeTrace?: LifeTraceConfig | false
+  /**
+   * Кто решает. По умолчанию (`'auto'`) — СЕРВЕР правил машины, если его сокет есть, а свой набор
+   * (`rulesPath`) не задан: слово фаундера 2026-10-02, договор адаптеров v2. `false` — только
+   * встроенный конвейер (тесты; переменная OPENCODE_SW_LOCAL=1 делает то же для всего процесса).
+   */
+  daemon?: 'auto' | false
+  /** Подмена сокета для испытаний; по умолчанию — rpcSocketPath() ядра, тот же, что у хука. */
+  daemonSocketPath?: string
+  /**
+   * Корень проекта этого окна opencode (его каталог) — как `CLAUDE_PROJECT_DIR` у хука. По нему
+   * сервер находит правила ПАПКИ (`.sw`): без корня клиент не ставит меток папки, и папочные
+   * правила у opencode молчат (ядро 0.21.2).
+   */
+  projectRoot?: string
 }
 
 // ─── Adapter ───────────────────────────────────────────────
 
 export class SignalWire {
   private readonly pipeline: Pipeline
+  /**
+   * 🔴 РЕШАЕТ СЕРВЕР, А НЕ АДАПТЕР (слово фаундера 2026-10-02; договор адаптеров v2). Событие уходит
+   * демону signal-wire тем же `sw.evaluate`, что у хука Claude Code: живой набор флота, общее
+   * состояние, новое правило действует через секунды без выпуска и перезапуска окна. Замер до
+   * перевода: в opencode rules_loaded=95 при 100 в наборе. Встроенный `pipeline` остаётся
+   * ОБЪЯВЛЕННЫМ запасным путём: нет сокета вовсе, свой rulesPath, или сервер не ответил на событие.
+   */
+  private readonly daemon: DaemonEvaluator | null
+  private readonly daemonSocket: string
   private readonly registry: EmitterRegistry
   private sessionId: string
   private readonly platform: string
@@ -460,18 +486,62 @@ export class SignalWire {
     // Adapter identity banner (before Pipeline — so the line appears early)
     emitAdapterBanner(this.rulesStore.getRules().length, resolvedPath)
 
+    const lifeTrace: LifeTraceConfig | undefined = config.lifeTrace === false ? undefined : config.lifeTrace ?? {
+      ...lifeTraceFromEnv(HARNESS.OPENCODE),
+      context: (event) => this.heartbeatContext(event),
+      onAttach: (r, sid) => swLog(`SESSION_ATTACH status=${r.status} session=${sid} detail="${r.detail}"`),
+    }
+
+    this.daemonSocket = config.daemonSocketPath ?? rpcSocketPath()
+    const localForced = process.env.OPENCODE_SW_LOCAL === '1'
+    const useDaemon = config.daemon !== false && !config.rulesPath && !localForced && existsSync(this.daemonSocket)
+    this.daemon = useDaemon
+      ? new DaemonEvaluator({
+          platform: this.platform,
+          socketPath: this.daemonSocket,
+          agentName: () => process.env.SYNQTASK_AGENT_ID?.trim() || undefined,
+          agentBinding: () => process.env.KIBEROS_BINDING_ID?.trim() || undefined,
+          defaultSessionId: () => (this.sessionId && this.sessionId !== 'unknown' ? this.sessionId : undefined),
+          ...(config.projectRoot ? { ownRoot: () => config.projectRoot, cwd: () => config.projectRoot as string } : {}),
+          // След жизни — сведение о процессе, пишется на месте; ровно в одном месте, чтобы не двоить.
+          lifeTrace,
+        })
+      : null
+
     this.pipeline = new Pipeline({
       rules: this.rulesStore.getRules(),
       registry: this.registry,
       stateBackend: new MemoryBackend(),
       sessionId: this.sessionId || 'opencode-claude',
       serverUrl: config.serverUrl,
-      lifeTrace: config.lifeTrace === false ? undefined : config.lifeTrace ?? {
-        ...lifeTraceFromEnv(HARNESS.OPENCODE),
-        context: (event) => this.heartbeatContext(event),
-        onAttach: (r, sid) => swLog(`SESSION_ATTACH status=${r.status} session=${sid} detail="${r.detail}"`),
-      },
+      lifeTrace: this.daemon ? undefined : lifeTrace,
     })
+
+    // Журнал называет, КТО решает: в режиме сервера локальная копия набора не участвует.
+    swLog(this.daemon
+      ? `RULES_DECIDED_BY server socket=${this.daemonSocket} — live fleet set, not the installed copy`
+      : `SW_DAEMON_ABSENT rules decided LOCALLY by the installed copy (${config.rulesPath ? 'explicit rulesPath' : localForced ? 'OPENCODE_SW_LOCAL=1' : config.daemon === false ? 'daemon:false' : 'no socket at ' + this.daemonSocket}) — new rules arrive only with a release`)
+  }
+
+  /** Кто сейчас решает — для журнала, TUI и испытаний. */
+  get decidedBy(): 'server' | 'local' { return this.daemon ? 'server' : 'local' }
+
+  /**
+   * Одна дверь решения для всех путей (sync/async/hook/external). Сервер не ответил — событие
+   * считает встроенный конвейер по установленной копии набора, и это сказано в журнале. Не
+   * открываемся вслепую (защитные правила работают и в копии) и не замораживаем агента целиком:
+   * отказ каждому вызову на всё время перезапуска демона остановил бы всех агентов opencode разом.
+   */
+  private async decide(event: SignalWireEvent): Promise<EmitResult[]> {
+    if (this.daemon) {
+      try {
+        return await this.daemon.process(event)
+      } catch (e) {
+        if (!(e instanceof DaemonUnavailableError)) throw e
+        swLog(`SW_DAEMON_UNAVAILABLE type=${event.type} session=${event.sessionId ?? '?'} socket=${this.daemonSocket} reason="${e.message}" — this event decided by the installed copy`)
+      }
+    }
+    return this.pipeline.process(event)
   }
 
   /** Static identity — exported for introspection/TUI. */
@@ -871,7 +941,7 @@ export class SignalWire {
     const event = contextToEvent(ctx, this.sessionId)
     this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-sync', event)
-    this.pipeline.process(event)
+    this.decide(event)
       .then(rs => { this.lastAsyncResult = this.toLegacy(rs) })
       .catch(() => { /* CN-09 */ })
     return this.lastAsyncResult
@@ -883,7 +953,7 @@ export class SignalWire {
     const event = contextToEvent(ctx, this.sessionId)
     this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-async', event)
-    const results = await this.pipeline.process(event)
+    const results = await this.decide(event)
     const legacy = this.toLegacy(results)
     this.lastAsyncResult = legacy
     return legacy
@@ -905,7 +975,7 @@ export class SignalWire {
     this.rulesStore.maybeReload()
     this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-hook', event)
-    const results = await this.pipeline.process(event)
+    const results = await this.decide(event)
     // Cache so legacy sync evaluate() (if anyone still calls it) sees something
     this.lastAsyncResult = this.toLegacy(results)
     return results
@@ -943,7 +1013,7 @@ export class SignalWire {
     }
     this.attachRuntimeMeta(event)
     this.logInvoke('evaluate-external', event)
-    const results = await this.pipeline.process(event)
+    const results = await this.decide(event)
     const firedIds = new Set(results.map(r => r.ruleId))
     const currentRules = this.rulesStore.getRules()
     return { matched: currentRules.filter(r => firedIds.has(r.id)), results }

@@ -17,7 +17,7 @@ const servers: Server[] = []
 afterEach(() => { for (const s of servers.splice(0)) s.close() })
 
 /** Сервер, отвечающий на каждый sw.evaluate заданным списком; запоминает присланное. */
-function fakeDaemon(answer: unknown[] | 'error'): Promise<{ path: string; seen: any[] }> {
+function fakeDaemon(answer: unknown[] | 'error', folderAnswer: unknown[] = []): Promise<{ path: string; seen: any[] }> {
   const dir = mkdtempSync(join(tmpdir(), 'oc-sw-daemon-'))
   const path = join(dir, 'rpc.sock')
   const seen: any[] = []
@@ -31,7 +31,7 @@ function fakeDaemon(answer: unknown[] | 'error'): Promise<{ path: string; seen: 
       seen.push(req)
       const body = answer === 'error'
         ? { jsonrpc: '2.0', id: req.id, error: { message: 'boom' } }
-        : { jsonrpc: '2.0', id: req.id, result: { results_per_event: [answer] } }
+        : { jsonrpc: '2.0', id: req.id, result: { results_per_event: [answer], synapse_results_per_event: [folderAnswer] } }
       sock.end(JSON.stringify(body) + '\n')
     })
   })
@@ -103,6 +103,16 @@ describe('сервер решает', () => {
     sw.trackTokens({ inputTokens: 123_456 })
     await sw.evaluateHook(toolBefore('ses_daemon_probe'))
     expect(d.seen[0].params.input.tokenPosition).toBe(123_456)
+  })
+
+  test('подсказка правила ПАПКИ (.sw) доходит до адаптера — сервер кладёт её отдельным полем', async () => {
+    // 02.10: сервер срабатывал, но клиент ядра брал только results_per_event, а подсказки папки
+    // лежат в synapse_results_per_event — адаптер получал пустоту. Ядро 0.22.3 берёт оба поля.
+    const folderHint = { ruleId: 'folder:.sw/hint', type: 'hint', success: true, hintText: 'ПОДСКАЗКА ПАПКИ' }
+    const d = await fakeDaemon([], [folderHint])
+    const root = mkdtempSync(join(tmpdir(), 'oc-sw-root-'))
+    const results = await adapter(d.path, root).evaluateHook(toolBefore('ses_daemon_probe'))
+    expect(results.some((r: any) => r.hintText === 'ПОДСКАЗКА ПАПКИ')).toBe(true)
   })
 
   test('сокета нет — встроенная копия, решает «local»', () => {

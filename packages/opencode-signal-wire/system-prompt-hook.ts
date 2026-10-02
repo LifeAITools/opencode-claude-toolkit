@@ -2,15 +2,10 @@
  * system-prompt-hook — implements opencode's `experimental.chat.system.transform`
  * hook to inject role-specific system prompts.
  *
- * Two execution paths handle the two ways opencode sessions are used:
- *
- *   1. PARENT SESSION (the main opencode interactive session):
- *      Uses the plugin's provisioned identity. Role's systemPrompt block
- *      is appended or replaces opencode default (per role's strategy).
- *
- *   2. SUB-SESSION (spawned via task tool, brief claimed in claimBriefForSubSession):
- *      Uses the ephemeral brief's composedSystemPrompt. Strategy from brief
- *      (typically 'replace' for staff-*).
+ * One execution path: the main opencode session uses the plugin's provisioned
+ * identity; the role's systemPrompt block is appended or replaces opencode
+ * default (per role's strategy). The sub-session brief path was removed
+ * 2026-10-02 — briefs were never registered (opencode has no `pre_tool_use`).
  *
  * Strategy details (REQ-39, REQ-40, REQ-41):
  *   - append: opencode default stays at output.system[0]; our content pushed.
@@ -23,14 +18,13 @@
  * Hook signature (from @opencode-ai/plugin):
  *   "experimental.chat.system.transform"(input: {sessionID?, model}, output: {system: string[]}): Promise<void>
  *
- * Error handling: never throw. If brief lookup fails or identity is missing,
+ * Error handling: never throw. If identity is missing,
  * we don't inject — opencode default is used as-is. The plugin's runtime is
  * never blocked by hook failures.
  *
  * Conformance: REQ-38..REQ-43, CR-04, CR-13, US-04, US-11.
  */
 
-import { getBriefForSession, claimBriefForSubSession } from './spawn-brief-applier'
 import { startupTextForSession } from './startup-context-hook'
 import { AGENT_IDENTITY_DIR } from './domain-constants'
 
@@ -103,7 +97,6 @@ function getParentIdentity(): ProvisionedIdentitySnapshot | null {
  * Format the role context as a single string block to inject.
  *
  * For PARENT sessions: synthesizes from identity cache's orgRole snapshot.
- * For SUB-SESSIONS: uses brief's pre-composed systemPrompt.
  */
 function formatRoleBlock(identity: ProvisionedIdentitySnapshot): string {
   if (!identity.orgRole?.systemPrompt) {
@@ -117,7 +110,6 @@ function formatRoleBlock(identity: ProvisionedIdentitySnapshot): string {
     identity.orgRole.systemPrompt.trim(),
   ]
   // Capabilities, tools, limits — pull from metadata for parent-session injection.
-  // (Sub-sessions get this already pre-composed in brief.composedSystemPrompt.)
   if (md.tools_allowed) {
     lines.push('', `**Tools allowed:** ${md.tools_allowed}`)
   }
@@ -143,27 +135,8 @@ export async function systemTransformHook(
     const sessionID = input.sessionID
     if (!sessionID) return
 
-    // PATH 1: Sub-session — check if it has a brief to apply
-    // First time we see this sub-session, claim a registered brief
-    let brief = getBriefForSession(sessionID)
-    if (!brief) {
-      // Maybe this is the FIRST chat.message for a newly-spawned sub-session;
-      // try to claim an unassociated brief.
-      brief = claimBriefForSubSession(sessionID)
-    }
-
-    if (brief) {
-      // Sub-session path: brief.composedSystemPrompt was already assembled by
-      // wake-router's composable-prompt module per the role's strategy
-      // (append vs replace). For ephemeral sub-sessions we always treat the
-      // composed prompt as REPLACE — anchor the cache prefix on OUR content
-      // only, discarding opencode default. Trade-off: small one-time cache
-      // miss; benefit: full focus on role-specific instructions without
-      // dilution from generic CLI prose.
-      output.system[0] = brief.composedSystemPrompt
-      output.system.length = 1
-      return
-    }
+    // Ветка под-сессии с брифом удалена 02.10.2026: брифы никто не регистрировал (перехватчика
+    // `pre_tool_use` у opencode нет), claimBriefForSubSession всегда возвращал null.
 
     // PATH 2: Parent session — synthesize from provisioned identity
     // Стартовый контекст (бриф, прайминг, рельсы) — независимо от кэша личности: он приходит с

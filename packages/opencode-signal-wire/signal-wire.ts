@@ -92,7 +92,7 @@ function swLog(msg: string): void {
 
 /** Emit adapter identity line ONCE per process on first construction. */
 let adapterBannerEmitted = false
-function emitAdapterBanner(rulesLoaded: number, rulesPath: string | undefined): void {
+function emitAdapterBanner(rulesLoaded: number, rulesPath: string | undefined, decidedBy: 'server' | 'local'): void {
   if (adapterBannerEmitted) return
   adapterBannerEmitted = true
   // Include process-identification info so multiple opencode instances can be
@@ -106,7 +106,7 @@ function emitAdapterBanner(rulesLoaded: number, rulesPath: string | undefined): 
   const env = process.env
   const sessionEnv = env.OPENCODE_SESSION_ID || env.OPENCODE_SESSION_SLUG || '?'
   const instanceEnv = env.OPENCODE_AGENT_INSTANCE_ID || '?'
-  swLog(`ADAPTER_BANNER pid=${process.pid} ppid=${process.ppid ?? '?'} cwd=${process.cwd()} session_env=${sessionEnv} instance_env=${instanceEnv} core=${CORE_SOURCE_HASH} rules_loaded=${rulesLoaded} rules_path=${rulesPath ?? '(unset)'}`)
+  swLog(`ADAPTER_BANNER pid=${process.pid} ppid=${process.ppid ?? '?'} cwd=${process.cwd()} session_env=${sessionEnv} instance_env=${instanceEnv} core=${CORE_SOURCE_HASH} decided_by=${decidedBy} ${decidedBy === 'server' ? 'fallback_copy_rules' : 'rules_loaded'}=${rulesLoaded} rules_path=${rulesPath ?? '(unset)'}`)
 }
 
 // ─── Hot-reload rules store ────────────────────────────────
@@ -482,8 +482,6 @@ export class SignalWire {
       onSwap: (newRules) => this.applyRulesToPipeline(newRules),
     })
 
-    // Adapter identity banner (before Pipeline — so the line appears early)
-    emitAdapterBanner(this.rulesStore.getRules().length, resolvedPath)
 
     const lifeTrace: LifeTraceConfig | undefined = config.lifeTrace === false ? undefined : config.lifeTrace ?? {
       ...lifeTraceFromEnv(HARNESS.OPENCODE),
@@ -514,6 +512,10 @@ export class SignalWire {
       serverUrl: config.serverUrl,
       lifeTrace: this.daemon ? undefined : lifeTrace,
     })
+
+    // Стартовая строка — после выбора, КТО решает: в режиме сервера число правил относится к
+    // запасной копии (на случай, если сервер не ответит), а не к тому, по чему считается ход.
+    emitAdapterBanner(this.rulesStore.getRules().length, resolvedPath, this.daemon ? 'server' : 'local')
 
     // Журнал называет, КТО решает: в режиме сервера локальная копия набора не участвует.
     swLog(this.daemon
@@ -599,12 +601,9 @@ export class SignalWire {
 
   trackTokens(u: { inputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }): void {
     const promptSize = (u.inputTokens ?? 0) + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0)
-    const prev = this.contextPosition
-    if (prev > 0 && promptSize > 0 && promptSize < prev * 0.6) {
-      // Compaction detected — reset cooldowns
-      this.pipeline.getCooldownTracker().resetTokens()
-      void this.pipeline.getCooldownTracker().resetSession(this.sessionId || 'opencode-claude')
-    }
+    // Угадывание сжатия по падению токенов (<60 %) с локальным сбросом перезарядок удалено
+    // 02.10.2026: договор адаптеров v2, часть 4 — «своего счёта у адаптера нет». Сжатие opencode
+    // приходит событием `session.compacted` (plugin.ts), и сбрасывает состояние сессии ядро.
     if (promptSize > 0) {
       this.contextPosition = promptSize
       this.pipeline.updateTokens(promptSize)

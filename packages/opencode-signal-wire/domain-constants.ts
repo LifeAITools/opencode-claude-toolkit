@@ -132,12 +132,6 @@ export const FNV_32_PRIME = 2166136261
 /** wake-listener.ts:1133 — agent heartbeat ttl multiplier (count of supervisor sweeps before marking stale). */
 export const HEARTBEAT_STALE_SWEEPS = 120
 
-/** agent-action-client.ts:23 — default action client request timeout ms. */
-export const ACTION_CLIENT_TIMEOUT_MS = 5000
-
-/** agent-action-client.ts:201 — retry attempt initial backoff ms. */
-export const ACTION_CLIENT_RETRY_INITIAL_MS = 1000
-
 /** hook-listener.ts:70 — render budget for packed hints (chars). */
 export const RENDER_BUDGET_CHARS = 4000
 

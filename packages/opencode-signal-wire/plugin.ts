@@ -206,247 +206,11 @@ async function findNewSessionByDirectory(client: any, directory: string, notBefo
   return { id: candidates[0].id, directory: candidates[0].directory, count: 1 }
 }
 
-// ─── Subagent type → role mapping (loaded once on first call) ────
-
-let _subagentRoleMap: Record<string, string> | null = null
-function loadSubagentRoleMap(): Record<string, string> {
-  if (_subagentRoleMap) return _subagentRoleMap
-  const mapPath = join(WAKE_ROOT, 'subagent-role-map.json')
-  try {
-    const raw = readFileSync(mapPath, 'utf-8')
-    const parsed = JSON.parse(raw)
-    // Strip _comment / _doc fields (they're documentation, not mappings)
-    const map: Record<string, string> = {}
-    for (const [k, v] of Object.entries(parsed)) {
-      if (k.startsWith('_')) continue
-      if (typeof v === 'string') map[k] = v
-    }
-    _subagentRoleMap = map
-    return map
-  } catch {
-    return { default: 'staff-helper' }
-  }
-}
-
-function inferTargetRole(subagentType?: string): string {
-  if (!subagentType) {
-    return loadSubagentRoleMap().default ?? 'staff-helper'
-  }
-  const map = loadSubagentRoleMap()
-  // Direct match first
-  if (map[subagentType]) return map[subagentType]
-  // Prefix wildcard match: e.g. "lat-dev-kit-prompt-booster-*" → all prompt-booster-X
-  for (const [pattern, role] of Object.entries(map)) {
-    if (pattern.endsWith('*') && subagentType.startsWith(pattern.slice(0, -1))) {
-      return role
-    }
-  }
-  return map.default ?? 'staff-helper'
-}
-
-/**
- * Phase 4.2: routeTaskThroughEngine — central task tool intercept.
- *
- * Replaces the old local handlePreToolUseSpawnCheck. ALL task spawn decisions
- * MUST go through wake-router's decision-engine (CN-01: no bypass).
- *
- * Failure modes are HARD BLOCKS with explicit recovery instructions — no
- * silent fallback. If the central system is down, the operator must fix it
- * (start router / install stack / set explicit override). This is intentional:
- * silent fallbacks let the new system "kind of work" without anyone noticing
- * the central layer was never actually engaged, defeating the whole purpose.
- *
- * The ONLY escape valve is the explicit env var:
- *     SW_ALLOW_TASK_WITHOUT_ROUTER=1
- * which is loudly logged on every fire. Intended exclusively for operators
- * debugging the router itself; NOT to be set in any persistent .env.
- *
- * Flow:
- *   1. Not a spawn tool → undefined (no-op)
- *   2. Description quality gate (cheap early reject)
- *   3. Check identity provisioned + router reachable
- *      - missing identity → BLOCK with `wake-status install` hint
- *      - router down → BLOCK with `systemctl start synqtask-stack` hint
- *      - both can be overridden by SW_ALLOW_TASK_WITHOUT_ROUTER=1 (loud warning)
- *   4. POST /agent-action/request with intent='inline_helper'
- *   5. On decision:
- *      - inline_ok → inject _sw* args; opencode spawns subprocess
- *      - denied → BLOCK with router's reason + alternative
- *      - any error → BLOCK with the error message
- */
-async function routeTaskThroughEngine(
-  toolName: string,
-  sessionId: string,
-  input?: Record<string, any>,
-  output?: { args?: Record<string, any> },
-): Promise<{ decision: 'block'; message: string } | undefined> {
-  const spawnTools = ['task', 'Task', 'task_tool', 'call_omo_agent']
-  if (!spawnTools.includes(toolName)) return undefined
-
-  const description = String(input?.description ?? input?.prompt ?? input?.message ?? '')
-  // Cheap early gate (router would deny too, but this saves a network call)
-  if (description.length > 0 && description.length < 200) {
-    return {
-      decision: 'block',
-      message: `Delegation blocked: description too short (${description.length} chars, need 200+). ` +
-               `Include concrete task, constraints, files, and expected output.`,
-    }
-  }
-
-  // Operator override — explicit, loud, NEVER persisted in .env.
-  // Used for debugging the router itself when you can't otherwise unblock task tool.
-  const override = process.env.SW_ALLOW_TASK_WITHOUT_ROUTER === '1'
-
-  // Lazy-load to avoid plugin boot dependency on these modules if unused
-  const [{ requestAgentAction, RouterUnreachableError, RouterRejectedError, isRouterReachable }, { detectRunMode }] = await Promise.all([
-    import('./agent-action-client'),
-    import('./run-mode'),
-  ])
-
-  const memberId = process.env.SYNQTASK_MEMBER_ID
-  const memberSecret = process.env.SYNQTASK_MEMBER_SECRET
-
-  // ─── Gate: identity provisioned? ──
-  if (!memberId || !memberSecret) {
-    if (override) {
-      console.error(
-        `[SW] ⚠️⚠️⚠️ SW_ALLOW_TASK_WITHOUT_ROUTER=1: task tool firing without provisioned identity. ` +
-        `This bypasses RBAC and audit. ONLY for debugging.`,
-      )
-      // Override = allow with no further checks. Operator's responsibility.
-      helperStarted()
-      return undefined
-    }
-    return {
-      decision: 'block',
-      message:
-        `Task tool blocked: plugin has no SynqTask identity.\n` +
-        `\n` +
-        `Run \`wake-status install\` (or check that ${WAKE_ROOT}/router.json exists\n` +
-        `and ${AGENT_IDENTITY_DIR}/ contains your cached identity).\n` +
-        `\n` +
-        `Debug override (NOT for normal use): SW_ALLOW_TASK_WITHOUT_ROUTER=1`,
-    }
-  }
-
-  // ─── Gate: router reachable? ──
-  const reachable = await isRouterReachable(800)
-  if (!reachable) {
-    if (override) {
-      console.error(
-        `[SW] ⚠️⚠️⚠️ SW_ALLOW_TASK_WITHOUT_ROUTER=1: router unreachable but task tool firing anyway. ` +
-        `RBAC bypassed. ONLY for debugging.`,
-      )
-      helperStarted()
-      return undefined
-    }
-    return {
-      decision: 'block',
-      message:
-        `Task tool blocked: wake-router is unreachable.\n` +
-        `\n` +
-        `Run \`systemctl --user start synqtask-stack\` to start the router.\n` +
-        `Check status: \`wake-status\` or \`curl http://127.0.0.1:9800/health\`.\n` +
-        `\n` +
-        `Debug override (NOT for normal use): SW_ALLOW_TASK_WITHOUT_ROUTER=1`,
-    }
-  }
-
-  const runMode = detectRunMode().mode
-  const subagentType = input?.subagent_type ?? input?.subagentType
-  const targetRole = inferTargetRole(subagentType)
-  const depth = await resolveCurrentDepth(sessionId)
-
-  // ─── Main path: ask the router ──
-  try {
-    const result = await requestAgentAction({
-      caller: {
-        memberId,
-        memberSecret,
-        sessionId,
-        spawnDepth: depth,
-        pid: process.pid,
-        runMode,
-      },
-      intent: 'inline_helper',
-      target: { role: targetRole },
-      task: {
-        title: input?.description?.slice(0, 80) ?? 'subagent task',
-        description: description || '(no description provided)',
-      },
-    }, { timeoutMs: 6000 })
-
-    if (result.decision === 'inline_ok' && result.inline) {
-      // Phase 4.3 — in-process brief registration.
-      //
-      // Important: opencode's `task` tool does NOT spawn a subprocess. It
-      // creates a sub-session within the SAME opencode runtime, handled by
-      // the SAME plugin instance. So we don't inject env vars; we register
-      // the brief in our in-process registry, keyed by spawnBriefRef. On
-      // the first chat.message for the new sub-session, we claim the brief,
-      // associate it with the session ID, and apply:
-      //   - composed system prompt (via experimental.chat.system.transform)
-      //   - tool restrictions (via tool.definition + tool.execute.before)
-      //   - per-call reminder injected into chat parts
-      const { registerBrief } = await import('./spawn-brief-applier')
-      registerBrief({
-        briefRef: result.inline.spawnBriefRef,
-        decisionLogId: result.decisionLogId,
-        parentMemberId: memberId,
-      })
-
-      helperStarted()
-      dbg(`task routed via engine: decision=inline_ok role=${targetRole} ` +
-          `decisionLogId=${result.decisionLogId.slice(0, 8)} promptHash=${result.audit.promptHash?.slice(0, 8)} ` +
-          `briefRef=${result.inline.spawnBriefRef}`)
-      return undefined  // ALLOW (opencode spawns sub-session, our chat.message hook will pick up brief)
-    }
-    return {
-      decision: 'block',
-      message: `Unexpected engine decision: ${result.decision} (${result.reason})`,
-    }
-  } catch (e: any) {
-    if (e instanceof RouterRejectedError) {
-      const resp = e.response
-      const alt = resp.denial?.alternative ? `\n\nAlternative: ${resp.denial.alternative}` : ''
-      return {
-        decision: 'block',
-        message: `Task blocked by router: ${resp.reason}${alt}\n\n(decisionLogId: ${resp.decisionLogId})`,
-      }
-    }
-    if (e instanceof RouterUnreachableError) {
-      // Router was reachable a moment ago (we just probed /health), so this
-      // is a real network/protocol error. Surface explicitly.
-      return {
-        decision: 'block',
-        message:
-          `Task blocked: router became unreachable during request (${e.reason}).\n` +
-          `Check \`wake-status\` or \`journalctl --user -u synqtask-stack -n 50\`.`,
-      }
-    }
-    // Unknown error — fail-closed for safety.
-    dbg(`task routing error: ${e?.message ?? String(e)}`)
-    return {
-      decision: 'block',
-      message:
-        `Task routing error: ${e?.message ?? 'unknown'}.\n` +
-        `Run \`wake-status\` to diagnose.`,
-    }
-  }
-}
-
-/**
- * Backward-compat shim — kept only because existing in-tree callers reference
- * the old name. New code uses routeTaskThroughEngine directly. Both paths
- * lead to the SAME implementation; no legacy bypass anywhere.
- */
-async function handlePreToolUseSpawnCheck(
-  toolName: string,
-  sessionId: string,
-  input?: Record<string, any>,
-): Promise<{ decision: 'block'; message: string } | undefined> {
-  return routeTaskThroughEngine(toolName, sessionId, input, undefined)
-}
+// 🔴 ВЕТКА ДЕЛЕГИРОВАНИЯ УДАЛЕНА (02.10.2026, опись адаптера, задача signal-wire-core 9d18128d).
+// Здесь жили routeTaskThroughEngine / handlePreToolUseSpawnCheck / карта «тип под-агента → роль»:
+// порог «описание ≥200 знаков», блокировки «роутер недоступен», регистрация брифов. Всё это висело на
+// перехватчике `pre_tool_use`, которого у opencode НЕТ (бинарь: `tool.execute.before` — 5 вхождений,
+// `pre_tool_use` — 0), то есть ни разу не исполнялось. Решения о делегировании — правилам и роутеру.
 
 /**
  * ОДИН ПРИЁМНИК ПОБУДОК И ОДИН НАБЛЮДАТЕЛЬ КВОТЫ НА ПРОЦЕСС, сколько бы раз opencode ни поднял плагин.
@@ -897,9 +661,6 @@ export default {
           }
         }
       },
-      pre_tool_use: async ({ toolName, input }: { toolName: string; input?: any }) => {
-        return await handlePreToolUseSpawnCheck(toolName, boundSessionId ?? sessionId, input)
-      },
 
       // ─── Phase 4.5: System prompt + tool definition hooks ──────────────
       // Inject role-specific context (from OrgRole template OR ephemeral
@@ -1022,31 +783,10 @@ export default {
           const toolName = input?.tool ?? ''
           const sessionID = input?.sessionID ?? boundSessionId ?? ''
 
-          // 1) Sub-session blocked tools (from ephemeral brief)
-          const { getBriefForSession } = await import('./spawn-brief-applier')
-          const brief = sessionID ? getBriefForSession(sessionID) : null
-          if (brief?.blockedTools?.includes(toolName)) {
-            if (output?.args) {
-              output.args = {
-                _swBlocked: true,
-                _swReason: `Tool '${toolName}' is blocked for this sub-session's role (ephemeral brief). Use one of: ${brief.allowedTools.join(', ')}`,
-                _swDecisionLogId: brief.decisionLogId,
-              }
-            }
-            logStep('TOOL_BLOCKED_BY_BRIEF', {
-              tool: toolName,
-              sessionId: sessionID,
-              decisionLogId: brief.decisionLogId,
-              allowedTools: brief.allowedTools,
-            })
-            return  // hard stop; signal-wire engine doesn't run
-          }
-
-          // 2) Parent identity blocked tools (from OrgRole.metadata.tools_blocked)
+          // Запрет по роли (OrgRole.metadata.tools_blocked). Это РЕШЕНИЕ адаптера (опись, D26) —
+          // переезжает в правило набора отдельным шагом; запрет по брифу удалён как мёртвый.
           const memberId = process.env.SYNQTASK_MEMBER_ID
-          if (memberId && !brief) {
-            // Only check parent identity blocks for non-sub-session calls
-            // (sub-session blocks are handled by step 1)
+          if (memberId) {
             const { _getBlockedForSession } = await import('./tool-definition-hook')
             const blocked = _getBlockedForSession(sessionID)
             if (blocked.includes(toolName)) {

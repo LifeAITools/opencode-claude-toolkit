@@ -61,3 +61,22 @@ describe('opencode: имя агента в runtimeMeta', () => {
 })
 
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }))
+
+describe('opencode: провайдер модели в runtimeMeta', () => {
+  // 02.10.2026: квоту Alibaba lat-context ищет по ТОЧНОМУ имени «провайдер/модель» из
+  // quota-status-alibaba.json (`bailian-cli/deepseek-v4-pro`). У моделей без известного окна
+  // отметку жизни пишет частичная ветка ядра по runtimeMeta.model — голым именем. Провайдер
+  // едет рядом, отдельным полем; само model не меняется, по нему сверяются правила.
+  test('после trackModel провайдер едет отдельным полем, model остаётся голым', () => {
+    const sw = make()
+    sw.trackModel('deepseek-v4-pro', 'bailian-cli')
+    const meta = sw.getCurrentRuntimeMeta()
+    expect(meta.provider).toBe('bailian-cli')
+    expect(meta.model).toBe('deepseek-v4-pro')
+  })
+  test('провайдер неизвестен — поля нет', () => {
+    const sw = make()
+    sw.trackModel('deepseek-v4-pro')
+    expect('provider' in sw.getCurrentRuntimeMeta()).toBe(false)
+  })
+})

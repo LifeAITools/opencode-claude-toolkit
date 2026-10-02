@@ -708,6 +708,10 @@ export class SignalWire {
       }
     }
     if (this.lastModel) meta.model = this.lastModel
+    // Провайдер модели отдельно (`bailian-cli`, `zai-coding-plan`…): имя «провайдер/модель» нужно
+    // отметке жизни, чтобы квоту поставщика нашли по ТОЧНОМУ имени из его файла (lat-context,
+    // quota-status-alibaba.json). Само `model` не трогаем — по нему сверяются правила.
+    if (this.lastProvider) meta.provider = this.lastProvider
     // Имя агента в SynqTask — по нему правило адресуется одному агенту (`runtime_meta_is: {agentName}`,
     // договор стыка, часть 2). Под kiberos `SYNQTASK_AGENT_ID` — ИМЯ агента (identity-bootstrap.ts), и
     // живёт оно в окружении ЭТОГО процесса opencode, а не чужого демона. Нет имени — поля нет.

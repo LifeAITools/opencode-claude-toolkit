@@ -115,3 +115,26 @@ describe('opencode: файловая дверь побудки', () => {
     expect(await pollFileDoor(d)).toEqual({ kind: 'idle' })
   })
 })
+
+describe('opencode: файловая побудка с готовым текстом роутера', () => {
+  // wake-router e17320b кладёт rendered {v:1, brief, full, parts}; ядро 0.23.1 даёт адаптеру выбрать
+  // текст и передать его версию в квитанцию — по ней роутер мерит переход программ (rendered_v).
+  test('rendered есть — вставлен full как есть, в квитанции версия 1', async () => {
+    const { home, file } = setup()
+    writeFileSync(file, JSON.stringify({ summary: 'старое', content: 'текст', member_id: 'm', event_id: 'e2', rendered: { v: 1, full: 'ГОТОВЫЙ ПОЛНЫЙ', brief: 'КОРОТКИЙ', parts: {} } }))
+    const got: Array<[string, number | undefined]> = []
+    const { d, sent } = deps(home, { receipt: (w, v) => { got.push([String(w.event_id), v]) } })
+    await pollFileDoor(d)
+    expect(sent[0]![1]).toBe('ГОТОВЫЙ ПОЛНЫЙ')
+    expect(got).toEqual([['e2', 1]])
+  })
+
+  test('rendered нет — прежний текст ядра, версии в квитанции нет', async () => {
+    const { home } = setup()
+    const got: Array<[string, number | undefined]> = []
+    const { d, sent } = deps(home, { receipt: (w, v) => { got.push([String(w.event_id), v]) } })
+    await pollFileDoor(d)
+    expect(sent[0]![1]).toContain('письмо до подъёма')
+    expect(got).toEqual([['e1', undefined]])
+  })
+})

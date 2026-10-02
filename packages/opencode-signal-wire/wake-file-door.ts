@@ -18,7 +18,7 @@
  * и открыть новую, только если окна нет. Сессию рядом с окном не заводим: один агент — один разговор.
  */
 import { existsSync, readdirSync } from 'node:fs'
-import { drainWakeDirsAsync, postReceipt, wakeDirs, type DrainResult, type WakeEnvelope } from '@kiberos/signal-wire-core'
+import { drainWakeDirsAsync, postReceipt, renderWake, wakeDirs, type DrainResult, type WakeEnvelope } from '@kiberos/signal-wire-core'
 
 export interface FileDoorDeps {
   /** Привязка пускателя kiberos (`KIBEROS_BINDING_ID`); нет — каталога привязки нет. */
@@ -40,7 +40,7 @@ export interface FileDoorDeps {
    * true — файл удаляется и уходит квитанция; false или исключение — письмо лежит до следующего прохода.
    */
   send: (sessionId: string, text: string) => Promise<boolean>
-  receipt?: (w: WakeEnvelope) => void
+  receipt?: (w: WakeEnvelope, renderedV?: number) => void
   log?: (line: string) => void
   home?: string
 }
@@ -61,6 +61,21 @@ function hasWakeFiles(dirs: string[]): boolean {
   return false
 }
 
+/**
+ * Текст файловой побудки. Роутер кладёт готовый текст `rendered` (план wake-text-one-renderer,
+ * wake-router e17320b) — побайтно тот же, что видят агенты Claude. Файловая дверь у opencode
+ * работает только на границе хода (проход сначала спрашивает isBusy), поэтому берётся `full`.
+ * Версию называем ТОЛЬКО когда вставили готовый текст: по `rendered_v` в квитанции роутер мерит
+ * переход программ (ядро 0.23.1). Поля нет — прежний renderWake ядра, без версии.
+ */
+export function renderFileWake(w: WakeEnvelope): { text: string; renderedV?: number } {
+  const r = w.rendered
+  if (r && r.v === 1 && typeof r.full === 'string' && r.full.length > 0) return { text: r.full, renderedV: 1 }
+  return { text: renderWake(w) }
+}
+
+const defaultReceipt = (w: WakeEnvelope, v?: number) => postReceipt(w, undefined, v)
+
 /** Один проход. Интервалом управляет вызывающий. */
 export async function pollFileDoor(deps: FileDoorDeps): Promise<FileDoorOutcome> {
   const dirs = wakeDirs({ bindingId: deps.bindingId(), sessionId: deps.knownSessionId(), home: deps.home })
@@ -78,14 +93,16 @@ export async function pollFileDoor(deps: FileDoorDeps): Promise<FileDoorOutcome>
         sent = await toWindow(text)
         return sent
       },
-      receipt: deps.receipt ?? ((w) => postReceipt(w)),
+      render: renderFileWake,
+      receipt: deps.receipt ?? defaultReceipt,
       log: deps.log,
     })
     return { kind: 'window', result }
   }
   const result = await drainWakeDirsAsync(dirs, {
     deliver: (text) => deps.send(sessionId, text),
-    receipt: deps.receipt ?? ((w) => postReceipt(w)),
+    render: renderFileWake,
+    receipt: deps.receipt ?? defaultReceipt,
     log: deps.log,
   })
   return { kind: 'drained', sessionId, result }

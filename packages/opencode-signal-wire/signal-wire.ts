@@ -24,7 +24,6 @@ import {
   translateLegacyRules,
   HARNESS,
   lifeTraceFromEnv,
-  heartbeatContextFromRuntimeMeta,
   DaemonEvaluator,
   DaemonUnavailableError,
   rpcSocketPath,
@@ -488,7 +487,6 @@ export class SignalWire {
 
     const lifeTrace: LifeTraceConfig | undefined = config.lifeTrace === false ? undefined : config.lifeTrace ?? {
       ...lifeTraceFromEnv(HARNESS.OPENCODE),
-      context: (event) => this.heartbeatContext(event),
       onAttach: (r, sid) => swLog(`SESSION_ATTACH status=${r.status} session=${sid} detail="${r.detail}"`),
     }
 
@@ -649,18 +647,6 @@ export class SignalWire {
   }
 
   /**
-   * Замер для отметки жизни. Модель едет как `провайдер/модель` — так её набирает пускатель
-   * (`opencode -m zai-coding-plan/glm-5.3`, `member.launch`), и реестр сравнивает выбранную с
-   * работающей строка в строку (просьба фаундера 30.09 через vibe-yjs-todo-sync-owner). В правила
-   * (`runtimeMeta.model`) модель по-прежнему идёт без провайдера: на это имя опираются их условия.
-   */
-  private heartbeatContext(event: SignalWireEvent) {
-    const c = heartbeatContextFromRuntimeMeta(event)
-    if (!c) return null
-    return this.lastProvider && !c.model.includes('/') ? { ...c, model: `${this.lastProvider}/${c.model}` } : c
-  }
-
-  /**
    * Окно модели из каталога opencode (`limit.context`) — источник важнее встроенной таблицы, которая
    * знает только модели Claude. Применяется сразу, если модель уже текущая.
    */
@@ -708,9 +694,11 @@ export class SignalWire {
       }
     }
     if (this.lastModel) meta.model = this.lastModel
-    // Провайдер модели отдельно (`bailian-cli`, `zai-coding-plan`…): имя «провайдер/модель» нужно
-    // отметке жизни, чтобы квоту поставщика нашли по ТОЧНОМУ имени из его файла (lat-context,
-    // quota-status-alibaba.json). Само `model` не трогаем — по нему сверяются правила.
+    // Провайдер модели отдельно (`bailian-cli`, `zai-coding-plan`…). Из него ЯДРО (≥0.22.2,
+    // qualifiedModel) само собирает `context_model` = «провайдер/модель» в обеих ветках отметки
+    // жизни — и в полном замере, и в window-unknown. Так её набирает пускатель (`opencode -m
+    // zai-coding-plan/glm-5.3`), и по этому же имени lat-context находит квоту поставщика
+    // (quota-status-alibaba.json). Само `model` голое: по нему сверяются правила.
     if (this.lastProvider) meta.provider = this.lastProvider
     // Имя агента в SynqTask — по нему правило адресуется одному агенту (`runtime_meta_is: {agentName}`,
     // договор стыка, часть 2). Под kiberos `SYNQTASK_AGENT_ID` — ИМЯ агента (identity-bootstrap.ts), и

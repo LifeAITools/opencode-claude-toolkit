@@ -65,6 +65,21 @@ describe('opencode: замер заполнения из message.updated', () =>
     expect(sw.getCurrentRuntimeMeta().model).toBe('glm-5.3')
   })
 
+  test('модель без окна (Alibaba) — в отметке всё равно «провайдер/модель», по нему lat-context найдёт квоту', async () => {
+    // 02.10: у bailian-cli в opencode.jsonc нет limit, отметку пишет ветка window-unknown ядра,
+    // и до 0.22.2 там было голое `deepseek-v4-pro` — с `bailian-cli/deepseek-v4-pro` в
+    // quota-status-alibaba.json не совпадало ни у кого.
+    const sid = 'ses_ctx_ali'
+    const sw = new SignalWire({ serverUrl: 'http://127.0.0.1:0', sessionId: sid, rulesPath: join(process.env.SW_HEARTBEAT_DIR!, 'none.json'), platform: 'opencode' })
+    sw.trackModel('deepseek-v4-pro', 'bailian-cli')
+    sw.trackTokens({ inputTokens: 197_306 })
+    await sw.evaluateHook({ source: 'plugin', type: 'session.idle', sessionId: sid, timestamp: Date.now(), payload: {} } as any)
+    const hb = JSON.parse(readFileSync(heartbeatPath(process.env.SW_HEARTBEAT_DIR!, sid), 'utf-8'))
+    expect(hb.context_model).toBe('bailian-cli/deepseek-v4-pro')
+    expect(hb.context_tokens).toBe(197_306)
+    expect(hb.context_unmeasured_reason).toBe('window-unknown')
+  })
+
   test('окно каталога важнее таблицы и переживает повторный trackModel', () => {
     const sw = new SignalWire({ serverUrl: 'http://127.0.0.1:0', sessionId: 'ses_w', rulesPath: join(process.env.SW_HEARTBEAT_DIR!, 'none.json'), platform: 'opencode' })
     sw.trackContextWindow('glm-5.3', 1_000_000)

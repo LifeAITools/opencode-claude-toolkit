@@ -85,7 +85,10 @@ describe('приёмник не пишет в SynqTask за агента', () =>
   // 02.10.2026, решение владельца SynqTask: статус задачи — дело самого агента, а runtime_state
   // через batch_update_active порождал на сервере agent_waking — адаптер сам себе вызывал подъём.
   test('в приёмнике нет смены статуса задачи, runtime_state и wakeLifecycle', async () => {
-    const src = await Bun.file(new URL('./wake-listener.ts', import.meta.url)).text()
+    // Проверяется КОД, а не комментарии: пояснение, почему записи удалены, называет их по имени.
+    const src = (await Bun.file(new URL('./wake-listener.ts', import.meta.url)).text())
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
     expect(src).not.toContain("action: 'set_status'")
     expect(src).not.toContain('batch_update_active')
     expect(src).not.toContain("key: 'wakeLifecycle'")

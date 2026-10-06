@@ -744,6 +744,12 @@ export class SignalWire {
     if (this.lastSpend) meta.spend = { ...this.lastSpend }
     // Лимиты поставщиков — для правил; виды окон толкует потребитель.
     if (this.lastProviderQuota) meta.providerQuota = this.lastProviderQuota.map((q) => ({ ...q }))
+    // Плоский ключ окон для конвейера ядра (heartbeat.windows читает его, как у хука):
+    // тот же массив окон всех поставщиков одним списком.
+    if (this.lastProviderQuota) {
+      const flat = this.lastProviderQuota.flatMap((q) => q.windows.map((w) => ({ ...w })))
+      if (flat.length > 0) meta.quotaWindows = flat
+    }
 
     // ─── Diagnostic CTX_SNAPSHOT (added 2026-05-13) ──────────
     // Log a snapshot when state CHANGED meaningfully OR every 60s heartbeat.

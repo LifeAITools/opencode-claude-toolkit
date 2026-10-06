@@ -83,3 +83,18 @@ describe('отображение в окна — дословно по стро�
     ])
   })
 })
+
+describe('плоский ключ окон для конвейера ядра', () => {
+  test('quotaWindows — тот же массив окон всех поставщиков одним списком', () => {
+    const sw = new SignalWire({ serverUrl: 'http://127.0.0.1:0', sessionId: 'ses_qw', rulesPath: join(process.env.SW_HEARTBEAT_DIR!, 'none.json'), platform: 'opencode' })
+    const w1 = { kind: '5h', util: 0, measuredAt: NOW.toISOString() }
+    const w2 = { kind: '7d', util: 0.16, measuredAt: NOW.toISOString() }
+    sw.trackProviderQuota([
+      { provider: 'zhipu', measuredAt: NOW.toISOString(), limits: [], windows: [w1] },
+      { provider: 'zai', measuredAt: NOW.toISOString(), limits: [], windows: [w2] },
+    ])
+    expect((sw.getCurrentRuntimeMeta() as any).quotaWindows).toEqual([w1, w2])
+    sw.trackProviderQuota(null)
+    expect((sw.getCurrentRuntimeMeta() as any).quotaWindows).toBeUndefined()
+  })
+})

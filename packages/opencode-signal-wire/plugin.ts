@@ -43,6 +43,7 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
+import { createSessionStartTracker, extractSessionId, failureFromPartUpdated } from './session-lifecycle'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
 import { stampSessionLaunch } from './session-stamp'
@@ -55,6 +56,9 @@ let startupSeq = 0
 
 // Расход сессии из базы opencode обновляется не чаще раза в минуту на процесс.
 let lastSpendRefreshMs = 0
+// Старт сессии — один раз на процесс (session-lifecycle.ts): повторы
+// session.created — переподключения, не новые процессы.
+const isFirstSessionStart = createSessionStartTracker()
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
@@ -753,6 +757,46 @@ export default {
               logStep('SESSION_COMPACTED_FORWARDED', { sessionId: compactedSession })
             } catch (e: any) {
               logStep('SESSION_COMPACTED_FORWARD_FAILED', { sessionId: compactedSession, error: e?.message ?? String(e) })
+            }
+          }
+        }
+        // ─── session.created → session.start (дыра доктрины 06.10) ───
+        // У opencode нет события старта — только created. По договору старт — «процесс
+        // поднялся, ещё до первого промпта», поэтому синтезируется из первого created.
+        if (eventType === 'session.created' && signalWireEngine) {
+          const startedSession = extractSessionId(event)
+          if (startedSession && isFirstSessionStart(startedSession)) {
+            try {
+              await signalWireEngine.evaluateHook({ source: 'plugin', type: 'session.start', sessionId: startedSession, timestamp: Date.now(), payload: {} })
+              logStep('SESSION_START_FORWARDED', { sessionId: startedSession })
+            } catch (e: any) {
+              logStep('SESSION_START_FORWARD_FAILED', { sessionId: startedSession, error: e?.message ?? String(e) })
+            }
+          }
+        }
+        // ─── tool-error part → tool.failure (дыра доктрины 06.10) ───
+        // Провал вызова у opencode — не событие, а часть tool в state error прямо
+        // в потоке. Только своя сессия (как у usage): чужие провалы — не наши.
+        if (eventType === 'message.part.updated' && signalWireEngine) {
+          const failure = failureFromPartUpdated(event)
+          if (failure && (!boundSessionId || failure.sessionId === boundSessionId)) {
+            try {
+              await signalWireEngine.evaluateHook({
+                source: 'plugin',
+                type: 'tool.failure',
+                sessionId: failure.sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  tool: failure.tool,
+                  toolName: failure.tool,
+                  callID: failure.callID,
+                  args: failure.args,
+                  response: { output: failure.error },
+                },
+              })
+              logStep('TOOL_FAILURE_FORWARDED', { sessionId: failure.sessionId, tool: failure.tool })
+            } catch (e: any) {
+              logStep('TOOL_FAILURE_FORWARD_FAILED', { sessionId: failure.sessionId, tool: failure.tool, error: e?.message ?? String(e) })
             }
           }
         }

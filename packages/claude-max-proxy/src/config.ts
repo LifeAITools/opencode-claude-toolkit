@@ -71,6 +71,11 @@ export interface ProxyConfig {
   openaiCompatAuthToken: string | null
   openaiCompatThinking: 'strip' | 'field'
 
+  // Spark responses (Muse Spark via opencode-go gateway)
+  sparkApiKey: string | null
+  sparkUpstreamUrl: string
+  sparkUserAgent: string
+
   // Subscription compat layer (hot-configurable for binary distribution)
   ccCompatVersion: string
   extraBetaFlags: string[]
@@ -186,6 +191,12 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     openaiCompatThinking: (['strip', 'field'].includes(read('OPENAI_COMPAT_THINKING', 'strip', fileEnv))
       ? read('OPENAI_COMPAT_THINKING', 'strip', fileEnv)
       : 'strip') as 'strip' | 'field',
+
+    // Spark responses — key via established order (process env → file env);
+    // absent key is refused loudly by the module, never a silent fallback.
+    sparkApiKey: read('SPARK_API_KEY', '', fileEnv) || null,
+    sparkUpstreamUrl: read('SPARK_UPSTREAM_URL', 'https://opencode.ai/zen/go/v1', fileEnv),
+    sparkUserAgent: read('SPARK_USER_AGENT', 'claude-max-proxy-spark/1.0', fileEnv),
 
     // Floor only — the installed Claude Code wins when newer (cc-version.ts). Sidecars have
     // no Claude Code, so this default IS their version: 2.1.280 is the minimum for opus-5-5.

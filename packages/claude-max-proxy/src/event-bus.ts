@@ -101,6 +101,11 @@ export type EventKind =
   | 'OPENAI_COMPAT_COMPLETE'
   | 'OPENAI_COMPAT_ERROR'
 
+  // Spark responses (Muse Spark via opencode-go — Anthropic in, Responses out)
+  | 'SPARK_REQUEST'
+  | 'SPARK_COMPLETE'
+  | 'SPARK_ERROR'
+
   // Generic
   | 'INFO'
   | 'WARN'
@@ -163,6 +168,10 @@ export const EVENT = {
   OPENAI_COMPAT_REQUEST: 'OPENAI_COMPAT_REQUEST',
   OPENAI_COMPAT_COMPLETE: 'OPENAI_COMPAT_COMPLETE',
   OPENAI_COMPAT_ERROR: 'OPENAI_COMPAT_ERROR',
+  // Spark responses (spend metering for the shared ceiling reads these)
+  SPARK_REQUEST: 'SPARK_REQUEST',
+  SPARK_COMPLETE: 'SPARK_COMPLETE',
+  SPARK_ERROR: 'SPARK_ERROR',
   // Generic
   INFO: 'INFO',
   WARN: 'WARN',

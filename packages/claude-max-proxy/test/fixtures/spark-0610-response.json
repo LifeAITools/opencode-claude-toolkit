@@ -1,0 +1,29 @@
+{
+  "_provenance": "live log from vibe-kiberos-app-owner, 06.10.2026, key redacted; request was POST https://opencode.ai/zen/go/v1/responses {model: muse-spark-1.3-contributor, input: [{role: user, content: 'Ответь одним словом: столица Франции?'}], max_output_tokens: 500, stream: false} → 200",
+  "_note": "encrypted_content truncated the same way the log arrived (opaque block, ~3KB); the translator must never read it, only count it as dropped",
+  "id": "resp_6ac4b2c78887481685964275",
+  "object": "response",
+  "status": "completed",
+  "model": "muse-spark-1.3-contributor",
+  "error": null,
+  "output": [
+    {
+      "type": "reasoning",
+      "status": "completed",
+      "encrypted_content": "Q-PaDgEn5BpffO0SGX0IOqyr…<обрезано, ~3 КБ непрозрачного блока>",
+      "summary": []
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [{ "type": "output_text", "text": "Париж" }]
+    }
+  ],
+  "usage": {
+    "input_tokens": 16,
+    "output_tokens": 208,
+    "total_tokens": 224,
+    "output_tokens_details": { "reasoning_tokens": 195 }
+  },
+  "reasoning": { "effort": "high" }
+}

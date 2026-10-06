@@ -89,7 +89,21 @@ function textOf(blocks: MessagesContentBlock[]): string {
 export function translateImageBlock(b: MessagesContentBlock): { type: 'input_image'; image_url: string } {
   const src = (b as any).source ?? {}
   if (src.type === 'base64' && src.data) {
-    const mime = src.media_type ?? 'image/jpeg'
+    // media_type is usually present; when absent, sniff magic bytes instead
+    // of guessing jpeg (a png sent as jpeg decodes wrong server-side).
+    // base64 prefixes: PNG 'iVBORw0KGgo', JPEG '/9j/', GIF 'R0lGOD', WEBP 'UklGR'.
+    let mime = src.media_type as string | undefined
+    if (!mime) {
+      const head: string = src.data.slice(0, 12)
+      mime = head.startsWith('iVBORw0KGgo') ? 'image/png'
+        : head.startsWith('/9j/') ? 'image/jpeg'
+        : head.startsWith('R0lGOD') ? 'image/gif'
+        : head.startsWith('UklGR') ? 'image/webp'
+        : undefined
+    }
+    if (!mime) {
+      throw new Error('image block without media_type and unrecognised payload — refusing instead of guessing')
+    }
     return { type: 'input_image', image_url: `data:${mime};base64,${src.data}` }
   }
   if ((src.type === 'url' && src.url) || (b as any).url) {

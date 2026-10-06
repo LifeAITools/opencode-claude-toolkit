@@ -118,6 +118,26 @@ describe('translateToResponsesBody', () => {
     expect(parts[1]).toMatchObject({ type: 'input_image', image_url: 'data:image/jpeg;base64,AAA' })
   })
 
+  test('mime sniffed from payload when media_type absent; unknown refused', () => {
+    const { body } = translateToResponsesBody({
+      model: 'muse-spark-1.3-contributor',
+      messages: [{
+        role: 'user',
+        content: [
+          // 'iVBORw0KGgo' = PNG magic in base64
+          { type: 'image', source: { type: 'base64', data: 'iVBORw0KGgoAAAANSUhEUg' } } as any,
+        ],
+      }],
+      max_tokens: 1024,
+    })
+    expect((body.input[0] as any).content[0].image_url.startsWith('data:image/png;base64,')).toBe(true)
+    expect(() => translateToResponsesBody({
+      model: 'muse-spark-1.3-contributor',
+      messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', data: 'AAAAAAAAAAAA' } } as any] }],
+      max_tokens: 1024,
+    })).toThrow(/unrecognised payload/)
+  })
+
   test('image inside tool_result rides a separate message (output is string-only)', () => {
     const { body } = translateToResponsesBody({
       model: 'muse-spark-1.3-contributor',

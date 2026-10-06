@@ -70,3 +70,26 @@ describe('opencode: расход по окнам подписки', () => {
     expect(readWindowSpend(openDb, join(tmpdir(), 'oc-spend-missing.db'), NOW)).toBeNull()
   })
 })
+
+describe('расход модели за окна Go', () => {
+  test('суммы cost по модели и окнам; чужая модель не в счёт', async () => {
+    const { readModelWindowSpend } = await import('./session-spend')
+    const { Database } = await import('bun:sqlite')
+    const { mkdtempSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-spend-model-'))
+    const path = join(dir, 't.db')
+    const db = new Database(path)
+    db.run('CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)')
+    const put = (id: string, t: number, model: string, cost: number) =>
+      db.run('INSERT INTO message VALUES (?,?,?,?,?)', [id, 's', t, t, JSON.stringify({ role: 'assistant', cost, tokens: { input: 1, output: 1 }, modelID: model })])
+    put('a', NOW - 3600_000, 'muse-spark-1.3-contributor', 1)
+    put('b', NOW - 10 * 3600_000, 'muse-spark-1.3-contributor', 2)
+    put('c', NOW - 3600_000, 'other-model', 100)
+    db.close()
+    const openDb = (p: string) => new Database(p, { readonly: true }) as any
+    expect(readModelWindowSpend(openDb, path, 'muse-spark-1.3-contributor', NOW)).toEqual({ spend5h: 1, spendWeek: 3, spendMonth: 3 })
+    expect(readModelWindowSpend(openDb, path, 'absent-model', NOW)).toEqual({ spend5h: null, spendWeek: null, spendMonth: null })
+  })
+})

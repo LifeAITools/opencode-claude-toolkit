@@ -43,7 +43,8 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
-import { defaultOpencodeDbPath, readSessionSpend } from './session-spend'
+import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
+import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
 import { stampSessionLaunch } from './session-stamp'
 import { PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
 
@@ -80,6 +81,28 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
       const q = await queryProviderQuota(fetch as any, provider, key)
       if (q) out.push(q)
     }))
+    // Окна Go из публичных лимитов и измеренного расхода (provider-go-usage.ts):
+    // вход не нужен, только база. Модели без трафика не везём.
+    try {
+      const { Database } = await import('bun:sqlite')
+      const openDb = (path: string) => new Database(path, { readonly: true }) as any
+      const dbPath = process.env.OPENCODE_DB_PATH ?? defaultOpencodeDbPath()
+      const nowMs = Date.now()
+      for (const modelId of Object.keys(GO_MODEL_MONTHLY_LIMIT_USD)) {
+        const s = readModelWindowSpend(openDb, dbPath, modelId, nowMs)
+        if (!s || (s.spend5h == null && s.spendWeek == null && s.spendMonth == null)) continue
+        const windows = computeGoWindows(modelId, s.spend5h, s.spendWeek, s.spendMonth, new Date(nowMs))
+        if (!windows) continue
+        out.push({
+          provider: 'go' as const,
+          measuredAt: new Date(nowMs).toISOString(),
+          limits: [],
+          windows: windows.map((w) => ({ kind: w.kind, util: w.util, measuredAt: w.measuredAt })),
+        })
+      }
+    } catch (e: any) {
+      logStep('GO_WINDOWS_FAILED', { error: e?.message ?? String(e) })
+    }
     signalWire.trackProviderQuota(out.length > 0 ? out : null)
     logStep('PROVIDER_QUOTA_REFRESH', { providers: out.map((q) => `${q.provider}:${q.limits.length}`) })
   } catch (e: any) {

@@ -28,7 +28,7 @@ export interface ProviderQuotaLimit {
 }
 
 export interface ProviderQuota {
-  provider: 'zhipu' | 'zai'
+  provider: 'zhipu' | 'zai' | 'go'
   /**
    * Время запроса, полная точность (ISO): ценз реестра 300 секунд, часовое
    * округление во второй половине часа читалось бы протухшим. Эпоху-число

@@ -53,3 +53,21 @@ describe('опрос двери', () => {
     expect(await queryGoUsage(down as any, [{ provider: 'go', key: 'K' }], NOW)).toBeNull()
   })
 })
+
+describe('окна Go из публичных лимитов и расхода', () => {
+  test('доли месячного лимита: 5h 20%, неделя 50%, месяц 100%', async () => {
+    const { computeGoWindows } = await import('./provider-go-usage')
+    const w = computeGoWindows('muse-spark-1.3-contributor', 2.1353, 4.6599, 4.6599, NOW)!
+    expect(w.map((x) => [x.kind, x.limit])).toEqual([['5h', 24], ['7d', 60], ['30d', 120]])
+    expect(w[0]!.util).toBeCloseTo(2.1353 / 24, 6)
+    expect(w[2]!.util).toBeCloseTo(4.6599 / 120, 6)
+    expect(w[0]!.measuredAt).toBe(NOW.toISOString())
+  })
+
+  test('модели без лимита и пустой расход — null и нули, а не выдумка', async () => {
+    const { computeGoWindows } = await import('./provider-go-usage')
+    expect(computeGoWindows('nope', 1, 1, 1, NOW)).toBeNull()
+    const w = computeGoWindows('muse-spark-1.3-contributor', null, null, null, NOW)!
+    expect(w.every((x) => x.util === 0 && x.spent === 0)).toBe(true)
+  })
+})

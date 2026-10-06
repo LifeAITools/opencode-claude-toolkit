@@ -97,8 +97,7 @@ export function readSessionSpend(
 /**
  * Расход по окнам подписки: суммы cost по всем сессиям базы за каждое окно.
  * Пустое окно — spent null (не 0): «не было расхода» отличается от «потрачено ноль».
- */
-export function readWindowSpend(
+ */export function readWindowSpend(
   openDb: (path: string) => { query: (sql: string) => { get: (...args: any[]) => any }; close: () => void },
   dbPath: string,
   nowMs: number = Date.now(),
@@ -120,6 +119,38 @@ export function readWindowSpend(
       }
     }
     return out
+  } catch {
+    return null
+  } finally {
+    try { db?.close() } catch { /* закрытие — тоже best-effort */ }
+  }
+}
+
+/**
+ * Расход одной модели за окна Go (5ч/7д/30д): суммы cost её ответов.
+ * Для computeGoWindows (provider-go-usage.ts). Пустое окно — null.
+ */
+export function readModelWindowSpend(
+  openDb: (path: string) => { query: (sql: string) => { get: (...args: any[]) => any }; close: () => void },
+  dbPath: string,
+  modelId: string,
+  nowMs: number = Date.now(),
+): { spend5h: number | null; spendWeek: number | null; spendMonth: number | null } | null {
+  if (!modelId) return null
+  const WINDOWS = [5 * 3600_000, 7 * 24 * 3600_000, 30 * 24 * 3600_000]
+  let db: { query: (sql: string) => { get: (...args: any[]) => any }; close: () => void } | null = null
+  try {
+    db = openDb(dbPath)
+    const spends: Array<number | null> = []
+    for (const w of WINDOWS) {
+      const row = db.query(
+        `SELECT count(*) AS n, sum(json_extract(data,'$.cost')) AS cost
+         FROM message WHERE time_created >= ? AND json_extract(data,'$.role') = 'assistant'
+         AND json_extract(data,'$.modelID') = ?`,
+      ).get(nowMs - w, modelId) as { n: number; cost: number | null } | null
+      spends.push(!row || num(row.n) === 0 ? null : row.cost == null ? null : num(row.cost))
+    }
+    return { spend5h: spends[0]!, spendWeek: spends[1]!, spendMonth: spends[2]! }
   } catch {
     return null
   } finally {

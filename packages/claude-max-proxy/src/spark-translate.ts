@@ -260,7 +260,7 @@ export interface ResponsesObject {
   status: string
   incomplete_details?: { reason?: string }
   output: ResponsesOutputItem[]
-  usage?: { input_tokens: number; output_tokens: number }
+  usage?: { input_tokens: number; output_tokens: number; input_tokens_details?: { cached_tokens?: number } }
 }
 
 export interface MessagesResponse {
@@ -273,13 +273,15 @@ export interface MessagesResponse {
     | { type: 'tool_use'; id: string; name: string; input: unknown }
   )[]
   stop_reason: 'end_turn' | 'tool_use' | 'max_tokens'
-  usage: { input_tokens: number; output_tokens: number }
+  usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number }
 }
 
 export interface FromResponsesResult {
   message: MessagesResponse
   /** Encrypted reasoning items seen and dropped (billable output, invisible answer). */
   droppedReasoning: number
+  /** Кэш-чтение из input_tokens_details (замер tixi 06.10: 97% со второго вызова). */
+  cachedTokens: number
 }
 
 export function translateFromResponsesObject(res: ResponsesObject): FromResponsesResult {
@@ -313,6 +315,11 @@ export function translateFromResponsesObject(res: ResponsesObject): FromResponse
     stop_reason = 'max_tokens'
   }
 
+  // Кэш-чтение — в нативное поле Anthropic, а не только в событие: потребитель
+  // считает честно без знания диалекта шлюза. Нет деталей — ноль, а не null.
+  const rawCached = res.usage?.input_tokens_details?.cached_tokens
+  const cachedTokens = typeof rawCached === 'number' && Number.isFinite(rawCached) && rawCached > 0 ? Math.floor(rawCached) : 0
+
   return {
     message: {
       id: `msg_spark_${res.id}`,
@@ -324,9 +331,11 @@ export function translateFromResponsesObject(res: ResponsesObject): FromResponse
       usage: {
         input_tokens: res.usage?.input_tokens ?? 0,
         output_tokens: res.usage?.output_tokens ?? 0,
+        ...(cachedTokens > 0 ? { cache_read_input_tokens: cachedTokens } : {}),
       },
     },
     droppedReasoning,
+    cachedTokens,
   }
 }
 
@@ -346,7 +355,7 @@ export interface SparkSSEOpts {
    * SPARK_COMPLETE: without the callback the ceiling metering is blind on
    * streamed traffic, which is nearly all of it.
    */
-  onComplete?: (usage: { input_tokens: number; output_tokens: number }, durationMs: number) => void
+  onComplete?: (usage: { input_tokens: number; output_tokens: number; cached_tokens: number }, durationMs: number) => void
 }
 
 export async function transformResponsesSSEToAnthropic(
@@ -364,7 +373,7 @@ export async function transformResponsesSSEToAnthropic(
   const items = new Map<string, { index: number; kind: 'text' | 'tool'; name: string; argBuf: string }>()
   let started = false
   let sawToolBlock = false
-  let usage = { input_tokens: 0, output_tokens: 0 }
+  let usage = { input_tokens: 0, output_tokens: 0, cached_tokens: 0 }
   const t0 = Date.now()
 
   const out = new ReadableStream<Uint8Array>({
@@ -434,7 +443,14 @@ export async function transformResponsesSSEToAnthropic(
                 }
               } else if (t === 'response.completed') {
                 const u = ev.response?.usage
-                if (u) usage = { input_tokens: u.input_tokens ?? 0, output_tokens: u.output_tokens ?? 0 }
+                if (u) {
+                  const c = u.input_tokens_details?.cached_tokens
+                  usage = {
+                    input_tokens: u.input_tokens ?? 0,
+                    output_tokens: u.output_tokens ?? 0,
+                    cached_tokens: typeof c === 'number' && Number.isFinite(c) && c > 0 ? Math.floor(c) : 0,
+                  }
+                }
               }
             }
           }

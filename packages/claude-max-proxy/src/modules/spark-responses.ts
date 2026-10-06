@@ -168,14 +168,14 @@ export function createSparkResponsesModule(): ProxyModule {
 
         if (!wantStream) {
           try {
-            const { message, droppedReasoning } = await bufferResponsesToMessages(upstream)
+            const { message, droppedReasoning, cachedTokens } = await bufferResponsesToMessages(upstream)
             // Keep the upstream id (msg_spark_<res.id>) — it traces the call
             // on both sides; a local random id would orphan it.
             ctx.emit({
               level: 'info', kind: EVENT.SPARK_COMPLETE, sessionId,
               model: body.model, stream: false, durationMs: Date.now() - t0,
               inTokens: message.usage.input_tokens, outTokens: message.usage.output_tokens,
-              droppedReasoning,
+              droppedReasoning, cachedTokens,
             })
             return new Response(JSON.stringify(message), {
               status: 200, headers: { 'content-type': 'application/json' },
@@ -193,6 +193,7 @@ export function createSparkResponsesModule(): ProxyModule {
               level: 'info', kind: EVENT.SPARK_COMPLETE, sessionId,
               model: body.model, stream: true, durationMs,
               inTokens: usage.input_tokens, outTokens: usage.output_tokens,
+              cachedTokens: usage.cached_tokens,
             })
           },
         })

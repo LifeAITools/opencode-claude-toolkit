@@ -356,3 +356,37 @@ describe('самописец исходящего тела', () => {
     }
   })
 })
+
+describe('кэш-чтение из деталей usage', () => {
+  test('cached_tokens едет в нативное поле и в итог; без деталей — ноль', async () => {
+    const { translateFromResponsesObject } = await import('../src/spark-translate.js')
+    const withCache = translateFromResponsesObject({
+      id: 'r1', model: 'm', status: 'completed',
+      usage: { input_tokens: 2616, output_tokens: 100, input_tokens_details: { cached_tokens: 2531 } },
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'hi' }] }],
+    } as any)
+    expect(withCache.cachedTokens).toBe(2531)
+    expect(withCache.message.usage.cache_read_input_tokens).toBe(2531)
+    const cold = translateFromResponsesObject({
+      id: 'r2', model: 'm', status: 'completed',
+      usage: { input_tokens: 100, output_tokens: 50 },
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'hi' }] }],
+    } as any)
+    expect(cold.cachedTokens).toBe(0)
+    expect('cache_read_input_tokens' in cold.message.usage).toBe(false)
+  })
+
+  test('стрим: usage из completed с деталями доезжает до onComplete', async () => {
+    const { transformResponsesSSEToAnthropic } = await import('../src/spark-translate.js')
+    const sse = 'data: {"type":"response.output_text.delta","item_id":"i1","delta":"hi"}\n\n'
+      + 'data: {"type":"response.completed","response":{"usage":{"input_tokens":2616,"output_tokens":100,"input_tokens_details":{"cached_tokens":2531}}}}\n\n'
+    const upstream = new Response(sse, { headers: { 'content-type': 'text/event-stream' } })
+    let seen: any = null
+    const out = await transformResponsesSSEToAnthropic(upstream, {
+      messageId: 'm1', model: 'm',
+      onComplete: (u) => { seen = u },
+    })
+    await out.text()
+    expect(seen).toMatchObject({ input_tokens: 2616, output_tokens: 100, cached_tokens: 2531 })
+  })
+})

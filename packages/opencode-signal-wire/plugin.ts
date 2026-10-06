@@ -43,7 +43,7 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
-import { createSessionStartTracker, extractSessionId, failureFromPartUpdated } from './session-lifecycle'
+import { createSessionStartTracker, errorFromSessionError, extractSessionId, failureFromPartUpdated } from './session-lifecycle'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
 import { stampSessionLaunch } from './session-stamp'
@@ -771,6 +771,26 @@ export default {
               logStep('SESSION_START_FORWARDED', { sessionId: startedSession })
             } catch (e: any) {
               logStep('SESSION_START_FORWARD_FAILED', { sessionId: startedSession, error: e?.message ?? String(e) })
+            }
+          }
+        }
+        // ─── session.error → дословно (дыра доктрины 06.10, ответ «да») ───
+        // Канонического типа в ядре пока нет — имя сохраняется, правило совпадёт,
+        // когда близнец появится. Только своя сессия, как у failure.
+        if (eventType === 'session.error' && signalWireEngine) {
+          const serr = errorFromSessionError(event)
+          if (serr && (!boundSessionId || serr.sessionId === boundSessionId)) {
+            try {
+              await signalWireEngine.evaluateHook({
+                source: 'plugin',
+                type: 'session.error',
+                sessionId: serr.sessionId,
+                timestamp: Date.now(),
+                payload: { error: serr.error },
+              })
+              logStep('SESSION_ERROR_FORWARDED', { sessionId: serr.sessionId })
+            } catch (e: any) {
+              logStep('SESSION_ERROR_FORWARD_FAILED', { sessionId: serr.sessionId, error: e?.message ?? String(e) })
             }
           }
         }

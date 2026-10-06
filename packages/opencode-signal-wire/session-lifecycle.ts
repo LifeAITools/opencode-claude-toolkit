@@ -54,8 +54,7 @@ export function createSessionStartTracker(): (sessionId: string | null) => boole
  * Замер из события message.part.updated; всё, что не упавший вызов, — null.
  * Упавший вызов у opencode — НЕ отдельное событие: часть tool переходит
  * в state error прямо в потоке (замер по типам SDK 06.10).
- */
-export function failureFromPartUpdated(event: any): ToolFailure | null {
+ */export function failureFromPartUpdated(event: any): ToolFailure | null {
   if (event?.type !== 'message.part.updated') return null
   const part = event?.properties?.part
   if (!part || part.type !== 'tool') return null
@@ -71,4 +70,26 @@ export function failureFromPartUpdated(event: any): ToolFailure | null {
     args: state.input ?? null,
     error,
   }
+}
+
+export interface SessionError {
+  sessionId: string
+  /** Объект ошибки SDK как есть (ProviderAuthError | UnknownError | ...). */
+  error: unknown
+}
+
+/**
+ * Ошибка сессии (session.error) — тем же узором: своё событие, везётся как есть.
+ * Канонического типа в ядре пока нет (близнец — сторона ядра), поэтому имя
+ * сохраняется дословно: правило совпадёт, когда близнец появится, а до тех пор
+ * событие видно в логе, но никого ложно не триггерит.
+ */
+export function errorFromSessionError(event: any): SessionError | null {
+  if (event?.type !== 'session.error') return null
+  const p = event?.properties ?? {}
+  const sessionId = typeof p.sessionID === 'string' && p.sessionID ? p.sessionID
+    : typeof p.sessionId === 'string' && p.sessionId ? p.sessionId : null
+  if (!sessionId) return null
+  if (p.error == null) return null
+  return { sessionId, error: p.error }
 }

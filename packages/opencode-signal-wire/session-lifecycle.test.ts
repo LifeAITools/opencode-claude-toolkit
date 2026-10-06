@@ -52,3 +52,19 @@ describe('провал вызова из message.part.updated', () => {
     expect(failureFromPartUpdated(errPart({ status: 'error', error: '' }, { tool: '' }))).toBeNull()
   })
 })
+
+describe('ошибка сессии дословно', () => {
+  test('session.error с объектом ошибки — как есть', async () => {
+    const { errorFromSessionError } = await import('./session-lifecycle')
+    const err = { type: 'ApiError', message: 'boom' }
+    expect(errorFromSessionError({ type: 'session.error', properties: { sessionID: 'ses_e', error: err } }))
+      .toEqual({ sessionId: 'ses_e', error: err })
+  })
+
+  test('чужое событие, нет сессии, нет ошибки — null', async () => {
+    const { errorFromSessionError } = await import('./session-lifecycle')
+    expect(errorFromSessionError({ type: 'session.idle', properties: {} })).toBeNull()
+    expect(errorFromSessionError({ type: 'session.error', properties: {} })).toBeNull()
+    expect(errorFromSessionError({ type: 'session.error', properties: { sessionID: 's' } })).toBeNull()
+  })
+})

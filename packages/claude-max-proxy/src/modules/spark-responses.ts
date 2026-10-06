@@ -17,6 +17,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
+import { captureBody } from '../body-capture.js'
 import { createHash } from 'crypto'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
 import {
@@ -117,15 +118,26 @@ export function createSparkResponsesModule(): ProxyModule {
         })
 
         let upstream: Response
+        // Самописец исходящего тела (чья просьба tixi 06.10): ЧТО ушло на шлюз —
+        // единственный способ различить «блоки не доехали» и «модель stalls».
+        // Пишется перевод, не вход: ключ в заголовках режется самописцем
+        // (authorization → <redacted>), тело едет как есть, включая байты картинок
+        // (диск ограничен существующим cap самописца). Общий kill-switch — тот же.
+        const upstreamHeaders: Record<string, string> = {
+          'content-type': 'application/json',
+          'authorization': `Bearer ${key}`,
+          'user-agent': userAgent(),
+          'x-opencode-session': sessionId,
+        }
+        try {
+          const raw = Buffer.from(JSON.stringify(translation.body))
+          const bytes = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)
+          captureBody(bytes, upstreamHeaders, { sessionId, sourcePid, srcPort })
+        } catch { /* самописец не роняет ход */ }
         try {
           upstream = await fetch(upstreamUrl(), {
             method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'authorization': `Bearer ${key}`,
-              'user-agent': userAgent(),
-              'x-opencode-session': sessionId,
-            },
+            headers: upstreamHeaders,
             body: JSON.stringify(translation.body),
             signal: req.signal,
           })

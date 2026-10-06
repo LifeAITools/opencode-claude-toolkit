@@ -325,3 +325,34 @@ describe('sparkErrorResponse + models', () => {
     expect(body.data.map((m: any) => m.id)).toContain('muse-spark-1.3-contributor')
   })
 })
+
+describe('самописец исходящего тела', () => {
+  test('тело как есть, ключ в заголовках — только длиной', async () => {
+    const { mkdtempSync, readdirSync, readFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    // NB: body-capture читает env при первом импорте — до этого файла его
+    // не импортирует никто, поэтому каталог подменяется здесь.
+    const dir = mkdtempSync(join(tmpdir(), 'oc-spark-cap-'))
+    process.env.CLAUDE_MAX_PROXY_CAPTURE_DIR = dir
+    try {
+      const bc = await import('../src/body-capture.js')
+      const { translateToResponsesBody } = await import('../src/spark-translate.js')
+      const { body } = translateToResponsesBody({
+        model: 'muse-spark-1.3-contributor',
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+      bc.captureBody(Buffer.from(JSON.stringify(body)), { authorization: 'Bearer SECRETKEY123', 'content-type': 'application/json' }, { sessionId: 'spark-test', sourcePid: null, srcPort: null })
+      await new Promise((r) => setTimeout(r, 100))
+      const files = readdirSync(dir)
+      const dump = files.find((f) => f.endsWith('.json') && !f.endsWith('.meta.json'))!
+      expect(dump).toBeTruthy()
+      expect(JSON.parse(readFileSync(join(dir, dump), 'utf-8'))).toMatchObject({ model: 'muse-spark-1.3-contributor' })
+      const meta = JSON.parse(readFileSync(join(dir, dump.replace('.json', '.meta.json')), 'utf-8'))
+      expect(meta.headers.authorization).toBe('<redacted:19b>')
+      expect(meta.headers['content-type']).toBe('application/json')
+    } finally {
+      delete process.env.CLAUDE_MAX_PROXY_CAPTURE_DIR
+    }
+  })
+})

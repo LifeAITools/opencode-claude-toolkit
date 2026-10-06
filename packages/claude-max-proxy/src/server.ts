@@ -59,7 +59,7 @@ import { startKaPurchaseNotice } from './ka-purchase-notice.js'
 import { readLaunchIdentity } from './launch-identity.js'
 import { acquireStartSlot, publishDiscoveryState, clearDiscoveryState, getStateFilePath, findFreePort } from './discovery.js'
 import { ProxyClient, loadKeepaliveConfig, startRewriteDumpCleanup, readOwnerPassport } from '@life-ai-tools/claude-code-sdk'
-import { captureBody, startCaptureCleanup, CAPTURE_INFO } from './body-capture.js'
+import { captureBody, startCaptureCleanup, captureInfo } from './body-capture.js'
 import { startStatsEmitter } from './stats-emitter.js'
 import { checkDeployDrift, resolveInstallDir } from './deploy-drift.js'
 // OpenAI translate imports moved to modules/openai-compat.ts and modules/anthropic.ts
@@ -207,7 +207,7 @@ emit({
 
 // ═══ Body-capture boot — rolling 48h TTL of native CC + opencode bodies ══
 // Default ON; disable via CLAUDE_MAX_PROXY_CAPTURE_BODIES=0.
-// Files land in CAPTURE_INFO.dir (default ~/.claude-local/proxy-body-dumps/).
+// Files land in captureInfo().dir (default ~/.claude-local/proxy-body-dumps/).
 // Sweep timer runs in background; safe to ignore the returned stop fn here.
 startCaptureCleanup()
 
@@ -227,9 +227,7 @@ const stopStatsEmitter = startStatsEmitter()
 emit({
   level: 'info',
   kind: 'BODY_CAPTURE',
-  enabled: CAPTURE_INFO.enabled,
-  ttlHours: CAPTURE_INFO.ttlHours,
-  dir: CAPTURE_INFO.dir,
+  ...captureInfo(),
 })
 
 // ═══ ProxyClient (from SDK) — our core orchestrator ════════════════

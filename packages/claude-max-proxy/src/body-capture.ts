@@ -28,20 +28,29 @@ import { mkdirSync, readdirSync, statSync, unlinkSync, writeFile } from 'node:fs
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
-const CAPTURE_ENABLED = process.env.CLAUDE_MAX_PROXY_CAPTURE_BODIES !== '0'
+// Читаются лениво (на каждый вызов), а не константами при импорте: иначе первый
+// импорт в процессе фиксирует каталог навсегда, и испытания не могут подменить
+// его временным (замер 06.10: файл теста падал только в полном прогоне, когда
+// body-capture уже импортировал чужой файл). В проде env неподвижен с подъёма,
+// поведение то же.
+function captureEnabled(): boolean {
+  return process.env.CLAUDE_MAX_PROXY_CAPTURE_BODIES !== '0'
+}
+function captureDir(): string {
+  return process.env.CLAUDE_MAX_PROXY_CAPTURE_DIR
+    ?? join(homedir(), '.claude-local', 'proxy-body-dumps')
+}
 const CAPTURE_TTL_HOURS = Number(process.env.CLAUDE_MAX_PROXY_CAPTURE_TTL_HOURS ?? '48')
 // Hard disk cap (MB). After the TTL pass, if the dir still exceeds this, oldest
 // files are deleted until it fits. Guards against full-body 1M-context traffic
 // blowing past the 48h TTL window (observed 2.1GB/8h → ~10GB before TTL kicks).
 // 0 = no size cap (TTL only). Default: 500 MB.
 const CAPTURE_MAX_MB = Number(process.env.CLAUDE_MAX_PROXY_CAPTURE_MAX_MB ?? '500')
-const CAPTURE_DIR = process.env.CLAUDE_MAX_PROXY_CAPTURE_DIR
-  ?? join(homedir(), '.claude-local', 'proxy-body-dumps')
 
-let _ensured = false
-function ensureDir(): void {
-  if (_ensured) return
-  try { mkdirSync(CAPTURE_DIR, { recursive: true }); _ensured = true } catch {}
+const _ensuredDirs = new Set<string>()
+function ensureDir(dir: string): void {
+  if (_ensuredDirs.has(dir)) return
+  try { mkdirSync(dir, { recursive: true }); _ensuredDirs.add(dir) } catch {}
 }
 
 let _turnCounter = 0
@@ -57,19 +66,20 @@ export function captureBody(
   headers: Record<string, string>,
   meta: { sessionId: string; sourcePid: number | null; srcPort: number | null },
 ): void {
-  if (!CAPTURE_ENABLED) return
-  ensureDir()
+  if (!captureEnabled()) return
+  const dir = captureDir()
+  ensureDir(dir)
   const turn = ++_turnCounter
   const ts = Date.now()
   const portTag = meta.srcPort ?? 'no-port'
   const base = `proxy-${portTag}-${String(turn).padStart(4, '0')}-${ts}`
 
   // Body: raw bytes (the same JSON CC sends to Anthropic).
-  const bodyPath = join(CAPTURE_DIR, `${base}.json`)
+  const bodyPath = join(dir, `${base}.json`)
   writeFile(bodyPath, Buffer.from(rawBody), () => { /* swallow */ })
 
   // Sidecar with headers + session attribution.
-  const metaPath = join(CAPTURE_DIR, `${base}.meta.json`)
+  const metaPath = join(dir, `${base}.meta.json`)
   const sidecar = {
     ts: new Date(ts).toISOString(),
     sessionId: meta.sessionId,
@@ -97,22 +107,23 @@ function redactHeaders(h: Record<string, string>): Record<string, string> {
 
 /** Periodic TTL sweep — deletes files older than CAPTURE_TTL_HOURS. Runs every 30min. */
 export function startCaptureCleanup(): () => void {
-  if (!CAPTURE_ENABLED) return () => {}
-  ensureDir()
+  if (!captureEnabled()) return () => {}
+  ensureDir(captureDir())
   const sweepIntervalMs = 30 * 60 * 1000
   const ttlMs = CAPTURE_TTL_HOURS * 60 * 60 * 1000
 
   const capBytes = CAPTURE_MAX_MB > 0 ? CAPTURE_MAX_MB * 1024 * 1024 : 0
 
   const sweep = (): void => {
+    const dir = captureDir()
     try {
       const cutoff = Date.now() - ttlMs
-      const entries = readdirSync(CAPTURE_DIR)
+      const entries = readdirSync(dir)
       let ttlDeleted = 0
       // Survivors after the TTL pass, with size+age for a possible size-cap pass.
       const survivors: { full: string; size: number; mtimeMs: number }[] = []
       for (const name of entries) {
-        const full = join(CAPTURE_DIR, name)
+        const full = join(dir, name)
         try {
           const st = statSync(full)
           if (st.mtimeMs < cutoff) {
@@ -143,7 +154,7 @@ export function startCaptureCleanup(): () => void {
       // Logging via console for now — proxy emit() lives elsewhere.
       if (ttlDeleted > 0 || capDeleted > 0) {
         console.log(`[body-capture] sweep: ttlDeleted=${ttlDeleted} capDeleted=${capDeleted} `
-          + `kept=${survivors.length - capDeleted} ttl=${CAPTURE_TTL_HOURS}h cap=${CAPTURE_MAX_MB}MB dir=${CAPTURE_DIR}`)
+          + `kept=${survivors.length - capDeleted} ttl=${CAPTURE_TTL_HOURS}h cap=${CAPTURE_MAX_MB}MB dir=${dir}`)
       }
     } catch { /* swallow */ }
   }
@@ -154,9 +165,12 @@ export function startCaptureCleanup(): () => void {
   return () => clearInterval(timer)
 }
 
-export const CAPTURE_INFO = {
-  enabled: CAPTURE_ENABLED,
-  ttlHours: CAPTURE_TTL_HOURS,
-  maxMb: CAPTURE_MAX_MB,
-  dir: CAPTURE_DIR,
+/** Снимок настроек на момент вызова (для /health и отладки). */
+export function captureInfo(): { enabled: boolean; ttlHours: number; maxMb: number; dir: string } {
+  return {
+    enabled: captureEnabled(),
+    ttlHours: CAPTURE_TTL_HOURS,
+    maxMb: CAPTURE_MAX_MB,
+    dir: captureDir(),
+  }
 }

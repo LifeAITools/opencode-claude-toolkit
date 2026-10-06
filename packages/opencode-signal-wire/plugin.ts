@@ -43,11 +43,15 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
+import { defaultOpencodeDbPath, readSessionSpend } from './session-spend'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
 
 let startupSeq = 0
+
+// Расход сессии из базы opencode обновляется не чаще раза в минуту на процесс.
+let lastSpendRefreshMs = 0
 
 function dbg(...args: any[]) {
   if (!DEBUG) return
@@ -578,6 +582,24 @@ export default {
             signalWire.trackTokens({ inputTokens: usage.promptTokens })
           } catch (e: any) {
             logStep('CONTEXT_USAGE_TRACK_FAILED', { error: e?.message ?? String(e) })
+          }
+          // Расход сессии из базы opencode (session-spend.ts): индексированный SUM
+          // ~2 мс на базе 3.8 ГБ, но чаще раза в минуту ему меняться не с чего.
+          try {
+            const now = Date.now()
+            if (now - lastSpendRefreshMs >= 60_000) {
+              lastSpendRefreshMs = now
+              const { Database } = await import('bun:sqlite')
+              const spend = readSessionSpend(
+                (path: string) => new Database(path, { readonly: true }) as any,
+                process.env.OPENCODE_DB_PATH ?? defaultOpencodeDbPath(),
+                usage.sessionId,
+              )
+              signalWire.trackSpend(spend)
+              if (spend) logStep('SPEND_REFRESH', { sessionId: usage.sessionId, cost: spend.cost, input: spend.inputTokens })
+            }
+          } catch (e: any) {
+            logStep('SPEND_REFRESH_FAILED', { error: e?.message ?? String(e) })
           }
         }
         if (eventType === 'session.created' || eventType === 'session.updated') {

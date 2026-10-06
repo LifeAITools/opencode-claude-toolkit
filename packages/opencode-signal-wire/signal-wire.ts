@@ -668,6 +668,42 @@ export class SignalWire {
   }
 
   /**
+   * Расход сессии из базы opencode (session-spend.ts). Хранится как есть и
+   * отдаётся в runtimeMeta; в отметку жизни ляжет, когда ядро научит свой
+   * писатель полю spend (половина владельца ядра — см. DM 06.10). Пусто = null.
+   */
+  private lastSpend: {
+    inputTokens: number
+    outputTokens: number
+    reasoningTokens: number
+    cost: number | null
+    currency: null
+    measuredAt: string
+  } | null = null
+
+  trackSpend(s: {
+    inputTokens: number
+    outputTokens: number
+    reasoningTokens: number
+    cost: number | null
+    currency: null
+    measuredAt: string
+  } | null): void {
+    this.lastSpend = s
+  }
+
+  getSpend(): {
+    inputTokens: number
+    outputTokens: number
+    reasoningTokens: number
+    cost: number | null
+    currency: null
+    measuredAt: string
+  } | null {
+    return this.lastSpend
+  }
+
+  /**
    * Build the RuntimeMeta snapshot for the current moment. Adapter-side
    * single source of truth — engine never builds this directly.
    *
@@ -706,6 +742,8 @@ export class SignalWire {
     if (agentName) meta.agentName = agentName
     if (this.lastQuotaUtil5h != null) meta.quotaUtil5h = this.lastQuotaUtil5h
     if (this.lastQuotaUtil7d != null) meta.quotaUtil7d = this.lastQuotaUtil7d
+    // Расход сессии из базы opencode — для правил и как половина договора spend.
+    if (this.lastSpend) meta.spend = { ...this.lastSpend }
 
     // ─── Diagnostic CTX_SNAPSHOT (added 2026-05-13) ──────────
     // Log a snapshot when state CHANGED meaningfully OR every 60s heartbeat.

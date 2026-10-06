@@ -29,8 +29,47 @@ export interface ProviderQuotaLimit {
 
 export interface ProviderQuota {
   provider: 'zhipu' | 'zai'
+  /**
+   * Время запроса, полная точность (ISO): ценз реестра 300 секунд, часовое
+   * округление во второй половине часа читалось бы протухшим. Эпоху-число
+   * реестр не принимает — перевод в ISO на нашей стороне (см. resetAt ниже).
+   */
   measuredAt: string
   limits: ProviderQuotaLimit[]
+  /** Окна по отображению владельца ядра (ниже): TIME_LIMIT сюда не входит вовсе. */
+  windows: ProviderQuotaWindow[]
+}
+
+/**
+ * Отображение лимитов в окна — дословно по строке владельца ядра:
+ * TOKENS_LIMIT + unit 3 → 5h; + unit 6 → 7d; другой unit → tokens-uN как есть;
+ * TIME_LIMIT — НЕ окна (месячный allowance MCP-вызовов, работа моделей по нему
+ * не gate'ится). Неизвестное молча не роняется — едет отдельным окном.
+ */
+/**
+ * Окно квоты поставщика для общего провода. Форма — слова владельца ядра 06.10
+ * (доки + живой фикстур): вид сначала по type, потом по unit. resetAt — только
+ * ISO-строка (эпоху реестр не принимает); measuredAt — время запроса с точностью
+ * до секунды (ценз 300 секунд).
+ */
+export interface ProviderQuotaWindow {
+  kind: string
+  /** percentage 0..100, делённый на 100. */
+  util: number
+  resetAt?: string
+  measuredAt: string
+}
+
+export function mapLimitsToWindows(limits: ProviderQuotaLimit[], measuredAt: string): ProviderQuotaWindow[] {
+  const out: ProviderQuotaWindow[] = []
+  for (const l of limits) {
+    if (l.type !== 'TOKENS_LIMIT') continue
+    const kind = l.unit === 3 ? '5h' : l.unit === 6 ? '7d' : typeof l.unit === 'number' ? `tokens-u${l.unit}` : 'tokens-unknown'
+    const w: ProviderQuotaWindow = { kind, util: l.percentage / 100, measuredAt }
+    if (l.resetAt) w.resetAt = l.resetAt
+    out.push(w)
+  }
+  return out
 }
 
 export const PROVIDER_QUOTA_ENDPOINTS = {
@@ -104,7 +143,8 @@ export async function queryProviderQuota(
       if (l) limits.push(l)
     }
     if (limits.length === 0) return null
-    return { provider, measuredAt: now.toISOString(), limits }
+    const measuredAt = now.toISOString()
+    return { provider, measuredAt, limits, windows: mapLimitsToWindows(limits, measuredAt) }
   } catch {
     return null
   }

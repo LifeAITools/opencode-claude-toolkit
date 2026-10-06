@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota } from './provider-quota'
+import { mapLimitsToWindows, PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota } from './provider-quota'
 import { SignalWire } from './signal-wire'
 
 process.env.SW_EXEC_OFF = '1'
@@ -37,14 +37,19 @@ describe('двери лимитов: разбор без толкования', 
       { type: 'TOKENS_LIMIT', percentage: 16, resetAt: new Date(1791363922960).toISOString(), unit: 6, number: 1 },
       { type: 'TIME_LIMIT', percentage: 0, used: 0, total: 1000, remaining: 1000, resetAt: new Date(1793523922999).toISOString(), unit: 5, number: 1 },
     ])
+    // Окна — по отображению владельца ядра: unit 3 → 5h, unit 6 → 7d, TIME_LIMIT не окна.
+    expect(q.windows).toEqual([
+      { kind: '5h', util: 0, measuredAt: NOW.toISOString() },
+      { kind: '7d', util: 0.16, resetAt: new Date(1791363922960).toISOString(), measuredAt: NOW.toISOString() },
+    ])
   })
 
   test('проводка: лимиты едут в runtimeMeta, пусто — ключа нет', () => {
     const sw = new SignalWire({ serverUrl: 'http://127.0.0.1:0', sessionId: 'ses_q', rulesPath: join(process.env.SW_HEARTBEAT_DIR!, 'none.json'), platform: 'opencode' })
     expect((sw.getCurrentRuntimeMeta() as any).providerQuota).toBeUndefined()
-    sw.trackProviderQuota([{ provider: 'zai', measuredAt: NOW.toISOString(), limits: [{ type: 'TOKENS_LIMIT', percentage: 16 }] }])
+    sw.trackProviderQuota([{ provider: 'zai', measuredAt: NOW.toISOString(), limits: [{ type: 'TOKENS_LIMIT', percentage: 16 }], windows: [{ kind: '5h', util: 0.16, measuredAt: NOW.toISOString() }] }])
     expect((sw.getCurrentRuntimeMeta() as any).providerQuota).toEqual([
-      { provider: 'zai', measuredAt: NOW.toISOString(), limits: [{ type: 'TOKENS_LIMIT', percentage: 16 }] },
+      { provider: 'zai', measuredAt: NOW.toISOString(), limits: [{ type: 'TOKENS_LIMIT', percentage: 16 }], windows: [{ kind: '5h', util: 0.16, measuredAt: NOW.toISOString() }] },
     ])
     sw.trackProviderQuota(null)
     expect((sw.getCurrentRuntimeMeta() as any).providerQuota).toBeUndefined()
@@ -61,5 +66,20 @@ describe('двери лимитов: разбор без толкования', 
     expect(await queryProviderQuota(junk as any, 'zai', 'KEY', NOW)).toBeNull()
     const throws = async (): Promise<never> => { throw new Error('down') }
     expect(await queryProviderQuota(throws as any, 'zai', 'KEY', NOW)).toBeNull()
+  })
+})
+
+describe('отображение в окна — дословно по строке владельца ядра', () => {
+  // Импорт mapLimitsToWindows — через тот же модуль, без новых зависимостей.
+  test('другой unit — tokens-uN как есть; без unit — tokens-unknown; TIME_LIMIT не окно', () => {
+    const m = '2026-10-06T06:20:00.000Z'
+    expect(mapLimitsToWindows([
+      { type: 'TOKENS_LIMIT', percentage: 50, unit: 9, number: 2 },
+      { type: 'TOKENS_LIMIT', percentage: 10 },
+      { type: 'TIME_LIMIT', percentage: 0, used: 0, total: 1000 },
+    ], m)).toEqual([
+      { kind: 'tokens-u9', util: 0.5, measuredAt: m },
+      { kind: 'tokens-unknown', util: 0.1, measuredAt: m },
+    ])
   })
 })

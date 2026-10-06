@@ -59,6 +59,22 @@ describe('opencode: след жизни на каждом событии', () =>
     expect(hb.context_model).toBe('claude-sonnet-5')
   })
 
+  test('замеренный расход едет в отметку объектом дословно (ядро ≥0.24.0)', async () => {
+    const sid = 'ses_heartbeat_spend'
+    const sw = make(sid)
+    sw.trackSpend({ inputTokens: 300, outputTokens: 30, reasoningTokens: 5, cost: 0.003, currency: 'USD', measuredAt: '2026-10-06T06:00:00.000Z' })
+    await sw.evaluateHook(event(sid))
+    const hb = JSON.parse(readFileSync(heartbeatPath(dir(), sid), 'utf-8'))
+    expect(hb.spend).toEqual({ inputTokens: 300, outputTokens: 30, reasoningTokens: 5, cost: 0.003, currency: 'USD', measuredAt: '2026-10-06T06:00:00.000Z' })
+  })
+
+  test('без замера расхода ключа spend нет — а не ноль', async () => {
+    const sid = 'ses_heartbeat_nospend'
+    const sw = make(sid)
+    await sw.evaluateHook(event(sid))
+    const hb = JSON.parse(readFileSync(heartbeatPath(dir(), sid), 'utf-8'))
+    expect('spend' in hb).toBe(false)
+  })
   test('без номера сессии отметки нет — ни от заглушки unknown, ни от пустого', async () => {
     const sw = make('unknown')
     await sw.evaluateHook(event('unknown'))

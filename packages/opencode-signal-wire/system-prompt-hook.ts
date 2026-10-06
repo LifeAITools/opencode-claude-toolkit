@@ -129,6 +129,7 @@ function formatRoleBlock(identity: ProvisionedIdentitySnapshot): string {
 export async function systemTransformHook(
   input: SystemTransformInput,
   output: SystemTransformOutput,
+  opts?: { onStartupLine?: (line: string) => void },
 ): Promise<void> {
   // Hooks must never throw. Wrap everything.
   try {
@@ -142,7 +143,11 @@ export async function systemTransformHook(
     // Стартовый контекст (бриф, прайминг, рельсы) — независимо от кэша личности: он приходит с
     // сервера SynqTask по KIBEROS_BINDING_ID и ключу проекта. Кладётся ПОСЛЕДНИМ, чтобы не сдвигать
     // ни умолчание opencode, ни ролевой блок; строка за сессию одна и та же.
-    const startup = await startupTextForSession(sessionID)
+    // Исход попытки — и в stderr, и вызывающей стороне (жалоба 06.10: по stderr
+    // мёртвого процесса строку не восстановить, а в базе системных промптов нет).
+    const startup = await startupTextForSession(sessionID, {
+      log: (line) => { try { console.error(line) } catch {} try { opts?.onStartupLine?.(line) } catch {} },
+    })
     const identity = getParentIdentity()
     if (!identity?.orgRole) {
       // No identity or no role data → only the startup context (if any).

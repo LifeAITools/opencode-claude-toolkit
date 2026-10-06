@@ -853,7 +853,9 @@ export default {
 
       'experimental.chat.system.transform': async (input: any, output: any) => {
         const { systemTransformHook } = await import('./system-prompt-hook')
-        await systemTransformHook(input, output)
+        await systemTransformHook(input, output, {
+          onStartupLine: (line) => logStep('STARTUP_CONTEXT', { sessionId: input?.sessionID ?? 'unknown', line }),
+        })
       },
 
       'tool.definition': async (input: any, output: any) => {

@@ -244,6 +244,13 @@ export interface WakeListenerConfig {
   busyRetryInterval?: number
   /** Max injection retries when agent is busy */
   busyMaxRetries?: number
+  /**
+   * Наблюдаемость пути побудки: вызывается на получении, дубле, постановке в
+   * очередь, дренировании и исходе вставки (eventId всегда в details). Без него
+   * путь нем в проде (WAKE_LISTENER_DEBUG выключен) и жалоба «не подобрала»
+   * не читается по логу. Плагин прокидывает сюда свой logStep.
+   */
+  onWakeTrace?: (step: string, details: Record<string, unknown>) => void
   /** Initial subscription list (from preferences). Absent → default preset for memberType */
   subscribe?: string[]
   /** Preset name to apply at startup */

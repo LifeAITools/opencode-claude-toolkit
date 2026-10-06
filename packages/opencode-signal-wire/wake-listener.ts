@@ -1546,15 +1546,28 @@ export async function startWakeListener(
   const queue: WakeEvent[] = []
   const maxQueue = config.maxQueueSize ?? MAX_QUEUE_DEFAULT
   const retryInterval = config.busyRetryInterval ?? BUSY_RETRY_INTERVAL_DEFAULT
+  const maxDrainRetries = config.busyMaxRetries ?? 12
+  const drainAttempts = new Map<string, number>()
+
+  /**
+   * След пути побудки для прод-лога (жалоба 06.10: drain нем, «не подобрала»
+   * не читается). Без onWakeTrace — только dbg, как раньше.
+   */
+  function trace(step: string, details: Record<string, unknown>): void {
+    try { config.onWakeTrace?.(step, details) } catch {}
+    dbg(`[trace] ${step} ${JSON.stringify(details)}`)
+  }
 
   function queueWakeEvent(event: WakeEvent, reason: string): number {
     if (hasSeenWakeEvent(event)) return queue.findIndex(e => e.eventId === event.eventId) + 1
     if (queue.length >= maxQueue) {
       const dropped = queue.shift()
+      trace('WAKE_QUEUE_DROPPED', { droppedEventId: dropped?.eventId ?? null, reason: 'queue_full' })
       dbg(`wake: queue full, dropped oldest event ${dropped?.eventId}`)
     }
     queue.push(event)
     rememberWakeEvent(event)
+    trace('WAKE_QUEUED', { eventId: event.eventId, type: event.type, reason, position: queue.length })
     dbg(`wake: queued ${event.eventId} reason=${reason} position=${queue.length}`)
     return queue.length
   }
@@ -1656,9 +1669,11 @@ export async function startWakeListener(
     }
 
     dbg(`wake: received ${event.type} from ${event.source} [${event.priority}]`)
+    trace('WAKE_RECEIVED', { eventId: event.eventId, type: event.type, source: event.source, priority: event.priority ?? null })
 
     if (hasSeenWakeEvent(event)) {
       dbg(`wake: duplicate ignored ${event.eventId}`)
+      trace('WAKE_DUPLICATE', { eventId: event.eventId, type: event.type })
       return Response.json(
         { accepted: true, queued: false } satisfies WakeResponse,
       )
@@ -1701,6 +1716,7 @@ export async function startWakeListener(
             const combined = hintTexts.join('\n\n')
             const injected = await injectHintText(combined, config.sessionId, event)
             rememberWakeEvent(event)
+            trace('WAKE_ENGINE_HINTS', { eventId: event.eventId, hints: hintTexts.length, injected, wakeTriggered: result.wakeTriggered })
             dbg(`wake: engine matched, ${hintTexts.length} hint(s) injected=${injected}`)
             return Response.json({
               accepted: true,
@@ -1735,6 +1751,7 @@ export async function startWakeListener(
           } else {
             // Audit-only (or other non-injecting actions) — engine logged it.
             rememberWakeEvent(event)
+            trace('WAKE_ENGINE_AUDIT', { eventId: event.eventId, actions: result.actionsExecuted.length, wakeTriggered: result.wakeTriggered })
             dbg(`wake: engine matched, audit-only (no hint, no wake action)`)
             return Response.json({
               accepted: true,
@@ -1799,6 +1816,7 @@ export async function startWakeListener(
     const outcome = await injectWakeEvent(event, config.sessionId)
     if (outcome === 'ok') {
       rememberWakeEvent(event)
+      trace('WAKE_INJECTED', { eventId: event.eventId, immediate: true })
       dbg(`wake: injected ${event.eventId}`)
       return Response.json(
         { accepted: true, queued: false } satisfies WakeResponse,
@@ -1914,6 +1932,22 @@ export async function startWakeListener(
       if (await isAgentBusy()) return
       const event = queue.shift()!
       const ok = (await injectWakeEvent(event, config.sessionId)) === 'ok'
+      if (ok) {
+        drainAttempts.delete(event.eventId)
+        trace('WAKE_DRAINED', { eventId: event.eventId, type: event.type })
+      } else {
+        // Потерянная побудка — тихий дроп чинить нельзя: вставка не удалась,
+        // событие возвращается в голову очереди, попытки со счётом.
+        const attempts = (drainAttempts.get(event.eventId) ?? 0) + 1
+        if (attempts >= maxDrainRetries) {
+          drainAttempts.delete(event.eventId)
+          trace('WAKE_DRAIN_DROPPED', { eventId: event.eventId, type: event.type, attempts })
+        } else {
+          drainAttempts.set(event.eventId, attempts)
+          queue.unshift(event)
+          trace('WAKE_DRAIN_RETRY', { eventId: event.eventId, type: event.type, attempts })
+        }
+      }
       dbg(`drain: ${event.eventId} ${ok ? 'injected' : 'failed'}`)
     } catch (e: any) {
       dbg('drain error:', e?.message)

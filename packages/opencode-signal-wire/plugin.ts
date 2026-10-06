@@ -44,6 +44,7 @@ import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
 import { defaultOpencodeDbPath, readSessionSpend } from './session-spend'
+import { stampSessionLaunch } from './session-stamp'
 import { PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
@@ -53,6 +54,8 @@ let startupSeq = 0
 
 // Расход сессии из базы opencode обновляется не чаще раза в минуту на процесс.
 let lastSpendRefreshMs = 0
+// Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
+const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
 let lastProviderQuotaRefreshMs = 0
 
@@ -489,6 +492,28 @@ export default {
       if (bound && signalWire) {
         try { signalWire.setSessionId(candidateSessionId) } catch { /* best-effort */ }
       }
+      // Клеймо запуска для семейства сборщика (session-stamp.ts): один раз на
+      // процесс, не блокирует привязку, исход — в журнал строкой.
+      if (bound) {
+        void (async () => {
+          try {
+            const { execFile } = await import('node:child_process')
+            const { promisify } = await import('node:util')
+            const run = async (cmd: string, args: string[], opts: { timeoutMs: number }) => {
+              try {
+                const out = await (promisify(execFile))(cmd, args, { timeout: opts.timeoutMs, maxBuffer: 64 * 1024 })
+                return { code: 0, stdout: String(out.stdout ?? ''), stderr: String(out.stderr ?? '') }
+              } catch (e: any) {
+                return { code: typeof e?.code === 'number' ? e.code : 1, stdout: String(e?.stdout ?? ''), stderr: String(e?.stderr ?? e?.message ?? '') }
+              }
+            }
+            const r = await stampSessionLaunch(run, candidateSessionId, cwd, stampGuard)
+            logStep(r.ok ? 'STAMP_LAUNCH_OK' : 'STAMP_LAUNCH_SKIPPED', { sessionId: candidateSessionId, detail: r.detail })
+          } catch (e: any) {
+            logStep('STAMP_LAUNCH_FAILED', { sessionId: candidateSessionId, error: e?.message ?? String(e) })
+          }
+        })()
+      }
       logStep(bound ? 'SESSION_BOUND' : 'SESSION_BIND_SKIPPED', {
         reason,
         sessionId: candidateSessionId,
@@ -543,6 +568,9 @@ export default {
           subscribe,
           subscribePreset: preset ?? undefined,
           memberType,
+          // След пути побудки в прод-логе (жалоба 06.10): получение, дубль,
+          // очередь, drain и исход вставки — с eventId, без тел и секретов.
+          onWakeTrace: (step, details) => logStep(step, details),
           agentRegistration: {
             enabled: Boolean(agentRegistration?.enabled)
               || process.env.SYNQTASK_AGENT_REGISTRATION === '1'

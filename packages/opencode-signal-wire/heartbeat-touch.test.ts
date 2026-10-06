@@ -75,6 +75,25 @@ describe('opencode: след жизни на каждом событии', () =>
     const hb = JSON.parse(readFileSync(heartbeatPath(dir(), sid), 'utf-8'))
     expect('spend' in hb).toBe(false)
   })
+
+  test('окна поставщиков едут в отметку из плоского ключа (ядро ≥0.25.0)', async () => {
+    const sid = 'ses_heartbeat_windows'
+    const sw = make(sid)
+    const w1 = { kind: '5h', util: 0, measuredAt: '2026-10-06T06:00:00.000Z' }
+    const w2 = { kind: '7d', util: 0.16, resetAt: '2026-10-07T00:00:00.000Z', measuredAt: '2026-10-06T06:00:00.000Z' }
+    sw.trackProviderQuota([{ provider: 'zai', measuredAt: '2026-10-06T06:00:00.000Z', limits: [], windows: [w1, w2] }])
+    await sw.evaluateHook(event(sid))
+    const hb = JSON.parse(readFileSync(heartbeatPath(dir(), sid), 'utf-8'))
+    expect(hb.windows).toEqual([w1, w2])
+  })
+
+  test('без лимитов ключа windows нет — а не пустой список', async () => {
+    const sid = 'ses_heartbeat_nowindows'
+    const sw = make(sid)
+    await sw.evaluateHook(event(sid))
+    const hb = JSON.parse(readFileSync(heartbeatPath(dir(), sid), 'utf-8'))
+    expect('windows' in hb).toBe(false)
+  })
   test('без номера сессии отметки нет — ни от заглушки unknown, ни от пустого', async () => {
     const sw = make('unknown')
     await sw.evaluateHook(event('unknown'))

@@ -37,6 +37,7 @@ import {
 
 import type { WakeEvent } from './wake-types'
 import type { SessionSpend } from './session-spend'
+import type { ProviderQuota } from './provider-quota'
 
 /**
  * Model context window SSOT (mirrors @life-ai-tools/claude-code-sdk/src/models.ts).
@@ -686,6 +687,21 @@ export class SignalWire {
   }
 
   /**
+   * Лимиты поставщиков (provider-quota.ts). Хранятся как есть, отдаются в
+   * runtimeMeta для правил; на общий провод лягут, когда реестр назовёт
+   * отображение unit/number в виды окон. Пусто = null.
+   */
+  private lastProviderQuota: ProviderQuota[] | null = null
+
+  trackProviderQuota(q: ProviderQuota[] | null): void {
+    this.lastProviderQuota = q
+  }
+
+  getProviderQuota(): ProviderQuota[] | null {
+    return this.lastProviderQuota
+  }
+
+  /**
    * Build the RuntimeMeta snapshot for the current moment. Adapter-side
    * single source of truth — engine never builds this directly.
    *
@@ -726,6 +742,8 @@ export class SignalWire {
     if (this.lastQuotaUtil7d != null) meta.quotaUtil7d = this.lastQuotaUtil7d
     // Расход сессии из базы opencode — для правил и как половина договора spend.
     if (this.lastSpend) meta.spend = { ...this.lastSpend }
+    // Лимиты поставщиков — для правил; виды окон толкует потребитель.
+    if (this.lastProviderQuota) meta.providerQuota = this.lastProviderQuota.map((q) => ({ ...q }))
 
     // ─── Diagnostic CTX_SNAPSHOT (added 2026-05-13) ──────────
     // Log a snapshot when state CHANGED meaningfully OR every 60s heartbeat.

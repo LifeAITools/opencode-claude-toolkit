@@ -44,6 +44,7 @@ import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
 import { defaultOpencodeDbPath, readSessionSpend } from './session-spend'
+import { PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -52,6 +53,36 @@ let startupSeq = 0
 
 // Расход сессии из базы opencode обновляется не чаще раза в минуту на процесс.
 let lastSpendRefreshMs = 0
+// Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
+let lastProviderQuotaRefreshMs = 0
+
+/**
+ * Опрос дверей лимитов Zhipu/Z.ai своим ключом (provider-quota.ts). Ключи читаются
+ * из auth.json в момент запроса и никуда не едут, кроме самих дверей: в журнал —
+ * только имена поставщиков и счёт лимитов, никогда ключи и их обрезки. Пусто = null.
+ */
+async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: ProviderQuota[] | null) => void }): Promise<void> {
+  try {
+    const authPath = join(homedir(), '.local', 'share', 'opencode', 'auth.json')
+    if (!existsSync(authPath)) { signalWire.trackProviderQuota(null); return }
+    const auth = JSON.parse(readFileSync(authPath, 'utf-8')) as Record<string, { type?: unknown; key?: unknown }>
+    // Связка измерена живьём 06.10 (обе 200): ключ `zai` → bigmodel.cn, ключ `zai-coding-plan` → api.z.ai.
+    const pairs = [
+      { provider: 'zhipu' as const, key: auth['zai']?.key },
+      { provider: 'zai' as const, key: auth['zai-coding-plan']?.key },
+    ] as const
+    const out: ProviderQuota[] = []
+    await Promise.all(pairs.map(async ({ provider, key }) => {
+      if (typeof key !== 'string' || !key) return
+      const q = await queryProviderQuota(fetch as any, provider, key)
+      if (q) out.push(q)
+    }))
+    signalWire.trackProviderQuota(out.length > 0 ? out : null)
+    logStep('PROVIDER_QUOTA_REFRESH', { providers: out.map((q) => `${q.provider}:${q.limits.length}`) })
+  } catch (e: any) {
+    logStep('PROVIDER_QUOTA_REFRESH_FAILED', { error: e?.message ?? String(e) })
+  }
+}
 
 function dbg(...args: any[]) {
   if (!DEBUG) return
@@ -565,6 +596,12 @@ export default {
       logStep('QUOTA_WATCHER_FAILED_OPEN', { error: e?.message ?? String(e) })
     }
 
+    // Двери лимитов поставщиков — один опрос на старте, дальше не чаще раза в 10 минут.
+    if (signalWire) {
+      lastProviderQuotaRefreshMs = Date.now()
+      void refreshProviderQuota(signalWire).catch(() => { /* залогировано внутри */ })
+    }
+
     return {
       event: async ({ event }: { event: any }) => {
         const eventType = eventTypeOf(event)
@@ -600,6 +637,16 @@ export default {
             }
           } catch (e: any) {
             logStep('SPEND_REFRESH_FAILED', { error: e?.message ?? String(e) })
+          }
+          // Лимиты поставщиков — не чаще раза в 10 минут (внешняя сеть).
+          try {
+            const now = Date.now()
+            if (now - lastProviderQuotaRefreshMs >= 600_000) {
+              lastProviderQuotaRefreshMs = now
+              void refreshProviderQuota(signalWire).catch(() => { /* залогировано внутри */ })
+            }
+          } catch (e: any) {
+            logStep('PROVIDER_QUOTA_REFRESH_FAILED', { error: e?.message ?? String(e) })
           }
         }
         if (eventType === 'session.created' || eventType === 'session.updated') {

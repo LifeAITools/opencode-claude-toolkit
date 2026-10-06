@@ -78,6 +78,26 @@ function textOf(blocks: MessagesContentBlock[]): string {
   return blocks.filter(b => b.type === 'text').map(b => b.text ?? '').join('')
 }
 
+/**
+ * Anthropic image block → Responses input_image part.
+ * Anthropic: {type:'image', source:{type:'base64'|'url', media_type?, data?, url?}}.
+ * Responses: {type:'input_image', image_url: 'data:<mime>;base64,<data>'}.
+ * A block that names neither is rejected LOUDLY — an image the translator
+ * cannot carry must refuse, never vanish (the silent-drop this fixes
+ * cost a live turn its schematic on 06.10.2026).
+ */
+export function translateImageBlock(b: MessagesContentBlock): { type: 'input_image'; image_url: string } {
+  const src = (b as any).source ?? {}
+  if (src.type === 'base64' && src.data) {
+    const mime = src.media_type ?? 'image/jpeg'
+    return { type: 'input_image', image_url: `data:${mime};base64,${src.data}` }
+  }
+  if ((src.type === 'url' && src.url) || (b as any).url) {
+    return { type: 'input_image', image_url: src.url ?? (b as any).url }
+  }
+  throw new Error(`image block without base64/url payload (media_type=${src.media_type ?? '?'})`)
+}
+
 function blocksOf(content: string | MessagesContentBlock[]): MessagesContentBlock[] {
   return typeof content === 'string' ? [{ type: 'text', text: content }] : content
 }
@@ -103,10 +123,14 @@ export function translateToResponsesBody(
     if (m.role === 'user') {
       const texts = blocks.filter(b => b.type === 'text')
       const results = blocks.filter(b => b.type === 'tool_result')
-      if (texts.length) {
+      const images = blocks.filter(b => b.type === 'image')
+      if (texts.length || images.length) {
         input.push({
           type: 'message', role: 'user',
-          content: texts.map(b => ({ type: 'input_text', text: b.text ?? '' })),
+          content: [
+            ...texts.map(b => ({ type: 'input_text', text: b.text ?? '' })),
+            ...images.map(translateImageBlock),
+          ],
         })
       }
       for (const r of results) {
@@ -119,9 +143,24 @@ export function translateToResponsesBody(
           call_id: r.tool_use_id,
           output,
         })
+        // function_call_output carries STRING only — image parts ride a
+        // separate user message right after, or the model never sees pixels.
+        if (Array.isArray(c)) {
+          const imgs = (c as any[]).filter((x: any) => x?.type === 'image')
+          if (imgs.length) {
+            input.push({
+              type: 'message', role: 'user',
+              content: imgs.map(translateImageBlock),
+            })
+          }
+        }
       }
-      if (!texts.length && !results.length && blocks.length) {
+      if (!texts.length && !results.length && !images.length && blocks.length) {
         throw new Error(`unsupported user content block: ${blocks.map(b => b.type).join(',')}`)
+      }
+      const unhandledU = blocks.filter(b => b.type !== 'text' && b.type !== 'tool_result' && b.type !== 'image')
+      if (unhandledU.length) {
+        throw new Error(`unsupported user content block rides with text and would vanish: ${unhandledU.map(b => b.type).join(',')}`)
       }
     } else {
       const texts = blocks.filter(b => b.type === 'text')
@@ -142,6 +181,10 @@ export function translateToResponsesBody(
       }
       if (!texts.length && !uses.length && blocks.length) {
         throw new Error(`unsupported assistant content block: ${blocks.map(b => b.type).join(',')}`)
+      }
+      const unhandledA = blocks.filter(b => b.type !== 'text' && b.type !== 'tool_use')
+      if (unhandledA.length) {
+        throw new Error(`unsupported assistant content block rides with text and would vanish: ${unhandledA.map(b => b.type).join(',')}`)
       }
     }
   }

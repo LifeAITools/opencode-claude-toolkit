@@ -101,6 +101,57 @@ describe('translateToResponsesBody', () => {
     expect(translateToResponsesBody(base, { reasoningEffort: 'low' }).body.reasoning).toMatchObject({ effort: 'low' })
   })
 
+  test('image blocks ride as input_image (base64 and url), never dropped', () => {
+    const { body } = translateToResponsesBody({
+      model: 'muse-spark-1.3-contributor',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is here?' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAA' } } as any,
+        ],
+      }],
+      max_tokens: 1024,
+    })
+    const parts = (body.input[0] as any).content
+    expect(parts).toHaveLength(2)
+    expect(parts[1]).toMatchObject({ type: 'input_image', image_url: 'data:image/jpeg;base64,AAA' })
+  })
+
+  test('image inside tool_result rides a separate message (output is string-only)', () => {
+    const { body } = translateToResponsesBody({
+      model: 'muse-spark-1.3-contributor',
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'tool_result', tool_use_id: 'toolu_9',
+          content: [
+            { type: 'text', text: 'rendered 900x500' },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'BBB' } },
+          ],
+        } as any],
+      }],
+      max_tokens: 1024,
+    })
+    const items = body.input as any[]
+    expect(items[0]).toMatchObject({ type: 'function_call_output', call_id: 'toolu_9', output: 'rendered 900x500' })
+    expect(items[1]).toMatchObject({ type: 'message', role: 'user' })
+    expect(items[1].content[0]).toMatchObject({ type: 'input_image', image_url: 'data:image/png;base64,BBB' })
+  })
+
+  test('unknown block riding with text refuses loudly instead of vanishing', () => {
+    expect(() => translateToResponsesBody({
+      model: 'muse-spark-1.3-contributor',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }, { type: 'document', source: {} } as any] }],
+      max_tokens: 1024,
+    })).toThrow(/would vanish/)
+    expect(() => translateToResponsesBody({
+      model: 'muse-spark-1.3-contributor',
+      messages: [{ role: 'user', content: [{ type: 'image' } as any] }],
+      max_tokens: 1024,
+    })).toThrow(/without base64\/url payload/)
+  })
+
   test('model gate: spark passes, everything else fails', () => {
     expect(isSparkModel('muse-spark-1.3-contributor')).toBe(true)
     expect(isSparkModel('muse-spark-1.2')).toBe(true)

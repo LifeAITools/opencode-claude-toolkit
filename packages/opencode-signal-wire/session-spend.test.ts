@@ -32,9 +32,9 @@ function seed(): string {
 }
 
 describe('opencode: расход сессии из базы', () => {
-  test('суммы по своим ответам ассистента; валюта — null, а не догадка', () => {
+  test('суммы по своим ответам ассистента; валюта — USD строкой в договоре', () => {
     const s = readSessionSpend(openDb, seed(), 'ses_a', new Date(NOW))
-    expect(s).toEqual({ inputTokens: 300, outputTokens: 30, reasoningTokens: 5, cost: 0.003, currency: null, measuredAt: new Date(NOW).toISOString() })
+    expect(s).toEqual({ inputTokens: 300, outputTokens: 30, reasoningTokens: 5, cost: 0.003, currency: 'USD', measuredAt: new Date(NOW).toISOString() })
   })
 
   test('пусто = null: чужая сессия без строк, unknown, нет базы', () => {

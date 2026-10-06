@@ -36,6 +36,7 @@ import {
 } from '@kiberos/signal-wire-core'
 
 import type { WakeEvent } from './wake-types'
+import type { SessionSpend } from './session-spend'
 
 /**
  * Model context window SSOT (mirrors @life-ai-tools/claude-code-sdk/src/models.ts).
@@ -669,37 +670,18 @@ export class SignalWire {
 
   /**
    * Расход сессии из базы opencode (session-spend.ts). Хранится как есть и
-   * отдаётся в runtimeMeta; в отметку жизни ляжет, когда ядро научит свой
-   * писатель полю spend (половина владельца ядра — см. DM 06.10). Пусто = null.
+   * отдаётся в runtimeMeta; в отметку жизни ляжет полем spend, когда конвейер
+   * ядра начнёт подавать его своему писателю (ядро 6d07353 добавило поле, но
+   * подачи spend в touchHeartbeat нет ни в pipeline.ts, ни в daemon-client.ts).
+   * Пусто = null.
    */
-  private lastSpend: {
-    inputTokens: number
-    outputTokens: number
-    reasoningTokens: number
-    cost: number | null
-    currency: null
-    measuredAt: string
-  } | null = null
+  private lastSpend: SessionSpend | null = null
 
-  trackSpend(s: {
-    inputTokens: number
-    outputTokens: number
-    reasoningTokens: number
-    cost: number | null
-    currency: null
-    measuredAt: string
-  } | null): void {
+  trackSpend(s: SessionSpend | null): void {
     this.lastSpend = s
   }
 
-  getSpend(): {
-    inputTokens: number
-    outputTokens: number
-    reasoningTokens: number
-    cost: number | null
-    currency: null
-    measuredAt: string
-  } | null {
+  getSpend(): SessionSpend | null {
     return this.lastSpend
   }
 

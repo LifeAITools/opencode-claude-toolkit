@@ -61,6 +61,7 @@ export interface ResponsesRequest {
   tool_choice?: unknown
   max_output_tokens: number
   stream: boolean
+  reasoning?: { effort: ReasoningEffort }
 }
 
 /** Floor for max_output_tokens — measured: 50 + high effort → incomplete. */
@@ -87,7 +88,12 @@ export interface ToResponsesResult {
   bumpedMaxTokens: boolean
 }
 
-export function translateToResponsesBody(req: MessagesRequest): ToResponsesResult {
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high'
+
+export function translateToResponsesBody(
+  req: MessagesRequest,
+  opts?: { reasoningEffort?: ReasoningEffort },
+): ToResponsesResult {
   const systemBlocks = req.system === undefined ? [] : blocksOf(req.system)
   const instructions = textOf(systemBlocks) || undefined
 
@@ -168,6 +174,10 @@ export function translateToResponsesBody(req: MessagesRequest): ToResponsesResul
     input,
     max_output_tokens,
     stream: req.stream === true,
+    // Our cognition lives substrate-side (vault-driven PLAN/EXECUTE/REFLECT) —
+    // model-internal reasoning is set to minimum, measured 06.10: 322→57 output
+    // tokens on the same answer. Raised only with a spend measurement, not a hunch.
+    reasoning: { effort: opts?.reasoningEffort ?? 'minimal' },
   }
   if (instructions) body.instructions = instructions
   if (tools.length) body.tools = tools

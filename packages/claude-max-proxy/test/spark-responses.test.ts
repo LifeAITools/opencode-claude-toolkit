@@ -95,6 +95,12 @@ describe('translateToResponsesBody', () => {
       .toMatchObject({ type: 'function', name: 't' })
   })
 
+  test('reasoning effort defaults to minimal, override respected', () => {
+    const base: MessagesRequest = { model: 'muse-spark-1.3-contributor', messages: [{ role: 'user', content: 'Hi' }], max_tokens: 1024 }
+    expect(translateToResponsesBody(base).body.reasoning).toMatchObject({ effort: 'minimal' })
+    expect(translateToResponsesBody(base, { reasoningEffort: 'low' }).body.reasoning).toMatchObject({ effort: 'low' })
+  })
+
   test('model gate: spark passes, everything else fails', () => {
     expect(isSparkModel('muse-spark-1.3-contributor')).toBe(true)
     expect(isSparkModel('muse-spark-1.2')).toBe(true)

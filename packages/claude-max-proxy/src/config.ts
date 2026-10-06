@@ -75,6 +75,7 @@ export interface ProxyConfig {
   sparkApiKey: string | null
   sparkUpstreamUrl: string
   sparkUserAgent: string
+  sparkReasoningEffort: 'minimal' | 'low' | 'medium' | 'high'
 
   // Subscription compat layer (hot-configurable for binary distribution)
   ccCompatVersion: string
@@ -197,6 +198,9 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     sparkApiKey: read('SPARK_API_KEY', '', fileEnv) || null,
     sparkUpstreamUrl: read('SPARK_UPSTREAM_URL', 'https://opencode.ai/zen/go/v1', fileEnv),
     sparkUserAgent: read('SPARK_USER_AGENT', 'claude-max-proxy-spark/1.0', fileEnv),
+    sparkReasoningEffort: (['minimal', 'low', 'medium', 'high'].includes(read('SPARK_REASONING_EFFORT', 'minimal', fileEnv))
+      ? read('SPARK_REASONING_EFFORT', 'minimal', fileEnv)
+      : 'minimal') as 'minimal' | 'low' | 'medium' | 'high',
 
     // Floor only — the installed Claude Code wins when newer (cc-version.ts). Sidecars have
     // no Claude Code, so this default IS their version: 2.1.280 is the minimum for opus-5-5.

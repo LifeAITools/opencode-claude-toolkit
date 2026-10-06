@@ -102,7 +102,7 @@ export function createSparkResponsesModule(): ProxyModule {
 
         let translation
         try {
-          translation = translateToResponsesBody(body)
+          translation = translateToResponsesBody(body, { reasoningEffort: ctx.config.sparkReasoningEffort })
         } catch (err: any) {
           return sparkErrorResponse(400, `Translation error: ${err?.message}`, 'invalid_request_error')
         }

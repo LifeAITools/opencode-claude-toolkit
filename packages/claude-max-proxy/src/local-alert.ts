@@ -32,7 +32,7 @@
  * может быть выключен, а журнал обязан наполниться всё равно.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { bus } from './event-bus.js'
@@ -249,14 +249,44 @@ export interface StuckReport {
 }
 
 /** Рабочий каталог из отметки жизни (жалоба 07.10: владелец через фронт
- *  LiteLLM неопознаваем — порт ведёт в контейнер посредника, а отметку пишет
- *  сам агент). Env читается на каждый вызов, не при импорте. Нет файла — null. */
+ *  LiteLLM неопознаваем — порт ведёт в посредника, а отметку пишет сам агент).
+ *  Env читается на каждый вызов, не при импорте. Нет файла — null. */
 export function readHeartbeatCwd(sessionId: string): string | null {
   try {
     const raw = process.env.SW_HEARTBEAT_DIR
     const dir = raw && raw.trim() ? raw.trim() : join(homedir(), '.claude', 'hooks', 'state')
     const hb = JSON.parse(readFileSync(join(dir, `session-heartbeat-${sessionId}.json`), 'utf8')) as { cwd?: unknown }
     return typeof hb.cwd === 'string' && hb.cwd ? hb.cwd : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Преемник (жалоба 07.10: сессию перезапустили под новым номером, а карточка
+ * предлагала заплатить за мёртвую): чужая отметка с ТЕМ ЖЕ каталогом, свежее
+ * последнего отказа стоящей. Читать — только при pid null: у опознанного
+ * владельца жизнь судится по процессу, а не по соседям (в одном каталоге
+ * вправе работать двое, и чужой стук — не смерть стоящего).
+ */
+export function findSuccessorHeartbeat(sessionId: string, cwd: string, sinceMs: number): { sessionId: string; lastSeen: string } | null {
+  try {
+    const raw = process.env.SW_HEARTBEAT_DIR
+    const dir = raw && raw.trim() ? raw.trim() : join(homedir(), '.claude', 'hooks', 'state')
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith('session-heartbeat-') || !name.endsWith('.json')) continue
+      try {
+        const hb = JSON.parse(readFileSync(join(dir, name), 'utf8')) as { session_id?: unknown; cwd?: unknown; last_seen?: unknown }
+        if (typeof hb.session_id !== 'string' || hb.session_id === sessionId) continue
+        if (hb.cwd !== cwd) continue
+        let seen = typeof hb.last_seen === 'string' ? Date.parse(hb.last_seen) : NaN
+        if (!Number.isFinite(seen)) {
+          try { seen = statSync(join(dir, name)).mtimeMs } catch { continue }
+        }
+        if (seen > sinceMs) return { sessionId: hb.session_id, lastSeen: new Date(seen).toISOString() }
+      } catch { /* битая отметка — не сосед */ }
+    }
+    return null
   } catch {
     return null
   }
@@ -370,16 +400,24 @@ function sweepStuck(now: number): void {
       + ' утверждать, что она всё ещё стоит, стало нечем')
       continue
     }
-    // Напоминание — только стучащейся (жалоба 07.10: карточка за 202 тыс. ушла
-    // по сессии, которая стукнула раз и молчит 19 минут — её уже заменили).
-    // Владелец неизвестен и свежих отказов нет — первая карточка уже ушла в
-    // момент отказа, повторять её в тишину некому: согласие некому потребить.
-    if (pid === null && st.lastBlockAt <= st.announcedAt) {
+    // Преемник (жалоба 07.10: карточка за 202 тыс. ушла по сессии, которую уже
+    // заменили под новым номером — платить предлагалось за мёртвую). Только при
+    // неизвестном владельце: у опознанного жизнь судится по процессу, а в одном
+    // каталоге вправе работать двое. Нашли — снимаем с учёта молча о покойнике.
+    if (pid === null) {
       if (!st.cwd) {
         const cwd = readHeartbeatCwd(sid)
         if (cwd) { st.cwd = cwd; changed = true }
       }
-      continue
+      if (st.cwd) {
+        const next = findSuccessorHeartbeat(sid, st.cwd, st.lastBlockAt)
+        if (next) {
+          stuck.delete(sid)
+          changed = true
+          retired(sid, st, now, `её заменили — в том же каталоге работает ${next.sessionId} (отметка ${next.lastSeen}), платить за старый кэш некому`)
+          continue
+        }
+      }
     }
     // Шаг берётся по числу УЖЕ СДЕЛАННЫХ напоминаний минус первое, прозвучавшее
     // на самом отказе: иначе первый повтор ушёл бы на час, а он нужен раньше —

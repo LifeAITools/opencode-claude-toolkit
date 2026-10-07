@@ -111,28 +111,17 @@ describe('обход судит о жизни сам, не дожидаясь с
     expect(_stuckState.get('s-live')).toBeDefined()
   })
 
-  test('владелец не опознан и тишина — повторного зова нет (первая карточка уже ушла в момент отказа)', () => {
+  test('владелец не опознан — пока стучится, зовём, но ГОВОРИМ, что жизнь не проверена', () => {
     startWith(() => null)
     block('s-unknown')
     fired = []
     _stuckState.sweep(Date.now() + 20 * 60_000)
-    // Жалоба 07.10: напоминание по сессии без свежих отказов предложило
-    // заплатить за мёртвую. Молчание после первой карточки — не стук.
-    expect(fired.filter(f => !f.journalOnly).length).toBe(0)
-    expect(_stuckState.get('s-unknown')).toBeDefined() // с учёта не снята
+    const loud = fired.filter(f => !f.journalOnly)
+    expect(loud.length).toBe(1)
+    expect(loud[0].body).toContain('жив ли её процесс, проверить нечем')
   })
 
-  test('владелец не опознан, но стук свежий — напоминание звучит', () => {
-    startWith(() => null)
-    block('s-retry')
-    const st = _stuckState.get('s-retry')!
-    st.lastBlockAt = Date.now() + 1000 // свежий отказ после прошлой карточки
-    fired = []
-    _stuckState.sweep(Date.now() + 20 * 60_000)
-    expect(fired.filter(f => !f.journalOnly).length).toBe(1)
-  })
-
-  test('каталог добирается из отметки жизни, когда владелец неопознаваем', () => {
+  test('преемник в том же каталоге снимает с учёта молча о покойнике (жалоба 07.10)', () => {
     const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
     const { tmpdir } = require('node:os') as typeof import('node:os')
     const { join } = require('node:path') as typeof import('node:path')
@@ -140,11 +129,40 @@ describe('обход судит о жизни сам, не дожидаясь с
     const prev = process.env.SW_HEARTBEAT_DIR
     process.env.SW_HEARTBEAT_DIR = dir
     try {
-      writeFileSync(join(dir, 'session-heartbeat-s-hb.json'),
-        JSON.stringify({ session_id: 's-hb', cwd: '/home/relishev/projects/vibe/1cfresh', event: 'e', last_seen: new Date().toISOString() }))
+      const now = Date.now()
+      writeFileSync(join(dir, 'session-heartbeat-s-old.json'),
+        JSON.stringify({ session_id: 's-old', cwd: '/proj/x', event: 'e', last_seen: new Date(now - 3600_000).toISOString() }))
+      writeFileSync(join(dir, 'session-heartbeat-s-new.json'),
+        JSON.stringify({ session_id: 's-new', cwd: '/proj/x', event: 'e', last_seen: new Date(now).toISOString() }))
       startWith(() => null)
-      block('s-hb')
-      expect(_stuckState.get('s-hb')!.cwd).toBe('/home/relishev/projects/vibe/1cfresh')
+      block('s-old')
+      const st = _stuckState.get('s-old')!
+      st.lastBlockAt = now - 30 * 60_000
+      expect(st.cwd).toBe('/proj/x') // каталог добрался из отметки
+      fired = []
+      _stuckState.sweep(now + 20 * 60_000)
+      expect(_stuckState.get('s-old')).toBeUndefined() // снята, карточки нет
+      expect(fired.filter(f => !f.journalOnly).length).toBe(0)
+      expect(fired.find(f => f.journalOnly)!.body).toContain('s-new')
+    } finally {
+      if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
+      else process.env.SW_HEARTBEAT_DIR = prev
+    }
+  })
+
+  test('без преемника тишина напоминания не гасит (замер 03.09)', () => {
+    const { mkdtempSync } = require('node:fs') as typeof import('node:fs')
+    const { tmpdir } = require('node:os') as typeof import('node:os')
+    const { join } = require('node:path') as typeof import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-empty-'))
+    const prev = process.env.SW_HEARTBEAT_DIR
+    process.env.SW_HEARTBEAT_DIR = dir
+    try {
+      startWith(() => null)
+      block('s-alone')
+      fired = []
+      _stuckState.sweep(Date.now() + 20 * 60_000)
+      expect(fired.filter(f => !f.journalOnly).length).toBe(1)
     } finally {
       if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
       else process.env.SW_HEARTBEAT_DIR = prev

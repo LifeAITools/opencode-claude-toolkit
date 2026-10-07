@@ -8,6 +8,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { extractSessionIdFromBody } from '@life-ai-tools/claude-code-sdk'
+import { serveSparkRequest } from './spark-responses.js'
 import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
 import { captureBody } from '../body-capture.js'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
@@ -64,6 +65,19 @@ export function createAnthropicModule(): ProxyModule {
         const idSource: 'header' | 'body' | 'none' =
           headerSession ? 'header' : bodySession ? 'body' : 'none'
         const sessionId = resolvedSession ?? 'anon-' + Date.now().toString(36)
+
+        // ── Spark-роут (диагноз роутера 07.10: req_011C умирал здесь 404) ──
+        // У CLI один baseURL: субагент с model=muse-spark-* приходит на /v1/messages,
+        // а шлюз понимает только Responses. Дешёвая проверка по тексту (полный разбор
+        // двухмегабайтных тел ради одного поля — см. комментарий ниже): нет spark —
+        // обычный путь без изменений.
+        const sparkModel = /"model"\s*:\s*"([^"]+)"/.exec(rawBodyStr)?.[1] ?? ''
+        if (sparkModel.startsWith('muse-spark-')) {
+          let sparkBody: any
+          try { sparkBody = JSON.parse(rawBodyStr) }
+          catch { return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'Invalid JSON body' } }), { status: 400, headers: { 'content-type': 'application/json' } }) }
+          return serveSparkRequest(sparkBody, { sessionId, sourcePid, srcPort, signal: req.signal }, ctx)
+        }
 
         const isNativeCC = headers['user-agent']?.includes('claude-cli/') || !!headers['x-claude-code-agent-id']
         let forwardBody: string | ArrayBuffer = rawBody

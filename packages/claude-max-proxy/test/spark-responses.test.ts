@@ -390,3 +390,45 @@ describe('кэш-чтение из деталей usage', () => {
     expect(seen).toMatchObject({ input_tokens: 2616, output_tokens: 100, cached_tokens: 2531 })
   })
 })
+
+describe('общее ядро двери (оба маршрута)', () => {
+  test('serveSparkRequest везёт перевод туда-обратно на мокнутом шлюзе', async () => {
+    const mod = await import('../src/modules/spark-responses.js')
+    const fx = JSON.parse(readFileSync(join(import.meta.dir, 'fixtures/spark-0610-response.json'), 'utf-8'))
+    const realFetch = globalThis.fetch
+    ;(globalThis as any).fetch = async () => new Response(JSON.stringify(fx), { status: 200 }) as any
+    // Модульный ctx для serveSparkRequest: ключ и конфиг напрямую.
+    const prevKey = process.env.SPARK_API_KEY
+    process.env.SPARK_API_KEY = 'K'
+    try {
+    const res = await mod.serveSparkRequest(
+      { model: 'muse-spark-1.3-contributor', messages: [{ role: 'user', content: 'Hi' }] } as any,
+      { sessionId: 'ses_route', sourcePid: null, srcPort: null, signal: null },
+      {
+        config: { sparkApiKey: 'K', sparkUpstreamUrl: 'https://x.test', sparkUserAgent: 't', sparkReasoningEffort: 'minimal' },
+        emit: () => {},
+      },
+    )
+      expect(res.status).toBe(200)
+      const msg = await res.json() as any
+      expect(msg.role).toBe('assistant')
+      expect(msg.content[0].type).toBe('text')
+    } finally {
+      ;(globalThis as any).fetch = realFetch
+      if (prevKey == null) delete process.env.SPARK_API_KEY
+    }
+  })
+
+  test('чужую модель ядро не везёт — 400, а не чужой счёт', async () => {
+    const mod = await import('../src/modules/spark-responses.js')
+    const res = await mod.serveSparkRequest(
+      { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Hi' }] } as any,
+      { sessionId: 's', sourcePid: null, srcPort: null, signal: null },
+      {
+        config: { sparkApiKey: 'K', sparkUpstreamUrl: 'https://x.test', sparkUserAgent: 't', sparkReasoningEffort: 'minimal' },
+        emit: () => {},
+      },
+    )
+    expect(res.status).toBe(400)
+  })
+})

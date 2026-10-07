@@ -43,7 +43,7 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
-import { createSessionStartTracker, errorFromSessionError, extractSessionId, failureFromPartUpdated } from './session-lifecycle'
+import { answeredFromPermissionReplied, askedFromPermissionUpdated, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated } from './session-lifecycle'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
 import { stampSessionLaunch } from './session-stamp'
@@ -59,6 +59,8 @@ let lastSpendRefreshMs = 0
 // Старт сессии — один раз на процесс (session-lifecycle.ts): повторы
 // session.created — переподключения, не новые процессы.
 const isFirstSessionStart = createSessionStartTracker()
+// Вид запроса человеку по id (PRP 08): в replied вида нет, помним из asked.
+const permissionKinds = createPermissionKindMemory()
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
@@ -772,6 +774,36 @@ export default {
             } catch (e: any) {
               logStep('SESSION_START_FORWARD_FAILED', { sessionId: startedSession, error: e?.message ?? String(e) })
             }
+          }
+        }
+        // ─── PRP 08: человек и конец (ядро ≥0.27.0) ───
+        // asked/answered/end — тем же узором, только своя сессия. Формы по
+        // поправкам: tool нет, kind из памяти, reason опускается, disposed
+        // без номера не синтезируется.
+        if ((eventType === 'permission.updated' || eventType === 'permission.replied' || eventType === 'session.deleted') && signalWireEngine) {
+          try {
+            if (eventType === 'permission.updated') {
+              const asked = askedFromPermissionUpdated(event)
+              if (asked && (!boundSessionId || asked.sessionId === boundSessionId)) {
+                permissionKinds.remember(asked.requestId, asked.kind)
+                await signalWireEngine.evaluateHook({ source: 'plugin', type: 'human.asked', sessionId: asked.sessionId, timestamp: Date.now(), payload: { kind: asked.kind, message: asked.message, requestId: asked.requestId } })
+                logStep('HUMAN_ASKED_FORWARDED', { sessionId: asked.sessionId, requestId: asked.requestId })
+              }
+            } else if (eventType === 'permission.replied') {
+              const answered = answeredFromPermissionReplied(event, permissionKinds.recall)
+              if (answered && (!boundSessionId || answered.sessionId === boundSessionId)) {
+                await signalWireEngine.evaluateHook({ source: 'plugin', type: 'human.answered', sessionId: answered.sessionId, timestamp: Date.now(), payload: { kind: answered.kind, outcome: answered.outcome, requestId: answered.requestId } })
+                logStep('HUMAN_ANSWERED_FORWARDED', { sessionId: answered.sessionId, requestId: answered.requestId, outcome: answered.outcome.slice(0, 40) })
+              }
+            } else {
+              const ended = endFromSessionDeleted(event)
+              if (ended && (!boundSessionId || ended.sessionId === boundSessionId)) {
+                await signalWireEngine.evaluateHook({ source: 'plugin', type: 'session.end', sessionId: ended.sessionId, timestamp: Date.now(), payload: {} })
+                logStep('SESSION_END_FORWARDED', { sessionId: ended.sessionId })
+              }
+            }
+          } catch (e: any) {
+            logStep('PRP08_FORWARD_FAILED', { eventType, error: e?.message ?? String(e) })
           }
         }
         // ─── session.error → дословно (дыра доктрины 06.10, ответ «да») ───

@@ -68,3 +68,37 @@ describe('ошибка сессии дословно', () => {
     expect(errorFromSessionError({ type: 'session.error', properties: { sessionID: 's' } })).toBeNull()
   })
 })
+
+describe('человек и конец (PRP 08)', () => {
+  test('asked без инструмента, answered с видом из памяти, end без причины', async () => {
+    const m = await import('./session-lifecycle')
+    expect(m.askedFromPermissionUpdated({
+      type: 'permission.updated',
+      properties: { id: 'p1', sessionID: 'ses_h', title: 'Run bun test?' },
+    })).toEqual({ sessionId: 'ses_h', kind: 'permission', message: 'Run bun test?', requestId: 'p1' })
+    expect(m.askedFromPermissionUpdated({ type: 'permission.updated', properties: {} })).toBeNull()
+    const mem = m.createPermissionKindMemory(2)
+    mem.remember('p1', 'permission')
+    expect(m.answeredFromPermissionReplied(
+      { type: 'permission.replied', properties: { sessionID: 'ses_h', permissionID: 'p1', response: 'allow-once' } },
+      mem.recall,
+    )).toEqual({ sessionId: 'ses_h', kind: 'permission', outcome: 'allow-once', requestId: 'p1' })
+    expect(m.answeredFromPermissionReplied(
+      { type: 'permission.replied', properties: { sessionID: 'ses_h', permissionID: 'nope', response: 'deny' } },
+      mem.recall,
+    )).toMatchObject({ kind: 'permission', outcome: 'deny' })
+    expect(m.endFromSessionDeleted({ type: 'session.deleted', properties: { info: { id: 'ses_gone' } } }))
+      .toEqual({ sessionId: 'ses_gone' })
+    expect(m.endFromSessionDeleted({ type: 'session.deleted', properties: {} })).toBeNull()
+  })
+
+  test('память видов вытесняет старые', async () => {
+    const m = await import('./session-lifecycle')
+    const mem = m.createPermissionKindMemory(2)
+    mem.remember('a', 'permission')
+    mem.remember('b', 'permission')
+    mem.remember('c', 'permission')
+    expect(mem.recall('a')).toBeNull()
+    expect(mem.recall('c')).toBe('permission')
+  })
+})

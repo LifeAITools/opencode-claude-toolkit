@@ -93,3 +93,92 @@ export function errorFromSessionError(event: any): SessionError | null {
   if (p.error == null) return null
   return { sessionId, error: p.error }
 }
+
+export interface HumanAsked {
+  sessionId: string
+  kind: 'permission'
+  message: string
+  requestId: string
+}
+
+export interface HumanAnswered {
+  sessionId: string
+  kind: string
+  outcome: string
+  requestId: string
+}
+
+export interface SessionEnded {
+  sessionId: string
+}
+
+/**
+ * Память вида по id запроса: в replied вида нет, помним из asked.
+ * Счётчик ограничен (старые вытесняются), чужие id не путаются — ключ полный.
+ */
+export function createPermissionKindMemory(limit = 500): {
+  remember: (requestId: string, kind: string) => void
+  recall: (requestId: string) => string | null
+} {
+  const map = new Map<string, string>()
+  return {
+    remember: (requestId, kind) => {
+      if (!requestId) return
+      map.set(requestId, kind)
+      if (map.size > limit) {
+        const oldest = map.keys().next().value
+        if (oldest !== undefined) map.delete(oldest)
+      }
+    },
+    recall: (requestId) => map.get(requestId) ?? null,
+  }
+}
+
+/**
+ * permission.updated → human.asked. Инструмента в Permission нет — без него
+ * (message ← title, requestId ← id). Пустой id — не вопрос.
+ */
+export function askedFromPermissionUpdated(event: any): HumanAsked | null {
+  if (event?.type !== 'permission.updated') return null
+  const p = event?.properties ?? {}
+  if (typeof p.id !== 'string' || !p.id) return null
+  if (typeof p.sessionID !== 'string' || !p.sessionID) return null
+  return {
+    sessionId: p.sessionID,
+    kind: 'permission',
+    message: typeof p.title === 'string' ? p.title : '',
+    requestId: p.id,
+  }
+}
+
+/**
+ * permission.replied → human.answered. Вид — из памяти по permissionID
+ * (в самом событии его нет), исход — response дословно.
+ */
+export function answeredFromPermissionReplied(
+  event: any,
+  recallKind: (requestId: string) => string | null,
+): HumanAnswered | null {
+  if (event?.type !== 'permission.replied') return null
+  const p = event?.properties ?? {}
+  if (typeof p.sessionID !== 'string' || !p.sessionID) return null
+  if (typeof p.permissionID !== 'string' || !p.permissionID) return null
+  if (typeof p.response !== 'string') return null
+  return {
+    sessionId: p.sessionID,
+    kind: recallKind(p.permissionID) ?? 'permission',
+    outcome: p.response,
+    requestId: p.permissionID,
+  }
+}
+
+/**
+ * session.deleted → session.end. Причины у deleted нет — поле опускается.
+ * disposed без номера сессии не синтезируется (догадка по каталогу).
+ */
+export function endFromSessionDeleted(event: any): SessionEnded | null {
+  if (event?.type !== 'session.deleted') return null
+  const sessionId = extractSessionId(event)
+  if (!sessionId) return null
+  return { sessionId }
+}

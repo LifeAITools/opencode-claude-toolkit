@@ -268,23 +268,39 @@ export function readHeartbeatCwd(sessionId: string): string | null {
  * последнего отказа стоящей. Читать — только при pid null: у опознанного
  * владельца жизнь судится по процессу, а не по соседям (в одном каталоге
  * вправе работать двое, и чужой стук — не смерть стоящего).
+ * Привязки: чужая запасная личность в той же папке (край 26.09) отсекается
+ * сравнением binding, когда он известен с обеих сторон; нет с одной —
+ * действует каталог (задокументированный край, не молчание).
  */
 export function findSuccessorHeartbeat(sessionId: string, cwd: string, sinceMs: number): { sessionId: string; lastSeen: string } | null {
   try {
     const raw = process.env.SW_HEARTBEAT_DIR
     const dir = raw && raw.trim() ? raw.trim() : join(homedir(), '.claude', 'hooks', 'state')
+    const readHb = (name: string): { session_id?: unknown; cwd?: unknown; last_seen?: unknown; binding?: unknown } | null => {
+      try {
+        return JSON.parse(readFileSync(join(dir, name), 'utf8')) as { session_id?: unknown; cwd?: unknown; last_seen?: unknown }
+      } catch {
+        return null
+      }
+    }
+    const own = readHb(`session-heartbeat-${sessionId}.json`)
+    const ownBinding = typeof own?.binding === 'string' ? (own as any).binding : null
+    const seenMs = (hb: { last_seen?: unknown }, name: string): number => {
+      const s = typeof hb.last_seen === 'string' ? Date.parse(hb.last_seen) : NaN
+      if (Number.isFinite(s)) return s
+      try { return statSync(join(dir, name)).mtimeMs } catch { return NaN }
+    }
     for (const name of readdirSync(dir)) {
       if (!name.startsWith('session-heartbeat-') || !name.endsWith('.json')) continue
-      try {
-        const hb = JSON.parse(readFileSync(join(dir, name), 'utf8')) as { session_id?: unknown; cwd?: unknown; last_seen?: unknown }
-        if (typeof hb.session_id !== 'string' || hb.session_id === sessionId) continue
-        if (hb.cwd !== cwd) continue
-        let seen = typeof hb.last_seen === 'string' ? Date.parse(hb.last_seen) : NaN
-        if (!Number.isFinite(seen)) {
-          try { seen = statSync(join(dir, name)).mtimeMs } catch { continue }
-        }
-        if (seen > sinceMs) return { sessionId: hb.session_id, lastSeen: new Date(seen).toISOString() }
-      } catch { /* битая отметка — не сосед */ }
+      const hb = readHb(name)
+      if (!hb) continue
+      if (typeof hb.session_id !== 'string' || hb.session_id === sessionId) continue
+      if (hb.cwd !== cwd) continue
+      const candBinding = typeof (hb as any).binding === 'string' ? (hb as any).binding : null
+      if (ownBinding && candBinding && ownBinding !== candBinding) continue // чужая личность — не преемник
+      const seen = seenMs(hb, name)
+      if (!Number.isFinite(seen)) continue
+      if (seen > sinceMs) return { sessionId: hb.session_id, lastSeen: new Date(seen).toISOString() }
     }
     return null
   } catch {

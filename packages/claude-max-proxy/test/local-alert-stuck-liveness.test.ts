@@ -121,11 +121,42 @@ describe('обход судит о жизни сам, не дожидаясь с
     expect(loud[0].body).toContain('жив ли её процесс, проверить нечем')
   })
 
-  test('преемник в том же каталоге снимает с учёта молча о покойнике (жалоба 07.10)', () => {
+  test('чужая привязка в том же каталоге — не преемник (край 26.09)', () => {
     const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
     const { tmpdir } = require('node:os') as typeof import('node:os')
     const { join } = require('node:path') as typeof import('node:path')
-    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-'))
+    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-bind-'))
+    const prev = process.env.SW_HEARTBEAT_DIR
+    process.env.SW_HEARTBEAT_DIR = dir
+    try {
+      const now = Date.now()
+      const hb = (sid: string, binding?: string) => writeFileSync(join(dir, `session-heartbeat-${sid}.json`),
+        JSON.stringify({ session_id: sid, cwd: '/proj/y', event: 'e', last_seen: new Date(now).toISOString(), ...(binding ? { binding } : {}) }))
+      hb('s-me', 'bind-A')
+      hb('s-alien', 'bind-B')
+      startWith(() => null)
+      block('s-me')
+      const st = _stuckState.get('s-me')!
+      st.lastBlockAt = now - 30 * 60_000
+      fired = []
+      _stuckState.sweep(now + 20 * 60_000)
+      expect(_stuckState.get('s-me')).toBeDefined() // чужая личность — не повод снимать
+      expect(fired.filter(f => !f.journalOnly).length).toBe(1)
+      hb('s-heir', 'bind-A')
+      fired = []
+      _stuckState.sweep(now + 25 * 60_000)
+      expect(_stuckState.get('s-me')).toBeUndefined() // своя привязка свежее — преемник
+    } finally {
+      if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
+      else process.env.SW_HEARTBEAT_DIR = prev
+    }
+  })
+
+  test('без привязок с обеих сторон действует каталог (переходный период)', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const { tmpdir } = require('node:os') as typeof import('node:os')
+    const { join } = require('node:path') as typeof import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-nobind-'))
     const prev = process.env.SW_HEARTBEAT_DIR
     process.env.SW_HEARTBEAT_DIR = dir
     try {
@@ -138,12 +169,11 @@ describe('обход судит о жизни сам, не дожидаясь с
       block('s-old')
       const st = _stuckState.get('s-old')!
       st.lastBlockAt = now - 30 * 60_000
-      expect(st.cwd).toBe('/proj/x') // каталог добрался из отметки
+      expect(st.cwd).toBe('/proj/x')
       fired = []
       _stuckState.sweep(now + 20 * 60_000)
-      expect(_stuckState.get('s-old')).toBeUndefined() // снята, карточки нет
+      expect(_stuckState.get('s-old')).toBeUndefined()
       expect(fired.filter(f => !f.journalOnly).length).toBe(0)
-      expect(fired.find(f => f.journalOnly)!.body).toContain('s-new')
     } finally {
       if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
       else process.env.SW_HEARTBEAT_DIR = prev

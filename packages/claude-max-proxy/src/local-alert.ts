@@ -248,7 +248,19 @@ export interface StuckReport {
   subagentId: string | null
 }
 
-/** Кто владеет сессией прямо сейчас — номер процесса и его рабочий каталог. */
+/** Рабочий каталог из отметки жизни (жалоба 07.10: владелец через фронт
+ *  LiteLLM неопознаваем — порт ведёт в контейнер посредника, а отметку пишет
+ *  сам агент). Env читается на каждый вызов, не при импорте. Нет файла — null. */
+export function readHeartbeatCwd(sessionId: string): string | null {
+  try {
+    const raw = process.env.SW_HEARTBEAT_DIR
+    const dir = raw && raw.trim() ? raw.trim() : join(homedir(), '.claude', 'hooks', 'state')
+    const hb = JSON.parse(readFileSync(join(dir, `session-heartbeat-${sessionId}.json`), 'utf8')) as { cwd?: unknown }
+    return typeof hb.cwd === 'string' && hb.cwd ? hb.cwd : null
+  } catch {
+    return null
+  }
+}
 export interface StuckOwner {
   pid: number | null
   cwd: string | null
@@ -355,7 +367,18 @@ function sweepStuck(now: number): void {
       stuck.delete(sid)
       changed = true
       retired(sid, st, now, 'владелец не опознан, и попыток нет более двух суток —'
-        + ' утверждать, что она всё ещё стоит, стало нечем')
+      + ' утверждать, что она всё ещё стоит, стало нечем')
+      continue
+    }
+    // Напоминание — только стучащейся (жалоба 07.10: карточка за 202 тыс. ушла
+    // по сессии, которая стукнула раз и молчит 19 минут — её уже заменили).
+    // Владелец неизвестен и свежих отказов нет — первая карточка уже ушла в
+    // момент отказа, повторять её в тишину некому: согласие некому потребить.
+    if (pid === null && st.lastBlockAt <= st.announcedAt) {
+      if (!st.cwd) {
+        const cwd = readHeartbeatCwd(sid)
+        if (cwd) { st.cwd = cwd; changed = true }
+      }
       continue
     }
     // Шаг берётся по числу УЖЕ СДЕЛАННЫХ напоминаний минус первое, прозвучавшее
@@ -597,6 +620,9 @@ export function startLocalAlert(
           pid = owner.pid ?? pid; cwd = owner.cwd ?? cwd; identity = owner.identity ?? identity
         }
       } catch { /* опознание не должно ронять тревогу */ }
+      // Владельца через фронт не опознать (порт ведёт в посредника) — каталог
+      // добираем из отметки жизни, её пишет сам агент. Нет — остаётся null.
+      if (!cwd) cwd = readHeartbeatCwd(sid)
       stuck.set(sid, {
         since: prev?.since ?? now,
         lastBlockAt: now,

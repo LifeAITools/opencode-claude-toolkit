@@ -111,14 +111,44 @@ describe('обход судит о жизни сам, не дожидаясь с
     expect(_stuckState.get('s-live')).toBeDefined()
   })
 
-  test('владелец не опознан — пока стучится, зовём, но ГОВОРИМ, что жизнь не проверена', () => {
+  test('владелец не опознан и тишина — повторного зова нет (первая карточка уже ушла в момент отказа)', () => {
     startWith(() => null)
     block('s-unknown')
     fired = []
     _stuckState.sweep(Date.now() + 20 * 60_000)
-    const loud = fired.filter(f => !f.journalOnly)
-    expect(loud.length).toBe(1)
-    expect(loud[0].body).toContain('жив ли её процесс, проверить нечем')
+    // Жалоба 07.10: напоминание по сессии без свежих отказов предложило
+    // заплатить за мёртвую. Молчание после первой карточки — не стук.
+    expect(fired.filter(f => !f.journalOnly).length).toBe(0)
+    expect(_stuckState.get('s-unknown')).toBeDefined() // с учёта не снята
+  })
+
+  test('владелец не опознан, но стук свежий — напоминание звучит', () => {
+    startWith(() => null)
+    block('s-retry')
+    const st = _stuckState.get('s-retry')!
+    st.lastBlockAt = Date.now() + 1000 // свежий отказ после прошлой карточки
+    fired = []
+    _stuckState.sweep(Date.now() + 20 * 60_000)
+    expect(fired.filter(f => !f.journalOnly).length).toBe(1)
+  })
+
+  test('каталог добирается из отметки жизни, когда владелец неопознаваем', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const { tmpdir } = require('node:os') as typeof import('node:os')
+    const { join } = require('node:path') as typeof import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-'))
+    const prev = process.env.SW_HEARTBEAT_DIR
+    process.env.SW_HEARTBEAT_DIR = dir
+    try {
+      writeFileSync(join(dir, 'session-heartbeat-s-hb.json'),
+        JSON.stringify({ session_id: 's-hb', cwd: '/home/relishev/projects/vibe/1cfresh', event: 'e', last_seen: new Date().toISOString() }))
+      startWith(() => null)
+      block('s-hb')
+      expect(_stuckState.get('s-hb')!.cwd).toBe('/home/relishev/projects/vibe/1cfresh')
+    } finally {
+      if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
+      else process.env.SW_HEARTBEAT_DIR = prev
+    }
   })
 
   test('владелец не опознан и двое суток ни одной попытки — перестаём утверждать', () => {

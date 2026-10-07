@@ -178,6 +178,16 @@ describe('translateToResponsesBody', () => {
     expect(isSparkModel('claude-sonnet-4-6')).toBe(false)
     expect(isSparkModel('gpt-5')).toBe(false)
   })
+
+  test('model gate: deepseek-v4.1-flash passes (verified Responses dialect 07.10), siblings do not', () => {
+    expect(isSparkModel('deepseek-v4.1-flash')).toBe(true)
+    // Не проверены живьём этот же дверью — ворота обязаны отказать, а не счесть чужой бакет.
+    expect(isSparkModel('deepseek-v4-flash')).toBe(false)
+    expect(isSparkModel('deepseek-v4-pro')).toBe(false)
+    // Ровно тот промах, ради которого ворота существуют: датированный снимок мимо плана.
+    expect(isSparkModel('deepseek-v4-pro-0813')).toBe(false)
+    expect(isSparkModel('deepseek-v4.1-flash-turbo')).toBe(false)
+  })
 })
 
 // ─── Live fixture 06.10.2026 ─────────────────────────────────────────
@@ -319,10 +329,12 @@ describe('sparkErrorResponse + models', () => {
     expect(await r.json()).toMatchObject({ type: 'error', error: { message: 'slow down' } })
   })
 
-  test('models list names the verified model', async () => {
+  test('models list names the verified models', async () => {
     const r = handleSparkModelsRequest('test-version')
     const body = await r.json()
-    expect(body.data.map((m: any) => m.id)).toContain('muse-spark-1.3-contributor')
+    const ids = body.data.map((m: any) => m.id)
+    expect(ids).toContain('muse-spark-1.3-contributor')
+    expect(ids).toContain('deepseek-v4.1-flash')
   })
 })
 

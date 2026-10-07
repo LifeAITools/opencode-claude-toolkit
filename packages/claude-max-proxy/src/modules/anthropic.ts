@@ -9,6 +9,7 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { extractSessionIdFromBody } from '@life-ai-tools/claude-code-sdk'
 import { serveSparkRequest } from './spark-responses.js'
+import { isSparkModel } from '../spark-translate.js'
 import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
 import { captureBody } from '../body-capture.js'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
@@ -72,7 +73,7 @@ export function createAnthropicModule(): ProxyModule {
         // двухмегабайтных тел ради одного поля — см. комментарий ниже): нет spark —
         // обычный путь без изменений.
         const sparkModel = /"model"\s*:\s*"([^"]+)"/.exec(rawBodyStr)?.[1] ?? ''
-        if (sparkModel.startsWith('muse-spark-')) {
+        if (isSparkModel(sparkModel)) {
           let sparkBody: any
           try { sparkBody = JSON.parse(rawBodyStr) }
           catch { return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'Invalid JSON body' } }), { status: 400, headers: { 'content-type': 'application/json' } }) }

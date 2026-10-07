@@ -69,9 +69,20 @@ export const SPARK_MIN_OUTPUT_TOKENS = 512
 export const SPARK_DEFAULT_OUTPUT_TOKENS = 4096
 
 /** Only Responses-dialect models may pass — others bill other buckets
- *  and speak other dialects this translator does not implement. */
+ *  and speak other dialects this translator does not implement.
+ *
+ *  `deepseek-v4.1-flash` added 07.10.2026 (founder asked tixi to try it for
+ *  speed): verified LIVE against the zen/go gateway that it speaks the SAME
+ *  Responses dialect this translator implements — function calls
+ *  (`type:"function_call"`), streaming SSE, `reasoning.effort` and 1M context
+ *  all confirmed by direct probes. The gate stays a CLOSED prefix list on
+ *  purpose: a name that is not here is refused loudly, never forwarded to a
+ *  bucket whose dialect we do not speak. */
+export const RESPONSES_DIALECT_MODELS = ['muse-spark-', 'deepseek-v4.1-flash'] as const
+
 export function isSparkModel(model: string): boolean {
-  return /^muse-spark-/.test(model)
+  return RESPONSES_DIALECT_MODELS.some((m) =>
+    m.endsWith('-') ? model.startsWith(m) : model === m)
 }
 
 function textOf(blocks: MessagesContentBlock[]): string {
@@ -512,6 +523,7 @@ export function handleSparkModelsRequest(version: string): Response {
       data: [
         { id: 'muse-spark-1.3-contributor', object: 'model', owned_by: 'opencode-go' },
         { id: 'muse-spark-1.2-contributor', object: 'model', owned_by: 'opencode-go' },
+        { id: 'deepseek-v4.1-flash', object: 'model', owned_by: 'opencode-go' },
       ],
     }),
     { status: 200, headers: { 'content-type': 'application/json', 'x-proxy': version } },

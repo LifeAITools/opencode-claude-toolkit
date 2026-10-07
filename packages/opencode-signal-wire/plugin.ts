@@ -851,6 +851,24 @@ export default {
       // brief for sub-sessions) into opencode's system prompt and tool
       // definitions sent to the LLM.
 
+      'experimental.session.compacting': async (input: any, output: any) => {
+        // Начало сжатия — десятое каноническое событие (сверка 07.10): единственный
+        // момент, когда правило ещё может попросить записать знание, пока дословность
+        // жива. Перехватчик есть в типах SDK; конец (compacted) уже едет из потока.
+        // Хук НЕ меняет output — только отдаёт событие движку. Fail-open.
+        if (signalWireEngine) {
+          const sid = input?.sessionID ?? boundSessionId ?? undefined
+          if (sid) {
+            try {
+              await signalWireEngine.evaluateHook({ source: 'plugin', type: 'session.compacting', sessionId: sid, timestamp: Date.now(), payload: {} })
+              logStep('SESSION_COMPACTING_FORWARDED', { sessionId: sid })
+            } catch (e: any) {
+              logStep('SESSION_COMPACTING_FORWARD_FAILED', { sessionId: sid, error: e?.message ?? String(e) })
+            }
+          }
+        }
+      },
+
       'experimental.chat.system.transform': async (input: any, output: any) => {
         const { systemTransformHook } = await import('./system-prompt-hook')
         await systemTransformHook(input, output, {

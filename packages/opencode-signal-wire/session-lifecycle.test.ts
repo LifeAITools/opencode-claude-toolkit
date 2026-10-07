@@ -102,3 +102,32 @@ describe('человек и конец (PRP 08)', () => {
     expect(mem.recall('c')).toBe('permission')
   })
 })
+
+describe('след потока (PRP 09)', () => {
+  test('текстовая дельта и конец сообщения', async () => {
+    const m = await import('./session-lifecycle')
+    expect(m.streamDeltaFromPartUpdated({
+      type: 'message.part.updated',
+      properties: { part: { type: 'text', sessionID: 'ses_s', text: 'helloworld' }, delta: 'world' },
+    })).toEqual({ sessionId: 'ses_s', text: 'world' })
+    expect(m.streamDeltaFromPartUpdated({
+      type: 'message.part.updated', properties: { part: { type: 'text', sessionID: 's', text: 'x' } },
+    })).toBeNull()
+    expect(m.streamDeltaFromPartUpdated({
+      type: 'message.part.updated',
+      properties: { part: { type: 'tool', sessionID: 's', state: { status: 'error' } }, delta: 'x' },
+    })).toBeNull()
+    expect(m.messageEndFromMessageUpdated({
+      type: 'message.updated',
+      properties: { info: { role: 'assistant', sessionID: 'ses_s', time: { created: 1, completed: 2 } } },
+    })).toEqual({ sessionId: 'ses_s' })
+    expect(m.messageEndFromMessageUpdated({
+      type: 'message.updated',
+      properties: { info: { role: 'assistant', sessionID: 'ses_s', time: { created: 1 } } },
+    })).toBeNull()
+    expect(m.messageEndFromMessageUpdated({
+      type: 'message.updated',
+      properties: { info: { role: 'user', sessionID: 'ses_s', time: { created: 1, completed: 2 } } },
+    })).toBeNull()
+  })
+})

@@ -43,7 +43,8 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
-import { answeredFromPermissionReplied, askedFromPermissionUpdated, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated } from './session-lifecycle'
+import { answeredFromPermissionReplied, askedFromPermissionUpdated, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, streamDeltaFromPartUpdated } from './session-lifecycle'
+import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
 import { stampSessionLaunch } from './session-stamp'
@@ -61,6 +62,8 @@ let lastSpendRefreshMs = 0
 const isFirstSessionStart = createSessionStartTracker()
 // Вид запроса человеку по id (PRP 08): в replied вида нет, помним из asked.
 const permissionKinds = createPermissionKindMemory()
+// След потока «греюсь» (PRP 09): живые дельты → файл на сессию. Только своя.
+const streamTracer = new StreamTracer({ harness: 'opencode' })
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
@@ -805,6 +808,20 @@ export default {
           } catch (e: any) {
             logStep('PRP08_FORWARD_FAILED', { eventType, error: e?.message ?? String(e) })
           }
+        }
+        // ─── PRP 09: след потока (текстовые дельты → end) ───
+        // Только своя сессия. Конец — message.updated с time.completed; обрыв
+        // такого события не даёт — end не зовётся, «замолчал» отличим.
+        if (eventType === 'message.part.updated' || eventType === 'message.updated') {
+          try {
+            if (eventType === 'message.part.updated') {
+              const d = streamDeltaFromPartUpdated(event)
+              if (d && (!boundSessionId || d.sessionId === boundSessionId)) streamTracer.delta(d.sessionId, d.text)
+            } else {
+              const e = messageEndFromMessageUpdated(event)
+              if (e && (!boundSessionId || e.sessionId === boundSessionId)) streamTracer.end(e.sessionId)
+            }
+          } catch { /* след не роняет ход */ }
         }
         // ─── session.error → дословно (дыра доктрины 06.10, ответ «да») ───
         // Канонического типа в ядре пока нет — имя сохраняется, правило совпадёт,

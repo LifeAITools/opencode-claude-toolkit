@@ -182,3 +182,35 @@ export function endFromSessionDeleted(event: any): SessionEnded | null {
   if (!sessionId) return null
   return { sessionId }
 }
+
+export interface StreamDelta {
+  sessionId: string
+  text: string
+}
+
+/**
+ * Живой кусок ответа (PRP 09): текстовые дельты message.part.updated.
+ * Только delta — полный текст части повторяется в каждом апдейте и задвоил бы счёт.
+ */
+export function streamDeltaFromPartUpdated(event: any): StreamDelta | null {
+  if (event?.type !== 'message.part.updated') return null
+  const part = event?.properties?.part
+  if (!part || part.type !== 'text') return null
+  if (typeof part.sessionID !== 'string' || !part.sessionID) return null
+  const delta = event?.properties?.delta
+  if (typeof delta !== 'string' || !delta) return null
+  return { sessionId: part.sessionID, text: delta }
+}
+
+/**
+ * Конец сообщения: message.updated ассистента с time.completed.
+ * Обрыв (abort) такого события не даёт — end не зовётся, «замолчал» отличим.
+ */
+export function messageEndFromMessageUpdated(event: any): { sessionId: string } | null {
+  if (event?.type !== 'message.updated') return null
+  const info = event?.properties?.info
+  if (!info || info.role !== 'assistant') return null
+  if (typeof info.sessionID !== 'string' || !info.sessionID) return null
+  if (typeof info.time?.completed !== 'number') return null
+  return { sessionId: info.sessionID }
+}

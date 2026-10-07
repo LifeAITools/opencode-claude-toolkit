@@ -116,6 +116,7 @@ import {
   type PersistedSession,
 } from './ka-snapshot-store.js'
 import { readFileSync, writeFileSync } from 'fs'
+import { StreamTracer, streamTraceDir } from './stream-trace-local.js'
 import { homedir } from 'os'
 import { KaSpendMeter, quotaStopLine, type StopLine } from './quota-stop-line.js'
 import { join } from 'path'
@@ -512,6 +513,8 @@ export class ProxyClient {
   private readonly store: ISessionStore<KeepaliveEngine>
   private readonly upstream: IUpstreamFetcher
   private readonly liveness: ILivenessChecker
+  /** След потока «греюсь» (PRP 09): живые дельты SSE → файл на сессию. */
+  private readonly streamTracer = new StreamTracer(streamTraceDir())
 
   // Bounded, abortable backoff for TRANSIENT upstream faults (5xx / 529) on the
   // REAL request path — smooths seconds-long Anthropic capacity blips so they
@@ -2575,7 +2578,8 @@ export class ProxyClient {
     }
 
     // Parse in background — extract usage + notify engine. Never crashes.
-    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0, reqLineageKey, reqRateLimit, upstreamRequestId).catch((e) => {
+    // След потока — только именованным (PRP 09): при idSource none молчим.
+    void this.parseSSEAndNotify(toParse, session, sessionId, model, t0, reqLineageKey, reqRateLimit, upstreamRequestId, !unidentified).catch((e) => {
       this.events.emit({
         level: 'error',
         kind: 'REAL_REQUEST_ERROR',
@@ -3199,8 +3203,7 @@ export class ProxyClient {
   private async parseSSEAndNotify(
     stream: ReadableStream<Uint8Array>,
     session: Session<KeepaliveEngine>,
-    sessionId: string,
-    model: string,
+    sessionId: string,    model: string,
     t0: number,
     lineageKey: string,
     // Frozen at call time from THIS request's upstream response — emitting the
@@ -3211,6 +3214,9 @@ export class ProxyClient {
     // frozen at call time like reqRateLimit. See the capture site in
     // handleRequest for why a SUCCESS carrying it is the point.
     upstreamRequestId: string | null,
+    // След потока («греюсь», PRP 09): писать ли живые дельты в session-stream
+    // файл. Только при именованном источнике (header/body) — при none молчим.
+    traceStream: boolean,
   ): Promise<void> {
     try {
       let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
@@ -3303,6 +3309,11 @@ export class ProxyClient {
             } else if (p.type === 'content_block_delta' && p.delta?.type === 'input_json_delta') {
               const slot = toolArgs.get(Number(p.index))
               if (slot) slot.json += String(p.delta.partial_json ?? '')
+            } else if (p.type === 'content_block_delta' && p.delta?.type === 'text_delta') {
+              // Живой кусок ответа — в след потока (PRP 09). Символы, не токены.
+              if (traceStream) {
+                try { this.streamTracer.delta(sessionId, String(p.delta.text ?? '')) } catch { /* след не роняет разбор */ }
+              }
             } else if (p.type === 'content_block_stop') {
               const slot = toolArgs.get(Number(p.index))
               if (slot) {
@@ -3489,6 +3500,11 @@ export class ProxyClient {
           resetAt7d: reqRateLimit.resetAt7d ?? null,
         },
       })
+      // Штатный конец потока — закрыть след («закончил»). На обрыв (catch ниже)
+      // end НЕ зовётся: «замолчал» остаётся отличимым от «закончил».
+      if (traceStream) {
+        try { this.streamTracer.end(sessionId) } catch { /* след не роняет учёт */ }
+      }
     } catch (err: any) {
       this.events.emit({
         level: 'error',

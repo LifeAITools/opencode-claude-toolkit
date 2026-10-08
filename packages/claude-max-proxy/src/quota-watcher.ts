@@ -148,7 +148,22 @@ const PID_STATE_PRUNE_AFTER_MS = 30 * 60_000  // forget pids silent >30min
  *  Consumers still see `lastSeenAt` untouched, so an old reading is legible AS
  *  old; this window governs when we stop answering at all, not how fresh we
  *  claim the answer is. */
-const SESSION_STATE_PRUNE_AFTER_MS = 12 * 60 * 60_000  // 12h
+/** Тихий потолок для сессий БЕЗ сигнала смерти (замер 08.10: 12 ч вычёркивали
+ *  живую, но молчащую сессию — карточка врала «орг неизвестна»). Со сигналом
+ *  (event=session.end в отметке) вычёркиваем сразу, без оглядки на часы. */
+const SESSION_STATE_QUIET_CEILING_MS = 7 * 24 * 60 * 60_000  // 7d
+/** Смерть сессии — отметка жизни с event=session.end (хук / конвейер пишут её
+ *  на конце; обрыв такого события не даёт). Env читается на каждый вызов. */
+function heartbeatEventOf(sessionId: string): string | null {
+  try {
+    const raw = process.env.SW_HEARTBEAT_DIR
+    const dir = raw && raw.trim() ? raw.trim() : join(homedir(), '.claude', 'hooks', 'state')
+    const hb = JSON.parse(readFileSync(join(dir, `session-heartbeat-${sessionId}.json`), 'utf8')) as { event?: unknown }
+    return typeof hb.event === 'string' ? hb.event : null
+  } catch {
+    return null
+  }
+}
 const TOKEN_REFRESH_DELTA_MS = 60_000          // expiresAt jump > 60s = real change
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -1033,12 +1048,14 @@ function pruneStaleStates(now: number): void {
     }
   }
   for (const h of affectedAccounts) recomputeAccountFromPids(h)
-  // Sessions are plain ids (no liveness probe possible) — prune by age only,
-  // on their OWN much longer clock: an account binding stays true while the
-  // session sleeps, and forgetting it blinds the wake-router to the very
-  // agents it is supposed to protect. See SESSION_STATE_PRUNE_AFTER_MS.
-  const sessionCutoff = now - SESSION_STATE_PRUNE_AFTER_MS
+  // Sessions are plain ids (no liveness probe possible) — вычёркивать по смерти,
+  // а не по часам (замер 08.10): отметка с event=session.end уходит сразу;
+  // часовой потолок (7 сут) — только для сессий без сигнала. Забыть привязку
+  // молчащей, но живой сессии — значит ослепить wake-router к тем агентам,
+  // которых он должен беречь.
+  const sessionCutoff = now - SESSION_STATE_QUIET_CEILING_MS
   for (const [ses, s] of sessionStates.entries()) {
+    if (heartbeatEventOf(ses) === 'session.end') { sessionStates.delete(ses); continue }
     if (s.lastSeenAt < sessionCutoff) sessionStates.delete(ses)
   }
 }

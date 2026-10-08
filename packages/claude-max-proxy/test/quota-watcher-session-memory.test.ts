@@ -58,7 +58,7 @@ describe('a session binding survives what the pid state must not', () => {
   test('the pruner can in fact delete — otherwise "it survived" proves nothing', () => {
     __testing.seedFromPreviousSnapshot({
       version: 1, updatedAt: new Date().toISOString(), accounts: {}, pids: {},
-      sessions: { 'very-old': { org: ORG, lastSeenAt: Date.now() - 100 * HOUR } },
+      sessions: { 'very-old': { org: ORG, lastSeenAt: Date.now() - 200 * HOUR } },
     } as never)
     __testing.pruneStaleStates(Date.now())
     expect(__testing.snapshot().sessions?.['very-old']).toBeUndefined()
@@ -73,13 +73,51 @@ describe('a session binding survives what the pid state must not', () => {
     expect(__testing.snapshot().sessions?.['idle-2h']?.org).toBe(ORG)
   })
 
-  test('but it is not remembered forever — past 12h it is forgotten', () => {
+  test('но не вечно — past 7d без сигнала забывается (было 12ч, замер 08.10)', () => {
     __testing.seedFromPreviousSnapshot({
       version: 1, updatedAt: new Date().toISOString(), accounts: {}, pids: {},
-      sessions: { 'ancient': { org: ORG, lastSeenAt: Date.now() - 13 * HOUR } },
+      sessions: { 'ancient': { org: ORG, lastSeenAt: Date.now() - 8 * 24 * HOUR } },
     } as never)
     __testing.pruneStaleStates(Date.now())
     expect(__testing.snapshot().sessions?.['ancient']).toBeUndefined()
+  })
+
+  test('молчунья 21 час НЕ забывается — часов больше нет, только смерть (замер 08.10)', () => {
+    __testing.seedFromPreviousSnapshot({
+      version: 1, updatedAt: new Date().toISOString(), accounts: {}, pids: {},
+      sessions: { 'quiet-21h': { org: ORG, lastSeenAt: Date.now() - 21 * HOUR } },
+    } as never)
+    __testing.pruneStaleStates(Date.now())
+    expect(__testing.snapshot().sessions?.['quiet-21h']?.org).toBe(ORG)
+  })
+
+  test('отметка session.end вычёркивает сразу, без оглядки на часы', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const { tmpdir } = require('node:os') as typeof import('node:os')
+    const { join } = require('node:path') as typeof import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-end-'))
+    const prev = process.env.SW_HEARTBEAT_DIR
+    process.env.SW_HEARTBEAT_DIR = dir
+    try {
+      writeFileSync(join(dir, 'session-heartbeat-s-ended.json'),
+        JSON.stringify({ session_id: 's-ended', cwd: '/x', event: 'session.end', last_seen: new Date().toISOString() }))
+      writeFileSync(join(dir, 'session-heartbeat-s-live.json'),
+        JSON.stringify({ session_id: 's-live', cwd: '/x', event: 'chat.message', last_seen: new Date().toISOString() }))
+      __testing.seedFromPreviousSnapshot({
+        version: 1, updatedAt: new Date().toISOString(), accounts: {}, pids: {},
+        sessions: {
+          's-ended': { org: ORG, lastSeenAt: Date.now() - HOUR },
+          's-live': { org: ORG, lastSeenAt: Date.now() - HOUR },
+        },
+      } as never)
+      __testing.pruneStaleStates(Date.now())
+      const s = __testing.snapshot().sessions ?? {}
+      expect(s['s-ended']).toBeUndefined()
+      expect(s['s-live']?.org).toBe(ORG)
+    } finally {
+      if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
+      else process.env.SW_HEARTBEAT_DIR = prev
+    }
   })
 
   test('a malformed entry is skipped, not carried as a half-fact', () => {

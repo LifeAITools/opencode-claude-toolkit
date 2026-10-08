@@ -76,6 +76,10 @@ export interface ProxyConfig {
   sparkUpstreamUrl: string
   sparkUserAgent: string
   sparkReasoningEffort: 'minimal' | 'low' | 'medium' | 'high'
+  // Organization id for the opencode console org. The NEW org serves Go at
+  // /inference/go and REQUIRES header x-opencode-org-id (403 without it, measured
+  // 2026-10-08). Empty = header not sent, so the legacy zen/go config is untouched.
+  sparkOrgId: string | null
 
   // Subscription compat layer (hot-configurable for binary distribution)
   ccCompatVersion: string
@@ -198,6 +202,7 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     sparkApiKey: read('SPARK_API_KEY', '', fileEnv) || null,
     sparkUpstreamUrl: read('SPARK_UPSTREAM_URL', 'https://opencode.ai/zen/go/v1', fileEnv),
     sparkUserAgent: read('SPARK_USER_AGENT', 'claude-max-proxy-spark/1.0', fileEnv),
+    sparkOrgId: read('SPARK_ORG_ID', '', fileEnv) || null,
     sparkReasoningEffort: (['minimal', 'low', 'medium', 'high'].includes(read('SPARK_REASONING_EFFORT', 'minimal', fileEnv))
       ? read('SPARK_REASONING_EFFORT', 'minimal', fileEnv)
       : 'minimal') as 'minimal' | 'low' | 'medium' | 'high',

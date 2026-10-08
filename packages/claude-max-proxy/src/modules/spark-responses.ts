@@ -39,6 +39,7 @@ export interface SparkDeps {
     sparkUpstreamUrl: string
     sparkUserAgent: string
     sparkReasoningEffort: 'minimal' | 'low' | 'medium' | 'high'
+    sparkOrgId: string | null
   }
   emit: (event: Record<string, unknown>) => void
 }
@@ -53,6 +54,11 @@ function apiKey(deps: SparkDeps): string | null {
 
 function userAgent(deps: SparkDeps): string {
   return deps.config.sparkUserAgent
+}
+
+// Organization header for the NEW opencode org. Absent (legacy config) → no header.
+function orgId(deps: SparkDeps): string | null {
+  return deps.config.sparkOrgId
 }
 
 export interface SparkWire {
@@ -111,11 +117,14 @@ export async function serveSparkRequest(body: MessagesRequest, wire: SparkWire, 
         // Пишется перевод, не вход: ключ в заголовках режется самописцем
         // (authorization → <redacted>), тело едет как есть, включая байты картинок
         // (диск ограничен существующим cap самописца). Общий kill-switch — тот же.
+        const org = orgId(deps)
         const upstreamHeaders: Record<string, string> = {
           'content-type': 'application/json',
           'authorization': `Bearer ${key}`,
           'user-agent': userAgent(deps),
           'x-opencode-session': sessionId,
+          // New opencode org requires the organization header (403 without it).
+          ...(org ? { 'x-opencode-org-id': org } : {}),
         }
         try {
           const raw = Buffer.from(JSON.stringify(translation.body))

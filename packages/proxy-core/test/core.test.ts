@@ -87,6 +87,11 @@ describe('stats-store', () => {
     rmSync(dirnameOnly(path), { recursive: true, force: true })
   })
 
+  // Предел времени здесь щедрый НАРОЧНО: тест функциональный («не копят соединений,
+  // не падают с BUSY»), а не про скорость. Но каждая запись ОТКРЫВАЕТ своё соединение
+  // (stats-store.ts:54 — короткоживущий писатель под WAL), и 100 штук под нагрузкой на
+  // диск выходили за дефолтные 5 с bun (падения 5.5 с и 12.5 с, 30.09). Это не деградация
+  // хранилища, а цена схемы — занижать обратно не надо.
   test('многократные записи не копят соединений и не падают с BUSY', () => {
     const path = tmpDb()
     initStore(path)
@@ -105,7 +110,7 @@ describe('stats-store', () => {
     }
     expect(aggregateUsage(path).rows).toBe(100)
     rmSync(dirnameOnly(path), { recursive: true, force: true })
-  })
+  }, 30_000)
 
   test('initStore идемпотентен (повторный вызов не роняет)', () => {
     const path = tmpDb()

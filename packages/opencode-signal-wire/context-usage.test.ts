@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { heartbeatPath } from '@kiberos/signal-wire-core'
-import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
+import { createModelWindowResolver, modelFromMessageEvent, usageFromMessageEvent } from './context-usage'
 import { SignalWire } from './signal-wire'
 
 process.env.SW_EXEC_OFF = '1'
@@ -91,5 +91,15 @@ describe('opencode: замер заполнения из message.updated', () =>
     const src = readFileSync(join(import.meta.dir, 'plugin.ts'), 'utf-8')
     expect(src).not.toMatch(/totalChars\s*\/\s*4/)
     expect(src).toContain('usageFromMessageEvent(event)')
+  })
+
+  test('модель из ответа ассистента БЕЗ токенов — оборванный ход тоже её отдаёт', () => {
+    // 09.10: ses_ef1e46 (400 на каждом ходу) — context_model null, хотя modelID есть у
+    // каждого сообщения. usageFromMessageEvent тут null (токенов нет); модель берём отсюда,
+    // иначе процесс со всеми отбитыми ходами не узнаёт модель никогда.
+    expect(modelFromMessageEvent(msg(undefined)))
+      .toEqual({ sessionId: 'ses_p', providerId: 'zai-coding-plan', modelId: 'glm-5.3' })
+    expect(modelFromMessageEvent({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: 's' } } })).toBeNull()
+    expect(modelFromMessageEvent({ type: 'session.idle', properties: {} })).toBeNull()
   })
 })

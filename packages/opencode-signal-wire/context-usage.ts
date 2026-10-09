@@ -37,6 +37,23 @@ export function usageFromMessageEvent(event: any): AssistantUsage | null {
 }
 
 /**
+ * Модель/провайдер из ЛЮБОГО ответа ассистента (`message.updated`) — БЕЗ требования токенов.
+ * У хода, оборванного ошибкой, токенов нет, и `usageFromMessageEvent` отдаёт null, поэтому
+ * процесс, где ВСЕ ходы с ошибкой, модель не узнавал никогда — ровно тогда, когда она нужнее
+ * всего (агент стоит на ошибках, а по отметке не видно, на какой он модели). Замер 09.10:
+ * ses_ef1e46 (400 на каждом ходу) — `context_model null`, хотя в базе у каждого сообщения
+ * modelID есть. Источник модели для отметки — ЗАПРОС (`chat.message`, input.model) и вот этот
+ * — любой ответ, даже отбитый; число токенов здесь ни при чём.
+ */
+export function modelFromMessageEvent(event: any): { sessionId: string; providerId: string; modelId: string } | null {
+  if (event?.type !== 'message.updated') return null
+  const info = event?.properties?.info
+  if (!info || info.role !== 'assistant') return null
+  if (typeof info.sessionID !== 'string' || typeof info.modelID !== 'string' || !info.modelID) return null
+  return { sessionId: info.sessionID, providerId: String(info.providerID ?? ''), modelId: info.modelID }
+}
+
+/**
  * Окно модели из каталога opencode. Каталог запрашивается один раз на процесс и кэшируется; сбой
  * запроса не кэшируется — следующий ответ спросит снова. Неизвестная модель — null, а не догадка.
  */

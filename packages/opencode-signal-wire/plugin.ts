@@ -42,7 +42,7 @@ import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
 import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
-import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
+import { createModelWindowResolver, modelFromMessageEvent, usageFromMessageEvent } from './context-usage'
 import { answeredFromPermissionReplied, askedFromPermissionUpdated, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, retryFromSessionStatus, streamDeltaFromPartUpdated } from './session-lifecycle'
 import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
@@ -669,13 +669,24 @@ export default {
           eventType,
           keys: event && typeof event === 'object' ? Object.keys(event).slice(0, 10) : [],
         })
+        // Модель — из ЛЮБОГО ответа ассистента, БЕЗ требования токенов: у хода, оборванного
+        // ошибкой, токенов нет, и раньше модель не узнавалась никогда (замер 09.10: процесс
+        // со всеми отбитыми ходами — context_model null, хотя в базе modelID у каждого сообщения).
+        // Источники модели — запрос (chat.message, ниже) и вот этот; число токенов к модели не относится.
+        const model = modelFromMessageEvent(event)
+        if (model && signalWire && (!boundSessionId || model.sessionId === boundSessionId)) {
+          try {
+            signalWire.trackModel(model.modelId, model.providerId)
+            const window = await resolveModelWindow(model.providerId, model.modelId)
+            if (window) signalWire.trackContextWindow(model.modelId, window)
+          } catch (e: any) {
+            logStep('MODEL_TRACK_FAILED', { error: e?.message ?? String(e) })
+          }
+        }
         const usage = usageFromMessageEvent(event)
         if (usage && signalWire && (!boundSessionId || usage.sessionId === boundSessionId)) {
           // Только своя сессия: помощники в том же процессе шлют свои ответы, и их заполнение — не наше.
           try {
-            signalWire.trackModel(usage.modelId, usage.providerId)
-            const window = await resolveModelWindow(usage.providerId, usage.modelId)
-            if (window) signalWire.trackContextWindow(usage.modelId, window)
             signalWire.trackTokens({ inputTokens: usage.promptTokens })
           } catch (e: any) {
             logStep('CONTEXT_USAGE_TRACK_FAILED', { error: e?.message ?? String(e) })
@@ -1009,8 +1020,16 @@ export default {
           // Updates runtimeMeta lastModel for subsequent runtimeMeta predicates
           // and template interpolation in this and following turns.
           const modelId = input?.model?.modelID
+          const providerId = input?.model?.providerID
           if (typeof modelId === 'string' && modelId.length > 0) {
-            try { (signalWireEngine as any).trackModel?.(modelId, input?.model?.providerID) } catch { /* tracking is best-effort */ }
+            // Модель — из ЗАПРОСА (input.model): он есть ВСЕГДА, даже у отбитого хода, и при
+            // перескоке называет новую модель с первой же попытки (договор 09.10). Это ГЛАВНЫЙ
+            // источник; ответ (message.updated) — второй, на случай хода без chat.message.
+            try {
+              signalWire?.trackModel(modelId, providerId)
+              const window = await resolveModelWindow(providerId ?? '', modelId)
+              if (window) signalWire?.trackContextWindow(modelId, window)
+            } catch (e: any) { logStep('MODEL_TRACK_FROM_REQUEST_FAILED', { error: e?.message ?? String(e) }) }
           }
           // Заполнение контекста НЕ оценивается здесь по длине сообщения человека: до 0.3.24 так и было
           // (символы/4), и «контекстом» становился размер одной реплики. Настоящий замер приходит

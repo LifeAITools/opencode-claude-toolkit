@@ -43,7 +43,7 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, usageFromMessageEvent } from './context-usage'
-import { answeredFromPermissionReplied, askedFromPermissionUpdated, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, streamDeltaFromPartUpdated } from './session-lifecycle'
+import { answeredFromPermissionReplied, askedFromPermissionUpdated, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, retryFromSessionStatus, streamDeltaFromPartUpdated } from './session-lifecycle'
 import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
@@ -840,6 +840,27 @@ export default {
               logStep('SESSION_ERROR_FORWARDED', { sessionId: serr.sessionId })
             } catch (e: any) {
               logStep('SESSION_ERROR_FORWARD_FAILED', { sessionId: serr.sessionId, error: e?.message ?? String(e) })
+            }
+          }
+        }
+        // ─── PRP 10: повтор хода — session.retry (договор «каждый описывает своё») ───
+        // session.status с type:"retry" несёт attempt/next/message. busy и idle НЕ
+        // переводим: их уже дают chat.message и session.idle (иначе двойной счёт).
+        // Только своя сессия, как у остальных.
+        if (eventType === 'session.status' && signalWireEngine) {
+          const retry = retryFromSessionStatus(event)
+          if (retry && (!boundSessionId || retry.sessionId === boundSessionId)) {
+            try {
+              await signalWireEngine.evaluateHook({
+                source: 'plugin',
+                type: 'session.retry',
+                sessionId: retry.sessionId,
+                timestamp: Date.now(),
+                payload: { attempt: retry.attempt, next: retry.next, message: retry.message },
+              })
+              logStep('SESSION_RETRY_FORWARDED', { sessionId: retry.sessionId, attempt: retry.attempt })
+            } catch (e: any) {
+              logStep('SESSION_RETRY_FORWARD_FAILED', { sessionId: retry.sessionId, error: e?.message ?? String(e) })
             }
           }
         }

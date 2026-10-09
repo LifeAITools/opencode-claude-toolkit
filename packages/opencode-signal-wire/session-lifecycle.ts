@@ -214,3 +214,31 @@ export function messageEndFromMessageUpdated(event: any): { sessionId: string } 
   if (typeof info.time?.completed !== 'number') return null
   return { sessionId: info.sessionID }
 }
+
+export interface SessionRetry {
+  sessionId: string
+  attempt: number
+  /** Когда будет следующая попытка, epoch-ms (типы SDK: next: number). */
+  next: number
+  message: string
+}
+
+/**
+ * session.status → session.retry (PRP 10, договор «каждый описывает своё»).
+ * Только ветка retry: busy и idle НЕ переводим — их уже дают chat.message и
+ * session.idle, иначе одна поломка считалась бы дважды. Форма status — из типов
+ * SDK opencode (types.gen.d.ts:396): {type:'retry', attempt, message, next}.
+ */
+export function retryFromSessionStatus(event: any): SessionRetry | null {
+  if (event?.type !== 'session.status') return null
+  const p = event?.properties ?? {}
+  if (typeof p.sessionID !== 'string' || !p.sessionID) return null
+  const st = p.status
+  if (!st || st.type !== 'retry') return null
+  return {
+    sessionId: p.sessionID,
+    attempt: typeof st.attempt === 'number' ? st.attempt : 0,
+    next: typeof st.next === 'number' ? st.next : 0,
+    message: typeof st.message === 'string' ? st.message : '',
+  }
+}

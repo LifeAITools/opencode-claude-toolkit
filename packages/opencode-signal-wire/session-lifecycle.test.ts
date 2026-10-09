@@ -131,3 +131,25 @@ describe('след потока (PRP 09)', () => {
     })).toBeNull()
   })
 })
+
+describe('повтор хода (PRP 10: session.status → session.retry)', () => {
+  test('ветка retry переводится с attempt/next/message', async () => {
+    const { retryFromSessionStatus } = await import('./session-lifecycle')
+    expect(retryFromSessionStatus({
+      type: 'session.status',
+      properties: { sessionID: 'ses_r', status: { type: 'retry', attempt: 2, next: 1791530000000, message: 'overloaded' } },
+    })).toEqual({ sessionId: 'ses_r', attempt: 2, next: 1791530000000, message: 'overloaded' })
+  })
+
+  test('busy и idle НЕ переводятся (их дают chat.message / session.idle)', async () => {
+    const { retryFromSessionStatus } = await import('./session-lifecycle')
+    expect(retryFromSessionStatus({ type: 'session.status', properties: { sessionID: 's', status: { type: 'busy' } } })).toBeNull()
+    expect(retryFromSessionStatus({ type: 'session.status', properties: { sessionID: 's', status: { type: 'idle' } } })).toBeNull()
+  })
+
+  test('чужое событие и пустая сессия — null', async () => {
+    const { retryFromSessionStatus } = await import('./session-lifecycle')
+    expect(retryFromSessionStatus({ type: 'session.idle', properties: {} })).toBeNull()
+    expect(retryFromSessionStatus({ type: 'session.status', properties: { status: { type: 'retry', attempt: 1 } } })).toBeNull()
+  })
+})

@@ -80,3 +80,27 @@ describe('opencode: провайдер модели в runtimeMeta', () => {
     expect('provider' in sw.getCurrentRuntimeMeta()).toBe(false)
   })
 })
+
+describe('opencode: runtimeMeta.runtime — объявленное состояние (проект 10, ядро ≥0.33.0)', () => {
+  // Ядро переносит runtimeMeta.runtime в отметку жизни блоком `runtime`. Пустые
+  // поля отбрасываются; объявить нечего — ключа нет. declared_by:"harness" — данные
+  // дала сама opencode (providerID/modelID/limit.context), а не наша настройка.
+  test('модель, провайдер и окно едут блоком runtime с declared_by harness', () => {
+    const sw = make()
+    sw.trackModel('deepseek-v4-pro', 'bailian-cli')
+    sw.trackContextWindow('deepseek-v4-pro', 1_000_000)
+    expect(sw.getCurrentRuntimeMeta().runtime).toEqual({
+      model: 'deepseek-v4-pro', provider: 'bailian-cli', window: 1_000_000, declared_by: 'harness',
+    })
+  })
+
+  test('объявить нечего — ключа runtime нет', () => {
+    expect('runtime' in make().getCurrentRuntimeMeta()).toBe(false)
+  })
+
+  test('только модель — блок есть, пустые поля не выдумываются', () => {
+    const sw = make()
+    sw.trackModel('glm-5.3')
+    expect(sw.getCurrentRuntimeMeta().runtime).toEqual({ model: 'glm-5.3', declared_by: 'harness' })
+  })
+})

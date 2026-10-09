@@ -1813,10 +1813,13 @@ export async function startWakeListener(
     }
 
     // Agent idle — inject immediately
+    // Сессия-получатель в строке — против ложных выводов «письмо ушло в старую
+    // сессию»: без неё обе стороны читали один и тот же факт по-разному.
+    const wakeRecipient = (await resolveSessionId(config.sessionId)) ?? config.sessionId
     const outcome = await injectWakeEvent(event, config.sessionId)
     if (outcome === 'ok') {
       rememberWakeEvent(event)
-      trace('WAKE_INJECTED', { eventId: event.eventId, immediate: true })
+      trace('WAKE_INJECTED', { eventId: event.eventId, immediate: true, sessionId: wakeRecipient })
       dbg(`wake: injected ${event.eventId}`)
       return Response.json(
         { accepted: true, queued: false } satisfies WakeResponse,

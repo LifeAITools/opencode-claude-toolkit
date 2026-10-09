@@ -733,6 +733,18 @@ export class SignalWire {
     // zai-coding-plan/glm-5.3`), и по этому же имени lat-context находит квоту поставщика
     // (quota-status-alibaba.json). Само `model` голое: по нему сверяются правила.
     if (this.lastProvider) meta.provider = this.lastProvider
+    // ─── runtime: объявленное состояние (договор «каждый описывает своё», ядро ≥0.33.0) ───
+    // Ядро переносит runtimeMeta.runtime в отметку жизни блоком `runtime`; пустые поля
+    // отбрасываются, объявить нечего — ключа нет. `declared_by:"harness"` помечает, что
+    // данные дала сама opencode (providerID/modelID/limit.context), а не наша настройка.
+    // `account` появится, когда шлюз назовёт счёт, обслуживший запрос (две организации Go).
+    {
+      const runtime: Record<string, unknown> = {}
+      if (this.lastModel) runtime.model = this.lastModel
+      if (this.lastProvider) runtime.provider = this.lastProvider
+      if (this.lastContextWindow != null) runtime.window = this.lastContextWindow
+      if (Object.keys(runtime).length > 0) meta.runtime = { ...runtime, declared_by: 'harness' }
+    }
     // Имя агента в SynqTask — по нему правило адресуется одному агенту (`runtime_meta_is: {agentName}`,
     // договор стыка, часть 2). Под kiberos `SYNQTASK_AGENT_ID` — ИМЯ агента (identity-bootstrap.ts), и
     // живёт оно в окружении ЭТОГО процесса opencode, а не чужого демона. Нет имени — поля нет.

@@ -76,6 +76,29 @@ export function cacheInjectionDisabled(headers: Record<string, string | undefine
   return (v ?? '').trim().toLowerCase() === 'none'
 }
 
+/**
+ * Follow-session header (`x-claude-max-follow-session: <session-id>`): a service call
+ * made ON BEHALF OF a consumer session asks the proxy to route it through the SAME
+ * account as that session («интернет-доступ идёт через тот же аккаунт, что у
+ * потребителя» — фаундер 09.10.2026). The value names the CONSUMER's session; the
+ * caller's own session id is NOT pinned (such calls carry `x-claude-max-cache: none`).
+ * Consumed here, never forwarded upstream.
+ */
+export const FOLLOW_SESSION_HEADER = 'x-claude-max-follow-session'
+
+export function followSessionId(headers: Record<string, string | undefined> | Headers | undefined): string | null {
+  if (!headers) return null
+  let v: string | null | undefined
+  if (typeof (headers as Headers).get === 'function') v = (headers as Headers).get(FOLLOW_SESSION_HEADER)
+  else {
+    const h = headers as Record<string, string | undefined>
+    const key = Object.keys(h).find(k => k.toLowerCase() === FOLLOW_SESSION_HEADER)
+    v = key ? h[key] : undefined
+  }
+  const id = (v ?? '').trim()
+  return id ? id : null
+}
+
 /** True when ANY cache_control mark exists in system ⊕ tools ⊕ messages. */
 export function hasAnyCacheControl(body: Record<string, unknown>): boolean {
   const blockHas = (b: unknown): boolean =>

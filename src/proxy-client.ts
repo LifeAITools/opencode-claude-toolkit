@@ -80,6 +80,7 @@ import { consumeConsent } from './rewrite-consent.js'
 import { readOwnerPassport } from './owner-passport.js'
 import { FileOrgIdResolver, readOrgInfoFromConfig, type OrgIdResolver } from './org-identity.js'
 import { OrgVault } from './org-vault.js'
+import { cacheInjectionDisabled, followSessionId } from './subscription-compat.js'
 import {
   refreshOAuthToken,
   readClaudeCredentials,
@@ -380,6 +381,14 @@ export interface HandleRequestContext {
 
   /** OS PID of the consumer process (for JIT liveness check). */
   sourcePid?: number | null
+
+  /**
+   * Кэш-лес вызов (`x-claude-max-cache: none`). Признак берётся из ОРИГИНАЛЬНЫХ
+   * заголовков: у чужого клиента enrich ВЫРЕЗАЕТ этот заголовок до handleRequest
+   * (subscription-compat.ts:359), поэтому по `headers` его уже не видно. Не задан —
+   * читаем из `headers` (этот путь верен для нативного CLI и прямых SDK-вызовов).
+   */
+  cacheOptOut?: boolean
 
   /** Abort signal for the upstream fetch. */
   signal?: AbortSignal
@@ -1561,7 +1570,12 @@ export class ProxyClient {
     account: { orgId: string | null; token: string; expiresAt: number | null },
     reloadAsked: boolean,
     now: number,
+    cacheOptOut = false,
   ): { token: string; stop: boolean; held: boolean } {
+    // Кэш-лес сессия НИКОГДА не пинится (защищать нечего): берёт переданный токен
+    // — свою организацию или организацию потребителя через follow-session — и не
+    // оставляет следа в sessionPins/хранилище.
+    if (cacheOptOut) return { token: account.token, stop: false, held: false }
     const pin = this.sessionPins.get(sessionId)
     if (!pin || reloadAsked) {
       this.sessionPins.set(sessionId, { ...account })
@@ -1599,6 +1613,36 @@ export class ProxyClient {
     // after. See HandleRequestContext.idSource for the measurement.
     const idSource = ctx.idSource ?? 'header'
     const unidentified = idSource === 'none'
+
+    // ── Сессия без кэша НЕ закрепляется за организацией ──────────────────────
+    // Пин защищает кэш промпта от перезаписи при смене аккаунта (рельса
+    // no-live-account-migration). У сессии, объявившей `x-claude-max-cache: none`
+    // (короткие одноразовые вызовы, кэша нет вовсе), защищать нечего — а липкий
+    // TOFU-пин держит её на исчерпанной учётке сутками (09.10.2026: служба поиска
+    // kiberos-websearch застряла на 02b4bfd1, страницы не читались). Такую сессию
+    // НЕ пиним и снимаем уже стоящий пин: она идёт за ТЕКУЩЕЙ живой учёткой.
+    // Длинные сессии с кэшем не трогаются — у них пин остаётся.
+    const cacheOptOut = ctx.cacheOptOut ?? cacheInjectionDisabled(headers)
+    if (cacheOptOut) {
+      // Снять и память, и ХРАНИЛИЩЕ: пин переживает перезапуск (ORG_PIN_RESTORED),
+      // поэтому проверять только sessionPins мало — persisted-пин вернулся бы.
+      const hadMem = this.sessionPins.delete(sessionId)
+      const hadPersisted = this.orgVault.getPin(sessionId) !== null
+      if (hadPersisted) this.orgVault.deletePin(sessionId)
+      if (hadMem || hadPersisted) {
+        this.events.emit({
+          level: 'info', kind: 'ORG_PIN_DROPPED_CACHELESS', sessionId,
+          msg: 'cache-less session (x-claude-max-cache: none) — pin dropped, follows the current live org',
+        })
+      }
+    }
+
+    // Сессия-потребитель, за которой следует этот вызов: «интернет-доступ идёт через
+    // тот же аккаунт, что у потребителя» (фаундер 09.10.2026). Служба шлёт своё имя
+    // сессии ПЛЮС `x-claude-max-follow-session: <сессия вызвавшего>`; организация
+    // берётся у потребителя, свой пин не заводится (cache:none). Нет потребителя —
+    // идёт за текущей живой учёткой.
+    const followId = followSessionId(headers)
 
     // Get or create session with KA engine
     // 🔴 ПАСПОРТ ВЛАДЕЛЬЦА СНИМАЕТСЯ ЗДЕСЬ, И ЭТО МЕСТО КУПЛЕНО ОШИБКОЙ.
@@ -1717,10 +1761,27 @@ export class ProxyClient {
     // failed-token contract). Set once the Authorization header is built.
     let sentToken: string | null = null
     try {
-      const account = {
+      let account = {
         orgId: this.orgIdResolver.current(),
         token: await this.credentials.getAccessToken(),
         expiresAt: this.credentials.currentExpiresAt?.() ?? null,
+      }
+      // Follow-session: вызов обслуживается организацией сессии-ПОТРЕБИТЕЛЯ, а не
+      // текущей. Организацию потребителя даёт resolveServedOrg (его пин, иначе
+      // текущая), токен — свежий из хранилища. Свой пин служба не заводит.
+      if (followId && followId !== sessionId) {
+        const followOrg = this.resolveServedOrg(followId)
+        if (followOrg && followOrg !== account.orgId) {
+          const tok = await this.withFreshOrgToken(followOrg, { reason: 'follow-session' })
+          if (tok) {
+            const ve = this.orgVault.get(followOrg)
+            account = { orgId: followOrg, token: tok, expiresAt: ve?.expiresAt ?? null }
+            this.events.emit({
+              level: 'info', kind: 'ORG_FOLLOW_SESSION', sessionId,
+              msg: `following consumer session ${followId.slice(0, 8)} → org ${followOrg.slice(0, 8)}`,
+            })
+          }
+        }
       }
       reloadAsked = inspectLastUserMessage(
         parsedBody, loadKeepaliveConfig().rewriteGuard.reloadMarker,
@@ -1763,7 +1824,7 @@ export class ProxyClient {
         }
       }
       rotateConsumed = this.orgRotateConsent.delete(sessionId)
-      const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now())
+      const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now(), cacheOptOut)
       if (sel.stop) {
         this.events.emit({
           level: 'error',
@@ -2000,7 +2061,11 @@ export class ProxyClient {
       const blockColdStart = !!rewriteAssessment
         && rewriteAssessment.rewriteClass === 'expected:cold-start'
         && rewriteAssessment.predictedTokens >= guard.minColdStartTokens
-      if (guard.enabled && rewriteAssessment && (blockAvoidable || blockColdStart)) {
+      // Кэш-лес сессия: сторожа НЕ спрашиваем — защищать нечего (клиент объявил
+      // `x-claude-max-cache: none`), а блокировка смены организации держала бы её
+      // на исчерпанной учётке (инцидент 09.10.2026, служба поиска). Длинные
+      // сессии с кэшем проходят сторожа как прежде.
+      if (guard.enabled && !cacheOptOut && rewriteAssessment && (blockAvoidable || blockColdStart)) {
         // Consent check. Inspect the in-message marker first (no side effect);
         // only when it is ABSENT consume a session grant (single-use). The
         // short-circuit OR guarantees a marker'd turn never burns a grant.
@@ -2387,7 +2452,7 @@ export class ProxyClient {
           // reuses the existing pin machinery (vault token refresh, HOLD,
           // restart-restore). servedOrg is ground truth (response header) — we
           // bind to what was actually served, not the racy resolver default.
-          if (!this.sessionPins.has(sessionId)) {
+          if (!cacheOptOut && !this.sessionPins.has(sessionId)) {
             const ve = this.orgVault.get(servedOrg)
             if (ve && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
               this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })

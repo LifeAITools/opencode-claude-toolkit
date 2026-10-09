@@ -7,7 +7,7 @@
  */
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
-import { extractSessionIdFromBody } from '@life-ai-tools/claude-code-sdk'
+import { extractSessionIdFromBody, cacheInjectionDisabled } from '@life-ai-tools/claude-code-sdk'
 import { serveSparkRequest } from './spark-responses.js'
 import { isSparkModel } from '../spark-translate.js'
 import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
@@ -130,6 +130,9 @@ export function createAnthropicModule(): ProxyModule {
           sessionId,
           sourcePid,
           idSource,
+          // Признак кэш-лес берём из ОРИГИНАЛЬНЫХ headers: у чужого клиента enrich уже
+          // вырезал `x-claude-max-cache` из forwardHeaders (subscription-compat.ts:359).
+          cacheOptOut: cacheInjectionDisabled(headers),
           // Имя звонящего берётся ИЗ ИСХОДНЫХ заголовков: в forwardHeaders для
           // чужого клиента уже стоит наша подстановка claude-cli/…, и запись
           // оттуда назвала бы всех одинаково.

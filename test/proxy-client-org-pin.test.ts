@@ -193,3 +193,71 @@ describe('Layer 2 — cli reload rebinds the pin', () => {
     c.stop()
   })
 })
+
+// ── Кэш-лес сессия (x-claude-max-cache: none) — НЕ пинится ──────────────────
+// Фаундер 09.10.2026: «всё должно быть динамично; интернет-доступ идёт через тот же
+// аккаунт, что у потребителя». У кэш-лес сессии защищать нечего, поэтому пин ей не
+// нужен: она идёт за текущей живой учёткой (и не застревает на исчерпанной).
+describe('Кэш-лес сессия не закрепляется за организацией', () => {
+  const noCache = (extra = '') => JSON.stringify({
+    model: 'claude-opus-4-7',
+    system: [{ type: 'text', text: 'system prompt' }],
+    tools: [],
+    messages: [{ role: 'user', content: 'read a page ' + FILLER + ' ' + extra }],
+  })
+
+  test('не оставляет пина и следует за текущей учёткой', async () => {
+    const auth: string[] = []
+    const m = mutableAccount({ orgId: 'org-A', token: 'tok-A', expiresAt: Date.now() + 3_600_000 })
+    const c = mkClient({ credentialsProvider: m.credentialsProvider, orgIdResolver: m.orgIdResolver, upstreamFetcher: recordingUpstream({ auth }) })
+    const r1 = await c.handleRequest(noCache(), { 'x-claude-max-cache': 'none' }, { sessionId: 'svc' })
+    expect(r1.status).toBe(200)
+    expect((c as any).sessionPins.has('svc')).toBe(false)
+    expect((c as any).orgVault.getPin('svc')).toBeNull()
+    // Флот переехал → кэш-лес сессия идёт за ТЕКУЩЕЙ, а не держит старую.
+    m.state.orgId = 'org-B'; m.state.token = 'tok-B'
+    const r2 = await c.handleRequest(noCache(), { 'x-claude-max-cache': 'none' }, { sessionId: 'svc' })
+    expect(r2.status).toBe(200)
+    expect(auth.at(-1)).toBe('Bearer tok-B')
+    c.stop()
+  })
+
+  test('снимает уже стоящий пин кэш-лес сессии', async () => {
+    const auth: string[] = []
+    const m = mutableAccount({ orgId: 'org-A', token: 'tok-A', expiresAt: Date.now() + 3_600_000 })
+    const c = mkClient({ credentialsProvider: m.credentialsProvider, orgIdResolver: m.orgIdResolver, upstreamFetcher: recordingUpstream({ auth }) })
+    await c.handleRequest(reqBody(), {}, { sessionId: 'svc2' })   // обычный вызов → пин на org-A
+    expect((c as any).sessionPins.has('svc2')).toBe(true)
+    m.state.orgId = 'org-B'; m.state.token = 'tok-B'
+    const r = await c.handleRequest(noCache(), { 'x-claude-max-cache': 'none' }, { sessionId: 'svc2' })
+    expect(r.status).toBe(200)
+    expect((c as any).sessionPins.has('svc2')).toBe(false)
+    expect((c as any).orgVault.getPin('svc2')).toBeNull()
+    expect(auth.at(-1)).toBe('Bearer tok-B')
+    c.stop()
+  })
+
+  test('снимает PERSISTED-пин, даже когда память пуста (пин пережил перезапуск)', async () => {
+    const auth: string[] = []
+    const m = mutableAccount({ orgId: 'org-A', token: 'tok-A', expiresAt: Date.now() + 3_600_000 })
+    const c = mkClient({ credentialsProvider: m.credentialsProvider, orgIdResolver: m.orgIdResolver, upstreamFetcher: recordingUpstream({ auth }) })
+    ;(c as any).orgVault.setPin('svc3', 'org-A')   // persisted-пин, в sessionPins его нет
+    m.state.orgId = 'org-B'; m.state.token = 'tok-B'
+    const r = await c.handleRequest(noCache(), { 'x-claude-max-cache': 'none' }, { sessionId: 'svc3' })
+    expect(r.status).toBe(200)
+    expect((c as any).orgVault.getPin('svc3')).toBeNull()
+    expect(auth.at(-1)).toBe('Bearer tok-B')
+    c.stop()
+  })
+
+  test('ctx.cacheOptOut (заголовок вырезан enrich) тоже не пинит', async () => {
+    const auth: string[] = []
+    const m = mutableAccount({ orgId: 'org-A', token: 'tok-A', expiresAt: Date.now() + 3_600_000 })
+    const c = mkClient({ credentialsProvider: m.credentialsProvider, orgIdResolver: m.orgIdResolver, upstreamFetcher: recordingUpstream({ auth }) })
+    const r = await c.handleRequest(noCache(), {}, { sessionId: 'svc4', cacheOptOut: true })
+    expect(r.status).toBe(200)
+    expect((c as any).sessionPins.has('svc4')).toBe(false)
+    expect((c as any).orgVault.getPin('svc4')).toBeNull()
+    c.stop()
+  })
+})

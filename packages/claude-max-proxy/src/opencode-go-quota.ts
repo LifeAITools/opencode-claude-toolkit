@@ -183,7 +183,7 @@ export function buildGoQuotaStatus(input: {
         level,
         message: windows.length === 0
           ? 'opencode-go: the plan reports no limited window.'
-          : 'opencode-go: ' + windows.map((w) => `${w.window} ${pc((w.util as number) * 100)}`).join(', ') + '.',
+          : 'opencode-go: ' + windows.map((w) => `${w.window} ${pc(w.util as number)}`).join(', ') + '.',
       },
     },
   }

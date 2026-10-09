@@ -41,6 +41,8 @@ describe('дверь', () => {
     expect(a.reset5hAt).toBe('2026-10-07T15:40:49.000Z')
     expect(a.windows.map((w: any) => w.window)).toEqual(['5h', 'week', 'month'])
     expect(a.windows[0].util).toBe(0.11)
+    // message — то, что видит человек: percent 11/53/26, НЕ 1100/5300/2600 (двойное ×100).
+    expect(a.message).toBe('opencode-go: 5h 11%, week 53%, month 26%.')
   })
 
   test('percent клампится, кривой сброс — null', async () => {

@@ -5,14 +5,16 @@
  * ЗАЧЕМ (07.10.2026, поручение фаундера: под агентами на Go должна стоять квота Go,
  * а не Anthropic). Читатель — lat-context (файл той же формы, что у Alibaba).
  *
- * ОТКУДА ЧИСЛА. Недокументированная дверь `GET https://opencode.ai/zen/go/v1/usage`
- * (anomalyco/opencode #16513): `Authorization: Bearer <ключ opencode-go из auth.json>`.
- * 🔴 Дверь требует юзер-агент opencode (без него 403 даже с верным ключом — замер 07.10).
- * Ответ: `{usage:{rolling|weekly|monthly:{status, percent, resetsAt}}}`; percent —
- * ЦЕЛЫЙ ИСРАСХОДОВАННЫЙ 0–100, клампится; при упоре status ≠ ok.
+ * ОТКУДА ЧИСЛА. Из ЕДИНСТВЕННОЙ двери реестра организаций (kiberos-app):
+ * `python3 .../litellm/go_refresher.py status --json` — отдаёт активную организацию
+ * и по каждой её окна поставщика (status/percent/resetsAt). Решение kiberos-app
+ * 09.10: «читать один источник, в .go-tokens.json не лезть». Секретов в ответе нет.
+ * 🔴 Прямую дверь `/zen/go/v1/usage` ключом из auth.json БОЛЬШЕ НЕ ЧИТАЕМ: она
+ * описывает ПЕРВУЮ (исчерпанную) организацию, а шлюз ходит ВТОРОЙ — подвал показывал
+ * не тот счёт (инцидент 08-09.10).
  *
  * КАКИМ МОДЕЛЯМ ПРИНАДЛЕЖИТ. Не догадка по имени (ловушка: голое deepseek-v4.1-flash
- * идёт в DashScope): GET /zen/go/v1/models тем же ключом → id с приставкой
+ * идёт в DashScope): GET /zen/go/v1/models ключом из auth.json → id с приставкой
  * `opencode-go/`, плюс алиасы LiteLLM, чей api_base ведёт в zen/go.
  */
 import { createHash } from 'crypto'
@@ -22,7 +24,6 @@ import { dirname, join } from 'path'
 import { CLAUDE_LOCAL, classifyLevel } from './quota-paths.js'
 
 export const QUOTA_STATUS_OPENCODE_GO_JSON = join(CLAUDE_LOCAL, 'quota-status-opencode-go.json')
-export const GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
 export const GO_MODELS_URL = 'https://opencode.ai/zen/go/v1/models'
 
 export interface GoWindowUsage {
@@ -35,6 +36,27 @@ export interface GoUsage {
   rolling?: GoWindowUsage
   weekly?: GoWindowUsage
   monthly?: GoWindowUsage
+}
+
+/** Одна организация из двери реестра `go_refresher.py status --json`. */
+export interface GoOrgStatus {
+  name: string
+  workspace?: string
+  auth?: string
+  /** true — через неё сейчас ходит посредник (меняется только командой `use`). */
+  active?: boolean
+  expires_at_ms?: number | null
+  usage?: GoUsage | null
+  usage_error?: string | null
+  /** Имена исчерпанных окон этой организации (например ['weekly']). */
+  exhausted?: string[]
+}
+
+/** Ответ двери реестра: кто активен и по каждой организации её окна. */
+export interface GoRegistryStatus {
+  active?: string
+  measured_at_ms?: number
+  orgs: GoOrgStatus[]
 }
 
 /** Ключ opencode-go из auth.json. Нет ключа — null (названное отсутствие ниже). */
@@ -50,29 +72,37 @@ export function readGoKey(authJsonPath: string): string | null {
 
 const userAgent = () => process.env.OPENCODE_GO_QUOTA_UA ?? 'opencode/1.18.34'
 
-/** Тот же запрос, что отдаёт usage живьём (замер 07.10, обе пробы 200). */
-export async function readGoUsage(
-  apiKey: string | null,
-  fetcher: typeof fetch = fetch,
-): Promise<{ usage: GoUsage | null; error: string | null }> {
-  if (!apiKey) return { usage: null, error: 'go_key_missing: opencode-go not in auth.json' }
+export interface RunResult { code: number; stdout: string; stderr: string }
+export type Runner = (cmd: string, args: string[]) => Promise<RunResult>
+
+/**
+ * Реестр организаций из ЕДИНСТВЕННОЙ двери kiberos-app: `go_refresher.py status --json`.
+ * Отдаёт `active` (какая организация обслуживает сейчас) и по каждой — окна поставщика
+ * как есть. Секретов в ответе нет — решение kiberos-app 09.10: «читать один источник,
+ * в .go-tokens.json не лезть». Запуск через execFile, не shell.
+ */
+export async function readGoRegistry(
+  doorPath: string,
+  runner?: Runner,
+): Promise<{ registry: GoRegistryStatus | null; error: string | null }> {
+  const run: Runner = runner ?? (async (cmd, args) => {
+    const { execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    try {
+      const out = await (promisify(execFile))(cmd, args, { timeout: 60_000, maxBuffer: 256 * 1024 })
+      return { code: 0, stdout: String(out.stdout ?? ''), stderr: String(out.stderr ?? '') }
+    } catch (e: any) {
+      return { code: typeof e?.code === 'number' ? e.code : 1, stdout: String(e?.stdout ?? ''), stderr: String(e?.stderr ?? e?.message ?? '') }
+    }
+  })
   try {
-    const res = await fetcher(GO_USAGE_URL, {
-      method: 'GET',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-        'user-agent': userAgent(),
-        accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(30_000),
-    })
-    if (!res.ok) return { usage: null, error: `go_http_${res.status}` }
-    const body = (await res.json()) as { usage?: GoUsage }
-    if (!body || typeof body.usage !== 'object') return { usage: null, error: 'go_no_data' }
-    return { usage: body.usage, error: null }
+    const r = await run('python3', [doorPath, 'status', '--json'])
+    if (r.code !== 0) return { registry: null, error: `go_refresher_exit_${r.code}` }
+    const body = JSON.parse(r.stdout) as GoRegistryStatus
+    if (!body || !Array.isArray(body.orgs)) return { registry: null, error: 'go_refresher_bad_json' }
+    return { registry: body, error: null }
   } catch (e) {
-    return { usage: null, error: `go_unreachable: ${String((e as Error).message).slice(0, 200)}` }
+    return { registry: null, error: `go_refresher_unavailable: ${String((e as Error).message).slice(0, 200)}` }
   }
 }
 
@@ -135,17 +165,23 @@ const isoOf = (v: unknown): string | null => {
 export function buildGoQuotaStatus(input: {
   usage: GoUsage | null
   error: string | null
+  /** Имя активной организации из реестра — её числа здесь и лежат. */
+  org: string
+  /** true — через эту организацию сейчас ходит посредник (меняется командой `use`). */
+  active: boolean
   accountHint: string
   models: string[]
   modelsSource: string
   measuredAt: Date
 }): Record<string, unknown> {
-  const { usage, error, accountHint, models, modelsSource, measuredAt } = input
+  const { usage, error, org, active, accountHint, models, modelsSource, measuredAt } = input
   const base = {
     version: 1,
     provider: 'opencode-go',
     updatedAt: measuredAt.toISOString(),
     measured_at: measuredAt.toISOString(),
+    org,
+    active,
     models,
     models_source: modelsSource,
   }
@@ -173,6 +209,8 @@ export function buildGoQuotaStatus(input: {
     accounts: {
       [accountHint]: {
         accountHint,
+        org,
+        active,
         util5h: util5h === null ? null : util5h / 100,
         util7d: util7d === null ? null : util7d / 100,
         utilMonth: utilMonth === null ? null : utilMonth / 100,
@@ -182,8 +220,8 @@ export function buildGoQuotaStatus(input: {
         windows,
         level,
         message: windows.length === 0
-          ? 'opencode-go: the plan reports no limited window.'
-          : 'opencode-go: ' + windows.map((w) => `${w.window} ${pc(w.util as number)}`).join(', ') + '.',
+          ? `opencode-go (${org}${active ? ', активна' : ', не активна'}): план не ограничивает окна.`
+          : `opencode-go (${org}${active ? ', активна' : ', не активна'}): ` + windows.map((w) => `${w.window} ${pc(w.util as number)}`).join(', ') + '.',
       },
     },
   }
@@ -199,19 +237,30 @@ export function writeAtomic(path: string, body: unknown): void {
 export interface CollectOptions {
   authJsonPath: string
   litellmConfigPath: string
+  /** Путь к двери реестра kiberos-app: `go_refresher.py`. */
+  goRefresherPath: string
   outPath: string
   fetcher?: typeof fetch
   now?: () => Date
+  /** Подмена запуска двери в испытаниях (по умолчанию — python3 execFile). */
+  runner?: Runner
 }
 
 export async function collectOnce(opts: CollectOptions): Promise<Record<string, unknown>> {
   const fetcher = opts.fetcher ?? fetch
   const now = opts.now ?? (() => new Date())
   const apiKey = readGoKey(opts.authJsonPath)
-  const [{ usage, error }, sub] = await Promise.all([
-    readGoUsage(apiKey, fetcher),
+  // Числа — из ОДНОЙ двери реестра (kiberos-app): АКТИВНАЯ организация, а не та,
+  // чей ключ лежит в auth.json (09.10: вторая организация обслуживает, первая
+  // исчерпана — подвал показывал первую). Ключ из auth.json остаётся ТОЛЬКО для
+  // списка моделей подписки.
+  const [{ registry, error: doorError }, sub] = await Promise.all([
+    readGoRegistry(opts.goRefresherPath, opts.runner),
     goSubscriptionModels(apiKey, fetcher),
   ])
+  const activeOrg = registry
+    ? (registry.orgs.find((o) => o.active === true) ?? registry.orgs[0] ?? null)
+    : null
   let litellmAliases: string[] = []
   let litellmSource = 'litellm config unread'
   try {
@@ -221,12 +270,14 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
   } catch {
     litellmSource = 'litellm config unread'
   }
-  const measuredAt = now()
+  const measuredAt = registry?.measured_at_ms ? new Date(registry.measured_at_ms) : now()
   const models = [...sub.models, ...litellmAliases].sort()
   const status = buildGoQuotaStatus({
-    usage,
-    error: apiKey ? error : 'go_key_missing: opencode-go not in auth.json',
-    accountHint: apiKey ? accountHintFor(apiKey) : 'opencode-go-unknown',
+    usage: activeOrg?.usage ?? null,
+    error: doorError ?? activeOrg?.usage_error ?? null,
+    org: activeOrg?.name ?? 'unknown',
+    active: activeOrg?.active === true,
+    accountHint: activeOrg?.name ?? 'opencode-go-unknown',
     models,
     modelsSource: [sub.source, litellmSource].join('; '),
     measuredAt,
@@ -240,6 +291,7 @@ if (import.meta.main) {
   const status = await collectOnce({
     authJsonPath: process.env.OPENCODE_AUTH_JSON ?? join(home, '.local', 'share', 'opencode', 'auth.json'),
     litellmConfigPath: process.env.LITELLM_CONFIG_PATH ?? '/home/relishev/projects/vibe/kiberos-app/litellm/config.yaml',
+    goRefresherPath: process.env.GO_REFRESHER_PATH ?? '/home/relishev/projects/vibe/kiberos-app/litellm/go_refresher.py',
     outPath: process.env.QUOTA_STATUS_OPENCODE_GO_JSON ?? QUOTA_STATUS_OPENCODE_GO_JSON,
   })
   console.log(JSON.stringify({ written: process.env.QUOTA_STATUS_OPENCODE_GO_JSON ?? QUOTA_STATUS_OPENCODE_GO_JSON, error: (status as any).error ?? null, models: ((status as any).models as string[]).length }))

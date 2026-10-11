@@ -215,6 +215,38 @@ export function messageEndFromMessageUpdated(event: any): { sessionId: string } 
   return { sessionId: info.sessionID }
 }
 
+// ─── КОПИЛКА ПРОЗЫ АГЕНТА (канал `agent_text`) ───────────────────────────────
+//
+// Правила по тексту агента (`agent_text_regex`: agent-claims-continue, anti-silent-defer и
+// семейство) читают ТОЛЬКО `payload.channels.agent_text`. В opencode этот канал неоткуда взять
+// на входе хода: хук `chat.message` зовётся ТОЛЬКО на сообщение человека (бинарь 1.19.0:
+// `trigger("chat.message")` — одно вхождение, внутри `createUserMessage`, роль всегда `user`).
+// Поэтому прозу копим из дельт `message.part.updated` и прикладываем к событию так же, как это
+// делает хук Claude Code (там `agent_text` — последняя реплика ассистента на момент события):
+// на `chat.message` — проза ПРЕДЫДУЩЕГО хода, на `tool.after` — текущего.
+//
+// Ключ — номер сессии. `take` (чтение с обнулением) зовётся на `chat.message`: это граница хода.
+// `peek` (чтение без обнуления) — на `tool.after`: проза текущего хода ещё копится.
+
+/** Дописать кусок прозы ассистента (пустой текст и пустая сессия — не событие). */
+export function appendAgentProse(store: Map<string, string>, sessionId: string, text: string): void {
+  if (!sessionId || !text) return
+  store.set(sessionId, (store.get(sessionId) ?? '') + text)
+}
+
+/** Прочитать прозу, НЕ обнуляя. Пусто — undefined («проза не накопилась», а не пустая строка). */
+export function peekAgentProse(store: Map<string, string>, sessionId: string): string | undefined {
+  const v = store.get(sessionId)
+  return v && v.length > 0 ? v : undefined
+}
+
+/** Прочитать прозу И обнулить (граница хода). Пусто — undefined. */
+export function takeAgentProse(store: Map<string, string>, sessionId: string): string | undefined {
+  const v = store.get(sessionId)
+  store.delete(sessionId)
+  return v && v.length > 0 ? v : undefined
+}
+
 export interface SessionRetry {
   sessionId: string
   attempt: number

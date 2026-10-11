@@ -43,7 +43,7 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, modelFromMessageEvent, usageFromMessageEvent } from './context-usage'
-import { answeredFromPermissionReplied, askedFromPermissionUpdated, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, retryFromSessionStatus, streamDeltaFromPartUpdated } from './session-lifecycle'
+import { answeredFromPermissionReplied, askedFromPermissionUpdated, appendAgentProse, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, peekAgentProse, retryFromSessionStatus, streamDeltaFromPartUpdated, takeAgentProse } from './session-lifecycle'
 import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
@@ -64,6 +64,15 @@ const isFirstSessionStart = createSessionStartTracker()
 const permissionKinds = createPermissionKindMemory()
 // След потока «греюсь» (PRP 09): живые дельты → файл на сессию. Только своя.
 const streamTracer = new StreamTracer({ harness: 'opencode' })
+// ПРОЗА АГЕНТА (канал `agent_text`): последний текст ассистента, накопленный из дельт
+// `message.part.updated`. Каналы — единственная поверхность, которую читают правила по тексту
+// агента (`agent_text_regex`: agent-claims-continue, anti-silent-defer и семейство), и без неё
+// они слепы. Взять её из `chat.message` по роли НЕЛЬЗЯ: opencode зовёт этот хук ТОЛЬКО на
+// сообщение человека (бинарь 1.19.0: `trigger("chat.message")` — одно вхождение, внутри
+// `createUserMessage`, и несёт `role:"user"`). Берём так же, как хук Claude Code: прикладываем
+// последнюю прозу ассистента к событию — `chat.message` несёт прозу ПРЕДЫДУЩЕГО хода,
+// `tool.after` текущего. Ключ — сессия; чтение на `chat.message` обнуляет (граница хода).
+const assistantProseBySession = new Map<string, string>()
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
@@ -827,7 +836,11 @@ export default {
           try {
             if (eventType === 'message.part.updated') {
               const d = streamDeltaFromPartUpdated(event)
-              if (d && (!boundSessionId || d.sessionId === boundSessionId)) streamTracer.delta(d.sessionId, d.text)
+              if (d && (!boundSessionId || d.sessionId === boundSessionId)) {
+                streamTracer.delta(d.sessionId, d.text)
+                // Копим прозу хода для канала `agent_text` (см. assistantProseBySession).
+                appendAgentProse(assistantProseBySession, d.sessionId, d.text)
+              }
             } else {
               const e = messageEndFromMessageUpdated(event)
               if (e && (!boundSessionId || e.sessionId === boundSessionId)) streamTracer.end(e.sessionId)
@@ -1002,6 +1015,16 @@ export default {
           if (!event.sessionId && boundSessionId) {
             ;(event as any).sessionId = boundSessionId
           }
+          // Канал `agent_text`: проза ПРЕДЫДУЩЕГО хода (как в хуке Claude Code, где
+          // agent_text — последняя реплика ассистента на момент события). Копим её из дельт
+          // и отдаём на входе нового хода, затем обнуляем — граница хода.
+          if (event.sessionId) {
+            const prevProse = takeAgentProse(assistantProseBySession, event.sessionId)
+            if (prevProse) {
+              const payload = event.payload as { channels?: Record<string, string> }
+              payload.channels = { ...(payload.channels ?? {}), agent_text: prevProse }
+            }
+          }
           // chat.message always carries the authoritative session id — use
           // it to refresh the SignalWire adapter so runtimeMeta.sessionId
           // is correct for THIS turn's hint interpolation, even if
@@ -1138,6 +1161,16 @@ export default {
           )
           if (!event.sessionId && boundSessionId) {
             ;(event as any).sessionId = boundSessionId
+          }
+          // Канал `agent_text`: проза ТЕКУЩЕГО хода — та, что ассистент написал до этого вызова
+          // (как в хуке Claude Code на PostToolUse). Без неё правила по тексту агента, у которых
+          // событие — PostToolUse (`tool.after`), молчат по построению.
+          if (event.sessionId) {
+            const prose = peekAgentProse(assistantProseBySession, event.sessionId)
+            if (prose) {
+              const payload = event.payload as { channels?: Record<string, string> }
+              payload.channels = { ...(payload.channels ?? {}), agent_text: prose }
+            }
           }
           const results = await signalWireEngine.evaluateHook(event)
           if (results.length > 0) {

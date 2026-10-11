@@ -142,8 +142,17 @@ export function normalizeChatMessage(
   input: { sessionID: string; agent?: string; model?: { providerID: string; modelID: string }; messageID?: string },
   output: { message: unknown; parts: unknown[] },
 ): SignalWireEvent {
-  // Concatenate text parts → single prompt string for keyword/regex matchers.
+  // Concatenate text parts → single string for keyword/regex matchers.
   const promptText = extractPromptText(output.parts)
+  // КАНАЛ ЧЕЛОВЕКА. opencode зовёт хук `chat.message` ТОЛЬКО на сообщение пользователя
+  // (бинарь 1.19.0: `trigger("chat.message")` — одно вхождение, внутри `createUserMessage`,
+  // роль всегда `user`), поэтому здесь законен ровно один канал — `user_text`. Канал `agent_text`
+  // сюда поставить нельзя: роли `assistant` в этом хуке не бывает, и такая ветка была бы
+  // мёртвой. Прозу ассистента несёт `payload.channels.agent_text` из plugin.ts (копим дельты
+  // `message.part.updated`, отдаём на `chat.message` предыдущего хода и на `tool.after`).
+  const role = (output.message as { role?: unknown } | null | undefined)?.role
+  const channels: Record<string, string> = {}
+  if (role === 'user' || role === undefined) channels.user_text = promptText
   return {
     source: 'hook',
     type: EVT_CHAT_MESSAGE,
@@ -153,6 +162,7 @@ export function normalizeChatMessage(
       message: output.message,
       agent: input.agent,
       messageID: input.messageID,
+      ...(Object.keys(channels).length > 0 ? { channels } : {}),
       // Match `contextToEvent()` payload contract (translate/index.ts:50-67)
       // so legacy `match.prompt_keywords` rules keep firing.
       prompt: promptText,

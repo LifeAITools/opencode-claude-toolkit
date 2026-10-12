@@ -47,6 +47,9 @@ for _ in $(seq 1 $(( TIMEOUT / 2 ))); do
     echo "OK session_id=$sid"
     [ -n "$url" ] && echo "url=$url"
     echo "tmux=$SESSION  registry=$REG"
+    # Панель своя и уже пуста (CLI вернулся в приглашение после создания сессии) — закрываем,
+    # чтобы пустые панели не копились. Имя своё (`cloud-*`), чужого не трогаем.
+    tmux kill-session -t "$SESSION" 2>/dev/null || true
     exit 0
   fi
   sleep 2

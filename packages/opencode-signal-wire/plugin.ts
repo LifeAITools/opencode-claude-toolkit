@@ -77,6 +77,9 @@ const assistantProseBySession = new Map<string, string>()
 // она или рассуждение), `message.part.delta` — только partID. Дельту принимаем, лишь если
 // partID зарегистрирован как текстовая часть, иначе проза агента засорится рассуждениями.
 const textPartIdsBySession = new Map<string, Set<string>>()
+// Гейт продолжения хода: одна continue-досылка на ход (аналог stop_hook_active в Claude Code),
+// чтобы не выстроить лестницу в потолок. Обнуляется на границе хода (chat.message).
+const idleContinuationSessions = new Set<string>()
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
@@ -769,10 +772,31 @@ export default {
                 timestamp: Date.now(),
                 payload: idleProse ? { channels: { agent_text: idleProse } } : {},
               })
-              const hintsNotDelivered = results.filter((r: any) =>
+              const hintResults = results.filter((r: any) =>
                 r?.success && r?.hintText && (r.type === 'hint' || r.type === 'respond' || (r.type === 'exec' && r.inject === true)),
-              ).length
-              logStep('SESSION_IDLE_EVALUATED', { sessionId: idleSession, results: results.length, hintsNotDelivered })
+              )
+              logStep('SESSION_IDLE_EVALUATED', { sessionId: idleSession, results: results.length, hintsNotDelivered: hintResults.length })
+              // Доставка continue-подобно (аналог `Stop` + `continue:true` в Claude Code): досылаем
+              // подсказку БЕЗ `noReply`, чтобы агент начал ход и ДОДЕЛАЛ СЕЙЧАС, а не прочитал её на
+              // следующем ходу (ровно та поздняя поимка, от которой уходим). Узость с двух сторон:
+              // доставляем ТОЛЬКО при непустых hint-результатах (перезарядку движок применил до выдачи
+              // results) и не чаще одной досылки на ход — иначе лестница в потолок.
+              if (hintResults.length > 0 && !idleContinuationSessions.has(idleSession)) {
+                const sdk = getBoundSdk()
+                if (sdk) {
+                  idleContinuationSessions.add(idleSession)
+                  const text = hintResults.map((r: any) => r.hintText).join('\n')
+                  try {
+                    await (sdk as any).session.prompt({
+                      path: { id: idleSession },
+                      body: { parts: [{ type: 'text', text }] },
+                    })
+                    logStep('SESSION_IDLE_CONTINUATION_SENT', { sessionId: idleSession, hints: hintResults.length, chars: text.length })
+                  } catch (e: any) {
+                    logStep('SESSION_IDLE_CONTINUATION_FAILED', { sessionId: idleSession, error: e?.message ?? String(e) })
+                  }
+                }
+              }
             } catch (e: any) {
               logStep('SESSION_IDLE_EVAL_FAILED', { sessionId: idleSession, error: e?.message ?? String(e) })
             }
@@ -1051,6 +1075,8 @@ export default {
             const prevProse = takeAgentProse(assistantProseBySession, event.sessionId)
             // Граница хода: реестр текстовых частей тоже обнуляем — его partID живут в пределах хода.
             textPartIdsBySession.delete(event.sessionId)
+            // Граница хода: гейт продолжения снимается — новый ход вправе получить свою досылку.
+            idleContinuationSessions.delete(event.sessionId)
             if (prevProse) {
               const payload = event.payload as { channels?: Record<string, string> }
               payload.channels = { ...(payload.channels ?? {}), agent_text: prevProse }

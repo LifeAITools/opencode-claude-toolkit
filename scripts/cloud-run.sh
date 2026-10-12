@@ -9,6 +9,10 @@
 #   cloud-run "<задача>"                      # из текущего каталога (репозитория)
 #   cloud-run --dir <путь-к-репо> "<задача>"
 #   cloud-run --org <ref> "<задача>"          # под аккаунтом из org-vault (напр. --org berez)
+#   cloud-run --model <m> "<задача>"          # переопределить модель (по умолчанию opus = Opus 5.5)
+#
+# 🔴 Задача уходит как `--cloud=<текст>` (склейка через `=`), поэтому текст, начинающийся
+# с `-` (напр. YAML-заголовок `---`), НЕ читается парсером как опция (иначе: unknown option '---').
 #
 # НАСТРОЙКИ (env):
 #   CLAUDE_CLOUD_WRAPPER   путь к обёртке (по умолчанию scripts/claude-cloud.sh рядом с проектом)
@@ -34,11 +38,13 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dir)    DIR="${2:?--dir требует путь}"; shift 2 ;;
     --org)    ORG="${2:?--org требует аккаунт (orgId-префикс/почта/имя)}"; shift 2 ;;
+    --model)  MODEL="${2:?--model требует модель}"; shift 2 ;;
     --bypass) BYPASS=1; shift ;;
+    -h|--help) echo 'usage: cloud-run [--dir <repo>] [--org <acct>] [--model <m>] [--bypass] "<task>"'; exit 0 ;;
     *)        break ;;
   esac
 done
-TASK="${1:?usage: cloud-run [--dir <repo>] [--org <acct>] [--bypass] \"<task>\"}"
+TASK="${1:?usage: cloud-run [--dir <repo>] [--org <acct>] [--model <m>] [--bypass] \"<task>\"}"
 
 [ -x "$WRAP" ] || { echo "обёртка не найдена: $WRAP" >&2; exit 2; }
 mkdir -p "$(dirname "$REG")"
@@ -52,7 +58,7 @@ WRAP_OPTS=""
 [ -n "$ORG" ] && WRAP_OPTS="--org $(printf '%q' "$ORG")"
 [ -n "$MODEL" ] && WRAP_OPTS="$WRAP_OPTS --model $(printf '%q' "$MODEL")"
 [ -n "$BYPASS" ] && WRAP_OPTS="$WRAP_OPTS --dangerously-skip-permissions"
-tmux send-keys -t "$SESSION" "cd $(printf '%q' "$DIR") && $(printf '%q' "$WRAP") $WRAP_OPTS --cloud $(printf '%q' "$TASK")" Enter
+tmux send-keys -t "$SESSION" "cd $(printf '%q' "$DIR") && $(printf '%q' "$WRAP") $WRAP_OPTS --cloud=$(printf '%q' "$TASK")" Enter
 
 accepted_bypass=0
 for _ in $(seq 1 $(( TIMEOUT / 2 ))); do

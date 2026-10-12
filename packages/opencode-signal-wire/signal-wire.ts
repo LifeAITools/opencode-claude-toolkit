@@ -719,13 +719,21 @@ export class SignalWire {
       sessionId: sid,
       contextTokens: this.contextPosition || undefined,
     }
+    // 🔴 ГОТОВАЯ СТРОКА «ПОКАЗАТЬ ВЕЛИЧИНУ» — одна на обе программы. Хук Claude Code строит её так же
+    // (`signal-wire-hook.sh`: `CONTEXT_FILL="${PERCENT}% · ${TOKENS} из ${WINDOW}"`), а текст правила
+    // подставляет её дословно и ветвиться не умеет — поэтому неизмеренный случай называет себя прямо,
+    // а НЕ печатает «0%»: пустота не должна выглядеть нулём. Зеркалит contextPercent/Tokens/Window.
+    let contextFill = 'НЕ ИЗМЕРЕНО (это не «пусто»)'
     if (this.lastContextWindow != null) {
       meta.contextWindow = this.lastContextWindow
       if (this.contextPosition > 0) {
-        meta.contextPercent = Math.min(100, Math.round((this.contextPosition / this.lastContextWindow) * 100))
+        const pct = Math.min(100, Math.round((this.contextPosition / this.lastContextWindow) * 100))
+        meta.contextPercent = pct
         meta.contextRemaining = Math.max(0, this.lastContextWindow - this.contextPosition)
+        contextFill = `${pct}% · ${this.contextPosition} из ${this.lastContextWindow}`
       }
     }
+    meta.contextFill = contextFill
     if (this.lastModel) meta.model = this.lastModel
     // Провайдер модели отдельно (`bailian-cli`, `zai-coding-plan`…). Из него ЯДРО (≥0.22.2,
     // qualifiedModel) само собирает `context_model` = «провайдер/модель» в обеих ветках отметки

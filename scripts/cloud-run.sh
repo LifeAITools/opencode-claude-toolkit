@@ -31,13 +31,18 @@ mkdir -p "$(dirname "$REG")"
 
 SESSION="cloud-$(date +%s)-$$"
 tmux new-session -d -s "$SESSION" -x 220 -y 50
+# Ширина решает: узкая панель переносит строку «Resume with: … session_<id>» и рвёт id пополам.
+tmux resize-window -t "$SESSION" -x 220 -y 50 2>/dev/null || true
 tmux send-keys -t "$SESSION" "cd $(printf '%q' "$DIR") && $(printf '%q' "$WRAP") --cloud $(printf '%q' "$TASK")" Enter
 
 for _ in $(seq 1 $(( TIMEOUT / 2 ))); do
   pane="$(tmux capture-pane -pt "$SESSION" -S -200 2>/dev/null || true)"
-  sid="$(printf '%s' "$pane" | grep -oE 'session_[A-Za-z0-9]+' | head -1 || true)"
+  # id берём из строки View (кончается на ?from=cli — надёжная граница) и требуем длину ≥16:
+  # так обрезанный переносом фрагмент (< 16) не уйдёт в реестр.
+  sid="$(printf '%s' "$pane" | grep -oE 'claude\.ai/code/session_[A-Za-z0-9]{16,}' | head -1 | sed 's#.*/##' || true)"
+  [ -n "$sid" ] || sid="$(printf '%s' "$pane" | grep -oE 'session_[A-Za-z0-9]{16,}' | head -1 || true)"
   if [ -n "$sid" ]; then
-    url="$(printf '%s' "$pane" | grep -oE 'https://claude\.ai/code/session_[A-Za-z0-9]+' | head -1 || true)"
+    url="https://claude.ai/code/$sid"
     printf '%s\t%s\t%s\t%s\n' "$(date -Is)" "$sid" "$DIR" "$TASK" >> "$REG"
     echo "OK session_id=$sid"
     [ -n "$url" ] && echo "url=$url"

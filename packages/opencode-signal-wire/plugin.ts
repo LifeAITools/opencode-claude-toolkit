@@ -9,6 +9,7 @@
 import { appendFileSync, existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { spawn } from 'child_process'
 import { SignalWire } from './signal-wire'
 import { execSuppressionReason } from '@kiberos/signal-wire-core'
 import {
@@ -80,6 +81,39 @@ const textPartIdsBySession = new Map<string, Set<string>>()
 // Гейт продолжения хода: одна continue-досылка на ход (аналог stop_hook_active в Claude Code),
 // чтобы не выстроить лестницу в потолок. Обнуляется на границе хода (chat.message).
 const idleContinuationSessions = new Set<string>()
+
+// ПРИСУТСТВИЕ В РЕЕСТРЕ lat-context (паритет с хуком Claude Code). Хук зовёт
+// `context agent status <binding> busy|idle` на границах хода (signal-wire-hook.sh: UserPromptSubmit
+// → busy, Stop/StopFailure → idle), fire-and-forget с `timeout 5`. У opencode этого не было, поэтому
+// `turn.last_turn_at` в реестре всегда null, а лаунчер читает его как якорь границы хода (задача 886fd7be).
+// Гейт по KIBEROS_BINDING_ID: у plain opencode привязки нет — no-op. Fail-open, никогда не блокирует ход.
+let _ctxBinResolved: string | null | undefined
+function resolveCtxBin(): string | null {
+  if (_ctxBinResolved !== undefined) return _ctxBinResolved
+  const home = process.env.HOME ?? homedir()
+  const dirs = [...(process.env.PATH ?? '').split(':').filter(Boolean), join(home, '.local/bin')]
+  for (const d of dirs) {
+    const cand = join(d, 'context')
+    try { if (existsSync(cand)) { _ctxBinResolved = cand; return cand } } catch { /* ignore */ }
+  }
+  _ctxBinResolved = null
+  return null
+}
+function writePresence(state: 'busy' | 'idle'): void {
+  try {
+    const binding = process.env.KIBEROS_BINDING_ID
+    if (!binding) return
+    const bin = resolveCtxBin()
+    if (!bin) return
+    const args = ['agent', 'status', binding, state]
+    const project = process.env.KIBEROS_PROJECT_SLUG
+    if (project) args.push('--project', project)
+    const child = spawn('timeout', ['5', bin, ...args], { detached: true, stdio: 'ignore' })
+    // `timeout` не найден — зовём бинарь напрямую (fail-open).
+    child.on('error', () => { try { spawn(bin, args, { detached: true, stdio: 'ignore' }).unref() } catch { /* ignore */ } })
+    child.unref()
+  } catch { /* fail-open */ }
+}
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
@@ -759,6 +793,8 @@ export default {
         if (eventType === 'session.idle' && signalWireEngine) {
           const idleSession = sessionFromEvent(event).id ?? boundSessionId ?? undefined
           if (idleSession) {
+            // Присутствие: конец хода (паритет с Stop → idle у claude).
+            writePresence('idle')
             try {
               // Канал `agent_text` на конце хода: проза ТОГО ЖЕ хода (та же, что копится из
               // `message.part.delta`). Читаем через `peek`, НЕ `take`: границу хода обнуляет
@@ -906,6 +942,8 @@ export default {
         if (eventType === 'session.error' && signalWireEngine) {
           const serr = errorFromSessionError(event)
           if (serr && (!boundSessionId || serr.sessionId === boundSessionId)) {
+            // Присутствие: ход оборван ошибкой — тоже конец хода (паритет с StopFailure → idle).
+            writePresence('idle')
             try {
               await signalWireEngine.evaluateHook({
                 source: 'plugin',
@@ -1077,6 +1115,8 @@ export default {
             textPartIdsBySession.delete(event.sessionId)
             // Граница хода: гейт продолжения снимается — новый ход вправе получить свою досылку.
             idleContinuationSessions.delete(event.sessionId)
+            // Присутствие в реестре: ход начался (паритет с UserPromptSubmit → busy у claude).
+            writePresence('busy')
             if (prevProse) {
               const payload = event.payload as { channels?: Record<string, string> }
               payload.channels = { ...(payload.channels ?? {}), agent_text: prevProse }

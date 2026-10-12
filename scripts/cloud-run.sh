@@ -14,6 +14,7 @@
 #   CLAUDE_CLOUD_WRAPPER   путь к обёртке (по умолчанию scripts/claude-cloud.sh рядом с проектом)
 #   CLAUDE_CLOUD_REGISTRY  файл реестра (по умолчанию ~/.claude/cloud-sessions.log)
 #   CLAUDE_CLOUD_TIMEOUT   сколько секунд ждать session_id (по умолчанию 240)
+#   CLAUDE_CLOUD_MODEL     модель облака (по умолчанию `opus` = Opus 5.5)
 #
 # ВАЖНО: запуск (--cloud) ветку не меняет; читать/продолжать надо `--teleport` — и ТОЛЬКО
 # из отдельного worktree (он переключает ветку), см. оговорку в RECON.md.
@@ -22,6 +23,9 @@ set -euo pipefail
 WRAP="${CLAUDE_CLOUD_WRAPPER:-/home/relishev/projects/vibe/claude-code-sdk/scripts/claude-cloud.sh}"
 REG="${CLAUDE_CLOUD_REGISTRY:-$HOME/.claude/cloud-sessions.log}"
 TIMEOUT="${CLAUDE_CLOUD_TIMEOUT:-240}"
+# Модель облака — Opus 5.5 (слово фаундера 12.10: «последняя модель, которая у них есть»).
+# Алиас `opus` указывает на latest opus = 5.5; переопределяется CLAUDE_CLOUD_MODEL.
+MODEL="${CLAUDE_CLOUD_MODEL:-opus}"
 
 DIR="$PWD"
 ORG=""
@@ -46,6 +50,7 @@ tmux resize-window -t "$SESSION" -x 220 -y 50 2>/dev/null || true
 # Обёртка принимает --org (свой CLAUDE_CONFIG_DIR из org-vault) и пропускает флаги claude.
 WRAP_OPTS=""
 [ -n "$ORG" ] && WRAP_OPTS="--org $(printf '%q' "$ORG")"
+[ -n "$MODEL" ] && WRAP_OPTS="$WRAP_OPTS --model $(printf '%q' "$MODEL")"
 [ -n "$BYPASS" ] && WRAP_OPTS="$WRAP_OPTS --dangerously-skip-permissions"
 tmux send-keys -t "$SESSION" "cd $(printf '%q' "$DIR") && $(printf '%q' "$WRAP") $WRAP_OPTS --cloud $(printf '%q' "$TASK")" Enter
 

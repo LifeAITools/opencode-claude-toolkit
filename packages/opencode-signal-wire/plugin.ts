@@ -757,12 +757,17 @@ export default {
           const idleSession = sessionFromEvent(event).id ?? boundSessionId ?? undefined
           if (idleSession) {
             try {
+              // Канал `agent_text` на конце хода: проза ТОГО ЖЕ хода (та же, что копится из
+              // `message.part.delta`). Читаем через `peek`, НЕ `take`: границу хода обнуляет
+              // `chat.message`, и если обнулить здесь, следующий ход останется без прозы
+              // предыдущего — а она нужна правилу на `chat.message` (agent-claims-continue).
+              const idleProse = peekAgentProse(assistantProseBySession, idleSession)
               const results = await signalWireEngine.evaluateHook({
                 source: 'plugin',
                 type: 'session.idle',
                 sessionId: idleSession,
                 timestamp: Date.now(),
-                payload: {},
+                payload: idleProse ? { channels: { agent_text: idleProse } } : {},
               })
               const hintsNotDelivered = results.filter((r: any) =>
                 r?.success && r?.hintText && (r.type === 'hint' || r.type === 'respond' || (r.type === 'exec' && r.inject === true)),

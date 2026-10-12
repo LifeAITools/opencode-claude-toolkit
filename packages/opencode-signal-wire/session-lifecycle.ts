@@ -203,6 +203,36 @@ export function streamDeltaFromPartUpdated(event: any): StreamDelta | null {
 }
 
 /**
+ * Регистрация ТЕКСТОВОЙ части из `message.part.updated` (opencode 1.19.0).
+ *
+ * Почему нужна отдельная регистрация: в 1.19.0 дельта стрима едет ОТДЕЛЬНЫМ событием
+ * `message.part.delta` (`{sessionID, messageID, partID, field, delta}`), а у
+ * `message.part.updated` поля `delta` нет вовсе — только сама часть. Тип части (`text` /
+ * `reasoning` / …) знает ТОЛЬКО `part.updated`, поэтому текстовые части регистрируем здесь,
+ * а их дельты принимаем из `part.delta` по `partID`. Иначе рассуждения агента попали бы в
+ * канал `agent_text` и правила по прозе срабатывали бы на внутреннюю речь.
+ */
+export function textPartFromPartUpdated(event: any): { sessionId: string; partId: string } | null {
+  if (event?.type !== 'message.part.updated') return null
+  const part = event?.properties?.part
+  if (!part || part.type !== 'text') return null
+  if (typeof part.id !== 'string' || !part.id) return null
+  if (typeof part.sessionID !== 'string' || !part.sessionID) return null
+  return { sessionId: part.sessionID, partId: part.id }
+}
+
+/** Дельта текста из `message.part.delta` (opencode 1.19.0): `properties.delta` — сам кусок. */
+export function textDeltaFromPartDelta(event: any): { sessionId: string; partId: string; text: string } | null {
+  if (event?.type !== 'message.part.delta') return null
+  const p = event?.properties
+  if (!p) return null
+  if (typeof p.sessionID !== 'string' || !p.sessionID) return null
+  if (typeof p.partID !== 'string' || !p.partID) return null
+  if (typeof p.delta !== 'string' || !p.delta) return null
+  return { sessionId: p.sessionID, partId: p.partID, text: p.delta }
+}
+
+/**
  * Конец сообщения: message.updated ассистента с time.completed.
  * Обрыв (abort) такого события не даёт — end не зовётся, «замолчал» отличим.
  */

@@ -43,7 +43,7 @@ import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
 import { createModelWindowResolver, modelFromMessageEvent, usageFromMessageEvent } from './context-usage'
-import { answeredFromPermissionReplied, askedFromPermissionUpdated, appendAgentProse, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, peekAgentProse, retryFromSessionStatus, streamDeltaFromPartUpdated, takeAgentProse } from './session-lifecycle'
+import { answeredFromPermissionReplied, askedFromPermissionUpdated, appendAgentProse, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, peekAgentProse, retryFromSessionStatus, streamDeltaFromPartUpdated, takeAgentProse, textDeltaFromPartDelta, textPartFromPartUpdated } from './session-lifecycle'
 import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
@@ -73,6 +73,10 @@ const streamTracer = new StreamTracer({ harness: 'opencode' })
 // последнюю прозу ассистента к событию — `chat.message` несёт прозу ПРЕДЫДУЩЕГО хода,
 // `tool.after` текущего. Ключ — сессия; чтение на `chat.message` обнуляет (граница хода).
 const assistantProseBySession = new Map<string, string>()
+// Реестр ТЕКСТОВЫХ частей по сессии: `message.part.updated` сообщает тип части (текстовая
+// она или рассуждение), `message.part.delta` — только partID. Дельту принимаем, лишь если
+// partID зарегистрирован как текстовая часть, иначе проза агента засорится рассуждениями.
+const textPartIdsBySession = new Map<string, Set<string>>()
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
 // Лимиты поставщиков — не чаще раза в 10 минут: это внешняя сеть за деньги чужих дверей.
@@ -832,11 +836,31 @@ export default {
         // ─── PRP 09: след потока (текстовые дельты → end) ───
         // Только своя сессия. Конец — message.updated с time.completed; обрыв
         // такого события не даёт — end не зовётся, «замолчал» отличим.
-        if (eventType === 'message.part.updated' || eventType === 'message.updated') {
+        //
+        // opencode 1.19.0: дельта текста приезжает ОТДЕЛЬНЫМ событием `message.part.delta`
+        // (`properties.delta`), а `message.part.updated` несёт только саму часть — поля `delta`
+        // в нём НЕТ вовсе. Прежний код ждал `delta` внутри `part.updated`, такого события не
+        // бывает → след (и вместе с ним канал `agent_text`) молчал всегда. Тип части знает лишь
+        // `part.updated`: текстовые регистрируем там, их дельты принимаем из `part.delta`.
+        if (eventType === 'message.part.updated' || eventType === 'message.part.delta' || eventType === 'message.updated') {
           try {
             if (eventType === 'message.part.updated') {
+              const tp = textPartFromPartUpdated(event)
+              if (tp && (!boundSessionId || tp.sessionId === boundSessionId)) {
+                let set = textPartIdsBySession.get(tp.sessionId)
+                if (!set) { set = new Set(); textPartIdsBySession.set(tp.sessionId, set) }
+                set.add(tp.partId)
+              }
+              // Совместимость: часть с готовой дельтой приходит так не во всех версиях.
               const d = streamDeltaFromPartUpdated(event)
               if (d && (!boundSessionId || d.sessionId === boundSessionId)) {
+                streamTracer.delta(d.sessionId, d.text)
+                appendAgentProse(assistantProseBySession, d.sessionId, d.text)
+              }
+            } else if (eventType === 'message.part.delta') {
+              const d = textDeltaFromPartDelta(event)
+              const known = d ? textPartIdsBySession.get(d.sessionId) : undefined
+              if (d && known?.has(d.partId) && (!boundSessionId || d.sessionId === boundSessionId)) {
                 streamTracer.delta(d.sessionId, d.text)
                 // Копим прозу хода для канала `agent_text` (см. assistantProseBySession).
                 appendAgentProse(assistantProseBySession, d.sessionId, d.text)
@@ -1020,6 +1044,8 @@ export default {
           // и отдаём на входе нового хода, затем обнуляем — граница хода.
           if (event.sessionId) {
             const prevProse = takeAgentProse(assistantProseBySession, event.sessionId)
+            // Граница хода: реестр текстовых частей тоже обнуляем — его partID живут в пределах хода.
+            textPartIdsBySession.delete(event.sessionId)
             if (prevProse) {
               const payload = event.payload as { channels?: Record<string, string> }
               payload.channels = { ...(payload.channels ?? {}), agent_text: prevProse }

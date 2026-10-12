@@ -153,3 +153,35 @@ describe('повтор хода (PRP 10: session.status → session.retry)', () 
     expect(retryFromSessionStatus({ type: 'session.status', properties: { status: { type: 'retry', attempt: 1 } } })).toBeNull()
   })
 })
+
+describe('канал agent_text в opencode 1.19.0 (part.delta + регистрация типа части)', () => {
+  test('текстовая часть регистрируется по part.updated; рассуждение и прочие — нет', async () => {
+    const m = await import('./session-lifecycle')
+    expect(m.textPartFromPartUpdated({
+      type: 'message.part.updated',
+      properties: { sessionID: 'ses_s', part: { id: 'prt_1', type: 'text', sessionID: 'ses_s', messageID: 'm', text: 'иду' } },
+    })).toEqual({ sessionId: 'ses_s', partId: 'prt_1' })
+    // Рассуждение — НЕ текст агента (иначе правила по прозе ловят внутреннюю речь).
+    expect(m.textPartFromPartUpdated({
+      type: 'message.part.updated',
+      properties: { sessionID: 'ses_s', part: { id: 'prt_2', type: 'reasoning', sessionID: 'ses_s', messageID: 'm', text: 'думаю' } },
+    })).toBeNull()
+    // Нет id части или чужое событие — null.
+    expect(m.textPartFromPartUpdated({
+      type: 'message.part.updated', properties: { sessionID: 'ses_s', part: { type: 'text', sessionID: 'ses_s' } },
+    })).toBeNull()
+    expect(m.textPartFromPartUpdated({ type: 'message.part.delta', properties: { sessionID: 's', partID: 'p', delta: 'x' } })).toBeNull()
+  })
+
+  test('дельта берётся из part.delta (свойства SDK 1.19.0)', async () => {
+    const m = await import('./session-lifecycle')
+    expect(m.textDeltaFromPartDelta({
+      type: 'message.part.delta',
+      properties: { sessionID: 'ses_s', messageID: 'm', partID: 'prt_1', field: 'text', delta: ' дальше' },
+    })).toEqual({ sessionId: 'ses_s', partId: 'prt_1', text: ' дальше' })
+    // Пустая дельта, нет partID, чужое событие — null.
+    expect(m.textDeltaFromPartDelta({ type: 'message.part.delta', properties: { sessionID: 's', partID: 'p', delta: '' } })).toBeNull()
+    expect(m.textDeltaFromPartDelta({ type: 'message.part.delta', properties: { sessionID: 's', delta: 'x' } })).toBeNull()
+    expect(m.textDeltaFromPartDelta({ type: 'message.part.updated', properties: { sessionID: 's', partID: 'p', delta: 'x' } })).toBeNull()
+  })
+})

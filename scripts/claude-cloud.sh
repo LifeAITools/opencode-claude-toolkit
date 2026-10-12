@@ -15,8 +15,20 @@
 #   claude-cloud --cloud "задача"          # создать облачную сессию (нужен живой TTY)
 #   claude-cloud --teleport <session-id>   # втянуть сессию к себе (нужен живой TTY)
 #   claude-cloud -p "текст" --cloud <id>   # записать в готовую сессию (TTY не нужен)
+#   claude-cloud --org <ref> --cloud "…"   # под АККАУНТОМ из org-vault (свой CLAUDE_CONFIG_DIR)
 #
+# --org <ref>: облако берёт ВХОД CLI, а не токен прокси. Этот флаг разворачивает
+# изолированный каталог конфигурации для аккаунта, чей ключ уже лежит в org-vault
+# (общий вход флота не трогается) — входить в браузере не нужно.
 set -euo pipefail
+
+if [ "${1:-}" = "--org" ]; then
+  ORG="${2:?--org требует orgId-префикс/почту/имя организации}"
+  shift 2
+  ACCOUNT="${CLAUDE_CLOUD_ACCOUNT:-$(dirname "$0")/cloud-account.sh}"
+  [ -x "$ACCOUNT" ] || { echo "cloud-account.sh не найден: $ACCOUNT" >&2; exit 2; }
+  export CLAUDE_CONFIG_DIR="$("$ACCOUNT" "$ORG")"
+fi
 
 CFG="${CLAUDE_CLOUD_SETTINGS:-$HOME/.claude/cloud-settings.json}"
 if [ ! -f "$CFG" ]; then

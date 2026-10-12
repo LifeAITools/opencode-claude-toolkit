@@ -28,6 +28,7 @@
     }
   },
   "devDependencies": {
+    "@opencode/plugin": "2.0.27",
     "@types/bun": "latest",
     "solid-js": "^1.8.0",
     "typescript": "^5.8.0"

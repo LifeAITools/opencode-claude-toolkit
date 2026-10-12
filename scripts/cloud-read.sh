@@ -39,7 +39,9 @@ done
 # Отдельное дерево для teleport: в живом оно переключило бы ветку чужой работе.
 if [ -n "$REPO" ] && git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
   DEST="$(mktemp -d /tmp/cloud-read-XXXXXX)"
-  git -C "$REPO" worktree add -f --detach "$DEST" HEAD >/dev/null 2>&1 || { echo "worktree не создался" >&2; exit 3; }
+  # Ветка ИМЕНОВАННАЯ, не detached: teleport чекаутит ветку сессии — детальный HEAD мешает.
+  git -C "$REPO" worktree add -f -b "cloud-read-$(date +%s)-$$" "$DEST" HEAD >/dev/null 2>&1 \
+    || { echo "worktree не создался" >&2; exit 3; }
 else
   DEST="$(mktemp -d /tmp/cloud-read-XXXXXX)"
 fi

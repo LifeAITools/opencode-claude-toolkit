@@ -1954,3 +1954,51 @@ describe('KeepaliveEngine: предел простоя', () => {
     }
   })
 })
+
+// ─── Снятие мёртвой ветки: по ВСЕМУ реестру, а не только по eligible ──────
+//
+// Замер 01.10.2026: ветка 67305d327462:485fc8627741 (сессия f56b5d97) — последний
+// выстрел 30.09 18:04Z, дальше ни выстрела, ни снятия до 03:40Z (cacheAgeSec 32811).
+// Корень: снятие мёртвых (deadAtGate) стояло ПОСЛЕ `if (eligible.length === 0) return`
+// и судило только `eligible` — ветки, которым уже пора стрелять. Ветка, потерявшая
+// hasCacheControl (в `eligible` не попадает) или ещё не доросшая до порога, мёртвой не
+// считалась, и её префикс лежал в реестре часами, а ka-diag считал ветку живой.
+describe('KeepaliveEngine: снятие мёртвой ветки по всему реестру', () => {
+  test('ветка без cache_control с истёкшим префиксом снимается на тике (раньше жила часами)', async () => {
+    const e = mkEngine({ intervalMs: 60_000, minTokens: 100 })
+    // Без cache_control → в `eligible` (фильтр hasCacheControl) попасть не может.
+    const lk = e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'stale, no cc' }] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 }, lk)
+    expect(e._registry.get(lk)!.hasCacheControl).toBe(false)
+    // Префикс заведомо мёртв: 5m TTL − 15s margin = 285s, а тут 400s.
+    e._setLineageCacheWrittenAt(lk, Date.now() - 400_000)
+    ;(e as any).jitterMs = 0
+    e._setLastRealActivityAt(Date.now() - 400_000)
+
+    await e._tick()
+
+    // До фикса: primary===null (нет cache_control) → ранний возврат → ветка остаётся.
+    expect(e._registry.has(lk)).toBe(false)
+    e.stop()
+  })
+
+  test('живые соседи мёртвой ветки НЕ гаснут — движок не останавливается', async () => {
+    let disarm: { reason: string } | null = null
+    const e = mkEngine({ intervalMs: 60_000, minTokens: 100, onDisarmed: (info: { reason: string }) => { disarm = info } })
+    // Мёртвая: без cache_control + истёкший префикс.
+    const lkDead = e.notifyRealRequestStart('m', { messages: [{ role: 'user', content: 'dead, no cc' }] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 5000, outputTokens: 1 }, lkDead)
+    e._setLineageCacheWrittenAt(lkDead, Date.now() - 400_000)
+    // Живая: cache_control, только что прогрета (idle 0 → не пора, но ЖИВА).
+    const lkLive = e.notifyRealRequestStart('m', { system: [{ type: 'text', text: 'live sibling', cache_control: { type: 'ephemeral' } }] }, {})
+    e.notifyRealRequestComplete({ inputTokens: 9000, outputTokens: 1 }, lkLive)
+    ;(e as any).jitterMs = 0
+
+    await e._tick()
+
+    expect(e._registry.has(lkDead)).toBe(false)   // мёртвая снята
+    expect(e._registry.has(lkLive)).toBe(true)    // живая сохранена
+    expect(disarm).toBeNull()                     // движок НЕ остановлен
+    e.stop()
+  })
+})

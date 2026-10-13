@@ -1706,6 +1706,48 @@ export class KeepaliveEngine {
       return Date.now() - (st ? st.lastWarmedAt : this.lastActivityAt)
     }
 
+    // ── Мёртвые ветки снимаем по ВСЕМУ реестру, ДО любых ранних возвратов ──
+    // Раньше снятие стояло ещё ниже (`if (eligible.length===0) return`) и судило только `eligible` —
+    // ветки, которым уже пора стрелять. Ветка, потерявшая hasCacheControl (в `eligible` не попадает)
+    // или ещё не доросшая до порога, мёртвой не считалась, и её префикс лежал в реестре часами, а
+    // ka-diag считал ветку живой. Замер 01.10.2026: lineage 67305d327462:485fc8627741, cacheAgeSec 32811.
+    // Здесь судим ВЕСЬ реестр по cacheWrittenAt — ДО того, как что-либо раннее вернётся (в т.ч. до
+    // `if (!primary) return` ниже, куда упирается реестр из веток без cache_control). Живые не трогаем:
+    // полная остановка — ТОЛЬКО если после снятия в реестре не осталось ни одной ветки.
+    const deadAll: string[] = []
+    for (const e of this.registry.values()) {
+      if (e.cacheWrittenAt <= 0) continue          // возраст неизвестен — не нам решать
+      if (Date.now() - e.cacheWrittenAt >= this.ttlOfLineage(e) - this.safetyMarginMs) {
+        deadAll.push(e.lineageKey)
+      }
+    }
+    if (deadAll.length > 0) {
+      for (const key of deadAll) {
+        const e = this.registry.get(key)
+        try {
+          appendFileSync(debugLogPath(),
+            `[${new Date().toISOString()}] KA_LINEAGE_DROPPED_CACHE_DEAD pid=${process.pid} ${RUNTIME_IDENTITY}`
+            + ` lineage=${key} cacheAgeSec=${e ? Math.round((Date.now() - e.cacheWrittenAt) / 1000) : -1}`
+            + ` cacheTtlSec=${Math.round((e ? this.ttlOfLineage(e) : this.cacheTtlMs) / 1000)} regSize=${this.registry.size}`
+            + ' — снята: её префикс мёртв, выстрел был бы покупкой, а не прогревом\n')
+        } catch { /* logging best-effort */ }
+        this.registry.delete(key)
+      }
+      this.notifyRegistryChanged()
+      if (this.registry.size === 0) {
+        // Живых веток не осталось вовсе — движку больше нечего греть.
+        this.logClearDiag('cache_dead_at_fire_gate', {
+          cacheAgeMs: this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1,
+          cacheTtlMs: this.cacheTtlMs,
+          droppedLineages: deadAll.length,
+        })
+        this.clearRegistry()
+        this.stop()
+        try { this.config.onDisarmed?.({ reason: 'cache_dead_at_fire_gate', at: Date.now() }) } catch {}
+        return
+      }
+    }
+
     // Primary = heaviest cache_control entry (confirmed `main` beats `unknown`;
     // within a tier, heaviest context wins). Drives the per-tick onTick
     // countdown and the Layer 3 "nothing fireable" audit — semantics unchanged.
@@ -1749,6 +1791,7 @@ export class KeepaliveEngine {
     // греются в прежнем ритме; ветка со сроком короче шага успевает получить выстрел, пока жива.
     const dueAfterMs = (e: RegistryEntry): number =>
       Math.min(fireThresholdMs, Math.max(0, this.ttlOfLineage(e) - this.safetyMarginMs - this.tickMs))
+
     let eligible = Array.from(this.registry.values())
       .filter((e) => e.hasCacheControl)
       .map((e) => ({ entry: e, idle: lineageIdle(e) }))
@@ -1761,66 +1804,6 @@ export class KeepaliveEngine {
         return b.idle - a.idle
       })
     if (eligible.length === 0) return  // nothing due yet — onTick already emitted
-
-    // ── Каждая ветка судится по СВОИМ часам, а не по общим ────────────────
-    // Ворота ниже меряют возраст одним полем на весь движок. Это и была дыра:
-    // ход по любой ветке молодил общие часы, и выстрел уходил в префикс,
-    // умерший час назад, — то есть покупал его заново полной ценой.
-    // Замер 11.09.2026: 29 таких покупок за утро, 3 347 852 токена записи, и
-    // по 25 веткам из 29 купленное потом никто не прочитал.
-    //
-    // Мёртвую ветку СНИМАЕМ, а не глушим ею весь движок: соседние кэши той же
-    // сессии живы, и лишать их тепла из-за одной забытой ветки — та самая
-    // потеря, ради которой ворота и ставились. Полная остановка — только если
-    // после отсева в РЕГИСТРЕ не осталось ни одной ветки, а не когда просто
-    // никому больше не пора стрелять.
-    const deadAtGate: string[] = []
-    for (const x of eligible) {
-      const writtenAt = x.entry.cacheWrittenAt
-      if (writtenAt <= 0) continue          // возраст неизвестен — не нам решать
-      if (Date.now() - writtenAt >= this.ttlOfLineage(x.entry) - this.safetyMarginMs) {
-        deadAtGate.push(x.entry.lineageKey)
-      }
-    }
-    if (deadAtGate.length > 0) {
-      for (const key of deadAtGate) {
-        const e = this.registry.get(key)
-        try {
-          appendFileSync(debugLogPath(),
-            `[${new Date().toISOString()}] KA_LINEAGE_DROPPED_CACHE_DEAD pid=${process.pid} ${RUNTIME_IDENTITY}`
-            + ` lineage=${key} cacheAgeSec=${e ? Math.round((Date.now() - e.cacheWrittenAt) / 1000) : -1}`
-            + ` cacheTtlSec=${Math.round((e ? this.ttlOfLineage(e) : this.cacheTtlMs) / 1000)} regSize=${this.registry.size}`
-            + ' — снята: её префикс мёртв, выстрел был бы покупкой, а не прогревом\n')
-        } catch { /* logging best-effort */ }
-        this.registry.delete(key)
-      }
-      this.notifyRegistryChanged()
-      const survivors = new Set(this.registry.keys())
-      eligible = eligible.filter((x) => survivors.has(x.entry.lineageKey))
-      if (eligible.length === 0 && this.registry.size > 0) {
-        // К выстрелу подошла только мёртвая ветка, но в регистре остались
-        // ЖИВЫЕ — им просто ещё рано. Их не трогаем: ждём следующего тика.
-        // До 1.1.27 здесь стояло одно `eligible.length === 0`, и «никто не
-        // подошёл к выстрелу сейчас» читалось как «никто не жив»: 30.09
-        // kiberos-app потерял главную ветку с 48 минутами жизни кэша вместе с
-        // мёртвой соседкой, и через полтора часа сторож остановил его на
-        // перезаписи ~472 тыс. токенов (замер vibe-telegram-mcp-service-owner).
-        return
-      }
-      if (eligible.length === 0) {
-        // Живых веток не осталось вовсе — дальше прежний путь: движок
-        // замолкает и называет причину, как и раньше.
-        this.logClearDiag('cache_dead_at_fire_gate', {
-          cacheAgeMs: this.cacheWrittenAt > 0 ? Date.now() - this.cacheWrittenAt : -1,
-          cacheTtlMs: this.cacheTtlMs,
-          droppedLineages: deadAtGate.length,
-        })
-        this.clearRegistry()
-        this.stop()
-        try { this.config.onDisarmed?.({ reason: 'cache_dead_at_fire_gate', at: Date.now() }) } catch {}
-        return
-      }
-    }
 
     // ── Last gate before spending: is the cache we are about to refresh still
     // alive AT ALL? ──────────────────────────────────────────────────────

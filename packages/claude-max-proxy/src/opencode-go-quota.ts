@@ -26,6 +26,27 @@ import { CLAUDE_LOCAL, classifyLevel } from './quota-paths.js'
 export const QUOTA_STATUS_OPENCODE_GO_JSON = join(CLAUDE_LOCAL, 'quota-status-opencode-go.json')
 export const GO_MODELS_URL = 'https://opencode.ai/zen/go/v1/models'
 
+/** Мост ИМЯ→uid организации. Реестр организаций (SynqTask: `todo_members orgs`) по HTTP
+ * недоступен, а потребителю (lat-context) надо склеить `member.orgUid` с записью `orgs[]`
+ * по имени — иначе подвал агента не может показать ОРГ АГЕНТА (жалоба фаундера 13.10).
+ * Файл — типизированный конфиг ({ "console-personal": "<uid>", ... }); нет его — {} и НЕ
+ * выдумываем: потребитель падает на прежний выбор (активную), и это видно, а не врёт. */
+export const ORG_UIDS_JSON =
+  process.env.OPENCODE_GO_ORG_UIDS ?? join(CLAUDE_LOCAL, 'opencode-go-org-uids.json')
+
+export function readOrgUids(path: string): Record<string, string> {
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    const out: Record<string, string> = {}
+    for (const [name, uid] of Object.entries(raw)) {
+      if (typeof uid === 'string' && uid) out[name] = uid
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 export interface GoWindowUsage {
   status?: unknown
   percent?: unknown
@@ -177,8 +198,11 @@ export function buildGoQuotaStatus(input: {
    * а не активную. Без этого подвал для агента на неактивной орг показывал чужие числа
    * (жалоба фаундера 13.10: сверяет Березовскую, а подвал давал активную). */
   orgs?: GoOrgStatus[]
+  /** Имя→uid: `member.orgUid` — это SynqTask-uid, а в `orgs[]` лежат только ИМЕНА.
+   * Мост обязателен, иначе лат-контекст не сопоставит орг агента с записью. */
+  orgUids?: Record<string, string>
 }): Record<string, unknown> {
-  const { usage, error, org, active, accountHint, models, modelsSource, measuredAt, orgs } = input
+  const { usage, error, org, active, accountHint, models, modelsSource, measuredAt, orgs, orgUids } = input
   const base = {
     version: 1,
     provider: 'opencode-go',
@@ -217,6 +241,8 @@ export function buildGoQuotaStatus(input: {
     const lng = o7 === null ? oM : oM === null ? o7 : Math.max(o7, oM)
     return {
       name: o.name,
+      // uid — мост к `member.orgUid`; нет в карте — поля нет (потребитель не выдумывает).
+      ...(orgUids?.[o.name] ? { uid: orgUids[o.name] } : {}),
       active: o.active === true,
       util5h: o5 === null ? null : o5 / 100,
       util7d: o7 === null ? null : o7 / 100,
@@ -304,6 +330,7 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
     modelsSource: [sub.source, litellmSource].join('; '),
     measuredAt,
     orgs: registry?.orgs,
+    orgUids: readOrgUids(ORG_UIDS_JSON),
   })
   writeAtomic(opts.outPath, status)
   return status

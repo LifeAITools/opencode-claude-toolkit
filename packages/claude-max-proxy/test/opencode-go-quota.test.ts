@@ -156,3 +156,29 @@ describe('сборка целиком (без сети)', () => {
     expect(readGoKey('/nonexistent/auth.json')).toBeNull()
   })
 })
+
+describe('мост имя→uid (member.orgUid ↔ orgs[])', () => {
+  test('uid проставляется по имени; имя вне карты — поля нет', () => {
+    const s: any = buildGoQuotaStatus({
+      usage: LIVE, error: null, org: 'console-berezovskaya', active: true,
+      accountHint: 'console-berezovskaya', models: [], modelsSource: '', measuredAt: AT,
+      orgs: [
+        { name: 'console-berezovskaya', active: true, usage: LIVE },
+        { name: 'unknown-org', active: false, usage: LIVE },
+      ],
+      orgUids: { 'console-berezovskaya': '5dfa97f6-84bd-4d5e-b1fc-9755d13ef4e8' },
+    })
+    expect(s.orgs[0].uid).toBe('5dfa97f6-84bd-4d5e-b1fc-9755d13ef4e8')
+    // Нет в карте — НЕ выдумываем uid (потребитель тогда падает на прежний выбор).
+    expect('uid' in s.orgs[1]).toBe(false)
+  })
+
+  test('карты нет вовсе → uid нет ни у кого', () => {
+    const s: any = buildGoQuotaStatus({
+      usage: LIVE, error: null, org: 'x', active: true,
+      accountHint: 'x', models: [], modelsSource: '', measuredAt: AT,
+      orgs: [{ name: 'x', active: true, usage: LIVE }],
+    })
+    expect('uid' in s.orgs[0]).toBe(false)
+  })
+})

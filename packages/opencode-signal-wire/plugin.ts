@@ -305,12 +305,15 @@ function eventPayloadOf(event: any): any {
   return event?.properties ?? event?.payload ?? event?.data ?? event
 }
 
-function sessionFromEvent(event: any): { id?: string; directory?: string } {
+function sessionFromEvent(event: any): { id?: string; directory?: string; parentID?: string | null } {
   const payload = eventPayloadOf(event)
   const session = payload?.session ?? payload
   return {
     id: session?.id ?? payload?.sessionID ?? payload?.sessionId,
     directory: session?.directory ?? payload?.directory,
+    // parentID — чтобы отличить СОБСТВЕННУЮ сессию процесса от дитя-под-агента: дитя не должно
+    // перехватывать привязку у родителя (opencode отдаёт parentID в session.list/get).
+    parentID: session?.parentID ?? session?.parent_id ?? session?.parentId ?? payload?.parentID ?? null,
   }
 }
 
@@ -555,11 +558,20 @@ export default {
     let wakeHandle: WakeListenerHandle | null = null
     let boundSessionId = sessionId !== 'unknown' ? sessionId : null
 
-    const bindSession = (candidateSessionId: string, reason: string, directory?: string) => {
+    const bindSession = (candidateSessionId: string, reason: string, directory?: string, parentID?: string | null) => {
       if (!candidateSessionId) return false
       if (boundSessionId && boundSessionId !== candidateSessionId) {
-        logStep('SESSION_BIND_SKIPPED', { reason: 'already_bound', existing: boundSessionId, candidate: candidateSessionId })
-        return false
+        // 🔴 ПЕРЕПРИВЯЗКА, А НЕ ОТКАЗ (замер 13.10, инцидент открыл packages-signal-wire-core-owner).
+        // Процесс opencode ПЕРЕЖИВАЕТ сессию: под ним поднимается НОВАЯ, а прежний bind-once отвергал её
+        // — в журнале `SESSION_BIND_SKIPPED already_bound` (8 раз против 1277 привязок за сутки) — и
+        // события новой сессии клались на СТАРУЮ. Следствие: реестр видел не больную сессию, и красный
+        // у vibe-telegram-mcp-service-owner не зажигался. Теперь следуем ЗА АКТИВНОЙ сессией процесса.
+        // Дитя (parentID) привязку у родителя НЕ ворует — под-агент не должен становиться лицом процесса.
+        if (parentID) {
+          logStep('SESSION_BIND_SKIPPED', { reason: 'candidate_is_child', existing: boundSessionId, candidate: candidateSessionId, parentID })
+          return false
+        }
+        logStep('SESSION_REBOUND', { reason, existing: boundSessionId, candidate: candidateSessionId })
       }
       if (!process.env.OPENCODE_AGENT_INSTANCE_ID && agentInstanceId.includes(':unknown:')) {
         agentInstanceId = `opencode:${candidateSessionId}:${process.pid}`
@@ -773,7 +785,7 @@ export default {
         if (eventType === 'session.created' || eventType === 'session.updated') {
           const session = sessionFromEvent(event)
           if (session.id && (!session.directory || session.directory === cwd)) {
-            bindSession(session.id, eventType, session.directory)
+            bindSession(session.id, eventType, session.directory, session.parentID)
           } else {
             logStep('SESSION_BIND_SKIPPED', {
               eventType,

@@ -40,12 +40,6 @@ import {
 } from './hook-listener'
 import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
-
-// 🔬 LOAD MARKER (temporary, 2026-10-13) — proves WHICH plugin.ts opencode actually loads.
-// The b5d87e9e delivery fix is in THIS file, yet two independent live poles still behaved like
-// the pre-fix module (rule fires, no CONTINUATION_* line at all). This marker settles whether
-// that is a stale module or something else. Remove once the mystery is closed.
-console.error('[sw-plugin-load] opencode-signal-wire/plugin.ts marker=idle-cont-via-input-client-20261013')
 import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'

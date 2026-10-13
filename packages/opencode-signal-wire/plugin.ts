@@ -824,11 +824,6 @@ export default {
                 r?.success && r?.hintText && (r.type === 'hint' || r.type === 'respond' || (r.type === 'exec' && r.inject === true)),
               )
               logStep('SESSION_IDLE_EVALUATED', { sessionId: idleSession, results: results.length, hintsNotDelivered: hintResults.length })
-              // 🔴 ВХОД ВЕТКИ НАЗЫВАЕТ СЕБЯ (передано vibe-claude-code-sdk-owner 13.10): ветка не
-              // логировала ни SENT, ни NO_CLIENT даже при hints>0 — значит её обошло условие ниже
-              // (Set уже содержит сеанс). За один прогон скажет, вход или Set. Снять вместе с
-              // меткой [sw-plugin-load] при закрытии.
-              logStep('SESSION_IDLE_CONTINUATION_ENTER', { sessionId: idleSession, hints: hintResults.length, has: idleContinuationSessions.has(idleSession) })
               // Доставка continue-подобно (аналог `Stop` + `continue:true` в Claude Code): досылаем
               // подсказку БЕЗ `noReply`, чтобы агент начал ход и ДОДЕЛАЛ СЕЙЧАС, а не прочитал её на
               // следующем ходу (ровно та поздняя поимка, от которой уходим). Узость с двух сторон:

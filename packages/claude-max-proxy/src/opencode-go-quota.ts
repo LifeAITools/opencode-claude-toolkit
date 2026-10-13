@@ -173,8 +173,12 @@ export function buildGoQuotaStatus(input: {
   models: string[]
   modelsSource: string
   measuredAt: Date
+  /** 🔴 ВСЕ организации реестра с их окнами — чтобы потребитель показал ОРГАНИЗАЦИЮ АГЕНТА,
+   * а не активную. Без этого подвал для агента на неактивной орг показывал чужие числа
+   * (жалоба фаундера 13.10: сверяет Березовскую, а подвал давал активную). */
+  orgs?: GoOrgStatus[]
 }): Record<string, unknown> {
-  const { usage, error, org, active, accountHint, models, modelsSource, measuredAt } = input
+  const { usage, error, org, active, accountHint, models, modelsSource, measuredAt, orgs } = input
   const base = {
     version: 1,
     provider: 'opencode-go',
@@ -204,8 +208,26 @@ export function buildGoQuotaStatus(input: {
   const windows = [win('5h', usage.rolling, util5h), win('week', usage.weekly, util7d), win('month', usage.monthly, utilMonth)]
     .filter((w) => w.util !== null)
   const pc = (v: number) => (Math.round(v * 1000) / 10) + '%'
+  // 🔴 ОКНА ВСЕХ ОРГАНИЗАЦИЙ — отдельным списком: потребитель (подвал агента) берёт ту,
+  // на которой агент РАБОТАЕТ (по orgUid/имени), а не «активную». Активная остаётся в base
+  // для обратной совместимости.
+  const perOrg = (orgs ?? []).map((o) => {
+    const u = (o.usage ?? {}) as GoUsage
+    const o5 = pct(u.rolling), o7 = pct(u.weekly), oM = pct(u.monthly)
+    const lng = o7 === null ? oM : oM === null ? o7 : Math.max(o7, oM)
+    return {
+      name: o.name,
+      active: o.active === true,
+      util5h: o5 === null ? null : o5 / 100,
+      util7d: o7 === null ? null : o7 / 100,
+      utilMonth: oM === null ? null : oM / 100,
+      level: classifyLevel(o5 === null ? null : o5 / 100, lng === null ? null : lng / 100),
+      windows: [win('5h', u.rolling, o5), win('week', u.weekly, o7), win('month', u.monthly, oM)].filter((w) => w.util !== null),
+    }
+  })
   return {
     ...base,
+    orgs: perOrg,
     accounts: {
       [accountHint]: {
         accountHint,
@@ -281,6 +303,7 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
     models,
     modelsSource: [sub.source, litellmSource].join('; '),
     measuredAt,
+    orgs: registry?.orgs,
   })
   writeAtomic(opts.outPath, status)
   return status

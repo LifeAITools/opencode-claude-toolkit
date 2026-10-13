@@ -152,12 +152,24 @@ export async function goSubscriptionModels(
  * Читаются только имена моделей и адреса (ключей не касаемся).
  */
 export function litellmGoAliases(litellmConfig: unknown): string[] {
-  const models = (litellmConfig as { model_list?: Array<{ model_name?: unknown; litellm_params?: { api_base?: unknown } }> })?.model_list
+  const models = (litellmConfig as {
+    model_list?: Array<{ model_name?: unknown; litellm_params?: { api_base?: unknown; litellm_credential_name?: unknown } }>
+  })?.model_list
   if (!Array.isArray(models)) return []
   const out: string[] = []
   for (const m of models) {
     const base = m?.litellm_params?.api_base
-    if (typeof base === 'string' && base.includes('opencode.ai/zen/go') && typeof m?.model_name === 'string' && m.model_name) {
+    const cred = m?.litellm_params?.litellm_credential_name
+    // 🔴 TWO DOORS INTO THE SAME SET OF GO ALIASES. (1) `api_base` pointing at zen/go — the direct
+    // aliases. (2) the Go credential entry `opencode-go-active` — our kiberos-app aliases carry
+    // `litellm_credential_name` INSTEAD of api_base, because the orgs have DIFFERENT bases
+    // (console-* → .../go/openai/v1, apikey-founder → .../zen/go/v1); pinning one api_base here
+    // would break the per-org route. Without (2) `deepseek-v4.1-flash-go` never entered models[]
+    // and every agent's presence row got no quota (founder, 2026-10-13).
+    const isGo =
+      (typeof base === 'string' && base.includes('opencode.ai/zen/go')) ||
+      (typeof cred === 'string' && cred === 'opencode-go-active')
+    if (isGo && typeof m?.model_name === 'string' && m.model_name) {
       out.push(m.model_name)
     }
   }

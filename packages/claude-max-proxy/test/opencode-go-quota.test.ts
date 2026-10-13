@@ -117,6 +117,19 @@ describe('чьи модели', () => {
     expect(litellmGoAliases(cfg).sort()).toEqual(['deepseek-v4.1-flash-go', 'muse-spark-1.3-contributor'])
     expect(litellmGoAliases({})).toEqual([])
   })
+
+  test('алиасы LiteLLM — и по litellm_credential_name (наши kiberos-app), без api_base', () => {
+    const cfg = {
+      model_list: [
+        { model_name: 'deepseek-v4.1-flash-go', litellm_params: { litellm_credential_name: 'opencode-go-active' } },
+        { model_name: 'muse-spark-1.3-contributor', litellm_params: { litellm_credential_name: 'opencode-go-active' } },
+        { model_name: 'muse-spark-1.3-contributor', litellm_params: { litellm_credential_name: 'other-cred' } },
+        { model_name: 'deepseek-v4.1-flash', litellm_params: { litellm_credential_name: 'dashscope' } },
+      ],
+    }
+    // Наш go-алиас несёт litellm_credential_name (api_base нельзя — у орг РАЗНЫЕ базы).
+    expect(litellmGoAliases(cfg).sort()).toEqual(['deepseek-v4.1-flash-go', 'muse-spark-1.3-contributor'])
+  })
 })
 
 describe('сборка целиком (без сети)', () => {

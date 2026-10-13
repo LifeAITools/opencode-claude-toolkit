@@ -40,6 +40,12 @@ import {
 } from './hook-listener'
 import { startQuotaWatcher, type QuotaWatcherHandle } from './quota-watcher'
 import { getBoundSdk, setCurrentSignalWire } from './token-rotation-bridge'
+
+// 🔬 LOAD MARKER (temporary, 2026-10-13) — proves WHICH plugin.ts opencode actually loads.
+// The b5d87e9e delivery fix is in THIS file, yet two independent live poles still behaved like
+// the pre-fix module (rule fires, no CONTINUATION_* line at all). This marker settles whether
+// that is a stale module or something else. Remove once the mystery is closed.
+console.error('[sw-plugin-load] opencode-signal-wire/plugin.ts marker=idle-cont-via-input-client-20261013')
 import { WAKE_ROOT, AGENT_IDENTITY_DIR } from './domain-constants'
 import { sessionFromArgv } from './session-argv'
 import { isOneShotRun } from './launch-kind'
@@ -824,6 +830,11 @@ export default {
                 r?.success && r?.hintText && (r.type === 'hint' || r.type === 'respond' || (r.type === 'exec' && r.inject === true)),
               )
               logStep('SESSION_IDLE_EVALUATED', { sessionId: idleSession, results: results.length, hintsNotDelivered: hintResults.length })
+              // 🔴 ВХОД ВЕТКИ НАЗЫВАЕТ СЕБЯ (передано vibe-claude-code-sdk-owner 13.10): ветка не
+              // логировала ни SENT, ни NO_CLIENT даже при hints>0 — значит её обошло условие ниже
+              // (Set уже содержит сеанс). За один прогон скажет, вход или Set. Снять вместе с
+              // меткой [sw-plugin-load] при закрытии.
+              logStep('SESSION_IDLE_CONTINUATION_ENTER', { sessionId: idleSession, hints: hintResults.length, has: idleContinuationSessions.has(idleSession) })
               // Доставка continue-подобно (аналог `Stop` + `continue:true` в Claude Code): досылаем
               // подсказку БЕЗ `noReply`, чтобы агент начал ход и ДОДЕЛАЛ СЕЙЧАС, а не прочитал её на
               // следующем ходу (ровно та поздняя поимка, от которой уходим). Узость с двух сторон:
@@ -840,15 +851,19 @@ export default {
                 if (sdk?.session?.prompt) {
                   idleContinuationSessions.add(idleSession)
                   const text = hintResults.map((r: any) => r.hintText).join('\n')
-                  try {
-                    await sdk.session.prompt({
-                      path: { id: idleSession },
-                      body: { parts: [{ type: 'text', text }] },
-                    })
-                    logStep('SESSION_IDLE_CONTINUATION_SENT', { sessionId: idleSession, hints: hintResults.length, chars: text.length })
-                  } catch (e: any) {
-                    logStep('SESSION_IDLE_CONTINUATION_FAILED', { sessionId: idleSession, error: e?.message ?? String(e) })
-                  }
+                  // 🔴 THE `await` WAS THE SILENT KILLER. The branch was ENTERED (the ENTER log says
+                  // hints=1, has=false → the `if` is true), yet no SENT/FAILED/NO_CLIENT ever
+                  // appeared — because the code awaited `session.prompt(...)` and that promise never
+                  // settled, so neither the line after it nor the catch ran, and the process ended
+                  // with the continuation pending. Log the INVOKE (proves the call is made) and fire
+                  // it WITHOUT blocking the idle handler — the handler must not hang on delivery.
+                  logStep('SESSION_IDLE_CONTINUATION_INVOKE', { sessionId: idleSession, hints: hintResults.length, chars: text.length })
+                  void sdk.session.prompt({
+                    path: { id: idleSession },
+                    body: { parts: [{ type: 'text', text }] },
+                  })
+                    .then(() => logStep('SESSION_IDLE_CONTINUATION_SENT', { sessionId: idleSession, hints: hintResults.length, chars: text.length }))
+                    .catch((e: any) => logStep('SESSION_IDLE_CONTINUATION_FAILED', { sessionId: idleSession, error: e?.message ?? String(e) }))
                 } else {
                   // Silence was the worst part of this bug: a missing/incapable client must be NAMED,
                   // not swallowed — 197 evaluations produced not a single line about it.

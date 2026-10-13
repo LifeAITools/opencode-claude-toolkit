@@ -108,7 +108,15 @@ async function forward(request: Request, model: string | undefined): Promise<Res
 
   if (streamWanted && upstreamRes.body) {
     const teed = teeUsage(upstreamRes.body, write)
-    return new Response(teed, { status: upstreamRes.status, headers: upstreamRes.headers })
+    // 🔴 fetch УЖЕ распаковал тело (gzip/deflate/br), НО заголовок `content-encoding` остаётся
+    // (замер 13.10: Bun.gzipSync + fetch → body распакован, а r.headers.get('content-encoding')='gzip').
+    // Отдать этот заголовок с распакованным телом = клиент попытается gunzip и упадёт `ZlibError`
+    // (баг бил сессии dia/context777 с 3.10). Снимаем content-encoding И content-length — они
+    // описывают УЖЕ не то тело, что мы отдаём. content-type и прочее сохраняем.
+    const outHeaders = new Headers(upstreamRes.headers)
+    outHeaders.delete('content-encoding')
+    outHeaders.delete('content-length')
+    return new Response(teed, { status: upstreamRes.status, headers: outHeaders })
   }
 
   try {

@@ -2571,6 +2571,33 @@ export class ProxyClient {
         this.credentials.invalidate()
       }
 
+      if (upstream.status === 403 && /not allowed for this organization|oauth/i.test(errText)) {
+        // 🔴 ORG-LEVEL OAuth DENIAL (2026-10-13 prod incident: 6848 refusals, first 09:03:55).
+        // Anthropic can disable OAuth for an ORGANISATION while the token is still unexpired —
+        // `FileOrgIdResolver` keeps serving it, `/health` calls it live-by-expiry, and EVERY
+        // request 403s with NO self-heal. That blindness is the defect this branch closes:
+        // recognize the org failure and mark the SERVED org needsRelogin — the same class as a
+        // refresh REVOKE — so it stops looking "alive by expiry". It only NAMES the org; it does
+        // NOT migrate a session (rail no-live-account-migration), so whether the fleet may FAIL
+        // OVER to another live org on this signal stays the founder's call.
+        const servedOrg = this.resolveServedOrg(sessionId)
+        if (servedOrg) {
+          const prev = this.orgRefreshCooldown.get(servedOrg)
+          this.orgRefreshCooldown.set(servedOrg, {
+            until: Date.now() + REVOKE_RELOGIN_COOLDOWN_MS,
+            attempts: (prev?.attempts ?? 0) + 1,
+            needsRelogin: true,
+          })
+          this.events.emit({
+            level: 'error',
+            kind: 'ORG_OAUTH_NOT_ALLOWED',
+            orgId: servedOrg,
+            sessionId,
+            msg: 'upstream 403: OAuth not allowed for this organization — org marked needsRelogin',
+          })
+        }
+      }
+
       this.events.emit({
         level: 'error',
         kind: 'REAL_REQUEST_ERROR',

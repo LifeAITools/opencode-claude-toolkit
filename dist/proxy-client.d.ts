@@ -40,6 +40,7 @@ export interface ProxyClientOptions {
 export interface HandleRequestContext {
     sessionId: string;
     sourcePid?: number | null;
+    cacheOptOut?: boolean;
     signal?: AbortSignal;
     agentId?: string | null;
     clientUserAgent?: string | null;
@@ -64,6 +65,7 @@ export declare class ProxyClient {
     private readonly store;
     private readonly upstream;
     private readonly liveness;
+    private readonly streamTracer;
     private readonly realRetryDelaysMs;
     private readonly retryCeilingMs;
     private readonly retryRandom;

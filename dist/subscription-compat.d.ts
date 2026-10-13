@@ -4,6 +4,8 @@ export type CompatEmit = (event: {
 } & Record<string, unknown>) => void;
 export declare const CACHE_OPT_OUT_HEADER = "x-claude-max-cache";
 export declare function cacheInjectionDisabled(headers: Record<string, string | undefined> | Headers | undefined): boolean;
+export declare const FOLLOW_SESSION_HEADER = "x-claude-max-follow-session";
+export declare function followSessionId(headers: Record<string, string | undefined> | Headers | undefined): string | null;
 export declare function hasAnyCacheControl(body: Record<string, unknown>): boolean;
 export declare function injectCacheMarkers(body: Record<string, unknown>): number;
 export declare function setCompatVersion(v: string): void;

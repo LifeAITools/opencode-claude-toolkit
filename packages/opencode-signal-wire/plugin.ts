@@ -830,12 +830,18 @@ export default {
               // доставляем ТОЛЬКО при непустых hint-результатах (перезарядку движок применил до выдачи
               // results) и не чаще одной досылки на ход — иначе лестница в потолок.
               if (hintResults.length > 0 && !idleContinuationSessions.has(idleSession)) {
-                const sdk = getBoundSdk()
-                if (sdk) {
+                // 🔴 THE DELIVERY SURFACE IS THE OPENCODE SDK CLIENT — `input.client`, the plugin's
+                // own server client — NOT `getBoundSdk()`. That registry is bound by
+                // opencode-claude and is NULL in this process (measured 2026-10-13:
+                // SESSION_IDLE_EVALUATED 197, CONTINUATION_SENT 0, FAILED 0 — the `if (sdk)` branch
+                // never ran, so delivery was dead from the start). The call below uses the OPENCODE
+                // shape (`session.prompt({path, body:{parts}})`) anyway, which is this client's API.
+                const sdk = (input as any)?.client
+                if (sdk?.session?.prompt) {
                   idleContinuationSessions.add(idleSession)
                   const text = hintResults.map((r: any) => r.hintText).join('\n')
                   try {
-                    await (sdk as any).session.prompt({
+                    await sdk.session.prompt({
                       path: { id: idleSession },
                       body: { parts: [{ type: 'text', text }] },
                     })
@@ -843,6 +849,12 @@ export default {
                   } catch (e: any) {
                     logStep('SESSION_IDLE_CONTINUATION_FAILED', { sessionId: idleSession, error: e?.message ?? String(e) })
                   }
+                } else {
+                  // Silence was the worst part of this bug: a missing/incapable client must be NAMED,
+                  // not swallowed — 197 evaluations produced not a single line about it.
+                  logStep('SESSION_IDLE_CONTINUATION_NO_CLIENT', {
+                    sessionId: idleSession, hasInput: !!input, hasClient: !!sdk, hasPrompt: !!sdk?.session?.prompt,
+                  })
                 }
               }
             } catch (e: any) {

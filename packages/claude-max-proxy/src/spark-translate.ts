@@ -393,12 +393,36 @@ export async function transformResponsesSSEToAnthropic(
       const send = (obj: unknown) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`))
       }
+      // 🔴 USAGE CAN ARRIVE WITH ANY EVENT, NOT ONLY `response.completed` — read it from EVERY one.
+      // A gateway that emits it early (`response.created` / `in_progress`) lets `message_start` carry
+      // the REAL input + cache counts, which is where Anthropic clients look for them. Ours reveals
+      // it only at the END (measured 2026-10-14), so `message_delta` carries it — but reading every
+      // event costs nothing and can never miss a late one.
+      const captureUsage = (ev: any) => {
+        const u = ev?.response?.usage ?? ev?.usage
+        if (!u) return
+        const c = u.input_tokens_details?.cached_tokens
+        usage = {
+          input_tokens: u.input_tokens ?? 0,
+          output_tokens: u.output_tokens ?? 0,
+          cached_tokens: typeof c === 'number' && Number.isFinite(c) && c > 0 ? Math.floor(c) : 0,
+        }
+      }
       const ensureStart = () => {
         if (started) return
         started = true
         send({
           type: 'message_start',
-          message: { id: opts.messageId, type: 'message', role: 'assistant', model: opts.model, content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } },
+          message: {
+            id: opts.messageId, type: 'message', role: 'assistant', model: opts.model, content: [], stop_reason: null,
+            // Real counts when a gateway told us before the first content; zeros otherwise (output is
+            // 0 at start and grows — its final value rides message_delta below).
+            usage: {
+              input_tokens: usage.input_tokens,
+              output_tokens: 0,
+              ...(usage.cached_tokens > 0 ? { cache_read_input_tokens: usage.cached_tokens } : {}),
+            },
+          },
         })
       }
       const closeBlock = (index: number) => {
@@ -419,6 +443,7 @@ export async function transformResponsesSSEToAnthropic(
               let ev: any
               try { ev = JSON.parse(payload) } catch { continue }
               const t = ev.type as string
+              captureUsage(ev)
               if (t === 'response.output_text.delta') {
                 ensureStart()
                 let st = items.get(ev.item_id)
@@ -452,24 +477,29 @@ export async function transformResponsesSSEToAnthropic(
                   closeBlock(st.index)
                   items.delete(item.id)
                 }
-              } else if (t === 'response.completed') {
-                const u = ev.response?.usage
-                if (u) {
-                  const c = u.input_tokens_details?.cached_tokens
-                  usage = {
-                    input_tokens: u.input_tokens ?? 0,
-                    output_tokens: u.output_tokens ?? 0,
-                    cached_tokens: typeof c === 'number' && Number.isFinite(c) && c > 0 ? Math.floor(c) : 0,
-                  }
-                }
               }
+              // (usage — including the final `response.completed` — is captured generically above)
             }
           }
         }
       } finally {
         for (const st of items.values()) closeBlock(st.index)
         items.clear()
-        send({ type: 'message_delta', delta: { stop_reason: sawToolBlock ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: usage.output_tokens } })
+        send({
+          type: 'message_delta',
+          delta: { stop_reason: sawToolBlock ? 'tool_use' : 'end_turn', stop_sequence: null },
+          // 🔴 THE FINAL COUNT CARRIES input + CACHE, not only output. Our gateway reveals usage only at
+          // `response.completed` — AFTER `message_start` must already have gone out — so `message_start`
+          // cannot carry the cache count, and THIS event is the only place it can reach a consumer that
+          // reads the stream. Measured 2026-10-14: the true cache (99.9%) lived in SPARK_COMPLETE while
+          // every Anthropic event said 0, so a downstream detector read each warm turn as a cold cache.
+          // The cache field is omitted when 0, mirroring the non-streaming branch's convention.
+          usage: {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            ...(usage.cached_tokens > 0 ? { cache_read_input_tokens: usage.cached_tokens } : {}),
+          },
+        })
         send({ type: 'message_stop' })
         try { opts.onComplete?.(usage, Date.now() - t0) } catch { /* metering must not break the stream tail */ }
         controller.close()

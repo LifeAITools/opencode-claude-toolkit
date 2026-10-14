@@ -318,6 +318,52 @@ describe('transformResponsesSSEToAnthropic', () => {
     const tail = events.find(e => e.type === 'message_delta')
     expect(tail.delta.stop_reason).toBe('tool_use')
   })
+
+  test('🔴 the cache count REACHES the stream — message_delta carries cache_read_input_tokens', async () => {
+    // The whole point of the fix (2026-10-14): the gateway reveals usage only at response.completed,
+    // so message_start — already sent by then — cannot carry the cache count, and message_delta must.
+    const upstream = makeResponsesSSE([
+      { type: 'response.output_text.delta', item_id: 'it_1', delta: 'ok' },
+      { type: 'response.output_item.done', item: { id: 'it_1', type: 'message' } },
+      { type: 'response.completed', response: { usage: { input_tokens: 2616, output_tokens: 100, input_tokens_details: { cached_tokens: 2531 } } } },
+    ])
+    const events = await collectAnthropicEvents(
+      await transformResponsesSSEToAnthropic(upstream, { messageId: 'msg_test', model: 'muse-spark-1.3-contributor' }),
+    )
+    const tail = events[events.map(e => e.type).lastIndexOf('message_delta')]
+    expect(tail.usage.cache_read_input_tokens).toBe(2531)
+    expect(tail.usage.input_tokens).toBe(2616)
+    expect(tail.usage.output_tokens).toBe(100)
+  })
+
+  test('a COLD stream omits cache_read_input_tokens (mirrors the non-streaming branch), keeps output', async () => {
+    const upstream = makeResponsesSSE([
+      { type: 'response.output_text.delta', item_id: 'it_1', delta: 'ok' },
+      { type: 'response.output_item.done', item: { id: 'it_1', type: 'message' } },
+      { type: 'response.completed', response: { usage: { input_tokens: 100, output_tokens: 50 } } },
+    ])
+    const events = await collectAnthropicEvents(
+      await transformResponsesSSEToAnthropic(upstream, { messageId: 'msg_test', model: 'muse-spark-1.3-contributor' }),
+    )
+    const tail = events[events.map(e => e.type).lastIndexOf('message_delta')]
+    expect('cache_read_input_tokens' in tail.usage).toBe(false)
+    expect(tail.usage.output_tokens).toBe(50)
+  })
+
+  test('usage that arrives BEFORE the first content lands in message_start too (early-usage gateways)', async () => {
+    const upstream = makeResponsesSSE([
+      { type: 'response.created', response: { usage: { input_tokens: 2616, output_tokens: 0, input_tokens_details: { cached_tokens: 2531 } } } },
+      { type: 'response.output_text.delta', item_id: 'it_1', delta: 'ok' },
+      { type: 'response.output_item.done', item: { id: 'it_1', type: 'message' } },
+      { type: 'response.completed', response: { usage: { input_tokens: 2616, output_tokens: 100, input_tokens_details: { cached_tokens: 2531 } } } },
+    ])
+    const events = await collectAnthropicEvents(
+      await transformResponsesSSEToAnthropic(upstream, { messageId: 'msg_test', model: 'muse-spark-1.3-contributor' }),
+    )
+    const start = events.find(e => e.type === 'message_start')
+    expect(start.message.usage.cache_read_input_tokens).toBe(2531)
+    expect(start.message.usage.input_tokens).toBe(2616)
+  })
 })
 
 // ─── Error + models ──────────────────────────────────────────────────

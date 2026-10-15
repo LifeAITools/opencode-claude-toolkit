@@ -106,6 +106,11 @@ export type EventKind =
   | 'SPARK_COMPLETE'
   | 'SPARK_ERROR'
 
+  // Go door (OpenCode Go orgs — provider layer, /go/*)
+  | 'GO_REQUEST'
+  | 'GO_COMPLETE'
+  | 'GO_ERROR'
+
   // Generic
   | 'INFO'
   | 'WARN'
@@ -172,6 +177,9 @@ export const EVENT = {
   SPARK_REQUEST: 'SPARK_REQUEST',
   SPARK_COMPLETE: 'SPARK_COMPLETE',
   SPARK_ERROR: 'SPARK_ERROR',
+  GO_REQUEST: 'GO_REQUEST',
+  GO_COMPLETE: 'GO_COMPLETE',
+  GO_ERROR: 'GO_ERROR',
   // Generic
   INFO: 'INFO',
   WARN: 'WARN',

@@ -391,6 +391,7 @@ import { createMcpControlModule } from './modules/mcp-control.js'
 import { createAnthropicModule } from './modules/anthropic.js'
 import { createOpenAICompatModule } from './modules/openai-compat.js'
 import { createSparkResponsesModule } from './modules/spark-responses.js'
+import { createGoDoorModule } from './modules/go-door.js'
 
 // Compat version: configured value is the FLOOR; the installed Claude Code wins when
 // newer (the API gates new models on client version — see cc-version.ts).
@@ -427,6 +428,7 @@ const modules = [
   createAnthropicModule(),
   createOpenAICompatModule(),
   createSparkResponsesModule(),
+  createGoDoorModule(),
 ]
 
 // Load all modules (init + collect routes; failed modules' routes skipped)

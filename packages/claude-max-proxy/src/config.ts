@@ -81,6 +81,14 @@ export interface ProxyConfig {
   // 2026-10-08). Empty = header not sent, so the legacy zen/go config is untouched.
   sparkOrgId: string | null
 
+  // Go door (/go/*): registry of OpenCode Go orgs + the pass store. Both unset = door answers 503 loudly.
+  goRegistryPath: string | null
+  goTokensPath: string | null
+  goUserAgent: string
+  // Constant on purpose: the gateway scopes its cache by this header (architecture R6 — do NOT vary
+  // it per conversation before measurement 5.4 says what changes).
+  goProviderSession: string
+
   // Subscription compat layer (hot-configurable for binary distribution)
   ccCompatVersion: string
   extraBetaFlags: string[]
@@ -203,6 +211,10 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     sparkUpstreamUrl: read('SPARK_UPSTREAM_URL', 'https://opencode.ai/zen/go/v1', fileEnv),
     sparkUserAgent: read('SPARK_USER_AGENT', 'claude-max-proxy-spark/1.0', fileEnv),
     sparkOrgId: read('SPARK_ORG_ID', '', fileEnv) || null,
+    goRegistryPath: read('GO_REGISTRY_PATH', '', fileEnv) || null,
+    goTokensPath: read('GO_TOKENS_PATH', '', fileEnv) || null,
+    goUserAgent: read('GO_USER_AGENT', 'kiberos-chat/1.0', fileEnv),
+    goProviderSession: read('GO_PROVIDER_SESSION', 'kiberos-litellm-subagents', fileEnv),
     sparkReasoningEffort: (['minimal', 'low', 'medium', 'high'].includes(read('SPARK_REASONING_EFFORT', 'minimal', fileEnv))
       ? read('SPARK_REASONING_EFFORT', 'minimal', fileEnv)
       : 'minimal') as 'minimal' | 'low' | 'medium' | 'high',

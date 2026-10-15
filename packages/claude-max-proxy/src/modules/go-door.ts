@@ -20,7 +20,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
-import { loadRegistry, pickOrg, GoOrgError, type GoRegistry } from '../go-registry.js'
+import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } from '../go-registry.js'
 import { withGoCredential, GoCredentialError } from '../go-credentials.js'
 import {
   newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, bodyField, classifyError,
@@ -54,7 +54,7 @@ function callKindOf(req: Request): CallKind {
 /** Реестр читается заново на каждый вызов: он маленький, а правка реестра не должна требовать перезапуска. */
 function registry(): GoRegistry {
   const path = ctx.config.goRegistryPath
-  if (!path) throw new GoOrgError('GO_REGISTRY_PATH не задан')
+  if (!path) throw new GoRegistryError('GO_REGISTRY_PATH не задан')
   return loadRegistry(path)
 }
 
@@ -95,10 +95,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
       tokensPath: cfg.goTokensPath, environ: process.env, now: Date.now, userAgent: cfg.goUserAgent,
     })
   } catch (err: any) {
-    const status = err instanceof GoOrgError ? 400 : err instanceof GoCredentialError ? 503 : 503
+    const status = err instanceof GoOrgError ? 400 : 503
     const msg = String(err?.message ?? err).slice(0, 300)
     rec.response.status = status
-    rec.error = { kind: err instanceof GoOrgError ? 'client' : 'auth', provider_type: null }
+    rec.error = { kind: err instanceof GoOrgError ? 'client' : err instanceof GoCredentialError ? 'auth' : 'provider', provider_type: null }
     rec.timing.total_ms = Date.now() - t0
     writeDump(rec)
     ctx.emit({ level: 'error', kind: EVENT.GO_ERROR, sessionId, org: org?.name ?? null, msg })

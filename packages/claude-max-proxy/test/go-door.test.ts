@@ -7,7 +7,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { parseRegistry, pickOrg, GoOrgError } from '../src/go-registry.js'
+import { parseRegistry, pickOrg, GoOrgError, GoRegistryError } from '../src/go-registry.js'
 import { withGoCredential, GoCredentialError } from '../src/go-credentials.js'
 import { extractUsageChat, extractUsageResponses, usageFromSseText, classifyError } from '../src/provider-dump.js'
 import { createGoDoorModule } from '../src/modules/go-door.js'
@@ -45,7 +45,7 @@ describe('go-registry', () => {
     expect(() => pickOrg(reg, 'nope')).toThrow(GoOrgError)
   })
   test('рабочая не описана — отказ', () => {
-    expect(() => parseRegistry('active: x\norgs:\n  - name: y\n    workspace: w\n    auth: console\n    base_url: u')).toThrow(GoOrgError)
+    expect(() => parseRegistry('active: x\norgs:\n  - name: y\n    workspace: w\n    auth: console\n    base_url: u')).toThrow(GoRegistryError)
   })
 })
 

@@ -29,7 +29,11 @@ export interface GoRegistry {
   orgs: GoOrg[]
 }
 
+/** Названная организация не найдена — ошибка запроса (400). */
 export class GoOrgError extends Error {}
+
+/** Реестр не настроен или не читается — беда сервера (503), не запроса. */
+export class GoRegistryError extends Error {}
 
 export function parseRegistry(text: string): GoRegistry {
   const raw = (Bun.YAML.parse(text) ?? {}) as Record<string, any>
@@ -48,8 +52,8 @@ export function parseRegistry(text: string): GoRegistry {
     })
   }
   const active = String(raw.active ?? '')
-  if (!orgs.length) throw new GoOrgError('реестр Go пуст: нет ни одной организации')
-  if (!orgs.some(o => o.name === active)) throw new GoOrgError(`рабочая организация «${active}» не описана в реестре`)
+  if (!orgs.length) throw new GoRegistryError('реестр Go пуст: нет ни одной организации')
+  if (!orgs.some(o => o.name === active)) throw new GoRegistryError(`рабочая организация «${active}» не описана в реестре`)
   return { active, usageUrl: raw.usage_url ? String(raw.usage_url) : null, orgs }
 }
 

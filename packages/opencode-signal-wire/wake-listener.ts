@@ -867,6 +867,7 @@ export function wakeText(event: WakeEvent, mode: 'full' | 'brief', identity?: Ag
     const text = mode === 'brief' ? r.brief : r.full
     if (typeof text === 'string' && text.length > 0) return text
   }
+  dbg(`WAKE_TEXT_FALLBACK type=${event.type} source=${event.source} mode=${mode}`)
   return formatWakeMessage(event, identity)
 }
 

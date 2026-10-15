@@ -121,6 +121,7 @@ import { lineageKey, classifyRole, type AgentRole, type RoleHints } from './line
 import type { PersistedEngineState } from './ka-snapshot-store.js'
 import type { EvictionCircuitBreaker } from './eviction-breaker.js'
 import { isServerSideEviction, decideBreakerAction, decidePostEvictionFate } from './eviction-breaker.js'
+import { SubscriptionCountersPolicy, type WarmPolicy, type WarmContext } from './warm-policy.js'
 
 /**
  * WHO is running this engine — stamped into every diagnostic line beside the pid.
@@ -1461,6 +1462,28 @@ export class KeepaliveEngine {
   // Internal: timer & tick
   // ────────────────────────────────────────────────────────────
 
+  /** Политика «греть ли ветку»: подписка Anthropic (S0.6). Платное чтение — отдельная политика позже. */
+  private warmPolicy: WarmPolicy = new SubscriptionCountersPolicy()
+
+  /** Данные для решения политики по одной ветке; всё, что она знает о мире, приходит отсюда. */
+  private warmContext(e: RegistryEntry, idleMs: number, fireThresholdMs = 0): WarmContext {
+    return {
+      provider: 'anthropic',
+      orgId: null,
+      sessionId: null,
+      idleMs,
+      cacheAgeMs: e.cacheWrittenAt > 0 ? Date.now() - e.cacheWrittenAt : 0,
+      realIdleMs: Date.now() - this.lastRealActivityAt,
+      ttlMs: this.ttlOfLineage(e),
+      cadence: {
+        fireThresholdMs,
+        safetyMarginMs: this.safetyMarginMs,
+        tickMs: this.tickMs,
+        idleTimeoutMs: this.config.idleTimeoutMs,
+      },
+    }
+  }
+
   /** Срок жизни кэша ветки: её собственный из меток, иначе срок движка. */
   private ttlOfLineage(e: RegistryEntry): number {
     return typeof e.cacheTtlMs === 'number' && e.cacheTtlMs > 0 ? e.cacheTtlMs : this.cacheTtlMs
@@ -1717,9 +1740,8 @@ export class KeepaliveEngine {
     const deadAll: string[] = []
     for (const e of this.registry.values()) {
       if (e.cacheWrittenAt <= 0) continue          // возраст неизвестен — не нам решать
-      if (Date.now() - e.cacheWrittenAt >= this.ttlOfLineage(e) - this.safetyMarginMs) {
-        deadAll.push(e.lineageKey)
-      }
+      const verdict = this.warmPolicy.decide(this.warmContext(e, 0))
+      if (!verdict.fire && verdict.reason === 'cache_dead') deadAll.push(e.lineageKey)
     }
     if (deadAll.length > 0) {
       for (const key of deadAll) {
@@ -1789,13 +1811,10 @@ export class KeepaliveEngine {
     // Когда ветке пора: по общему шагу прогрева — но НЕ ПОЗЖЕ, чем за запас до конца ЕЁ
     // собственного срока (плюс один шаг пробуждения, чтобы тик не проскочил момент). Часовые ветки
     // греются в прежнем ритме; ветка со сроком короче шага успевает получить выстрел, пока жива.
-    const dueAfterMs = (e: RegistryEntry): number =>
-      Math.min(fireThresholdMs, Math.max(0, this.ttlOfLineage(e) - this.safetyMarginMs - this.tickMs))
-
     let eligible = Array.from(this.registry.values())
       .filter((e) => e.hasCacheControl)
       .map((e) => ({ entry: e, idle: lineageIdle(e) }))
-      .filter((x) => x.idle >= dueAfterMs(x.entry))
+      .filter((x) => this.warmPolicy.decide(this.warmContext(x.entry, x.idle, fireThresholdMs)).fire === true)
       .sort((a, b) => {
         const am = a.entry.role === 'main' ? 1 : 0
         const bm = b.entry.role === 'main' ? 1 : 0

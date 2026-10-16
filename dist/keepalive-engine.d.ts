@@ -105,6 +105,8 @@ export declare class KeepaliveEngine {
     stop(): void;
     disarm(reason: string): void;
     reload(reason: string): void;
+    private warmPolicy;
+    private warmContext;
     private ttlOfLineage;
     private get tickMs();
     private startTimer;

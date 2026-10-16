@@ -271,6 +271,58 @@ describe('обход судит о жизни сам, не дожидаясь с
     expect(b).not.toContain('undefined')
     expect(b).not.toContain('null')
   })
+
+  test('отметка session.end снимает стоящую БЕЗ владельца — первоисточник вместо догадки (замер 16.10)', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const { tmpdir } = require('node:os') as typeof import('node:os')
+    const { join } = require('node:path') as typeof import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-ended-'))
+    const prev = process.env.SW_HEARTBEAT_DIR
+    process.env.SW_HEARTBEAT_DIR = dir
+    try {
+      const now = Date.now()
+      writeFileSync(join(dir, 'session-heartbeat-s-done.json'),
+        JSON.stringify({ session_id: 's-done', cwd: '/proj/z', event: 'session.end', last_seen: new Date(now).toISOString() }))
+      startWith(() => null)
+      block('s-done')
+      fired = []
+      _stuckState.sweep(now + 20 * 60_000)
+      expect(_stuckState.get('s-done')).toBeUndefined()
+      expect(fired.filter(f => !f.journalOnly).length).toBe(0)
+      expect(fired.find(f => f.journalOnly)!.body).toContain('s-done')
+    } finally {
+      if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
+      else process.env.SW_HEARTBEAT_DIR = prev
+    }
+  })
+
+  test('worktree → корень проекта: преемник в корне снимает стоящую в worktree (замер 16.10)', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const { tmpdir } = require('node:os') as typeof import('node:os')
+    const { join } = require('node:path') as typeof import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-hb-wt-'))
+    const prev = process.env.SW_HEARTBEAT_DIR
+    process.env.SW_HEARTBEAT_DIR = dir
+    try {
+      const now = Date.now()
+      const wt = '/proj/app/.claude/worktrees/task-a'
+      writeFileSync(join(dir, 'session-heartbeat-s-wt.json'),
+        JSON.stringify({ session_id: 's-wt', cwd: wt, event: 'e', last_seen: new Date(now - 3600_000).toISOString() }))
+      writeFileSync(join(dir, 'session-heartbeat-s-heir.json'),
+        JSON.stringify({ session_id: 's-heir', cwd: '/proj/app', event: 'e', last_seen: new Date(now).toISOString() }))
+      startWith(() => null)
+      block('s-wt')
+      const st = _stuckState.get('s-wt')!
+      st.lastBlockAt = now - 30 * 60_000
+      fired = []
+      _stuckState.sweep(now + 20 * 60_000)
+      expect(_stuckState.get('s-wt')).toBeUndefined()
+      expect(fired.filter(f => !f.journalOnly).length).toBe(0)
+    } finally {
+      if (prev === undefined) delete process.env.SW_HEARTBEAT_DIR
+      else process.env.SW_HEARTBEAT_DIR = prev
+    }
+  })
 })
 
 describe('дверь согласия должна знать, ЧТО ей известно о сессии', () => {

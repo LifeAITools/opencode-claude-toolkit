@@ -263,6 +263,36 @@ export function readHeartbeatCwd(sessionId: string): string | null {
 }
 
 /**
+ * Сессия САМА объявила, что закончила: отметка жизни пишет `event: 'session.end'`
+ * при закрытии. Это тот первоисточник, которого не хватало: мёртвую сессию с
+ * неопознанным владельцем учёт держал до двухсуточного потолка и всё это время
+ * звал человека. Замер 16.10.2026: сессия `786f50e9` завершилась в 10:16, а
+ * карточки о ней поднимались в 13:39 и 14:49.
+ */
+export function readHeartbeatEnded(sessionId: string): boolean {
+  try {
+    const raw = process.env.SW_HEARTBEAT_DIR
+    const dir = raw && raw.trim() ? raw.trim() : join(homedir(), '.claude', 'hooks', 'state')
+    const hb = JSON.parse(readFileSync(join(dir, `session-heartbeat-${sessionId}.json`), 'utf8')) as { event?: unknown }
+    return hb?.event === 'session.end'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Корень проекта из рабочего каталога: worktree — ответвление ТОГО ЖЕ проекта, и
+ * сессия, перезапущенная в корне, — его преемник. Точное сравнение каталогов
+ * этого не видит (замер 16.10.2026: старая сессия жила в
+ * `myfamily-quest/.claude/worktrees/child-visibility-doors`, новая — в корне
+ * `myfamily-quest`). Каталог, который не worktree, возвращается как есть.
+ */
+function projectRoot(cwd: string): string {
+  const m = cwd.match(/^(.*?)\/\.claude\/worktrees\//)
+  return m ? m[1]! : cwd
+}
+
+/**
  * Преемник (жалоба 07.10: сессию перезапустили под новым номером, а карточка
  * предлагала заплатить за мёртвую): чужая отметка с ТЕМ ЖЕ каталогом, свежее
  * последнего отказа стоящей. Читать — только при pid null: у опознанного
@@ -295,7 +325,10 @@ export function findSuccessorHeartbeat(sessionId: string, cwd: string, sinceMs: 
       const hb = readHb(name)
       if (!hb) continue
       if (typeof hb.session_id !== 'string' || hb.session_id === sessionId) continue
-      if (hb.cwd !== cwd) continue
+      // Точный каталог ИЛИ «старая в worktree ↔ новая в корне проекта»: два
+      // РАЗНЫХ worktree одного проекта преемниками не считаются.
+      const heir = hb.cwd === cwd || (projectRoot(cwd) !== cwd && hb.cwd === projectRoot(cwd))
+      if (!heir) continue
       const candBinding = typeof (hb as any).binding === 'string' ? (hb as any).binding : null
       if (ownBinding && candBinding && ownBinding !== candBinding) continue // чужая личность — не преемник
       const seen = seenMs(hb, name)
@@ -409,6 +442,15 @@ function sweepStuck(now: number): void {
         retired(sid, st, now, `владельца (${pid}) больше нет — звать некого`)
         continue
       }
+    } else if (readHeartbeatEnded(sid)) {
+      // Сессия САМА сказала, что закончила — первоисточник сильнее догадок о её
+      // жизни. Без него мёртвая сессия с неопознанным владельцем звала человека
+      // до двухсуточного потолка (замер 16.10.2026: карточки в 13:39 и 14:49 о
+      // сессии, завершившейся в 10:16).
+      stuck.delete(sid)
+      changed = true
+      retired(sid, st, now, 'сессия сама объявила, что закончила (отметка session.end) — звать некого')
+      continue
     } else if (now - st.lastBlockAt > STUCK_UNVERIFIABLE_CEILING_MS) {
       stuck.delete(sid)
       changed = true

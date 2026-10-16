@@ -23,6 +23,7 @@
 import { readlinkSync } from 'node:fs'
 import type { ProxyModule, ModuleContext, RouteDefinition, BunServer } from '../module.js'
 import { bus } from '../event-bus.js'
+import { enrichOrgSurface } from '../org-surface.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
 import { buildControlManifest, CONTROL_MANIFEST_URI } from './ucm-manifest.js'
 
@@ -85,7 +86,7 @@ function buildTools(): ToolDef[] {
       run: async () => ({
         version: ctx.version,
         sessions: ctx.proxyClient.listSessions().length,
-        orgs: ctx.proxyClient.orgSurface().orgs.length,
+        orgs: enrichOrgSurface(ctx.proxyClient.orgSurface()).orgs.length,
         managedSessions: ctx.managedSessions.list().length,
       }),
     },
@@ -106,9 +107,9 @@ function buildTools(): ToolDef[] {
     },
     {
       name: 'orgs_list',
-      description: 'Per-organization token vault (redacted) + session→org pins + which org actually served each session.',
+      description: 'Per-organization token vault (redacted) + quota windows/status + session→org pins + which org actually served each session.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      run: async () => ctx.proxyClient.orgSurface(),
+      run: async () => enrichOrgSurface(ctx.proxyClient.orgSurface()),
     },
     {
       name: 'org_switch',
@@ -289,7 +290,7 @@ export function createMcpControlModule(): ProxyModule {
               params: {
                 kind: 'CONTROL_SNAPSHOT', ts: Date.now(), version: ctx.version,
                 sessions: ctx.proxyClient.listSessions(),
-                orgs: ctx.proxyClient.orgSurface(),
+                orgs: enrichOrgSurface(ctx.proxyClient.orgSurface()),
               },
             })
             unsubscribe = bus.onEvent((e) => {

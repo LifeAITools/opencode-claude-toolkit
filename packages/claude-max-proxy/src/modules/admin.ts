@@ -19,6 +19,7 @@ import { EVENT } from '../event-bus.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
 import { stuckSessionState, stuckSessionReport, stuckSessionsAll, dropStuck } from '../local-alert.js'
+import { enrichOrgSurface } from '../org-surface.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -341,11 +342,12 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
       },
     },
 
-    // Org surface — per-org credential vault + session pins (multi-org)
+    // Org surface — per-org credential vault + session pins (multi-org), plus
+    // the COMPLETE roster with quota windows + status from the quota file (S1/D1).
     {
       method: 'GET',
       path: '/admin/orgs',
-      handler: async () => Response.json(ctx.proxyClient.orgSurface()),
+      handler: async () => Response.json(enrichOrgSurface(ctx.proxyClient.orgSurface())),
     },
 
     // Explicit per-session org rotate (maintenance, one-shot guard consent).

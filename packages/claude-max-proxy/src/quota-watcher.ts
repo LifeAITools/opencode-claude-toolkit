@@ -259,12 +259,64 @@ interface SessionState {
   lastSeenAt: number // ms
 }
 
+/** One organization as the ACCOUNT VAULT knows it — identity + token state,
+ *  with no tokens carried. The roster the org picture is built from. */
+export interface VaultOrgEntry {
+  orgId: string
+  email?: string
+  orgName?: string
+  expiresAt: number | null
+  hasRefreshToken: boolean
+  capturedAt?: number
+  lastVerifiedAt?: number
+}
+
+/**
+ * One row of the COMPLETE organization picture (D1 fix).
+ *
+ * `accounts` keeps its old meaning — orgs whose windows TRAFFIC measured. That
+ * map drops an org the moment it goes cold (recomputeAccountFromPids deletes it
+ * when no pid state remains), so before this section the layer literally could
+ * not see an idle organization: 1 of 4 orgs visible, 3 invisible.
+ *
+ * This roster is the fix: EVERY vault org appears, with its token state and —
+ * where traffic has measured them — its windows. A cold org is VISIBLE with
+ * `windowsKnown:false` rather than absent.
+ *
+ * Cold orgs are deliberately NOT probed: a probe pays a cache WRITE on the new
+ * org, exactly what the cache guard exists to prevent. Unknown windows are
+ * treated as a full remainder by the chooser — self-correcting, since an org
+ * that starts serving reports its windows on the first response.
+ */
+export interface OrgPictureEntry {
+  orgId: string
+  orgName?: string
+  accountEmail?: string
+  expiresAt: number | null
+  hasRefreshToken: boolean
+  capturedAt?: number
+  lastVerifiedAt?: number
+  /** token_expired → access token is past its expiry; exhausted → a measured
+   *  window is at/over its wall; active → usable. */
+  status: 'active' | 'token_expired' | 'exhausted'
+  /** true when the windows below came from real traffic (measured). */
+  windowsKnown: boolean
+  util5h: number | null
+  util7d: number | null
+  reset5hAt: string | null
+  reset7dAt: string | null
+  level: 'ok' | 'warning' | 'critical' | null
+}
+
 interface QuotaStatusFile {
   version: 1
   updatedAt: string
   accounts: Record<string, AccountState>
   pids: Record<string, PidState>
   sessions?: Record<string, SessionState>
+  /** Complete org roster (all vault orgs, cold ones included). Additive —
+   *  consumers of `accounts` are untouched. See OrgPictureEntry. */
+  orgs?: OrgPictureEntry[]
 }
 
 interface TokenEvent {
@@ -758,38 +810,103 @@ function inferAccountHint(
  * Отсутствие остаётся отсутствием: нет записи — нет полей, и потребитель сам
  * решит, что показать вместо имени. Выдуманное имя было бы хуже номера.
  */
-function lookupAccountIdentity(accountHint: string): { email?: string; orgName?: string } {
+let vaultCacheMtime = -1
+let vaultCache = new Map<string, VaultOrgEntry>()
+
+/** Refresh the vault cache when org-vault.json changed on disk. Fail-soft: a
+ *  missing or unreadable vault keeps the previous cache (empty on first boot) —
+ *  quota accounting must never crash on the account store. The mtime is stamped
+ *  only AFTER a successful parse, so a transient bad read is retried rather than
+ *  remembered as "unchanged". */
+function refreshVaultCache(): void {
   try {
     const st = statSync(ORG_VAULT_JSON)
-    if (st.mtimeMs !== vaultCacheMtime) {
-      vaultCacheMtime = st.mtimeMs
-      vaultCache = new Map()
-      const raw = JSON.parse(readFileSync(ORG_VAULT_JSON, 'utf8')) as {
-        orgs?: Record<string, { accountEmail?: string; orgName?: string }>
-      }
-      for (const [orgId, entry] of Object.entries(raw.orgs ?? {})) {
-        if (!entry || typeof entry !== 'object') continue
-        vaultCache.set(orgId, {
-          ...(typeof entry.accountEmail === 'string' ? { email: entry.accountEmail } : {}),
-          ...(typeof entry.orgName === 'string' ? { orgName: entry.orgName } : {}),
-        })
-      }
+    if (st.mtimeMs === vaultCacheMtime) return
+    const raw = JSON.parse(readFileSync(ORG_VAULT_JSON, 'utf8')) as {
+      orgs?: Record<string, {
+        accountEmail?: string; orgName?: string; refreshToken?: string
+        expiresAt?: number; capturedAt?: number; lastVerifiedAt?: number
+      }>
     }
+    const next = new Map<string, VaultOrgEntry>()
+    for (const [orgId, entry] of Object.entries(raw.orgs ?? {})) {
+      if (!entry || typeof entry !== 'object') continue
+      next.set(orgId, {
+        orgId,
+        ...(typeof entry.accountEmail === 'string' ? { email: entry.accountEmail } : {}),
+        ...(typeof entry.orgName === 'string' ? { orgName: entry.orgName } : {}),
+        expiresAt: typeof entry.expiresAt === 'number' ? entry.expiresAt : null,
+        hasRefreshToken: typeof entry.refreshToken === 'string' && entry.refreshToken.length > 0,
+        ...(typeof entry.capturedAt === 'number' ? { capturedAt: entry.capturedAt } : {}),
+        ...(typeof entry.lastVerifiedAt === 'number' ? { lastVerifiedAt: entry.lastVerifiedAt } : {}),
+      })
+    }
+    vaultCache = next
+    vaultCacheMtime = st.mtimeMs
   } catch {
     // Хранилища нет или оно нечитаемо — это не повод ронять учёт квоты.
-    return {}
   }
-  // accountHint — это orgId целиком либо его начало (историческая форма).
-  const exact = vaultCache.get(accountHint)
-  if (exact) return exact
-  for (const [orgId, v] of vaultCache) {
-    if (orgId.startsWith(accountHint)) return v
-  }
-  return {}
 }
 
-let vaultCacheMtime = -1
-let vaultCache = new Map<string, { email?: string; orgName?: string }>()
+function lookupAccountIdentity(accountHint: string): { email?: string; orgName?: string } {
+  refreshVaultCache()
+  // accountHint — это orgId целиком либо его начало (историческая форма).
+  const exact = vaultCache.get(accountHint)
+  let hit: VaultOrgEntry | undefined = exact
+  if (!hit) {
+    for (const [orgId, v] of vaultCache) {
+      if (orgId.startsWith(accountHint)) { hit = v; break }
+    }
+  }
+  if (!hit) return {}
+  return {
+    ...(hit.email ? { email: hit.email } : {}),
+    ...(hit.orgName ? { orgName: hit.orgName } : {}),
+  }
+}
+
+/**
+ * Compose the complete org roster from vault entries + measured account states.
+ * PURE — no I/O — so a test drives it with a hand-built vault and a hand-built
+ * measured map instead of this machine's real files.
+ */
+export function composeOrgPicture(
+  vaultEntries: Iterable<VaultOrgEntry>,
+  measured: Map<string, AccountState>,
+  now: number,
+): OrgPictureEntry[] {
+  const out: OrgPictureEntry[] = []
+  for (const e of vaultEntries) {
+    const m = measured.get(e.orgId)
+    const tokenExpired = e.expiresAt != null && e.expiresAt <= now
+    const exhausted = !!m && m.level === 'critical'
+    const status: OrgPictureEntry['status'] =
+      tokenExpired ? 'token_expired' : exhausted ? 'exhausted' : 'active'
+    out.push({
+      orgId: e.orgId,
+      ...(e.orgName ? { orgName: e.orgName } : {}),
+      ...(e.email ? { accountEmail: e.email } : {}),
+      expiresAt: e.expiresAt,
+      hasRefreshToken: e.hasRefreshToken,
+      ...(e.capturedAt != null ? { capturedAt: e.capturedAt } : {}),
+      ...(e.lastVerifiedAt != null ? { lastVerifiedAt: e.lastVerifiedAt } : {}),
+      status,
+      windowsKnown: !!m,
+      util5h: m?.util5h ?? null,
+      util7d: m?.util7d ?? null,
+      reset5hAt: m?.reset5hAt ?? null,
+      reset7dAt: m?.reset7dAt ?? null,
+      level: m?.level ?? null,
+    })
+  }
+  return out.sort((a, b) => a.orgId.localeCompare(b.orgId))
+}
+
+/** The live roster: vault entries (refreshed) joined with the measured accounts. */
+function buildOrgPicture(now = Date.now()): OrgPictureEntry[] {
+  refreshVaultCache()
+  return composeOrgPicture(vaultCache.values(), accountStates, now)
+}
 
 function recomputeAccountFromPids(accountHint: string): void {
   // Aggregate: max util5h, max util7d, latest resetAt, pids list
@@ -1011,6 +1128,8 @@ function writeQuotaStatus(): void {
       Array.from(pidStates.entries()).map(([pid, s]) => [String(pid), s]),
     ),
     sessions: Object.fromEntries(sessionStates),
+    // Complete roster (all vault orgs, cold ones included) — the D1 fix.
+    orgs: buildOrgPicture(),
   }
   const tmp = QUOTA_STATUS_JSON + '.tmp'
   try {
@@ -1097,12 +1216,14 @@ export const __testing = {
   ingestStatsLine,
   pruneStaleStates,
   seedFromPreviousSnapshot,
+  composeOrgPicture,
   snapshot: (): QuotaStatusFile => ({
     version: 1,
     updatedAt: new Date().toISOString(),
     accounts: Object.fromEntries(accountStates),
     pids: Object.fromEntries(pidStates),
     sessions: Object.fromEntries(sessionStates),
+    orgs: buildOrgPicture(),
   }),
   reset: (): void => {
     pidStates.clear()

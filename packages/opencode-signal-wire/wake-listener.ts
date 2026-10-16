@@ -1338,6 +1338,48 @@ async function createSessionForWake(reason: string): Promise<string | null> {
  * именем привязки уже есть и написан НЕ этим плагином (его кладёт `context agent spawn` со своей
  * дверью tmux), он не затирается: два писателя одного файла перебивали бы друг друга.
  */
+/**
+ * Усвоить поля из sibling-карточки ТОГО ЖЕ агента: CLI lat-context пишет свою карточку с
+ * tmux-дверью и настоящим memberId, а плагин пишет рядом свою (другой pid → другое имя).
+ *
+ * 🔴 МАТЧ ПО ПРИВЯЗКЕ, А НЕ ТОЛЬКО ПО PID (правка 16.10.2026). Прежний матч требовал
+ * `sib.pid === myPid`, а карточку CLI пишет СВОЙ процесс (замер: у vibe_kiberos-billing CLI —
+ * pid 3938612, плагин — 3938911) — то есть путь НИКОГДА не срабатывал, и memberId оставался
+ * harness-личностью: ровно фантомное место, ради которого усвоение и заведено. Тот же матч даёт
+ * tmux-сессию — ЗАПАСНУЮ дверь, которую знает только CLI (`TMUX` даёт сокет, не имя).
+ *
+ * Чистая функция (читает только каталог) — испытание подменяет его.
+ */
+export function adoptFromSiblingCards(
+  dir: string,
+  selfPath: string,
+  myPid: number,
+  myBinding: string | undefined,
+): { memberId?: string; memberName?: string; tmuxSession?: string } {
+  const out: { memberId?: string; memberName?: string; tmuxSession?: string } = {}
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json') || join(dir, name) === selfPath) continue
+      let sib: {
+        pid?: number; memberId?: string; memberName?: string
+        tmux_binding_id?: string; binding_id?: string; tmux_session_id?: string
+      }
+      try { sib = JSON.parse(readFileSync(join(dir, name), 'utf-8')) } catch { continue }
+      const sibBinding = sib.tmux_binding_id ?? sib.binding_id
+      const byBinding = !!myBinding && sibBinding === myBinding
+      const byPid = sib.pid === myPid
+      if (!byBinding && !byPid) continue
+      if (sib.tmux_session_id) out.tmuxSession = sib.tmux_session_id
+      if (sib.tmux_binding_id && typeof sib.memberId === 'string' && sib.memberId && sib.memberId !== 'unknown') {
+        out.memberId = sib.memberId
+        if (sib.memberName) out.memberName = sib.memberName
+        if (byBinding) break
+      }
+    }
+  } catch { /* нет каталога / нечитаемо — усваивать нечего */ }
+  return out
+}
+
 export function discoveryFilePath(dir: string, pid: number, bindingId: string | undefined, sessionId: string): string {
   const legacy = join(dir, `${pid}-${sessionId}.json`)
   if (!bindingId) return legacy
@@ -1872,25 +1914,16 @@ export async function startWakeListener(
     // HTTP agent with no lat-context spawn).
     let discoveryMemberId = resolvedIdentity.memberId
     let discoveryMemberName = resolvedIdentity.memberName ?? _agentIdentity?.name ?? resolvedIdentity.memberId
-    try {
-      const siblings = readdirSync(resolvedDiscoveryDir)
-      // File names are `{pid}-{binding|sessionId}.json` — match by pid prefix.
-      const pidPrefix = `${process.pid}-`
-      for (const name of siblings) {
-        if (!name.startsWith(pidPrefix) || !name.endsWith('.json')) continue
-        if (join(resolvedDiscoveryDir, name) === discoveryPath) continue
-        const raw = readFileSync(join(resolvedDiscoveryDir, name), 'utf-8')
-        const sib = JSON.parse(raw) as { pid?: number; memberId?: string; memberName?: string; tmux_binding_id?: string }
-        if (sib.pid !== process.pid) continue
-        // Binding-keyed sibling (lat-context) carries tmux_binding_id + a real member.
-        if (sib.tmux_binding_id && typeof sib.memberId === 'string' && sib.memberId && sib.memberId !== 'unknown') {
-          discoveryMemberId = sib.memberId
-          discoveryMemberName = sib.memberName ?? discoveryMemberName
-          dbg(`discovery: adopting binding sibling memberId=${sib.memberId} from ${name}`)
-          break
-        }
+    // Усвоение полей из sibling-карточки CLI lat-context — ПО ПРИВЯЗКЕ (не по pid: карточку CLI
+    // пишет свой процесс). Чинит memberId, который прежним матчем по pid не усваивался никогда.
+    {
+      const adopted = adoptFromSiblingCards(resolvedDiscoveryDir, discoveryPath, process.pid, process.env.KIBEROS_BINDING_ID)
+      if (adopted.memberId) {
+        discoveryMemberId = adopted.memberId
+        discoveryMemberName = adopted.memberName ?? discoveryMemberName
+        dbg(`discovery: adopting sibling memberId=${adopted.memberId}`)
       }
-    } catch { /* no sibling / unreadable — keep resolved identity */ }
+    }
 
     const discoveryData: DiscoveryFile = {
       port: actualPort,

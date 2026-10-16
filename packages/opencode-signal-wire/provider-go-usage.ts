@@ -13,6 +13,10 @@
  * затем Go), нигде не хранятся и ни в какой журнал не едут.
  */
 
+import { readFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
+
 export const GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
 
 export interface GoUsageRaw {
@@ -130,4 +134,69 @@ export function computeGoWindows(
     return { kind, util: limit > 0 ? s / limit : 0, spent: s, limit, measuredAt }
   }
   return [w('5h', 0.2, spend5h), w('7d', 0.5, spendWeek), w('30d', 1, spendMonth)]
+}
+
+/** Файл окон подписки Go, который пишет прокси (claude-max-proxy/opencode-go-quota.ts). */
+export const GO_QUOTA_STATUS_JSON = join(homedir(), '.claude-local', 'quota-status-opencode-go.json')
+
+export interface GoStatusWindow {
+  kind: string
+  /** Доля 0..1. */
+  util: number
+  resetAt?: string
+  measuredAt: string
+}
+
+/**
+ * Окна АКТИВНОЙ организации Go из файла квоты, который пишет прокси.
+ *
+ * 🔴 ЗАЧЕМ, 16.10.2026. Окна подписки отдаёт только дверь провайдера, и её
+ * снимает `go_refresher` в kiberos-app → файл `quota-status-opencode-go.json`.
+ * Адаптер его НЕ читал: `computeGoWindows` выше считает окна лишь по моделям с
+ * известным лимитом (Spark), а флотские модели (`deepseek-*-go`) оставались без
+ * окон вовсе — ядро не могло судить паузу по квоте Go.
+ *
+ * Берётся ТОЛЬКО активная организация: правило, поднятое чужой исчерпанной
+ * организацией, попросило бы агента встать зря. Привязка «агент → орг» — шаг
+ * слоя провайдеров; до него активная орг — лучшее приближение.
+ *
+ * Форма — как у provider-quota: `util` 0..1, `measuredAt` ISO (ценз 300 с у
+ * потребителя). `week` → `7d`, `month` → `30d` — ради согласия с тем, как окна
+ * зовёт Claude-снимок и `GoWindow`. Нет файла или окон — null (не выдумываем).
+ */
+export function readGoQuotaStatusWindows(
+  path: string = GO_QUOTA_STATUS_JSON,
+): { measuredAt: string; windows: GoStatusWindow[] } | null {
+  try {
+    const d = JSON.parse(readFileSync(path, 'utf8')) as {
+      measured_at?: unknown
+      updatedAt?: unknown
+      org?: unknown
+      accounts?: Record<string, { active?: unknown; windows?: unknown }>
+    }
+    const measuredAt = finiteStr(d.measured_at) ?? finiteStr(d.updatedAt)
+    if (!measuredAt) return null
+    const accounts = d.accounts ?? {}
+    const orgName = finiteStr(d.org)
+    let acct = orgName ? accounts[orgName] : undefined
+    if (!acct) acct = Object.values(accounts).find((a) => a?.active === true)
+    const raw = acct?.windows
+    if (!Array.isArray(raw)) return null
+    const KIND: Record<string, string> = { '5h': '5h', week: '7d', month: '30d' }
+    const windows: GoStatusWindow[] = []
+    for (const w of raw) {
+      if (!w || typeof w !== 'object') continue
+      const ww = w as { window?: unknown; util?: unknown; resetIso?: unknown }
+      const kind = typeof ww.window === 'string' ? (KIND[ww.window] ?? ww.window) : null
+      const util = typeof ww.util === 'number' && Number.isFinite(ww.util) ? ww.util : null
+      if (!kind || util === null) continue
+      const out: GoStatusWindow = { kind, util, measuredAt }
+      const iso = finiteStr(ww.resetIso)
+      if (iso) out.resetAt = iso
+      windows.push(out)
+    }
+    return windows.length > 0 ? { measuredAt, windows } : null
+  } catch {
+    return null
+  }
 }

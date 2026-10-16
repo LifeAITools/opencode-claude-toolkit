@@ -47,7 +47,7 @@ import { createModelWindowResolver, modelFromMessageEvent, usageFromMessageEvent
 import { answeredFromPermissionReplied, askedFromPermissionUpdated, appendAgentProse, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, peekAgentProse, retryFromSessionStatus, streamDeltaFromPartUpdated, takeAgentProse, textDeltaFromPartDelta, textPartFromPartUpdated } from './session-lifecycle'
 import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
-import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
+import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD, readGoQuotaStatusWindows } from './provider-go-usage'
 import { stampSessionLaunch } from './session-stamp'
 import { PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
 
@@ -161,6 +161,24 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
       }
     } catch (e: any) {
       logStep('GO_WINDOWS_FAILED', { error: e?.message ?? String(e) })
+    }
+    // Окна АКТИВНОЙ организации Go — из файла, который пишет прокси
+    // (`quota-status-opencode-go.json`). Первоисточник — сама подписка, а не
+    // наша оценка по базе: `computeGoWindows` выше считает лишь модели с
+    // известным лимитом (Spark), флотские оставались без окон вовсе.
+    const goStatus = readGoQuotaStatusWindows()
+    if (goStatus) {
+      out.push({
+        provider: 'go' as const,
+        measuredAt: goStatus.measuredAt,
+        limits: [],
+        windows: goStatus.windows.map((w) => ({
+          kind: w.kind,
+          util: w.util,
+          ...(w.resetAt ? { resetAt: w.resetAt } : {}),
+          measuredAt: w.measuredAt,
+        })),
+      })
     }
     signalWire.trackProviderQuota(out.length > 0 ? out : null)
     logStep('PROVIDER_QUOTA_REFRESH', { providers: out.map((q) => `${q.provider}:${q.limits.length}`) })

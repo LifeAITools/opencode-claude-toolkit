@@ -299,13 +299,33 @@ export interface OrgPictureEntry {
   /** token_expired → access token is past its expiry; exhausted → a measured
    *  window is at/over its wall; active → usable. */
   status: 'active' | 'token_expired' | 'exhausted'
-  /** true when the windows below came from real traffic (measured). */
-  windowsKnown: boolean
+  /** Откуда окна: measured — живым трафиком ЭТИМ процессом; carried — перенесены
+   *  из прежнего снимка (организация молчит с тех пор); unknown — не измерялись. */
+  windowsSource: 'measured' | 'carried' | 'unknown'
+  /** ISO момента, к которому относится чтение окон (у carried — прежнее время,
+   *  не «сейчас»): потребитель обязан видеть, что чтение старое. */
+  windowsAt: string | null
   util5h: number | null
   util7d: number | null
   reset5hAt: string | null
   reset7dAt: string | null
   level: 'ok' | 'warning' | 'critical' | null
+}
+
+/**
+ * Последнее ИЗВЕСТНОЕ чтение окон организации, переносимое через перезапуск
+ * сборщика. Без него организация, измеренная как исчерпанная минуту назад,
+ * читалась бы после перезапуска как «окна неизвестны = полный остаток» — и выбор
+ * повёл бы трафик прямо на неё.
+ */
+export interface CarriedWindow {
+  util5h: number | null
+  util7d: number | null
+  reset5hAt: string | null
+  reset7dAt: string | null
+  level: 'ok' | 'warning' | 'critical' | null
+  /** ISO момента чтения (не «сейчас»). */
+  at: string | null
 }
 
 interface QuotaStatusFile {
@@ -349,6 +369,9 @@ export interface QuotaWatcherOptions {
 // legacy lines with no org field.
 const pidStates = new Map<string, PidState>()
 const accountStates = new Map<string, AccountState>()
+/** Окна, перенесённые из прежнего снимка (см. CarriedWindow). Живут отдельно от
+ *  `accountStates`: у счёта есть живой трафик, у carried — только память о нём. */
+const carriedWindows = new Map<string, CarriedWindow>()
 const sessionStates = new Map<string, SessionState>()
 /** resetAt carry-forward: upstream sends the rate-limit reset header only on
  *  SOME responses, so the aggregate's resetAt flickers to null while the
@@ -412,6 +435,25 @@ function seedFromPreviousSnapshot(prev: QuotaStatusFile): void {
     if (Number.isFinite(prev7d) && prev7d > now) {
       expectedReset7dAt.set(hint, { resetAt: prev7d, observedAt: now })
     }
+  }
+  // Окна переживают перезапуск. Берём из ПРЕЖНЕГО РОСТЕРА, а не из `accounts`:
+  // ростер несёт окна и тогда, когда счёт уже удалён (организация молчит). Отметку
+  // времени чтения переносим КАК ЕСТЬ — потребитель обязан видеть, что чтение старое.
+  for (const o of prev.orgs ?? []) {
+    if (!o || typeof o.orgId !== 'string') continue
+    if (o.windowsSource === 'unknown') continue
+    // Нести НЕЧЕГО — «перенесённое» чтение без окон было бы ложью о происхождении
+    // (живой прогон 17.10: снимок без `windowsSource` насеял такие записи, и весь
+    // ростер читался как `carried` с пустыми окнами).
+    if (o.util5h == null && o.util7d == null) continue
+    carriedWindows.set(o.orgId, {
+      util5h: o.util5h ?? null,
+      util7d: o.util7d ?? null,
+      reset5hAt: o.reset5hAt ?? null,
+      reset7dAt: o.reset7dAt ?? null,
+      level: o.level ?? null,
+      at: o.windowsAt ?? null,
+    })
   }
   // Which account each SESSION runs on — seeded for the same reason, and it
   // matters to a reader outside this process.
@@ -866,20 +908,43 @@ function lookupAccountIdentity(accountHint: string): { email?: string; orgName?:
 }
 
 /**
- * Compose the complete org roster from vault entries + measured account states.
- * PURE — no I/O — so a test drives it with a hand-built vault and a hand-built
- * measured map instead of this machine's real files.
+ * Приведение ПЕРЕНЕСЁННОГО чтения к сегодняшнему окну: окно, которое успело
+ * сброситься, обнуляется (пятичасовое) или теряется целиком (недельное) — иначе
+ * старый расход выдавался бы за текущий. Чтение, чьё недельное окно прошло,
+ * бесполезно: остаток по нему уже ничего не описывает.
+ */
+function effectiveCarried(w: CarriedWindow | undefined, now: number): CarriedWindow | undefined {
+  if (!w) return undefined
+  // Чтение без окон — не чтение: называть его `carried` значит выдавать пустоту за
+  // перенесённое знание. Второй рубеж к условию в seedFromPreviousSnapshot.
+  if (w.util5h == null && w.util7d == null) return undefined
+  const r7 = w.reset7dAt ? Date.parse(w.reset7dAt) : NaN
+  if (Number.isFinite(r7) && r7 <= now) return undefined
+  const r5 = w.reset5hAt ? Date.parse(w.reset5hAt) : NaN
+  if (Number.isFinite(r5) && r5 <= now) return { ...w, util5h: 0, reset5hAt: null }
+  return w
+}
+
+/**
+ * Compose the complete org roster from vault entries + measured account states,
+ * falling back to the windows CARRIED over a restart. PURE — no I/O — so a test
+ * drives it with hand-built maps instead of this machine's real files.
  */
 export function composeOrgPicture(
   vaultEntries: Iterable<VaultOrgEntry>,
   measured: Map<string, AccountState>,
+  carried: Map<string, CarriedWindow>,
   now: number,
 ): OrgPictureEntry[] {
   const out: OrgPictureEntry[] = []
   for (const e of vaultEntries) {
     const m = measured.get(e.orgId)
+    const w = m ? undefined : effectiveCarried(carried.get(e.orgId), now)
+    const util5h = m?.util5h ?? w?.util5h ?? null
+    const util7d = m?.util7d ?? w?.util7d ?? null
+    const level = m?.level ?? w?.level ?? null
     const tokenExpired = e.expiresAt != null && e.expiresAt <= now
-    const exhausted = !!m && m.level === 'critical'
+    const exhausted = level === 'critical'
     const status: OrgPictureEntry['status'] =
       tokenExpired ? 'token_expired' : exhausted ? 'exhausted' : 'active'
     out.push({
@@ -891,21 +956,22 @@ export function composeOrgPicture(
       ...(e.capturedAt != null ? { capturedAt: e.capturedAt } : {}),
       ...(e.lastVerifiedAt != null ? { lastVerifiedAt: e.lastVerifiedAt } : {}),
       status,
-      windowsKnown: !!m,
-      util5h: m?.util5h ?? null,
-      util7d: m?.util7d ?? null,
-      reset5hAt: m?.reset5hAt ?? null,
-      reset7dAt: m?.reset7dAt ?? null,
-      level: m?.level ?? null,
+      windowsSource: m ? 'measured' : w ? 'carried' : 'unknown',
+      windowsAt: m?.issuedAt ?? w?.at ?? null,
+      util5h,
+      util7d,
+      reset5hAt: m?.reset5hAt ?? w?.reset5hAt ?? null,
+      reset7dAt: m?.reset7dAt ?? w?.reset7dAt ?? null,
+      level,
     })
   }
   return out.sort((a, b) => a.orgId.localeCompare(b.orgId))
 }
 
-/** The live roster: vault entries (refreshed) joined with the measured accounts. */
+/** The live roster: vault entries (refreshed) joined with measured + carried windows. */
 function buildOrgPicture(now = Date.now()): OrgPictureEntry[] {
   refreshVaultCache()
-  return composeOrgPicture(vaultCache.values(), accountStates, now)
+  return composeOrgPicture(vaultCache.values(), accountStates, carriedWindows, now)
 }
 
 function recomputeAccountFromPids(accountHint: string): void {
@@ -1229,6 +1295,7 @@ export const __testing = {
     pidStates.clear()
     accountStates.clear()
     sessionStates.clear()
+    carriedWindows.clear()
     expectedResetAt.clear()
     expectedReset7dAt.clear()
   },

@@ -337,6 +337,15 @@ interface QuotaStatusFile {
   /** Complete org roster (all vault orgs, cold ones included). Additive —
    *  consumers of `accounts` are untouched. See OrgPictureEntry. */
   orgs?: OrgPictureEntry[]
+  /** Трафик: когда последний раз пришёл ход с окнами. Делает МОЛЧАНИЕ ЯВНЫМ:
+   *  пустой `accounts` из-за отсутствия трафика читался как «критично», и хук
+   *  голодал до last-good суточной давности (замер 17.10). */
+  traffic?: {
+    lastAt: string | null
+    staleAfterMs: number
+    stale: boolean
+    note: string
+  }
 }
 
 interface TokenEvent {
@@ -372,6 +381,35 @@ const accountStates = new Map<string, AccountState>()
 /** Окна, перенесённые из прежнего снимка (см. CarriedWindow). Живут отдельно от
  *  `accountStates`: у счёта есть живой трафик, у carried — только память о нём. */
 const carriedWindows = new Map<string, CarriedWindow>()
+
+/** Последний ход с окнами (epoch ms). null — трафика с окнами ещё не было. */
+let lastTrafficAt: number | null = null
+/** После какого молчания трафик считается устаревшим. */
+const TRAFFIC_STALE_AFTER_MS = 15 * 60_000
+/** Тик, переписывающий SSOT ПО ЧАСАМ, а не только по трафику: иначе файл не
+ *  менялся бы вовсе, и молчание трафика осталось бы невидимым. */
+let trafficHeartbeatTimer: ReturnType<typeof setInterval> | null = null
+const TRAFFIC_HEARTBEAT_MS = 5 * 60_000
+
+/**
+ * Явный отчёт о трафике: файл говорит «окна устарели ПО ПРИЧИНЕ молчания», а не
+ * отдаёт пустой `accounts`, который читается как «критично». Ровно тот класс, за
+ * который дом уже платил: успешный ответ, который ни на что не отвечает.
+ */
+export function buildTraffic(now = Date.now()): NonNullable<QuotaStatusFile['traffic']> {
+  const last = lastTrafficAt
+  const stale = last === null || now - last > TRAFFIC_STALE_AFTER_MS
+  return {
+    lastAt: last === null ? null : new Date(last).toISOString(),
+    staleAfterMs: TRAFFIC_STALE_AFTER_MS,
+    stale,
+    note: last === null
+      ? 'трафика с окнами ещё не было — accounts пуст ПО ПРИЧИНЕ, а не потому что «критично»'
+      : stale
+        ? `трафика с окнами не было с ${new Date(last).toISOString()} — окна в accounts устарели ПО ПРИЧИНЕ молчания, а не из-за исчерпания`
+        : 'трафик свежий',
+  }
+}
 const sessionStates = new Map<string, SessionState>()
 /** resetAt carry-forward: upstream sends the rate-limit reset header only on
  *  SOME responses, so the aggregate's resetAt flickers to null while the
@@ -532,11 +570,20 @@ export function startQuotaWatcher(opts: QuotaWatcherOptions): () => void {
   // Initial empty SSOT write so consumers see the file exists
   writeQuotaStatus()
 
+  // 5. Часовой тик: файл обновляется и БЕЗ трафика, чтобы молчание было видно
+  //    (updatedAt движется, traffic.stale говорит причину). Иначе файл замирал бы
+  //    на последнем QUOTA_WATCHER_BOOT, а пустой accounts читался как «критично».
+  trafficHeartbeatTimer = setInterval(() => {
+    try { maybeWriteQuotaStatus() } catch { /* best-effort — следующий тик повторит */ }
+  }, TRAFFIC_HEARTBEAT_MS)
+  ;(trafficHeartbeatTimer as any)?.unref?.()
+
   return () => stopQuotaWatcher()
 }
 
 function stopQuotaWatcher(): void {
   if (statsTailTimer) clearInterval(statsTailTimer)
+  if (trafficHeartbeatTimer) clearInterval(trafficHeartbeatTimer)
   if (credsWatcher) credsWatcher.close()
   appendTokenEvent({
     ts: new Date().toISOString(),
@@ -754,6 +801,9 @@ function ingestStatsLine(line: StatsLine): void {
 
   // skip rows with no rate-limit info (KA fires sometimes lack it)
   if (util5h === null && util7d === null) return
+
+  // Отметка трафика: ход С ОКНАМИ. Она и делает молчание явным (buildTraffic).
+  lastTrafficAt = ts
 
   // Per-ORG virtual client. Every stats line carries the SINGLE proxy process
   // pid (the emitter stamps PROXY_PID on all orgs), so keying pidStates by the
@@ -1196,6 +1246,8 @@ function writeQuotaStatus(): void {
     sessions: Object.fromEntries(sessionStates),
     // Complete roster (all vault orgs, cold ones included) — the D1 fix.
     orgs: buildOrgPicture(),
+    // Явное молчание трафика — чтобы пустой accounts не читался как «критично».
+    traffic: buildTraffic(),
   }
   const tmp = QUOTA_STATUS_JSON + '.tmp'
   try {
@@ -1283,6 +1335,7 @@ export const __testing = {
   pruneStaleStates,
   seedFromPreviousSnapshot,
   composeOrgPicture,
+  buildTraffic,
   snapshot: (): QuotaStatusFile => ({
     version: 1,
     updatedAt: new Date().toISOString(),
@@ -1296,6 +1349,7 @@ export const __testing = {
     accountStates.clear()
     sessionStates.clear()
     carriedWindows.clear()
+    lastTrafficAt = null
     expectedResetAt.clear()
     expectedReset7dAt.clear()
   },

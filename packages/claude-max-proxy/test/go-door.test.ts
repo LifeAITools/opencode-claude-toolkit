@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { parseRegistry, pickOrg, GoOrgError, GoRegistryError } from '../src/go-registry.js'
 import { withGoCredential, GoCredentialError } from '../src/go-credentials.js'
 import { extractUsageChat, extractUsageResponses, usageFromSseText, classifyError } from '../src/provider-dump.js'
-import { createGoDoorModule } from '../src/modules/go-door.js'
+import { createGoDoorModule, goDoorReadiness } from '../src/modules/go-door.js'
 
 const REG = `
 active: org-b
@@ -200,5 +200,32 @@ describe('go-door end to end (шлюз подменён)', () => {
     const res = await post({ 'x-kiberos-go-org': 'ghost' })
     expect(res.status).toBe(400)
     expect(seen.length).toBe(n)
+  })
+})
+
+/**
+ * Готовность двери БЕЗ пробы (S5/D5). Дверь, у которой не заданы пути, отвечает 503 —
+ * и до 17.10.2026 это было единственным способом узнать о ней, поэтому «модуль
+ * загружен» читалось как «дверь работает» (сервер kiberos.ai читался именно так).
+ */
+describe('goDoorReadiness', () => {
+  const cfgWith = (o: Record<string, unknown>) => ({ ...o }) as any
+
+  test('оба пути заданы — дверь настроена, недостающих нет', () => {
+    const r = goDoorReadiness(cfgWith({ goRegistryPath: '/x/go-orgs.yaml', goTokensPath: '/x/.go-tokens.json' }))
+    expect(r.configured).toBe(true)
+    expect(r.missing).toEqual([])
+  })
+
+  test('пути не заданы — названы ОБА, дверь не настроена', () => {
+    const r = goDoorReadiness(cfgWith({ goRegistryPath: null, goTokensPath: null }))
+    expect(r.configured).toBe(false)
+    expect(r.missing).toEqual(['GO_REGISTRY_PATH', 'GO_TOKENS_PATH'])
+  })
+
+  test('не хватает только пропусков — назван только он', () => {
+    const r = goDoorReadiness(cfgWith({ goRegistryPath: '/x/go-orgs.yaml', goTokensPath: null }))
+    expect(r.configured).toBe(false)
+    expect(r.missing).toEqual(['GO_TOKENS_PATH'])
   })
 })

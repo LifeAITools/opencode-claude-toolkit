@@ -391,7 +391,7 @@ import { createMcpControlModule } from './modules/mcp-control.js'
 import { createAnthropicModule } from './modules/anthropic.js'
 import { createOpenAICompatModule } from './modules/openai-compat.js'
 import { createSparkResponsesModule } from './modules/spark-responses.js'
-import { createGoDoorModule } from './modules/go-door.js'
+import { createGoDoorModule, goDoorReadiness } from './modules/go-door.js'
 
 // Compat version: configured value is the FLOOR; the installed Claude Code wins when
 // newer (the API gates new models on client version — see cc-version.ts).
@@ -442,6 +442,25 @@ emit({
   modulesFailed: failed.length,
   totalRoutes: allRoutes.length,
 })
+
+// 🔴 ДВЕРЬ, КОТОРУЮ НЕЛЬЗЯ ИСПОЛЬЗОВАТЬ, НАЗЫВАЕТСЯ ПРИ ЗАПУСКЕ (S5/D5, 17.10.2026).
+// Модуль go-door загружается ВСЕГДА — маршруты /go/* есть в любом случае, — но без
+// заданных путей реестра и пропусков каждый вызов получает 503. Снаружи это
+// неотличимо от «дверь выкачена и работает»: ровно так сервер kiberos.ai читался
+// как готовый, пока проба не показала обратное. Поэтому факт «дверь есть, а ходить
+// по ней нечем» говорится вслух здесь, а не выясняется пробой — и он же виден в
+// /health (поле doors).
+{
+  const go = goDoorReadiness(cfg)
+  if (!go.configured) {
+    emit({
+      level: 'info', kind: 'GO_DOOR_UNCONFIGURED',
+      msg: `дверь Go загружена, но НЕ настроена: не задано ${go.missing.join(', ')} — `
+        + 'маршруты /go/* отвечают 503, пока пути не выставлены',
+      missing: go.missing,
+    })
+  }
+}
 
 // ═══ Bun.serve — thin router ═══════════════════════════════════
 

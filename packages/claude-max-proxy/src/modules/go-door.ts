@@ -27,6 +27,7 @@ import {
   extractUsageChat, extractUsageResponses, usageFromSseText, type CallKind,
 } from '../provider-dump.js'
 import { resolveSessionIdentity } from '../session-identity.js'
+import type { ProxyConfig } from '../config.js'
 
 const ORG_HEADER = 'x-kiberos-go-org'
 const SESSION_HEADER = 'x-litellm-session-id'
@@ -57,6 +58,23 @@ function registry(): GoRegistry {
   const path = ctx.config.goRegistryPath
   if (!path) throw new GoRegistryError('GO_REGISTRY_PATH не задан')
   return loadRegistry(path)
+}
+
+/**
+ * Готовность двери Go — БЕЗ запроса к поставщику: настроена ли она вообще.
+ *
+ * 🔴 ЗАЧЕМ ЭТО ОТДЕЛЬНО ОТ 503 (17.10.2026). Дверь без заданных путей отвечает 503
+ * на КАЖДЫЙ вызов — и это верно, но узнать о ней можно было только вызовом. Из-за
+ * этого сервер kiberos.ai читался как «дверь выкачена»: модуль загружен, два маршрута
+ * на месте, а использовать дверь нельзя. Готовность обязана быть видна в строке
+ * здоровья и названа при запуске, а не выясняться пробой — пробу к тому же легко
+ * послать не туда (буквальный `/go` даёт 404 и читается как «двери нет»).
+ */
+export function goDoorReadiness(cfg: ProxyConfig): { configured: boolean; missing: string[] } {
+  const missing: string[] = []
+  if (!cfg.goRegistryPath) missing.push('GO_REGISTRY_PATH')
+  if (!cfg.goTokensPath) missing.push('GO_TOKENS_PATH')
+  return { configured: missing.length === 0, missing }
 }
 
 async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Response> {

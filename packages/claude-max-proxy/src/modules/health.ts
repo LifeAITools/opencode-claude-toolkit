@@ -4,6 +4,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { identityWindow } from '../identity-watch.js'
+import { goDoorReadiness } from './go-door.js'
 import { loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 
 export interface HealthModuleOpts {
@@ -120,11 +121,18 @@ export function createHealthModule(moduleOpts: HealthModuleOpts): ProxyModule {
         // потерянного времени у соседнего проекта и у меня (29.08.2026).
         // Полей нет вовсе, когда слежка не подписана: «не мерили» ≠ «ноль».
         const idw = identityWindow()
+        const go = goDoorReadiness(ctx.config)
         return Response.json({
           ok: true,
           uptime: Math.floor(process.uptime()),
           sessions: ctx.proxyClient.sessionCount(),
           ...(idw ? { reqLastHour: idw.requests, unidentifiedLastHour: idw.unidentified, windowMin: idw.windowMin } : {}),
+          // Готовность дверей БЕЗ пробы к поставщику (S5/D5): «маршрут есть» и «по
+          // маршруту можно ходить» — разные вещи, и второе до 17.10.2026 узнавалось
+          // только вызовом. `configured:false` здесь — не сбой, а честное «нечем».
+          doors: [
+            { name: 'go-door', configured: go.configured, ...(go.configured ? {} : { missing: go.missing }) },
+          ],
         })
       },
     },

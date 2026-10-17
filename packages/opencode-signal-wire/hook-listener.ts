@@ -47,43 +47,57 @@ import { join } from 'path'
 // render layer decided per emit: total → kept after dedup/trim → bytes.
 // Cheap audit: tail -f the log to see hint pressure & dropped reasons.
 
-const RENDER_LOG = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
+// Render diagnostics log. Overridable via SW_RENDER_LOG so tests never write to
+// the machine's live journal (Rule: tests must not touch the live debug log).
+function renderLogPath(): string {
+  return process.env.SW_RENDER_LOG ?? join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
+}
 function logHintPacked(hook: string, sessionId: string | null, out: PackOutput): void {
   try {
     const line = `[${new Date().toISOString()}] {"step":"HINT_PACKED","hook":"${hook}","sessionId":"${sessionId ?? '?'}","total":${out.stats.total},"kept":${out.stats.kept},"deduped":${out.stats.deduped},"trimmed":${out.stats.trimmed},"bytes":${out.stats.bytes},"droppedDeduped":${JSON.stringify(out.droppedDeduped)},"droppedTrimmed":${JSON.stringify(out.droppedTrimmed)}}\n`
-    appendFileSync(RENDER_LOG, line)
+    appendFileSync(renderLogPath(), line)
   } catch { /* logging best-effort */ }
 }
 
 /**
- * Hint budget — taken from the RULE SET, not held here.
+ * Hint budget — taken from the RULE SET, never held here.
  *
  * The engine stamps every result with `maxChars`, propagated from
- * `RuleSet._meta.hint_max_chars` (core ≥ fad7b41) — the SAME propagation as the
- * hint wrapper. The rule set is decided by the machine's daemon, so the budget
- * is the FLEET's number and changes hot with a rules.json edit: no adapter
- * release, no rebuild, no divergence between the core's own hint path and this
- * one. Before this, the adapter held 4000 while the core held 0 (no trim) — two
- * numbers that could drift silently, which is exactly what the primitive fixes.
+ * `RuleSet._meta.hint_max_chars` (core ≥ 0.37.0) — the SAME propagation as the
+ * hint wrapper — and `packHints` inherits it. So the budget is the FLEET's
+ * number and moves with a rules.json edit: no adapter release, no rebuild, and
+ * no second copy to drift against the core's own hint path. Before this the
+ * adapter held 4000 while the core held 0 (no trim) — the exact divergence the
+ * primitive exists to end.
  *
- * FALLBACK (bridge — delete when the bundled core carries the field): the
- * daemon-absent path packs with the in-process core, whose bundled rule set
- * predates `hint_max_chars`, so there is nothing to inherit. The env/default
- * keeps the old 4000 behaviour instead of silently dropping the trim on that
- * path. The SSOT rule set already carries `hint_max_chars = 4000`, so the two
- * paths agree today.
+ * ABSENCE IS CALLED BY NAME, not papered over. The core's default when no set
+ * carries the field is NO TRIM (0) — a deliberate pre-v1.7 behaviour. We do NOT
+ * substitute an adapter constant: that would re-create the second number this
+ * primitive removes. Instead the absence is logged ONCE per process
+ * (`HINT_BUDGET_ABSENT`), so a set that lost its field is VISIBLE rather than
+ * silently inflating every hint block.
  */
-export function hintBudget(results: EmitResult[]): number {
-  for (const r of results) {
+let warnedBudgetAbsent = false
+
+function noteIfBudgetAbsent(results: EmitResult[]): void {
+  if (warnedBudgetAbsent) return
+  if (hintsCarryBudget(results)) return
+  warnedBudgetAbsent = true
+  try {
+    appendFileSync(
+      renderLogPath(),
+      `[${new Date().toISOString()}] {"step":"HINT_BUDGET_ABSENT","note":"no result carried maxChars (RuleSet._meta.hint_max_chars) — packHints applies NO trim","results":${results.length}}\n`,
+    )
+  } catch { /* logging best-effort */ }
+}
+
+/** Does any result carry the rule set's budget? The engine stamps them all the
+ *  same, so the first hit decides — but ANY hit means the field reached us. */
+export function hintsCarryBudget(results: EmitResult[]): boolean {
+  return results.some((r) => {
     const n = (r as { maxChars?: unknown }).maxChars
-    if (typeof n === 'number' && Number.isFinite(n) && n > 0) return n
-  }
-  const env = process.env.SW_HINT_MAX_CHARS
-  if (env) {
-    const n = Number(env)
-    if (Number.isFinite(n) && n > 0) return n
-  }
-  return 4000
+    return typeof n === 'number' && Number.isFinite(n) && n > 0
+  })
 }
 
 // Event-type literals (hardcoded so consumers don't need to import a constants
@@ -255,7 +269,8 @@ export function applyHintResults(
   output: { output: string; title: string; metadata: unknown },
   sessionId?: string | null,
 ): number {
-  const packed = packHints(results, { maxChars: hintBudget(results) })
+  noteIfBudgetAbsent(results)
+  const packed = packHints(results)
   if (packed.text.length === 0) return 0
   output.output = `${output.output}\n${packed.text}`
   logHintPacked('tool.execute.after', sessionId ?? null, packed)
@@ -310,7 +325,7 @@ function logCompactDiag(
 ): void {
   try {
     const line = `[${new Date().toISOString()}] {"step":"COMPACT","hook":"tool.execute.after","sessionId":"${sessionId ?? '?'}","ruleId":"${ruleId ?? 'none'}","outcome":"${outcome}","bytesDropped":${bytesDropped},"linesDropped":${linesDropped}}\n`
-    appendFileSync(RENDER_LOG, line)
+    appendFileSync(renderLogPath(), line)
   } catch { /* logging best-effort */ }
 }
 
@@ -514,7 +529,8 @@ export function applyChatHintResults(
 ): number {
   if (!Array.isArray(output.parts) || output.parts.length === 0) return 0
 
-  const packed = packHints(results, { maxChars: hintBudget(results) })
+  noteIfBudgetAbsent(results)
+  const packed = packHints(results)
   if (packed.text.length === 0) return 0
 
   // Find the last text part (search from end). Skip non-text parts (file,

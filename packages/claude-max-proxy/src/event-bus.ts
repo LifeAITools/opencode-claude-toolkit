@@ -110,6 +110,8 @@ export type EventKind =
   | 'GO_REQUEST'
   | 'GO_COMPLETE'
   | 'GO_ERROR'
+  /** Запрос к двери Go без имени сессии — обслужен, но прогрев на нём не вооружается. */
+  | 'GO_REQUEST_UNIDENTIFIED'
 
   // Generic
   | 'INFO'
@@ -180,6 +182,7 @@ export const EVENT = {
   GO_REQUEST: 'GO_REQUEST',
   GO_COMPLETE: 'GO_COMPLETE',
   GO_ERROR: 'GO_ERROR',
+  GO_REQUEST_UNIDENTIFIED: 'GO_REQUEST_UNIDENTIFIED',
   // Generic
   INFO: 'INFO',
   WARN: 'WARN',

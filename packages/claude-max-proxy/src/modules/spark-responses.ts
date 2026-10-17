@@ -20,6 +20,7 @@ import { EVENT } from '../event-bus.js'
 import { captureBody } from '../body-capture.js'
 import { createHash } from 'crypto'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
+import { resolveSessionIdentity } from '../session-identity.js'
 import {
   translateToResponsesBody,
   bufferResponsesToMessages,
@@ -216,19 +217,20 @@ export function createSparkResponsesModule(): ProxyModule {
         try { body = await req.json() as MessagesRequest }
         catch { return sparkErrorResponse(400, 'Invalid JSON body', 'invalid_request_error') }
 
-        // Session: passthrough caller's conversation id (routing + prompt cache
-        // on the gateway side), else stable derivative like openai-compat.
-        let sessionId = req.headers.get('x-opencode-session') ?? ''
-        if (!sessionId) {
-          const authHeader = req.headers.get('authorization') ?? ''
-          if (authHeader.startsWith('Bearer ') && authHeader.length > 20) {
-            sessionId = 'spark-' + createHash('sha256').update(authHeader).digest('hex').slice(0, 8)
-          }
-        }
+        // Session: единое правило (FR-19/D3) — заголовок, иначе производный номер
+        // (дверь совместимости), иначе честное «не опознан».
+        const identity = resolveSessionIdentity({
+          headerValue: req.headers.get('x-opencode-session'),
+          derive: () => {
+            const authHeader = req.headers.get('authorization') ?? ''
+            if (authHeader.startsWith('Bearer ') && authHeader.length > 20) {
+              return 'spark-' + createHash('sha256').update(authHeader).digest('hex').slice(0, 8)
+            }
+            return 'spark-' + (server.requestIP(req)?.address ?? 'unknown')
+          },
+        })
+        const sessionId = identity.sessionId ?? ''
         const peer = server.requestIP(req)
-        if (!sessionId) {
-          sessionId = 'spark-' + (peer?.address ?? 'unknown')
-        }
         const srcPort = peer?.port ?? null
         return serveSparkRequest(body, {
           sessionId,

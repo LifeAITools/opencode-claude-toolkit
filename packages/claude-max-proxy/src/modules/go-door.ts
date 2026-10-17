@@ -26,6 +26,7 @@ import {
   newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, bodyField, classifyError,
   extractUsageChat, extractUsageResponses, usageFromSseText, type CallKind,
 } from '../provider-dump.js'
+import { resolveSessionIdentity } from '../session-identity.js'
 
 const ORG_HEADER = 'x-kiberos-go-org'
 const SESSION_HEADER = 'x-litellm-session-id'
@@ -63,7 +64,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   const cfg = ctx.config
   const kind = callKindOf(req)
   const door = 'proxy:opencode-go'
-  const sessionId = req.headers.get(SESSION_HEADER)
+  // Единое правило опознания (FR-19/D3). У двери Go носителя в теле нет, поэтому
+  // дверей две: заголовок `x-litellm-session-id` или честное «не опознан».
+  const identity = resolveSessionIdentity({ headerValue: req.headers.get(SESSION_HEADER) })
+  const sessionId = identity.sessionId
   const actor = hashActor(req.headers.get(ACTOR_HEADER))
   const path = dialect === 'chat' ? '/chat/completions' : '/responses'
 
@@ -76,6 +80,16 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     wantStream = j.stream === true
   } catch {
     return errorResponse(400, 'Invalid JSON body', 'invalid_request_error')
+  }
+
+  // Неопознанный запрос ОБСЛУЖИВАЕТСЯ, но назван в журнале: у разового вызова нет
+  // номера, по которому его узнать второй раз, — прогрев на нём не вооружается.
+  if (identity.source === 'none') {
+    ctx.emit({
+      level: 'info', kind: EVENT.GO_REQUEST_UNIDENTIFIED,
+      sessionId: null, model,
+      msg: 'дверь Go: запрос без x-litellm-session-id — обслужен, прогрев на нём не вооружается',
+    })
   }
 
   const rec = newRecord({ door, provider: 'opencode-go', call_kind: kind })

@@ -10,6 +10,7 @@ import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { createHash } from 'crypto'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
+import { resolveSessionIdentity } from '../session-identity.js'
 import {
   type OAIChatRequest,
   translateToAnthropicBody,
@@ -70,18 +71,20 @@ export function createOpenAICompatModule(): ProxyModule {
           }
         }
 
-        // Session ID resolution
-        let sessionId = req.headers.get('x-claude-code-session-id') ?? ''
-        if (!sessionId) {
-          const authHeader = req.headers.get('authorization') ?? ''
-          if (authHeader.startsWith('Bearer ') && authHeader.length > 20) {
-            sessionId = 'openai-' + createHash('sha256').update(authHeader).digest('hex').slice(0, 8)
-          }
-        }
-        if (!sessionId) {
-          const peer = server.requestIP(req)
-          sessionId = 'openai-' + (peer?.address ?? 'unknown')
-        }
+        // Session ID resolution — единое правило (FR-19/D3): заголовок, иначе
+        // ПРОИЗВОДНЫЙ номер (дверь совместимости объявляет его сама), иначе
+        // честное «не опознан».
+        const identity = resolveSessionIdentity({
+          headerValue: req.headers.get('x-claude-code-session-id'),
+          derive: () => {
+            const authHeader = req.headers.get('authorization') ?? ''
+            if (authHeader.startsWith('Bearer ') && authHeader.length > 20) {
+              return 'openai-' + createHash('sha256').update(authHeader).digest('hex').slice(0, 8)
+            }
+            return 'openai-' + (server.requestIP(req)?.address ?? 'unknown')
+          },
+        })
+        const sessionId = identity.sessionId ?? ''
 
         const peer = server.requestIP(req)
         const srcPort = peer?.port ?? null

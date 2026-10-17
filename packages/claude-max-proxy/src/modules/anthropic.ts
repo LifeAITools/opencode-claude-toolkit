@@ -8,6 +8,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { extractSessionIdFromBody, cacheInjectionDisabled } from '@life-ai-tools/claude-code-sdk'
+import { resolveSessionIdentity, toEngineIdSource } from '../session-identity.js'
 import { serveSparkRequest } from './spark-responses.js'
 import { isSparkModel } from '../spark-translate.js'
 import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
@@ -60,12 +61,16 @@ export function createAnthropicModule(): ProxyModule {
         // serve it WITHOUT arming keepalive: an id minted per request can
         // never be matched again, so its cache slot would be warmed forever
         // for nobody.
-        const headerSession = req.headers.get('x-claude-code-session-id')
-        const bodySession = headerSession ? null : extractSessionIdFromBody(rawBodyStr)
-        const resolvedSession = headerSession ?? bodySession
-        const idSource: 'header' | 'body' | 'none' =
-          headerSession ? 'header' : bodySession ? 'body' : 'none'
-        const sessionId = resolvedSession ?? 'anon-' + Date.now().toString(36)
+        // Правило одно на все двери — `resolveSessionIdentity` (FR-19/D3):
+        // заголовок → тело → честное «не опознан». У двери Anthropic носитель
+        // есть и в теле (`metadata.user_id`), поэтому она отдаёт извлекатель.
+        const identity = resolveSessionIdentity({
+          headerValue: req.headers.get('x-claude-code-session-id'),
+          bodyText: rawBodyStr,
+          bodyExtractor: extractSessionIdFromBody,
+        })
+        const idSource = toEngineIdSource(identity.source)
+        const sessionId = identity.sessionId ?? 'anon-' + Date.now().toString(36)
 
         // ── Spark-роут (диагноз роутера 07.10: req_011C умирал здесь 404) ──
         // У CLI один baseURL: субагент с model=muse-spark-* приходит на /v1/messages,

@@ -4,6 +4,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { identityWindow } from '../identity-watch.js'
+import { goDoorWindow } from '../go-door-watch.js'
 import { goDoorReadiness } from './go-door.js'
 import { loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
 
@@ -122,6 +123,7 @@ export function createHealthModule(moduleOpts: HealthModuleOpts): ProxyModule {
         // Полей нет вовсе, когда слежка не подписана: «не мерили» ≠ «ноль».
         const idw = identityWindow()
         const go = goDoorReadiness(ctx.config)
+        const goWin = goDoorWindow()
         return Response.json({
           ok: true,
           uptime: Math.floor(process.uptime()),
@@ -130,8 +132,15 @@ export function createHealthModule(moduleOpts: HealthModuleOpts): ProxyModule {
           // Готовность дверей БЕЗ пробы к поставщику (S5/D5): «маршрут есть» и «по
           // маршруту можно ходить» — разные вещи, и второе до 17.10.2026 узнавалось
           // только вызовом. `configured:false` здесь — не сбой, а честное «нечем».
+          // `window` — сколько вызовов прошло за час и сколько из них провалилось;
+          // поля нет вовсе, когда слежка не подписана («не мерили» ≠ «ноль»).
           doors: [
-            { name: 'go-door', configured: go.configured, ...(go.configured ? {} : { missing: go.missing }) },
+            {
+              name: 'go-door',
+              configured: go.configured,
+              ...(go.configured ? {} : { missing: go.missing }),
+              ...(goWin ? { window: { requests: goWin.requests, failures: goWin.failures, windowMin: goWin.windowMin } } : {}),
+            },
           ],
         })
       },

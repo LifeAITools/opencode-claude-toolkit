@@ -54,7 +54,7 @@ import { ProxyConfigCredentialsAdapter } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
 import { startStormWatch } from './storm-watch.js'
 import { startIdentityWatch } from './identity-watch.js'
-import { startGoDoorWatch } from './go-door-watch.js'
+import { startDoorWatch } from './door-watch.js'
 import { startLocalAlert } from './local-alert.js'
 import { startKaPurchaseNotice } from './ka-purchase-notice.js'
 import { readLaunchIdentity } from './launch-identity.js'
@@ -352,11 +352,13 @@ const stopHeartbeat = startHeartbeat(
 
 const stopStormWatch = startStormWatch()
 const stopIdentityWatch = startIdentityWatch()
-// Дверь Go: «стоит и отвечает» ≠ «по ней можно ходить» (S5/D5, 17.10.2026). Сторож
-// молчит, пока дверь не настроена, и говорит один раз, если почти все вызовы за час
-// провалились. Живёт здесь по той же причине, что и остальные сторожа: подписчик,
-// умирающий вместе с сессией, хуже отсутствующего.
-const stopGoDoorWatch = startGoDoorWatch(cfg)
+// Двери поставщиков: «стоит и отвечает» ≠ «по ней можно ходить» (S5/D5, 17.10.2026).
+// Сторож считает по КАЖДОЙ двери долю ПРОШЕДШИХ вызовов за час и говорит один раз, если
+// не проходит почти ничего — с причиной (квота / поставщик / вызывающий). Молчит, пока
+// дверь Go не настроена: это выбранное нами состояние, оно названо при запуске. Живёт
+// здесь по той же причине, что и остальные сторожа: подписчик, умирающий вместе с сессией,
+// хуже отсутствующего.
+const stopDoorWatch = startDoorWatch(cfg)
 // And the alerts leave the log file: detecting a storm and writing it to disk
 // is what let a 52-minute outage reach the founder by feel instead of by
 // notification on 2026-08-24. See local-alert.ts.

@@ -114,8 +114,8 @@ export type EventKind =
   | 'GO_REQUEST_UNIDENTIFIED'
   /** Дверь Go загружена, но не настроена: пути реестра/пропусков не заданы, дверь ответит 503. */
   | 'GO_DOOR_UNCONFIGURED'
-  /** За окно почти все вызовы двери Go провалились: ходить по ней нечем или некуда. */
-  | 'GO_DOOR_FAILING'
+  /** За окно почти ни один вызов двери не прошёл: дверь стоит и не пропускает (любая причина). */
+  | 'DOOR_PASSES_NOTHING'
   /** Человек поставил режим на сессию (FR-7): auto / away-until / off. */
   | 'HUMAN_MODE_SET'
 
@@ -190,7 +190,7 @@ export const EVENT = {
   GO_ERROR: 'GO_ERROR',
   GO_REQUEST_UNIDENTIFIED: 'GO_REQUEST_UNIDENTIFIED',
   GO_DOOR_UNCONFIGURED: 'GO_DOOR_UNCONFIGURED',
-  GO_DOOR_FAILING: 'GO_DOOR_FAILING',
+  DOOR_PASSES_NOTHING: 'DOOR_PASSES_NOTHING',
   HUMAN_MODE_SET: 'HUMAN_MODE_SET',
   // Generic
   INFO: 'INFO',

@@ -71,6 +71,14 @@ export interface GoOrgStatus {
   usage_error?: string | null
   /** Имена исчерпанных окон этой организации (например ['weekly']). */
   exhausted?: string[]
+  /** Статус организации из реестра (FR-1): `active | exhausted | retired | restricted`.
+   *  Нет поля — организация считается `active` (реестр пока его не несёт). */
+  status?: string
+  /** Смысловая причина ограничения (обязательна при `restricted`, FR-1): чтобы агент
+   *  и пускатель понимали ПОЧЕМУ, а не гадали. */
+  restricted_reason?: string | null
+  /** Модели, привязанные к организации (FR-1). Нет — поле не выводится (не выдумываем). */
+  models?: string[]
 }
 
 /** Ответ двери реестра: кто активен и по каждой организации её окна. */
@@ -251,6 +259,7 @@ export function buildGoQuotaStatus(input: {
     const u = (o.usage ?? {}) as GoUsage
     const o5 = pct(u.rolling), o7 = pct(u.weekly), oM = pct(u.monthly)
     const lng = o7 === null ? oM : oM === null ? o7 : Math.max(o7, oM)
+    const status = typeof o.status === 'string' && o.status ? o.status : 'active'
     return {
       name: o.name,
       // uid — мост к `member.orgUid`; нет в карте — поля нет (потребитель не выдумывает).
@@ -260,6 +269,15 @@ export function buildGoQuotaStatus(input: {
       util7d: o7 === null ? null : o7 / 100,
       utilMonth: oM === null ? null : oM / 100,
       level: classifyLevel(o5 === null ? null : o5 / 100, lng === null ? null : lng / 100),
+      // Статус и модельная привязка организации (FR-1/FR-18): их читает пускатель при
+      // рождении — «не ограничена и имеет нужную модель». Отсутствие остаётся отсутствием:
+      // статуса нет — `active`; причины нет при не-restricted — поля нет; моделей нет — поля нет.
+      status,
+      // Причина едет ТОЛЬКО при `restricted`: иначе случайная причина читалась бы
+      // как запрет, которого нет (FR-1: причина обязательна при флаге).
+      ...(status === 'restricted' && typeof o.restricted_reason === 'string' && o.restricted_reason
+        ? { restrictedReason: o.restricted_reason } : {}),
+      ...(Array.isArray(o.models) && o.models.length ? { models: o.models.map(String) } : {}),
       windows: [win('5h', u.rolling, o5), win('week', u.weekly, o7), win('month', u.monthly, oM)].filter((w) => w.util !== null),
     }
   })

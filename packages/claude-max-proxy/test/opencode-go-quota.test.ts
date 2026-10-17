@@ -195,3 +195,35 @@ describe('мост имя→uid (member.orgUid ↔ orgs[])', () => {
     expect('uid' in s.orgs[0]).toBe(false)
   })
 })
+
+describe('статус и модельная привязка организации (FR-1/FR-18) — их читает пускатель', () => {
+  const mk = (org: any) => buildGoQuotaStatus({
+    usage: LIVE, error: null, org: 'a', active: true,
+    accountHint: 'a', models: [], modelsSource: '', measuredAt: AT, orgs: [org],
+  }) as any
+
+  test('нет статуса в реестре → организация active (отсутствие не выдумываем в запрет)', () => {
+    expect(mk({ name: 'a', active: true, usage: LIVE }).orgs[0].status).toBe('active')
+  })
+
+  test('restricted с причиной доезжает до отчёта', () => {
+    const o = mk({
+      name: 'a', active: true, usage: LIVE,
+      status: 'restricted', restricted_reason: 'дорого в этом окне',
+    }).orgs[0]
+    expect(o.status).toBe('restricted')
+    expect(o.restrictedReason).toBe('дорого в этом окне')
+  })
+
+  test('модельная привязка доезжает; её отсутствие — поля НЕТ, а не пустой список', () => {
+    expect(mk({ name: 'a', active: true, usage: LIVE, models: ['opencode-go/x'] }).orgs[0].models)
+      .toEqual(['opencode-go/x'])
+    expect('models' in mk({ name: 'a', active: true, usage: LIVE }).orgs[0]).toBe(false)
+  })
+
+  test('причина без restricted не выводится (иначе поле читалось бы как запрет)', () => {
+    const o = mk({ name: 'a', active: true, usage: LIVE, restricted_reason: 'просто так' }).orgs[0]
+    expect(o.status).toBe('active')
+    expect('restrictedReason' in o).toBe(false)
+  })
+})

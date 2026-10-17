@@ -82,6 +82,7 @@ export declare class ProxyClient {
     private readonly kaReviveDropped;
     private readonly lineagePrefix;
     private readonly sessionPins;
+    private readonly humanModes;
     private readonly orgVault;
     private readonly orgRotateConsent;
     private readonly lastServedOrg;
@@ -109,6 +110,20 @@ export declare class ProxyClient {
     }>;
     get cacheMetricsSnapshot(): import("./cache-metrics.js").MetricsSummary;
     stop(): void;
+    setHumanMode(sessionId: string, mode: "auto" | "away-until" | "off", until?: number | null): {
+        ok: true;
+        mode: string;
+        until: number | null;
+    } | {
+        ok: false;
+        error: string;
+    };
+    humanModeSurface(): Array<{
+        sessionId: string;
+        mode: string;
+        until: number | null;
+    }>;
+    private humanAllowsSpend;
     disarmSessions(reason: string, sessionId?: string): string[];
     reloadSessions(reason: string, sessionId?: string): string[];
     notifyCredentialsChanged(reason: string): void;
@@ -208,5 +223,13 @@ export declare class ProxyClient {
 export declare function quotaReturnsAtSec(rl: Pick<RateLimitSnapshot, "resetAt" | "resetAt7d" | "utilization5h" | "utilization7d" | "retryAfter">, nowSec: number): number | null;
 export declare function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot;
 export declare function extractSessionIdFromBody(rawBody: ArrayBuffer | Uint8Array | string): string | null;
+export declare function humanModeAllowsSpend(m: {
+    mode: "auto" | "away-until" | "off";
+    until: number | null;
+} | undefined, now: number): boolean;
+export declare function inspectLastUserMessage(body: unknown, marker: string): {
+    isContinuation: boolean;
+    hasMarker: boolean;
+};
 export { parseSSEToEvents as _parseKaResponseForTests };
 declare function parseSSEToEvents(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<StreamEvent>;

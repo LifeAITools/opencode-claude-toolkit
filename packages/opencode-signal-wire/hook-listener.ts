@@ -56,12 +56,28 @@ function logHintPacked(hook: string, sessionId: string | null, out: PackOutput):
 }
 
 /**
- * Default render budget — 4000 chars (~1k tokens). Empirically:
- *   - typical 6-hint emit = ~900 chars → well under budget
- *   - extreme 20-hint emit at peak quota = ~5000 chars → trim ~25% of low-pri
- * Tuneable via SW_HINT_MAX_CHARS env if production patterns shift.
+ * Hint budget — taken from the RULE SET, not held here.
+ *
+ * The engine stamps every result with `maxChars`, propagated from
+ * `RuleSet._meta.hint_max_chars` (core ≥ fad7b41) — the SAME propagation as the
+ * hint wrapper. The rule set is decided by the machine's daemon, so the budget
+ * is the FLEET's number and changes hot with a rules.json edit: no adapter
+ * release, no rebuild, no divergence between the core's own hint path and this
+ * one. Before this, the adapter held 4000 while the core held 0 (no trim) — two
+ * numbers that could drift silently, which is exactly what the primitive fixes.
+ *
+ * FALLBACK (bridge — delete when the bundled core carries the field): the
+ * daemon-absent path packs with the in-process core, whose bundled rule set
+ * predates `hint_max_chars`, so there is nothing to inherit. The env/default
+ * keeps the old 4000 behaviour instead of silently dropping the trim on that
+ * path. The SSOT rule set already carries `hint_max_chars = 4000`, so the two
+ * paths agree today.
  */
-function renderBudget(): number {
+export function hintBudget(results: EmitResult[]): number {
+  for (const r of results) {
+    const n = (r as { maxChars?: unknown }).maxChars
+    if (typeof n === 'number' && Number.isFinite(n) && n > 0) return n
+  }
   const env = process.env.SW_HINT_MAX_CHARS
   if (env) {
     const n = Number(env)
@@ -239,7 +255,7 @@ export function applyHintResults(
   output: { output: string; title: string; metadata: unknown },
   sessionId?: string | null,
 ): number {
-  const packed = packHints(results, { maxChars: renderBudget() })
+  const packed = packHints(results, { maxChars: hintBudget(results) })
   if (packed.text.length === 0) return 0
   output.output = `${output.output}\n${packed.text}`
   logHintPacked('tool.execute.after', sessionId ?? null, packed)
@@ -498,7 +514,7 @@ export function applyChatHintResults(
 ): number {
   if (!Array.isArray(output.parts) || output.parts.length === 0) return 0
 
-  const packed = packHints(results, { maxChars: renderBudget() })
+  const packed = packHints(results, { maxChars: hintBudget(results) })
   if (packed.text.length === 0) return 0
 
   // Find the last text part (search from end). Skip non-text parts (file,

@@ -617,6 +617,18 @@ export class ProxyClient {
    *  reaped with the session. Drives forward token selection (hold cross-org /
    *  adopt same-org / rebind on marker+reload / 401 on cross-org expiry). */
   private readonly sessionPins: Map<string, SessionPin> = new Map()
+
+  /**
+   * РЕЖИМ ЧЕЛОВЕКА на сессию (FR-7). `auto` — решает сторож (по умолчанию);
+   * `away-until` — человек отошёл до времени, и до него сторож НЕ держит ходы;
+   * `off` — сторож на этой сессии не применяется вовсе.
+   *
+   * 🔴 ОТКАЗ ЧЕЛОВЕКА СИЛЬНЕЕ ПОЛИТИКИ, И ЭТО СВОЙСТВО МЕСТА: режим проверяется
+   * РЯДОМ с разовым согласием (`consentGrantPath`/маркер) и к нему ПРИБАВЛЯЕТСЯ,
+   * а не заменяет его. Сессия, которой человек сказал `off`, не запирается
+   * сторожем — иначе «отказ» был бы словом, а не поступком.
+   */
+  private readonly humanModes: Map<string, { mode: 'auto' | 'away-until' | 'off'; until: number | null }> = new Map()
   /** Per-org credential vault + persisted pin bindings (multi-org support). */
   private readonly orgVault: OrgVault
   /** One-shot consents from an explicit `switchSessionOrg` — exempts the very
@@ -829,6 +841,36 @@ export class ProxyClient {
    * Pass sessionId to target a single session, omit to disarm all.
    * Returns the list of sessionIds that were disarmed.
    */
+  /** Ставит режим человека на сессию (FR-7). `auto` снимает запись. */
+  setHumanMode(sessionId: string, mode: 'auto' | 'away-until' | 'off', until: number | null = null):
+    { ok: true; mode: string; until: number | null } | { ok: false; error: string } {
+    if (mode === 'away-until' && (until === null || !Number.isFinite(until))) {
+      return { ok: false, error: 'away-until требует until (epoch ms)' }
+    }
+    if (mode === 'auto') this.humanModes.delete(sessionId)
+    else this.humanModes.set(sessionId, { mode, until: mode === 'away-until' ? until : null })
+    const m = this.humanModes.get(sessionId)
+    this.events.emit({
+      level: 'info', kind: 'HUMAN_MODE_SET', sessionId, mode,
+      until: m?.until ?? null,
+      msg: `human mode on session ${sessionId.slice(0, 8)}: ${mode}`,
+    })
+    return { ok: true, mode, until: m?.until ?? null }
+  }
+
+  /** Снимок режимов — для /admin и испытаний. */
+  humanModeSurface(): Array<{ sessionId: string; mode: string; until: number | null }> {
+    return [...this.humanModes.entries()].map(([sessionId, m]) => ({ sessionId, mode: m.mode, until: m.until }))
+  }
+
+  /**
+   * Разрешает ли ЧЕЛОВЕК потратить ход вопреки сторожу. `off` — да всегда;
+   * `away-until` — да, пока время не прошло; `auto`/нет записи — нет (решает сторож).
+   */
+  private humanAllowsSpend(sessionId: string, now = Date.now()): boolean {
+    return humanModeAllowsSpend(this.humanModes.get(sessionId), now)
+  }
+
   disarmSessions(reason: string, sessionId?: string): string[] {
     const disarmed: string[] = []
     if (sessionId) {
@@ -1972,6 +2014,7 @@ export class ProxyClient {
         // one (sub-agents, tool-result continuations, programmatic clients).
         const consented = inspectLastUserMessage(parsedBody, qGuard.overrideMarker).hasMarker
           || consumeConsent(qGuard.consentGrantPath, sessionId)
+          || this.humanAllowsSpend(sessionId)
         if (!consented) {
           const resetAt = orgReading?.resetAt ?? null
           const resetsInSec = resetAt ? Math.max(0, resetAt * 1000 - Date.now()) / 1000 : null
@@ -2072,6 +2115,7 @@ export class ProxyClient {
         const lastMsg = inspectLastUserMessage(parsedBody, guard.overrideMarker)
         const consented = lastMsg.hasMarker
           || consumeConsent(guard.consentGrantPath, sessionId)
+          || this.humanAllowsSpend(sessionId)
         if (!consented) {
           // Dump the blocked request + prefix diff for offline analysis.
           let dumpPath: string | null = null
@@ -4224,7 +4268,22 @@ export function extractSessionIdFromBody(
  *     being sent now. This is why no marker-counting is needed: an old marker
  *     is structurally excluded by "latest message only".
  */
-function inspectLastUserMessage(
+/**
+ * Правило режима человека (FR-7), вынесенное ЧИСТОЙ функцией — чтобы его можно
+ * было проверить без прокси и без единой записи: `off` разрешает трату всегда;
+ * `away-until` — пока время не прошло; `auto`/нет записи — нет (решает сторож).
+ */
+export function humanModeAllowsSpend(
+  m: { mode: 'auto' | 'away-until' | 'off'; until: number | null } | undefined,
+  now: number,
+): boolean {
+  if (!m) return false
+  if (m.mode === 'off') return true
+  if (m.mode === 'away-until') return m.until !== null && now < m.until
+  return false
+}
+
+export function inspectLastUserMessage(
   body: unknown,
   marker: string,
 ): { isContinuation: boolean; hasMarker: boolean } {

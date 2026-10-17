@@ -342,6 +342,31 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
       },
     },
 
+    // Human modes (FR-7): auto / away-until / off, per session. The human's
+    // refusal is stronger than the policy — `off`/`away-until` stand the guards
+    // down for that session, alongside (never replacing) the per-turn consent.
+    {
+      method: 'POST',
+      path: '/admin/session-mode',
+      handler: async (req) => {
+        let body: { sessionId?: string; mode?: string; until?: number } = {}
+        try { body = await req.json() as any } catch { /* 400 below */ }
+        if (!body.sessionId || !body.mode) {
+          return Response.json({ error: 'sessionId and mode required' }, { status: 400 })
+        }
+        if (body.mode !== 'auto' && body.mode !== 'away-until' && body.mode !== 'off') {
+          return Response.json({ error: 'mode ∈ {auto|away-until|off}' }, { status: 400 })
+        }
+        const r = ctx.proxyClient.setHumanMode(body.sessionId, body.mode, body.until ?? null)
+        return Response.json(r, { status: r.ok ? 200 : 400 })
+      },
+    },
+    {
+      method: 'GET',
+      path: '/admin/session-mode',
+      handler: async () => Response.json({ modes: ctx.proxyClient.humanModeSurface() }),
+    },
+
     // Org surface — per-org credential vault + session pins (multi-org), plus
     // the COMPLETE roster with quota windows + status from the quota file (S1/D1).
     {

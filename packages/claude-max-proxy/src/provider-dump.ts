@@ -17,62 +17,31 @@ import { appendFile, mkdirSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import {
+  DUMP_SCHEMA_VERSION,
+  SECRET_HEADERS,
+  type CallKind,
+  type ErrorKind,
+  type UsageNorm,
+  type DumpRecord,
+} from '@kiberos/proxy-core'
 
-export const DUMP_SCHEMA_VERSION = 1
-
-export type CallKind = 'real' | 'warm' | 'probe' | 'refresh' | 'title'
-export type ErrorKind = 'network' | 'auth' | 'quota' | 'provider' | 'client'
-
-/** Заголовки, значения которых не пишутся. Список — по probe_capture.py:45 плюс наши. */
-export const SECRET_HEADERS = new Set([
-  'authorization', 'cookie', 'set-cookie', 'x-api-key', 'proxy-authorization',
-])
+// 🔴 Схема — КОНТРАКТ в `@kiberos/proxy-core` (FR-21/D6), а не здесь: писатель
+// (двери) и читатель (сборщик картины) берут ОДНИ типы, поэтому дрейф формы
+// ловится валидатором, а не «договорились». Здесь остаётся ПИСАТЕЛЬ: он
+// реэкспортирует контракт, чтобы существующие импортёры (`go-door`,
+// `provider-turns`, испытания) не меняли ни одной строки.
+export {
+  DUMP_SCHEMA_VERSION,
+  SECRET_HEADERS,
+  type CallKind,
+  type ErrorKind,
+  type UsageNorm,
+  type DumpRecord,
+} from '@kiberos/proxy-core'
 
 /** Заголовки учёта/квоты, которые дословно уходят в quota_seen. */
 const QUOTA_HEADER_RE = /^(x-ratelimit-|retry-after$|anthropic-ratelimit-|x-.*(cost|quota|usage|balance|remaining))/i
-
-export interface UsageNorm {
-  input: number | null
-  output: number | null
-  reasoning: number | null
-  cache_read: number | null
-  cache_write: number | null
-  cache_write_1h: number | null
-}
-
-export interface DumpRecord {
-  v: typeof DUMP_SCHEMA_VERSION
-  ts: string
-  host: string
-  door: string
-  provider: string
-  org_id: string | null
-  provider_org_ref: string | null
-  model: string | null
-  session_id: string | null
-  lineage: string | null
-  call_kind: CallKind
-  actor: string | null
-  request: {
-    method: string
-    url: string
-    headers: Record<string, string>
-    body_sha256: string | null
-    body_bytes: number | null
-    body_ref: string | null
-  }
-  response: {
-    status: number | null
-    headers: Record<string, string>
-    body: unknown | null
-    chunks: Array<{ t_ms: number; bytes: number; text: string }> | null
-  }
-  usage_raw: unknown | null
-  usage_norm: UsageNorm
-  quota_seen: Record<string, string>
-  timing: { ttfb_ms: number | null; total_ms: number | null }
-  error: { kind: ErrorKind; provider_type: string | null } | null
-}
 
 const EMPTY_USAGE: UsageNorm = {
   input: null, output: null, reasoning: null, cache_read: null, cache_write: null, cache_write_1h: null,

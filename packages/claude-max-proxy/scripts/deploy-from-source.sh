@@ -93,6 +93,20 @@ rm -rf "$SDK_DST/dist"; cp -a "$SDK_DIST" "$SDK_DST/dist"
 cp "$SDK_PKG" "$SDK_DST/package.json"
 log "SDK synced ($(grep -o '"version": "[^"]*"' "$SDK_DST/package.json" | head -1))"
 
+# 3b-bis. Build proxy-core (the dump SCHEMA, FR-21/D6, lives there) and keep the
+#     proxy's resolution of it a MONOREPO SYMLINK — exactly like the SDK.
+#     🔴 NOT a `file:` dep: bun would COPY it into node_modules AND `bun install`
+#     in $INSTALLED would then FAIL (its ../proxy-core does not exist there),
+#     aborting every deploy (measured 2026-10-17). The link is the only form that
+#     survives BOTH trees, so it is created here rather than declared.
+log "building proxy-core from source"
+( cd "$SRC_REPO/packages/proxy-core" && "$BUN" run build >/dev/null 2>&1 ) \
+  || { log "PROXY-CORE BUILD FAILED — aborting deploy"; exit 1; }
+mkdir -p "$PROXY_PKG_DIR/node_modules/@kiberos"
+rm -rf "$PROXY_PKG_DIR/node_modules/@kiberos/proxy-core"
+ln -sfn ../../../proxy-core "$PROXY_PKG_DIR/node_modules/@kiberos/proxy-core"
+log "proxy-core built + linked from monorepo"
+
 # 3c. Compile the runtime binaries (server + quota-watcher) and install them.
 #     Version is inlined at build time (--define) so /version reports truth.
 log "compiling binaries ($PLATFORM_SUFFIX)"

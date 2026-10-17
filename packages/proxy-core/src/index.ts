@@ -8,3 +8,15 @@ export {
   aggregateUsage,
   type UsageRow,
 } from './stats-store.js'
+export {
+  DUMP_SCHEMA_VERSION,
+  CALL_KINDS,
+  ERROR_KINDS,
+  SECRET_HEADERS,
+  validateDumpRecord,
+  type CallKind,
+  type ErrorKind,
+  type UsageNorm,
+  type DumpRecord,
+  type DumpValidation,
+} from './provider-dump-schema.js'

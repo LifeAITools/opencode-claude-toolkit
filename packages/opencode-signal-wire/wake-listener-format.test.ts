@@ -1,65 +1,67 @@
 import { describe, expect, test } from 'bun:test'
-import { formatWakeMessage } from './wake-listener'
+import { formatWakeMessage, wakeText } from './wake-listener'
 import type { WakeEvent } from './wake-types'
 
-function channelMessageEvent(payload: Record<string, unknown>): WakeEvent {
+// Пять веток ДОСТАВКИ удалены из formatWakeMessage 17.10 (замер: 0 заходов в
+// fallback за 1.3 суток — все доставки несут `rendered` роутера). Разрешение
+// автора канала теперь дело РОУТЕРА (его wake-render.ts) и проверяется там;
+// здесь держится ПРАВИЛО адаптера: доставка берёт готовое, квота рисуется сама,
+// а отсутствие текста зовётся по имени.
+
+function quotaEvent(payload: Record<string, unknown> = {}): WakeEvent {
   return {
-    eventId: 'evt-canonical-channel-message',
-    source: 'synqtask',
-    type: 'channel_message',
+    eventId: 'evt-quota',
+    source: 'proxy',
+    type: 'quota_critical',
     priority: 'urgent',
-    targetMemberId: 'agent-developer',
-    payload,
+    targetMemberId: '',
+    payload: {
+      accountHint: 'acct-1', util5h: 0.99, util7d: 0.5, level: 'critical',
+      message: 'stop', issuedAt: '2026-04-28T20:16:48.833Z', ...payload,
+    },
     timestamp: '2026-04-28T20:16:48.833Z',
   }
 }
 
-describe('formatWakeMessage — channel_message author resolution', () => {
-  test('canonical SynqTask payload (authorName/authorId) renders correct sender', () => {
-    const text = formatWakeMessage(
-      channelMessageEvent({
-        channelId: 'chan-canonical-1',
-        authorName: 'agent-ceo',
-        authorId: '11111111-1111-1111-1111-111111111111',
-        text: '@agent-developer please reply',
-      }),
-    )
-    expect(text).toContain('Channel Message from agent-ceo')
-    expect(text).not.toContain('Channel Message from unknown')
-    expect(text).toContain('`chan-canonical-1`')
+function deliveredEvent(payload: Record<string, unknown> = {}): WakeEvent {
+  return {
+    eventId: 'evt-delivery',
+    source: 'synqtask',
+    type: 'channel_message',
+    priority: 'urgent',
+    targetMemberId: 'agent-developer',
+    payload: { channelId: 'c1', authorName: 'agent-ceo', text: 'привет', ...payload },
+    timestamp: '2026-04-28T20:16:48.833Z',
+  }
+}
+
+describe('формат побудки — текст доставки приходит готовым, свой рисуется только для квоты', () => {
+  test('rendered есть — вставляется как есть: full на границе хода, brief посреди', () => {
+    const ev = deliveredEvent({ rendered: { v: 1, full: 'ПОЛНЫЙ', brief: 'КОРОТКИЙ', parts: {} } })
+    expect(wakeText(ev, 'full')).toBe('ПОЛНЫЙ')
+    expect(wakeText(ev, 'brief')).toBe('КОРОТКИЙ')
   })
 
-  test('legacy non-SynqTask payload (sender_name) still works', () => {
-    const text = formatWakeMessage(
-      channelMessageEvent({
-        channel_id: 'chan-legacy',
-        sender_name: 'legacy-bot',
-        text: 'hi from a legacy adapter',
-      }),
-    )
-    expect(text).toContain('Channel Message from legacy-bot')
+  test('доставка БЕЗ rendered — честное «роутер не приложил», а НЕ нарисованное адаптером', () => {
+    const own = wakeText(deliveredEvent(), 'full')
+    expect(own.startsWith('<system-reminder type="wake"')).toBe(true)
+    expect(own).toContain('Роутер не приложил текст побудки')
+    // Своего текста НЕТ: ни автора, ни инструкций — рисовальщик теперь один.
+    expect(own).not.toContain('agent-ceo')
+    expect(own).not.toContain('todo_channels')
   })
 
-  test('falls back to authorId when authorName missing', () => {
-    const text = formatWakeMessage(
-      channelMessageEvent({
-        channelId: 'chan-id-only',
-        authorId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-        text: 'no name available',
-      }),
-    )
-    expect(text).toContain('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
-    expect(text).not.toContain('from unknown')
+  test('rendered непонятной формы (v2) — тоже честный отказ, а не выдумка', () => {
+    const fb = wakeText(deliveredEvent({ rendered: { v: 2, full: 'X', brief: 'Y' } }), 'full')
+    expect(fb).toContain('Роутер не приложил текст побудки')
+    expect(fb).not.toContain('X')
   })
 
-  test('falls back to "unknown" only when no author hint at all', () => {
-    const text = formatWakeMessage(
-      channelMessageEvent({
-        channelId: 'chan-no-author',
-        text: 'orphan message',
-      }),
-    )
-    expect(text).toContain('Channel Message from unknown')
+  test('квота — ЕДИНСТВЕННЫЙ вид, который рисует адаптер (роутер её не видит)', () => {
+    const local = wakeText(quotaEvent(), 'full')
+    expect(local.startsWith('<system-reminder type="wake"')).toBe(true)
+    expect(local).toContain('acct-1')
+    expect(local).not.toContain('Роутер не приложил')
   })
 })
 
@@ -72,11 +74,10 @@ describe('formatWakeMessage — настроечные данные не пов�
       name: 'vibe-synqtalk-owner', roleName: 'Project Owner', rolePrompt: 'You own the project.',
       teamName: null, teammates: [], budget: { maxSubagents: 5, maxSpawnDepth: 2 },
     } as any
-    const text = formatWakeMessage(channelMessageEvent({ channelId: 'c1', authorName: 'agent-ceo', text: 'привет' }), identity)
+    const text = formatWakeMessage(quotaEvent(), identity)
     expect(text).not.toContain('<agent-identity')
     expect(text).not.toContain('You own the project.')
     expect(text).not.toContain('Teammates')
-    expect(text).toContain('Channel Message from agent-ceo')
     expect(text.startsWith('<system-reminder type="wake"')).toBe(true)
   })
 })
@@ -93,27 +94,5 @@ describe('приёмник не пишет в SynqTask за агента', () =>
     expect(src).not.toContain('batch_update_active')
     expect(src).not.toContain("key: 'wakeLifecycle'")
     expect(src).not.toContain('Starting work on')
-  })
-})
-
-describe('готовый текст побудки от роутера (rendered v1)', () => {
-  // План wake-text-one-renderer (02.10): текст рисует роутер; адаптер только выбирает full/brief.
-  const base = channelMessageEvent({ channelId: 'c1', authorName: 'agent-ceo', text: 'привет' })
-  const { wakeText } = require('./wake-listener')
-  test('поле есть — вставляется как есть: full на границе хода, brief посреди', () => {
-    const ev = { ...base, payload: { ...base.payload, rendered: { v: 1, full: 'ПОЛНЫЙ', brief: 'КОРОТКИЙ', parts: {} } } }
-    expect(wakeText(ev, 'full')).toBe('ПОЛНЫЙ')
-    expect(wakeText(ev, 'brief')).toBe('КОРОТКИЙ')
-  })
-  test('поля нет или версия другая — прежний текст адаптера', () => {
-    // Прежний текст адаптера узнаём по его обёртке и автору (вариант канала зависит от того, видел ли
-    // процесс этот канал раньше, — это не предмет этого испытания).
-    const own = wakeText(base, 'full')
-    expect(own.startsWith('<system-reminder type="wake"')).toBe(true)
-    expect(own).toContain('agent-ceo')
-    const v2 = { ...base, payload: { ...base.payload, rendered: { v: 2, full: 'X', brief: 'Y' } } }
-    const fallback = wakeText(v2, 'full')
-    expect(fallback.startsWith('<system-reminder type="wake"')).toBe(true)
-    expect(fallback).not.toBe('X')
   })
 })

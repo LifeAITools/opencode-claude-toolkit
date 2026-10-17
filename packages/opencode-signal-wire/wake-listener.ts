@@ -25,7 +25,7 @@ import type {
   WakeResponse,
   DiscoveryFile,
 } from './wake-types'
-import { DISCOVERY_DIR, discoveryDir, WAKE_EVENT_TYPES, WARM_CHANNEL_TTL_MS } from './wake-types'
+import { DISCOVERY_DIR, discoveryDir, WAKE_EVENT_TYPES } from './wake-types'
 import { FNV_32_PRIME } from './domain-constants'
 import { pollFileDoor } from './wake-file-door'
 import { hasWindow } from './launch-kind'
@@ -68,34 +68,6 @@ export interface WakeListenerHandle {
   token: string
   server: ReturnType<typeof Bun.serve>
   stop: () => void
-}
-
-// ─── Warm Channel Tracking ──────────────────────────────────────────
-// Tracks channels where this agent recently participated.
-// Warm = agent replied in last WARM_CHANNEL_TTL_MS → compact notification (reference only)
-// Cold = first contact or stale → full message with instructions
-
-// CR-05: TTL imported from wake-types (SSOT). See WARM_CHANNEL_TTL_MS.
-const warmChannels = new Map<string, { lastReply: number; messageCount: number }>()
-
-/** Mark a channel as warm (agent just interacted). Called after injection. */
-function markChannelWarm(channelId: string) {
-  const existing = warmChannels.get(channelId)
-  warmChannels.set(channelId, {
-    lastReply: Date.now(),
-    messageCount: (existing?.messageCount ?? 0) + 1,
-  })
-}
-
-/** Check if a channel is warm (agent active in it recently). */
-function isChannelWarm(channelId: string): boolean {
-  const entry = warmChannels.get(channelId)
-  if (!entry) return false
-  if (Date.now() - entry.lastReply > WARM_CHANNEL_TTL_MS) {
-    warmChannels.delete(channelId)
-    return false
-  }
-  return true
 }
 
 // ─── Agent Identity (CR-02: from SynqTask, DB-03: AGENTS.md fallback) ───
@@ -854,10 +826,14 @@ function formatMeasuredAt(issuedAt: unknown, eventTimestamp?: string): string {
 
 /**
  * Готовый текст побудки от роутера (wake-router, план wake-text-one-renderer, 02.10.2026) —
- * `rendered: {v: 1, brief, full, parts}`. Рисует ОДИН рисовальщик для всех программ; адаптер только
- * ПЕРЕВОДИТ: `full` — на границе хода (побудка открывает ход), `brief` — посреди хода (совет без
- * ответа может прийти, пока агент работает). Поля нет или форма другая — прежний formatWakeMessage
- * (переходный путь, снимается, когда роутер кладёт поле всем).
+ * `rendered: {v: 1, brief, full, parts}`. Рисует ОДИН рисовальщик — роутер (решение yjs 17.10);
+ * адаптер только ПЕРЕВОДИТ: `full` — на границе хода (побудка открывает ход), `brief` — посреди
+ * хода (совет без ответа может прийти, пока агент работает).
+ *
+ * 🔴 ДВА ЗАКОННЫХ ИСХОДА, ОБА НАЗВАНЫ. Квота — единственный вид, который рисуется ЗДЕСЬ:
+ * она рождается в адаптере (он читает файл поставщика), роутер её не видит. Всё прочее —
+ * доставка, и её текст принадлежит роутеру: отсутствие `rendered` — ДЕФЕКТ доставки, который
+ * зовётся по имени (`WAKE_TEXT_ABSENT`), а НЕ повод молча нарисовать своё.
  */
 export function wakeText(event: WakeEvent, mode: 'full' | 'brief', identity?: AgentIdentity | null): string {
   const r = ((event as any).rendered ?? (event.payload as any)?.rendered) as
@@ -867,8 +843,33 @@ export function wakeText(event: WakeEvent, mode: 'full' | 'brief', identity?: Ag
     const text = mode === 'brief' ? r.brief : r.full
     if (typeof text === 'string' && text.length > 0) return text
   }
-  dbg(`WAKE_TEXT_FALLBACK type=${event.type} source=${event.source} mode=${mode}`)
-  return formatWakeMessage(event, identity)
+  if (isQuotaAdvisoryType(event.type)) {
+    dbg(`WAKE_TEXT_LOCAL_QUOTA type=${event.type} mode=${mode}`)
+    return formatWakeMessage(event, identity)
+  }
+  dbg(`WAKE_TEXT_ABSENT type=${event.type} source=${event.source} mode=${mode}`)
+  return absentWakeText(event)
+}
+
+/** Четыре совета по квоте — единственный вид, рождающийся ВНУТРИ адаптера. */
+function isQuotaAdvisoryType(type: string): boolean {
+  return (
+    type === WAKE_EVENT_TYPES.QUOTA_CRITICAL ||
+    type === WAKE_EVENT_TYPES.QUOTA_WARNING ||
+    type === WAKE_EVENT_TYPES.QUOTA_RECOVERED ||
+    type === WAKE_EVENT_TYPES.QUOTA_STATUS
+  )
+}
+
+/**
+ * Честный текст на случай доставки без `rendered`: это НЕ побудка, а сообщение о
+ * дефекте доставки. Пропажа текста обязана быть ВИДНОЙ, а не замаскированной
+ * нарисованным на месте — иначе одна из удалённых веток оживёт при смене версии,
+ * и никто не заметит (условие yjs, 17.10).
+ */
+function absentWakeText(event: WakeEvent): string {
+  const esc = (s: string) => s.replace(/"/g, '&quot;')
+  return `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}">Роутер не приложил текст побудки (\`rendered\` отсутствует или непонятной формы). Моё дело — вставить готовое, а не нарисовать своё; сообщи владельцу роутера.</system-reminder>`
 }
 
 /** Format wake event with actionable instructions per event type.
@@ -900,78 +901,12 @@ export function formatWakeMessage(event: WakeEvent, identity?: AgentIdentity | n
   let body: string
 
   switch (event.type) {
-    case WAKE_EVENT_TYPES.CHANNEL_MESSAGE: {
-      const chId = p.channel_id ?? p.channelId ?? ''
-      // Canonical SynqTask wake payload uses authorName/authorId. Older keys
-      // (sender_name/senderName/senderId) kept for backward compat with any
-      // non-SynqTask wake source.
-      const sendName = p.authorName ?? p.author_name ?? p.sender_name ?? p.senderName ?? p.authorId ?? p.senderId ?? 'unknown'
-      const text = p.text ?? '(no text)'
-      const warm = isChannelWarm(chId)
-
-      if (warm) {
-        // ── WARM: compact reference. Agent knows the channel and tools. ──
-        const preview = text.length > 120 ? text.slice(0, 120) + '…' : text
-        body = `**${sendName}** in channel \`${chId}\`:\n> ${preview}\nReply: \`todo_channels({action:"send", channel_id:"${chId}", text:"..."})\``
-      } else {
-        // ── COLD: full message + instructions (first contact) ──
-        body = [
-          `## Channel Message from ${sendName}`,
-          `> ${text}`,
-          `**Channel:** \`${chId}\``,
-          `Reply: \`todo_channels({action:"send", channel_id:"${chId}", text:"YOUR REPLY"})\``,
-          `Read history: \`todo_channels({action:"read", channel_id:"${chId}", limit:5})\``,
-        ].join('\n')
-      }
-      // Mark warm after formatting (next message will be compact)
-      markChannelWarm(chId)
-      break
-    }
-
-    case WAKE_EVENT_TYPES.TASK_ASSIGNED: {
-      const taskId = p.task_id ?? p.taskId ?? p.entityId ?? ''
-      body = [
-        `## Task Assigned: ${p.title ?? 'Unknown'}`,
-        taskId ? `Task: \`${taskId}\`` : '',
-        p.description ? `> ${p.description}` : '',
-        `Accept: \`todo_tasks({action:"set_status", task_id:"${taskId}", status:"started"})\``,
-        `Details: \`todo_tasks({action:"show", task_id:"${taskId}"})\``,
-      ].filter(Boolean).join('\n')
-      break
-    }
-
-    case WAKE_EVENT_TYPES.COMMENT_ADDED: {
-      const entityId = p.entity_id ?? p.entityId ?? ''
-      body = [
-        `## Comment on ${p.title ?? entityId}`,
-        `From: ${p.actor_name ?? p.actorId ?? 'unknown'}`,
-        `Read: \`todo_comments({action:"list", task_id:"${entityId}"})\``,
-      ].join('\n')
-      break
-    }
-
-    case WAKE_EVENT_TYPES.DELEGATION_RECEIVED: {
-      const taskId = p.task_id ?? p.taskId ?? p.entityId ?? ''
-      body = [
-        `## Delegation: ${p.title ?? 'Unknown'}`,
-        `From: ${p.delegator ?? p.delegated_by ?? p.fromId ?? 'unknown'}`,
-        `Accept: \`todo_tasks({action:"accept_delegation", task_id:"${taskId}"})\``,
-        `Details: \`todo_tasks({action:"show", task_id:"${taskId}"})\``,
-      ].join('\n')
-      break
-    }
-
-    case WAKE_EVENT_TYPES.STATUS_CHANGED: {
-      const taskId = p.task_id ?? p.taskId ?? p.entityId ?? ''
-      const status = p.status ?? (p.changes as any)?.status?.to ?? '?'
-      const title = p.title ?? taskId
-      body = [
-        `## Task Status: ${title} → ${status}`,
-        `View: \`todo_tasks({action:"show", task_id:"${taskId}"})\``,
-      ].join('\n')
-      break
-    }
-
+    // 🔴 ТОЛЬКО КВОТА. Пять веток ДОСТАВКИ (channel_message, task_assigned,
+    // comment_added, delegation_received, status_changed) удалены 17.10: замер
+    // показал 0 заходов в fallback за 1.3 суток — все доставки несут `rendered`
+    // роутера, а рисовать их здесь значило держать ВТОРОЙ рисовальщик. Правило
+    // теперь одно: текст доставки приходит готовым (см. wakeText), а отсутствие
+    // `rendered` зовётся по имени, а не замазывается нарисованным на месте.
     case WAKE_EVENT_TYPES.QUOTA_CRITICAL: {
       // Payload (from quota-watcher.ts): accountHint, util5h, util7d,
       // resetAt (epoch ms), level, message, issuedAt (ISO).
@@ -1817,12 +1752,7 @@ export async function startWakeListener(
     // Advisory events (quota_*) inject as context-only via noReply:true so
     // they don't force a turn. Actionable events (channel_message,
     // task_assigned) use noReply:false to wake the agent into a response.
-    const isAdvisoryEvent = (
-      event.type === WAKE_EVENT_TYPES.QUOTA_CRITICAL ||
-      event.type === WAKE_EVENT_TYPES.QUOTA_WARNING ||
-      event.type === WAKE_EVENT_TYPES.QUOTA_RECOVERED ||
-      event.type === WAKE_EVENT_TYPES.QUOTA_STATUS
-    )
+    const isAdvisoryEvent = isQuotaAdvisoryType(event.type)
 
     if (isAdvisoryEvent) {
       // Advisory: skip busy-check (we don't compete for the LLM loop) and

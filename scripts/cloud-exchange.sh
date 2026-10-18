@@ -19,9 +19,9 @@
 #   .cloud-exchange/inbox/    — мы кладём СЮДА (ответы, уточнения)
 #
 # ИСПОЛЬЗОВАНИЕ:
-#   cloud-exchange pull <session_id> --dir <репо> --branch <ветка-сессии> [--remote <r>]
+#   cloud-exchange pull <session_id> --dir <репо> --branch <ветка-сессии> [--remote <r>]   # по умолчанию: origin, если он есть; иначе — ВСЕ remotes по очереди
 #       — забрать ветку и показать НОВЫЕ файлы из outbox (что уже видели — не повторяет)
-#   cloud-exchange say <session_id> "текст" --dir <репо> [--remote <r>] [--inbox-branch <b>] [--org <acct>]
+#   cloud-exchange say <session_id> "текст" --dir <репо> [--remote <r>]   # по умолчанию: origin, если он есть; иначе — ВСЕ remotes по очереди [--inbox-branch <b>] [--org <acct>]
 #       — положить ответ в inbox, отправить ветку и ПОЗВАТЬ агента (сообщение в очередь, ход не рвётся)
 #   cloud-exchange seen <session_id>            — что уже прочитано (маркер)
 #
@@ -34,7 +34,7 @@ OUTBOX=".cloud-exchange/outbox"
 INBOX=".cloud-exchange/inbox"
 
 CMD="${1:-}"; shift || true
-SID=""; DIR="$PWD"; BRANCH=""; INBOX_BRANCH=""; REMOTE="origin"; ORG=""; TEXT=""
+SID=""; DIR="$PWD"; BRANCH=""; INBOX_BRANCH=""; REMOTE=""; ORG=""; TEXT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="${2:?--dir требует путь}"; shift 2 ;;
@@ -51,6 +51,18 @@ git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || { echo "не git-репоз
 mkdir -p "$MARK_DIR"
 MARK="$MARK_DIR/${SID}.seen"
 
+# 🔴 REMOTE НЕ УГАДЫВАЕТСЯ, А ВЫБИРАЕТСЯ (замер vibe-kiberos-app-owner 18.10): дефолт `origin`
+# молча уходил не туда на ЛЮБОМ нашем репо без `origin` (у kiberos-app их три: gitea-local,
+# github, upstream), и это читалось как «агент ничего не выложил» — то есть как ПУСТОЙ ОТВЕТ,
+# а не как ошибка. Худший класс: отсутствие выглядит как результат.
+remotes_all="$(git -C "$DIR" remote 2>/dev/null || true)"
+resolve_remotes() {
+  if [ -n "$REMOTE" ]; then printf '%s\n' "$REMOTE"; return; fi
+  if printf '%s\n' "$remotes_all" | grep -qx origin; then printf '%s\n' origin; return; fi
+  printf '%s\n' "$remotes_all"
+}
+CANDIDATES="$(resolve_remotes)"
+
 case "$CMD" in
   seen)
     [ -f "$MARK" ] && cat "$MARK" || echo "(ещё ничего не читали)"
@@ -58,8 +70,18 @@ case "$CMD" in
 
   pull)
     [ -n "$BRANCH" ] || { echo "pull: нужен --branch <ветка-сессии>" >&2; exit 2; }
-    git -C "$DIR" fetch -q "$REMOTE" "$BRANCH" 2>/dev/null || { echo "ветка не приехала: $REMOTE/$BRANCH" >&2; exit 3; }
-    ref="$REMOTE/$BRANCH"
+    ref=""; tried=""
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      tried="$tried $r"
+      if git -C "$DIR" fetch -q "$r" "$BRANCH" 2>/dev/null; then ref="$r/$BRANCH"; break; fi
+    done <<< "$CANDIDATES"
+    if [ -z "$ref" ]; then
+      echo "ветка '$BRANCH' НЕ НАЙДЕНА ни на одном remote. Пробовал:$tried" >&2
+      echo "  Это НЕ «агент ничего не выложил»: проверьте имя ветки и список remotes (git remote -v)." >&2
+      exit 3
+    fi
+    [ "$(printf '%s\n' "$CANDIDATES" | grep -c .)" -gt 1 ] && echo "(ветка нашлась на remote '$ref' — смотрел все, потому что origin нет)"
     files="$(git -C "$DIR" ls-tree -r --name-only "$ref" -- "$OUTBOX" 2>/dev/null | sort || true)"
     [ -n "$files" ] || { echo "в $ref нет файлов в $OUTBOX (агент ещё не выкладывал)"; exit 0; }
     new="$(comm -13 <(sort "$MARK" 2>/dev/null || true) <(printf '%s\n' "$files"))"
@@ -89,10 +111,13 @@ case "$CMD" in
     git -C "$WT" -c user.name="cloud-exchange" -c user.email="cloud-exchange@kiberos.local" \
       commit -q -m "cloud-exchange: ответ облачной сессии $SID"
     sha="$(git -C "$WT" rev-parse HEAD)"
-    if git -C "$WT" push -q "$REMOTE" "$sha:refs/heads/$ib" 2>/dev/null; then
-      echo "ответ уложен и отправлен: $REMOTE/$ib ($f)"
+    # Для отправки берём первый кандидат (origin, если он есть; иначе единственный remote).
+    push_remote="$(printf '%s\n' "$CANDIDATES" | grep -m1 . || true)"
+    [ -n "$push_remote" ] || { echo "у репозитория нет ни одного remote — ответ некуда отправить" >&2; exit 3; }
+    if git -C "$WT" push -q "$push_remote" "$sha:refs/heads/$ib" 2>/dev/null; then
+      echo "ответ уложен и отправлен: $push_remote/$ib ($f)"
     else
-      echo "НЕ ОТПРАВИЛОСЬ в $REMOTE/$ib — проверьте доступ к remote (для GitHub-клона нужен App)" >&2
+      echo "НЕ ОТПРАВИЛОСЬ в $push_remote/$ib — проверьте доступ к remote (для GitHub-клона нужен App)" >&2
       git -C "$DIR" worktree remove --force "$WT" 2>/dev/null || true
       exit 3
     fi

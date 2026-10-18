@@ -19,13 +19,21 @@
 #   • по ЖИВОЙ сессии teleport НЕ гонять;
 #   • состояние живой смотреть `--status` (ниже) — он не трогает сессию;
 #   • teleport — по ЗАВЕРШЁННОЙ (или когда обрыв хода приемлем).
-# 🔴 А ЕСТЬ ЛИ ЧТЕНИЕ БЕЗ КОПИИ? ЕСТЬ, НО НАМ ЗАКРЫТО (замер 18.10). `--cloud <session_id>`
-# — это ATTACH: по справке CLI он «attach to an existing one by session ID», то есть подключение
-# к ЖИВОЙ сессии, а не её копия, и именно он не должен обрывать ход. На нашем аккаунте отказ:
-#   Error: Attaching to an existing cloud session is not enabled for your account.
-# То есть дверь есть и её закрыл ПРОВАЙДЕР, а не наш код: на аккаунте без attach единственное
-# чтение — teleport, а он копию берёт и ход обрывает. Отсюда и `--status` как единственный
-# безопасный взгляд снаружи. Если attach когда-нибудь включат — сюда добавить `--attach`.
+# 🔴 ПОПРАВКА К СВОЕМУ ЖЕ ВЫВОДУ (18.10, по офф. документации — нашёл vibe-mermaid-ink-owner).
+# Я прочитал `Error: Attaching to an existing cloud session is not enabled for your account.`
+# как ЗАПРЕТ ПРОВАЙДЕРА и предложил просить Anthropic включить attach. ЭТО БЫЛО НЕВЕРНО:
+# в таблице ошибок `code.claude.com/docs/en/claude-code-on-the-web` та же строка объясняется
+# как ПОДСКАЗКА CLI — «You ran `--cloud <session-id>` without `-p`. Send the message with
+# `claude -p "your message" --cloud <session-id>`». То есть интерактивного attach нет ВООБЩЕ,
+# ни у нас, ни у кого: `--cloud <id>` без `-p` — не способ подключиться. Ждать и просить нечего.
+#
+# 🔴 А «ВИДЕТЬ ЖИВОГО, НЕ ТРОГАЯ» — ГОТОВОЕ И ЧУЖОЕ: ВЕБ-ИНТЕРФЕЙС. Докá: «Open the session on
+# claude.ai or the Claude mobile app to check progress or interact directly». Ссылка вида
+# https://claude.ai/code/<session_id> (её печатает cloud-run) — там вся переписка и оттуда
+# можно отвечать. НЕ искать read-API там, где есть браузер.
+#   • писать живому, НЕ прерывая: `claude -p "текст" --cloud <id>` (ставит сообщение в очередь);
+#   • смотреть снаружи, НЕ трогая: `--status` ниже;
+#   • читать/продолжать у себя: `--teleport` — и он берёт КОПИЮ, обрывая ход живой сессии.
 # 🔴 У НЕ-пушащего репо (не-GitHub, только локальный remote) канала НЕТ ВООБЩЕ — teleport'у
 # нечего fetch'ить; тогда остаётся только ждать конца сессии (или спасать код текстом).
 #

@@ -126,7 +126,9 @@ if [ "$STATUS" -eq 1 ]; then
   else
     echo "репозиторий не указан (--dir) — ветки remote не проверял"
   fi
-  echo "ЖИВА ЛИ СЕЙЧАС — отсюда НЕ видно: публичного read-API нет, attach у части аккаунтов закрыт."
+  echo "ЖИВА ЛИ СЕЙЧАС — отсюда НЕ видно: публичного read-API нет, а интерактивного attach не существует вовсе"
+  echo "  (ошибка «not enabled for your account» — подсказка CLI: --cloud без -p не подключает)."
+  echo "  ВИДЕТЬ живого и отвечать — веб-интерфейс claude.ai/code или приложение Claude."
   echo "Не трогая сессию, можно ещё НАПИСАТЬ ей: claude-cloud.sh --org <acct> -p \"текст\" --cloud $SID"
   exit 0
 fi

@@ -62,8 +62,8 @@ if [ "$STATUS" -eq 1 ]; then
   echo "=== cloud-read --status $SID (сессия НЕ тронута) ==="
   line="$(grep -m1 -F "$SID" "$REG" 2>/dev/null || true)"
   # 🔴 account берём не из первой строки: запись в реестре МНОГОСТРОЧНАЯ (в задаче есть
-  # переводы строк), поэтому `account=` уезжает на одну из следующих строк. Ищем по окну.
-  acc="$(grep -A6 -F "$SID" "$REG" 2>/dev/null | grep -oE 'account=[A-Za-z0-9_-]+' | head -1 || true)"
+  # переводы строк), поэтому `account=` уезжает далеко вниз. Ищем awk-ом от строки с id.
+  acc="$(awk -v s="$SID" 'index($0,s){f=1} f && match($0,/account=[A-Za-z0-9_-]+/){print substr($0,RSTART,RLENGTH); exit}' "$REG" 2>/dev/null || true)"
   if [ -n "$line" ]; then
     echo "реестр: ${line%%$'\t'*}  ${acc:-account=не указан}"
     printf '  задача: %s\n' "$(printf '%s' "$line" | cut -f4 | cut -c1-200)"

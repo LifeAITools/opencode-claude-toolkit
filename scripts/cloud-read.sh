@@ -71,10 +71,42 @@ if [ "$STATUS" -eq 1 ]; then
     echo "реестр: записи нет (не эта машина или сессия создана иначе)"
   fi
   if [ -n "$REPO" ] && git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
-    remote="$(git -C "$REPO" remote | head -1)"
-    if [ -n "$remote" ]; then
-      echo "remote '$remote' — головы (новая ветка = сессия, скорее всего, дописала):"
-      git -C "$REPO" ls-remote --heads "$remote" 2>/dev/null | awk '{print "  " $2}' | head -20 || true
+    # 🔴 ВСЕ REMOTE, А НЕ ПЕРВЫЙ (замер vibe-kiberos-app-owner 18.10): у `kiberos-app` их три
+    # (`gitea-local`, `github`, `upstream`), и первый по порядку — `gitea-local`, а облачная
+    # сессия возвращает ветку на `github`. С одним remote это незаметно, поэтому и не всплыло.
+    # Плюс называем то, что нельзя получить из ls-remote: свежести он не отдаёт — зато видно,
+    # какая голова есть ТОЛЬКО на одном remote, а это и есть след вернувшейся сессии.
+    remotes="$(git -C "$REPO" remote 2>/dev/null || true)"
+    if [ -n "$remotes" ]; then
+      tmp="$(mktemp)"; : > "$tmp"
+      while IFS= read -r r; do
+        [ -n "$r" ] || continue
+        git -C "$REPO" ls-remote --heads "$r" 2>/dev/null | awk -v R="$r" '{print $2 "\t" R}' >> "$tmp" || true
+      done <<< "$remotes"
+      echo "remotes ($(printf '%s' "$remotes" | wc -w)) — головы по каждому:"
+      while IFS= read -r r; do
+        [ -n "$r" ] || continue
+        n="$(awk -v R="$r" -F'\t' '$2==R' "$tmp" | wc -l)"
+        printf '  %-14s %s голов\n' "$r" "$n"
+      done <<< "$remotes"
+      uniq_heads=""
+      # Сравнение «только на одном remote» имеет смысл ТОЛЬКО при двух и более remote:
+      # с одним remote каждый его ref формально «уникален», и список превращается в шум.
+      if [ "$(printf '%s' "$remotes" | wc -w)" -ge 2 ]; then
+        uniq_heads="$(cut -f1 "$tmp" | sort | uniq -c | awk '$1==1{print $2}')"
+      fi
+      if [ -n "$uniq_heads" ]; then
+        # Список ограничиваем: у форкнутого репо уникальных голов на `upstream` сотни,
+        # и без границы сигнал («появилась новая») тонет в шуме чужого форка.
+        total_uniq="$(printf '%s\n' "$uniq_heads" | grep -c . || true)"
+        echo "🔴 ЕСТЬ ТОЛЬКО НА ОДНОМ REMOTE (${total_uniq} шт., первые 10 — ищите знакомое имя):"
+        while IFS= read -r h; do
+          [ -n "$h" ] || continue
+          printf '  %s  ← %s\n' "$h" "$(awk -v H="$h" -F'\t' '$1==H{print $2}' "$tmp" | paste -sd, -)"
+        done <<< "$(printf '%s\n' "$uniq_heads" | head -10)"
+        [ "$total_uniq" -gt 10 ] && echo "  … и ещё $(( total_uniq - 10 ))"
+      fi
+      rm -f "$tmp"
     fi
   else
     echo "репозиторий не указан (--dir) — ветки remote не проверял"

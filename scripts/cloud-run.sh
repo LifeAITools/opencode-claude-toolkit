@@ -74,7 +74,10 @@ WRAP_OPTS=""
 [ -n "$ORG" ] && WRAP_OPTS="--org $(printf '%q' "$ORG")"
 [ -n "$MODEL" ] && WRAP_OPTS="$WRAP_OPTS --model $(printf '%q' "$MODEL")"
 [ -n "$BYPASS" ] && WRAP_OPTS="$WRAP_OPTS --dangerously-skip-permissions"
-tmux send-keys -t "$SESSION" "cd $(printf '%q' "$DIR") && $(printf '%q' "$WRAP") $WRAP_OPTS --cloud=$(printf '%q' "$TASK")" Enter
+# 🔴 PATH ПЕРЕДАЁТСЯ В ПАНЕЛЬ ЯВНО (замер vibe-kiberos-app-owner 18.10): панель наследует
+# окружение СЕРВЕРА tmux, а не наше, поэтому 1 прогон из 11 упал `exec: claude: not found`.
+# Явный PATH + абсолютный путь в обёртке закрывают это с двух сторон.
+tmux send-keys -t "$SESSION" "export PATH=$(printf '%q' "$PATH"); cd $(printf '%q' "$DIR") && $(printf '%q' "$WRAP") $WRAP_OPTS --cloud=$(printf '%q' "$TASK")" Enter
 
 accepted_bypass=0
 for _ in $(seq 1 $(( TIMEOUT / 2 ))); do
@@ -106,5 +109,12 @@ for _ in $(seq 1 $(( TIMEOUT / 2 ))); do
 done
 
 echo "TIMEOUT: session_id не появился за ${TIMEOUT}s; панель '$SESSION' оставлена для осмотра" >&2
-tmux capture-pane -pt "$SESSION" -S -40 2>/dev/null | tail -20 >&2 || true
+# 🔴 ПРИЧИНУ НАЗЫВАЕМ, А НЕ ОСТАВЛЯЕМ ЧИТАТЕЛЮ (18.10): самый частый молчаливый отказ —
+# бинарник/команда не найдены (панель унаследовала чужое окружение). Тогда в панели лежит
+# `… not found`, и это надо сказать вслух, иначе прогон выглядит как «просто не пошёл».
+pane_tail="$(tmux capture-pane -pt "$SESSION" -S -60 2>/dev/null | grep -vE '^[[:space:]]*$' | tail -20 || true)"
+if printf '%s' "$pane_tail" | grep -qiE 'not found|command not found|No such file|Permission denied'; then
+  echo "ПРИЧИНА: в панели виден отказ запуска (бинарник или команда не найдены) — проверьте PATH/CLAUDE_BIN." >&2
+fi
+printf '%s\n' "$pane_tail" >&2
 exit 1

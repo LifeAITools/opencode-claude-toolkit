@@ -36,4 +36,17 @@ if [ ! -f "$CFG" ]; then
   printf '%s' '{"env":{"ANTHROPIC_AUTH_TOKEN":"","ANTHROPIC_BASE_URL":""}}' > "$CFG"
 fi
 
-exec claude --settings "$CFG" "$@"
+# 🔴 БИНАРНИК ИЩЕТСЯ ЯВНО (замер vibe-kiberos-app-owner 18.10): 1 прогон из 11 упал
+# пустым выводом — `exec: claude: not found` (строка 39), потому что панель tmux
+# унаследовала окружение СЕРВЕРА tmux, а не нашей оболочки, и `~/.local/bin` в PATH
+# не оказался. Непостоянство опаснее постоянной поломки: выглядит как «прогон не пошёл».
+# Поэтому: абсолютный путь + ГРОМКИЙ отказ, а не молчаливое «claude не найден».
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || true)}"
+[ -n "$CLAUDE_BIN" ] || CLAUDE_BIN="$HOME/.local/bin/claude"
+if [ ! -x "$CLAUDE_BIN" ]; then
+  echo "claude-cloud: бинарник claude не найден (искали в PATH и в $HOME/.local/bin)." >&2
+  echo "  Передайте CLAUDE_BIN=/путь/к/claude или поправьте PATH." >&2
+  exit 127
+fi
+
+exec "$CLAUDE_BIN" --settings "$CFG" "$@"

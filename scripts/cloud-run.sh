@@ -109,7 +109,13 @@ for _ in $(seq 1 $(( TIMEOUT / 2 ))); do
   if [ -n "$sid" ]; then
     url="https://claude.ai/code/$sid"
     # Приложение-колонка account — ЧТОБЫ ЗНАТЬ, под кем сессия; первые 4 колонки не тронуты.
-    printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Is)" "$sid" "$DIR" "$TASK" "account=${ORG:-global}" >> "$REG"
+    # 🔴 ЗАДАНИЕ В РЕЕСТР ПИШЕТСЯ ОДНОЙ СТРОКОЙ (замер vibe-uniclowd-owner 18.10): задание
+    # многострочное, и переводы строк рвали запись на куски — читатель видел ТОЛЬКО ПЕРВУЮ
+    # строку, а у него первой шла общая шапка репозитория. Две РАЗНЫЕ сессии выглядели
+    # одинаковыми, и это чуть не стало ложным обвинением в дубле. Теперь переводы строк и
+    # табуляции заменяются на « ⏎ », и запись — ровно одна строка целиком.
+    TASK_ONELINE="$(printf '%s' "$TASK" | tr '\n\t' '  ' | sed 's/  */ /g' | cut -c1-400)"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Is)" "$sid" "$DIR" "$TASK_ONELINE" "account=${ORG:-global}" >> "$REG"
     echo "OK session_id=$sid"
     echo "account=${ORG:-global (CLI-вход)}"
     [ -n "$url" ] && echo "url=$url"

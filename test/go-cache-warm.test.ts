@@ -66,4 +66,28 @@ describe('go-cache-warm — прогрев не смеет вредить жив
     const out = await run(['--spool', join(tmpdir(), 'нет-такого-каталога-xyz')])
     expect(out).toContain('спул не найден')
   })
+
+  test('🔴 без организации в спуле — повтор НЕ шлётся (прогрел бы чужую учётку)', async () => {
+    // Тело без меты (старая форма) — организации нет, значит слать нельзя вовсе.
+    const dir = mkdtempSync(join(tmpdir(), 'go-warm-noorg-'))
+    const p = join(dir, 'ses_noorg.json')
+    writeFileSync(p, JSON.stringify({ model: 'deepseek-v4.1-flash-go', messages: [{ role: 'user', content: 'x' }] }))
+    const t = Date.now() / 1000 - 60 * 60
+    utimesSync(p, t, t)
+    const out = await run(['--spool', dir, '--fire'])
+    expect(out).toContain('нет организации')
+    expect(out).not.toContain('HTTP')
+  })
+
+  test('дверь берётся из меты: диалект не подменяется', async () => {
+    // Проверяем не сеть, а выбор двери — он вынесен в чистую функцию.
+    const p = Bun.spawnSync(['python3', '-c', `
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('w', '${SCRIPT}')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.door_path('acompletion'), m.door_path('anthropic_messages'), m.door_path('aresponses'), m.door_path('неизвестное'))
+`], { cwd: join(import.meta.dir, '..'), stdout: 'pipe', stderr: 'pipe' })
+    const out = new TextDecoder().decode(p.stdout)
+    expect(out.trim()).toBe('/v1/chat/completions /v1/messages /v1/responses /v1/chat/completions')
+  })
 })

@@ -32,8 +32,35 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_SPOOL = Path.home() / "projects/vibe/kiberos-app/litellm/capture/go-body"
-DEFAULT_ENDPOINT = "http://127.0.0.1:4000/v1/chat/completions"
+DEFAULT_BASE = "http://127.0.0.1:4000"
 DEFAULT_MASTER_KEY = Path.home() / "projects/vibe/kiberos-app/litellm/.master-key.local"
+
+# 🔴 ДВЕРЬ — ЧАСТЬ ТЕЛА (ревью владельца 19.10): тело антропного диалекта, уехавшее в
+# OpenAI-дверь, разберётся не так или откажет. Спул помнит дверь вызова (`call_type`),
+# и повтор идёт В ТУ ЖЕ.
+DOORS: dict[str, str] = {
+    "acompletion": "/v1/chat/completions",
+    "completion": "/v1/chat/completions",
+    "anthropic_messages": "/v1/messages",
+    "amessages": "/v1/messages",
+    "aresponses": "/v1/responses",
+    "responses": "/v1/responses",
+}
+
+
+def door_path(door: object) -> str:
+    """Путь двери по имени вызова. Неизвестное имя — дверь чата: это то, чем ходит флот."""
+    return DOORS.get(str(door or ""), "/v1/chat/completions")
+
+
+def read_spool(path: Path) -> dict:
+    """Тело и его мета из файла спула. Старая форма (тело без обёртки) — тоже годится:
+    такие файлы ещё лежат на диске и уйдут сами по TTL."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(doc, dict) and "body" in doc and isinstance(doc["body"], dict):
+        meta = doc.get("meta") or {}
+        return {"body": doc["body"], "org": meta.get("org"), "door": meta.get("door")}
+    return {"body": doc, "org": None, "door": None}
 
 
 def pick(spool: Path, idle_min: int, ttl_min: int, now: float | None = None) -> list[dict]:
@@ -57,17 +84,26 @@ def pick(spool: Path, idle_min: int, ttl_min: int, now: float | None = None) -> 
     return out
 
 
-def fire_one(item: dict, endpoint: str, master_key: str, timeout: int = 120) -> tuple[bool, str]:
+def fire_one(item: dict, base: str, master_key: str, timeout: int = 120) -> tuple[bool, str]:
     """Повторить тело через посредник. Ничего не меняет: только тот же запрос ещё раз."""
     try:
-        body = json.loads(Path(item["path"]).read_text(encoding="utf-8"))
+        spooled = read_spool(Path(item["path"]))
     except Exception as e:  # noqa: BLE001
         return False, f"тело не прочитано: {e}"
-    # Заголовок сессии — тот же, которым её звал агент: иначе повтор ляжет в ЧУЖУЮ сессию.
+    org = spooled.get("org")
+    if not org:
+        # Без организации повтор ушёл бы через строку `active:` реестра — то есть прогрел бы
+        # ЧУЖУЮ учётку и потратил бы на ней деньги. Это хуже, чем не греть.
+        return False, "в спуле нет организации — повтор не шлём (прогрел бы чужую учётку)"
+    headers = {
+        "content-type": "application/json",
+        "x-api-key": master_key,
+        "x-opencode-session-id": item["session"],
+        "x-kiberos-go-org": str(org),  # 🔴 та же организация, через которую шла СЕССИЯ
+    }
     req = urllib.request.Request(
-        endpoint, data=json.dumps(body).encode("utf-8"),
-        headers={"content-type": "application/json", "x-api-key": master_key,
-                 "x-opencode-session-id": item["session"]},
+        base.rstrip("/") + door_path(spooled.get("door")),
+        data=json.dumps(spooled["body"]).encode("utf-8"), headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -81,7 +117,7 @@ def fire_one(item: dict, endpoint: str, master_key: str, timeout: int = 120) -> 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--spool", type=Path, default=DEFAULT_SPOOL)
-    ap.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
+    ap.add_argument("--base", default=DEFAULT_BASE, help="база посредника (дверь выбирается по диалекту вызова)")
     ap.add_argument("--idle-min", type=int, default=40, help="раньше этого срока не греем")
     ap.add_argument("--ttl-min", type=int, default=120, help="позже этого — агент ушёл, не греем")
     ap.add_argument("--fire", action="store_true", help="послать по-настоящему (по умолчанию — показать)")
@@ -104,7 +140,7 @@ def main() -> int:
         return 1
     ok = bad = 0
     for it in items:
-        good, detail = fire_one(it, a.endpoint, key)
+        good, detail = fire_one(it, a.base, key)
         print(f"  {'OK  ' if good else 'ОТКАЗ'} {it['session']}  простой {it['idle_min']} мин — {detail}")
         ok += 1 if good else 0
         bad += 0 if good else 1

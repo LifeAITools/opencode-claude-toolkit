@@ -8,7 +8,7 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { resolveSessionIdentity, toEngineIdSource } from '../src/session-identity.js'
+import { resolveSessionIdentity, toEngineIdSource, readCallerSession } from '../src/session-identity.js'
 
 describe('resolveSessionIdentity — одна точка на все двери (FR-19/D3)', () => {
   test('заголовок — первая дверь, тело при этом НЕ читается', () => {
@@ -59,5 +59,35 @@ describe('resolveSessionIdentity — одна точка на все двери 
     expect(toEngineIdSource('header')).toBe('header')
     expect(toEngineIdSource('body')).toBe('body')
     expect(toEngineIdSource('derived')).toBe('header')
+  })
+})
+
+describe('readCallerSession — имена зовущего, ИЗМЕРЕННЫЕ дампом заголовков 19.10.2026', () => {
+  const h = (map: Record<string, string>) => ({ get: (n: string) => map[n] ?? null })
+
+  test('пускатель агентов: x-opencode-session-id — узнан', () => {
+    expect(readCallerSession(h({ 'x-opencode-session-id': 'ses_abc' })))
+      .toEqual({ sessionId: 'ses_abc', header: 'x-opencode-session-id' })
+  })
+
+  test('дверь чата: x-litellm-session-id — узнана', () => {
+    expect(readCallerSession(h({ 'x-litellm-session-id': 'ses_chat' })))
+      .toEqual({ sessionId: 'ses_chat', header: 'x-litellm-session-id' })
+  })
+
+  test('🔴 x-opencode-session (без -id) — НЕ имя зовущего: дамп показал, что так не приходит', () => {
+    // Прежнее чтение этой двери; разница в два знака молча оставляла сессию пускателя неопознанной.
+    expect(readCallerSession(h({ 'x-opencode-session': 'ses_wrong' })))
+      .toEqual({ sessionId: null, header: null })
+  })
+
+  test('имя заголовка возвращается — агентскую сессию можно отличить от разговора', () => {
+    const both = readCallerSession(h({ 'x-opencode-session-id': 'ses_agent', 'x-litellm-session-id': 'ses_chat' }))
+    expect(both).toEqual({ sessionId: 'ses_agent', header: 'x-opencode-session-id' })
+  })
+
+  test('пустой/пробельный заголовок — не имя; ничего нет — не опознан', () => {
+    expect(readCallerSession(h({ 'x-opencode-session-id': '   ' })).sessionId).toBeNull()
+    expect(readCallerSession(h({}))).toEqual({ sessionId: null, header: null })
   })
 })

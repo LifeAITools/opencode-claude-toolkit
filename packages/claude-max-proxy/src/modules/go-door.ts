@@ -26,11 +26,10 @@ import {
   newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, bodyField, classifyError,
   extractUsageChat, extractUsageResponses, usageFromSseText, type CallKind,
 } from '../provider-dump.js'
-import { resolveSessionIdentity } from '../session-identity.js'
+import { resolveSessionIdentity, readCallerSession, CALLER_SESSION_HEADERS } from '../session-identity.js'
 import type { ProxyConfig } from '../config.js'
 
 const ORG_HEADER = 'x-kiberos-go-org'
-const SESSION_HEADER = 'x-litellm-session-id'
 const CALL_KIND_HEADER = 'x-kiberos-call-kind'
 const ACTOR_HEADER = 'x-kiberos-user'
 /** Сколько текста потока держим для разбора usage и дампа. */
@@ -83,8 +82,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   const kind = callKindOf(req)
   const door = 'proxy:opencode-go'
   // Единое правило опознания (FR-19/D3). У двери Go носителя в теле нет, поэтому
-  // дверей две: заголовок `x-litellm-session-id` или честное «не опознан».
-  const identity = resolveSessionIdentity({ headerValue: req.headers.get(SESSION_HEADER) })
+  // дверей две: имя зовущего (см. `readCallerSession` — пускатель агентов и дверь
+  // чата называют сессию РАЗНЫМИ заголовками) или честное «не опознан».
+  const caller = readCallerSession(req.headers)
+  const identity = resolveSessionIdentity({ headerValue: caller.sessionId })
   const sessionId = identity.sessionId
   const actor = hashActor(req.headers.get(ACTOR_HEADER))
   const path = dialect === 'chat' ? '/chat/completions' : '/responses'
@@ -106,7 +107,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     ctx.emit({
       level: 'info', kind: EVENT.GO_REQUEST_UNIDENTIFIED,
       sessionId: null, model,
-      msg: 'дверь Go: запрос без x-litellm-session-id — обслужен, прогрев на нём не вооружается',
+      msg: `дверь Go: запрос без имени зовущего (${CALLER_SESSION_HEADERS.join(' / ')}) — обслужен, прогрев на нём не вооружается`,
     })
   }
 

@@ -20,7 +20,7 @@ import { EVENT } from '../event-bus.js'
 import { captureBody } from '../body-capture.js'
 import { createHash } from 'crypto'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
-import { resolveSessionIdentity } from '../session-identity.js'
+import { resolveSessionIdentity, readCallerSession } from '../session-identity.js'
 import { loadRegistry, pickOrg, GoOrgError } from '../go-registry.js'
 import { withGoCredential } from '../go-credentials.js'
 import {
@@ -281,7 +281,7 @@ export function createSparkResponsesModule(): ProxyModule {
         // Session: единое правило (FR-19/D3) — заголовок, иначе производный номер
         // (дверь совместимости), иначе честное «не опознан».
         const identity = resolveSessionIdentity({
-          headerValue: req.headers.get('x-opencode-session'),
+          headerValue: readCallerSession(req.headers).sessionId,
           derive: () => {
             const authHeader = req.headers.get('authorization') ?? ''
             if (authHeader.startsWith('Bearer ') && authHeader.length > 20) {

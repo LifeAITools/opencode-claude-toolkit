@@ -2597,6 +2597,13 @@ export class ProxyClient {
 
     if (!upstream.ok) {
       const errText = await upstream.text().catch(() => '')
+      // 🔴 НАЗВАННЫЙ ОТКАЗ ПО ОРГАНИЗАЦИИ (2026-10-19). Upstream отвечает 403 чужой
+      // формулировкой («OAuth authentication is currently not allowed for this
+      // organization»), и вызывающий не узнаёт НИ КАКАЯ орг, НИ ПОЧЕМУ, НИ ЧТО ДЕЛАТЬ —
+      // тот же класс, что «не ответил» вместо «прочитано». Здесь орг запоминается, чтобы
+      // ответ ниже назвал её нашим текстом (образец — контрактные начала `Cache guard` /
+      // `Quota guard`).
+      let orgOauthDenied: string | null = null
       if (upstream.status === 401) {
         // Real-request 401 backstop (mirror the KA `onAuthError` path + CC's
         // `handleOAuth401Error`). The token we ACTUALLY sent (`sentToken`) was
@@ -2626,6 +2633,7 @@ export class ProxyClient {
         // OVER to another live org on this signal stays the founder's call.
         const servedOrg = this.resolveServedOrg(sessionId)
         if (servedOrg) {
+          orgOauthDenied = servedOrg
           const prev = this.orgRefreshCooldown.get(servedOrg)
           this.orgRefreshCooldown.set(servedOrg, {
             until: Date.now() + REVOKE_RELOGIN_COOLDOWN_MS,
@@ -2678,7 +2686,25 @@ export class ProxyClient {
         })
       }
 
-      return new Response(errText, {
+      // 🔴 НАЗВАННЫЙ ОТКАЗ: орг отключила OAuth — отвечаем СВОИМ текстом, а не чужой
+      // формулировкой. Вызывающий (напр. суммаризатор чекпойнтов) обязан узнать, КАКАЯ
+      // орг, ПОЧЕМУ и ЧТО ДЕЛАТЬ; голый 403 этого не говорит. Начало `Org guard` —
+      // контракт, как `Cache guard` и `Quota guard` у соседей.
+      const body = orgOauthDenied
+        ? JSON.stringify({
+            type: 'error',
+            error: {
+              type: 'permission_error',
+              message:
+                `Org guard: организация ${orgOauthDenied} (взята прокси) не принимает OAuth — upstream 403 ` +
+                `oauth_not_allowed_for_organization. Токен жив по сроку, но организация отключила ` +
+                `вход по подписке и помечена needsRelogin. 🔴 ИМЯ ВЗЯТО ИЗ РЕШЕНИЯ ПРОКСИ, А НЕ ИЗ ТОКЕНА: ` +
+                `файл учётных данных организацию НЕ несёт, поэтому если 403 пришёл про ДРУГУЮ орг — ` +
+                `это значит, что учётные данные и конфиг аккаунта расходятся, и это надо смотреть отдельно.`,
+            },
+          })
+        : errText
+      return new Response(body, {
         status: upstream.status,
         headers: upstream.headers,
       })

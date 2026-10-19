@@ -21,6 +21,8 @@ import { captureBody } from '../body-capture.js'
 import { createHash } from 'crypto'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
 import { resolveSessionIdentity } from '../session-identity.js'
+import { loadRegistry, pickOrg, GoOrgError } from '../go-registry.js'
+import { withGoCredential } from '../go-credentials.js'
 import {
   translateToResponsesBody,
   bufferResponsesToMessages,
@@ -41,25 +43,66 @@ export interface SparkDeps {
     sparkUserAgent: string
     sparkReasoningEffort: 'minimal' | 'low' | 'medium' | 'high'
     sparkOrgId: string | null
+    goRegistryPath: string | null
+    goTokensPath: string | null
   }
   emit: (event: Record<string, unknown>) => void
 }
 
-function upstreamUrl(deps: SparkDeps): string {
-  return deps.config.sparkUpstreamUrl.replace(/\/$/, '') + '/responses'
+/** Чем дверь пойдёт к поставщику: пропуск, обязательные заголовки и адрес двери — ОДНИМ выбором. */
+export interface SparkTarget {
+  /** Значение для `Authorization: Bearer`. Не логировать. */
+  secret: string
+  /** Заголовки организации (user-agent + `x-opencode-org-id` у консольных орг). */
+  headers: Record<string, string>
+  /** База БЕЗ хвостового слэша; `/responses` дописывается на вызове. */
+  upstreamBase: string
+  /** Имя организации из реестра — для журнала; null на застывшем запасе. */
+  orgName: string | null
 }
 
-function apiKey(deps: SparkDeps): string | null {
-  return deps.config.sparkApiKey
-}
-
-function userAgent(deps: SparkDeps): string {
-  return deps.config.sparkUserAgent
-}
-
-// Organization header for the NEW opencode org. Absent (legacy config) → no header.
-function orgId(deps: SparkDeps): string | null {
-  return deps.config.sparkOrgId
+/**
+ * Организация + пропуск + дверь — ОДНИМ решением, из ЖИВОГО реестра (шов двери `/go`).
+ *
+ * 🔴 ПОЧЕМУ НЕ ИЗ ОКРУЖЕНИЯ (случай 19.10.2026, tixi-cold). Застывшие `SPARK_API_KEY` +
+ * `SPARK_ORG_ID` держали копию пропуска И организации: утром 401 `api_key_expired` по сроку,
+ * днём 429 по квоте — оба лечит ОДИН шов. Реестр читается на КАЖДОМ вызове, поэтому переживает
+ * и ротацию пропуска (`go_refresher`), и выбор организации — как `/go` (`go-door.ts:57`).
+ *
+ * Организация берётся из ЗАГОЛОВКА запроса (орг рождения агента), иначе — заданная `active`
+ * в реестре. 🔴 `pickOrg` квоту НЕ проверяет (`go-registry.ts:67`): «живая» приходит только
+ * заголовком, а `active` может быть исчерпана — поэтому отсутствие заголовка пишется в журнал.
+ *
+ * Дверь (`base_url`) — ЧАСТЬ выбора организации, а не константа: у консольных орг она
+ * `/inference/go/openai/v1`, у ключевой — `/zen/go/v1` (замер 19.10: консольный пропуск отвечает
+ * 200 на ОБЕИХ дверях для muse-spark, но полагаться на совпадение нельзя — берём заявленную).
+ *
+ * Запас: реестр не задан → застывшее окружение, прежнее поведение (совместимость выкатки).
+ */
+export function resolveSparkTarget(deps: SparkDeps, orgHeader?: string | null): SparkTarget {
+  const cfg = deps.config
+  if (cfg.goRegistryPath) {
+    const reg = loadRegistry(cfg.goRegistryPath)
+    const org = pickOrg(reg, orgHeader)
+    const cred = withGoCredential(org, {
+      tokensPath: cfg.goTokensPath, environ: process.env, now: Date.now, userAgent: cfg.sparkUserAgent,
+    })
+    return {
+      secret: cred.secret,
+      headers: cred.headers,
+      upstreamBase: org.baseUrl.replace(/\/$/, ''),
+      orgName: org.name,
+    }
+  }
+  if (!cfg.sparkApiKey) throw new Error('SPARK_API_KEY is not configured')
+  const headers: Record<string, string> = { 'user-agent': cfg.sparkUserAgent }
+  if (cfg.sparkOrgId) headers['x-opencode-org-id'] = cfg.sparkOrgId
+  return {
+    secret: cfg.sparkApiKey,
+    headers,
+    upstreamBase: cfg.sparkUpstreamUrl.replace(/\/$/, ''),
+    orgName: null,
+  }
 }
 
 export interface SparkWire {
@@ -67,6 +110,8 @@ export interface SparkWire {
   sourcePid: number | null
   srcPort: number | null
   signal?: AbortSignal | null
+  /** Организация из запроса (`x-kiberos-go-org`): uid SynqTask или имя. Иначе — `active` реестра. */
+  orgHeader?: string | null
 }
 
 /**
@@ -88,10 +133,27 @@ export async function serveSparkRequest(body: MessagesRequest, wire: SparkWire, 
   }
   if (!body.messages?.length) return sparkErrorResponse(400, 'messages is required', 'invalid_request_error')
 
-  const key = apiKey(deps)
-  if (!key) {
-    emit({ level: 'error', kind: EVENT.SPARK_ERROR, msg: 'SPARK_API_KEY absent — refusing loudly, not degrading' })
-    return sparkErrorResponse(503, 'SPARK_API_KEY is not configured', 'api_error')
+  // 🔴 Организация + пропуск + дверь — ОДНИМ решением из ЖИВОГО реестра (шов двери /go).
+  // Застывшее окружение — только запас, когда реестр не задан. Ошибка выбора — отказ вслух,
+  // не деградация: пропуск истёк / организации нет / реестр не читается — каждый со своим кодом.
+  let target: SparkTarget
+  try {
+    target = resolveSparkTarget(deps, wire.orgHeader)
+  } catch (err: any) {
+    const isClient = err instanceof GoOrgError
+    const status = isClient ? 400 : 503
+    const msg = String(err?.message ?? err).slice(0, 300)
+    emit({ level: 'error', kind: EVENT.SPARK_ERROR, sessionId, msg: `spark target: ${msg}` })
+    return sparkErrorResponse(status, msg, isClient ? 'invalid_request_error' : 'api_error')
+  }
+  // Заголовка нет — сказать ВСЛУХ: `pickOrg` отдаёт заданную `active`, а квоту он НЕ проверяет
+  // (`go-registry.ts:67`), и сегодня `active` может быть исчерпана. Молчаливый выбор мёртвой
+  // организации — тот же класс, что зелёный `/health` при мёртвой двери (замер 19.10.2026).
+  if (deps.config.goRegistryPath && !wire.orgHeader) {
+    emit({
+      level: 'info', kind: EVENT.SPARK_REQUEST, sessionId,
+      msg: `дверь spark: заголовка x-kiberos-go-org нет — взята заданная active реестра (${target.orgName ?? '?'}), живой она не проверена`,
+    })
   }
 
   const wantStream = body.stream === true
@@ -118,14 +180,13 @@ export async function serveSparkRequest(body: MessagesRequest, wire: SparkWire, 
         // Пишется перевод, не вход: ключ в заголовках режется самописцем
         // (authorization → <redacted>), тело едет как есть, включая байты картинок
         // (диск ограничен существующим cap самописца). Общий kill-switch — тот же.
-        const org = orgId(deps)
+        // Заголовки — из выбора организации: у консольной орг `x-opencode-org-id` уже внутри
+        // `target.headers`, у ключевой его нет (её дверь — зеновская, заголовка не требует).
         const upstreamHeaders: Record<string, string> = {
+          ...target.headers,
           'content-type': 'application/json',
-          'authorization': `Bearer ${key}`,
-          'user-agent': userAgent(deps),
+          'authorization': `Bearer ${target.secret}`,
           'x-opencode-session': sessionId,
-          // New opencode org requires the organization header (403 without it).
-          ...(org ? { 'x-opencode-org-id': org } : {}),
         }
         try {
           const raw = Buffer.from(JSON.stringify(translation.body))
@@ -133,7 +194,7 @@ export async function serveSparkRequest(body: MessagesRequest, wire: SparkWire, 
           captureBody(bytes, upstreamHeaders, { sessionId, sourcePid, srcPort })
         } catch { /* самописец не роняет ход */ }
         try {
-          upstream = await fetch(upstreamUrl(deps), {
+          upstream = await fetch(`${target.upstreamBase}/responses`, {
             method: 'POST',
             headers: upstreamHeaders,
             body: JSON.stringify(translation.body),
@@ -237,6 +298,8 @@ export function createSparkResponsesModule(): ProxyModule {
           sourcePid: srcPort ? resolvePidFromPeerPort(srcPort) : null,
           srcPort,
           signal: req.signal,
+          // Организация рождения агента — приоритетно из заголовка (как у двери /go).
+          orgHeader: req.headers.get('x-kiberos-go-org'),
         }, ctx)
       },
     },

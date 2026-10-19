@@ -82,7 +82,7 @@ export function createAnthropicModule(): ProxyModule {
           let sparkBody: any
           try { sparkBody = JSON.parse(rawBodyStr) }
           catch { return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'Invalid JSON body' } }), { status: 400, headers: { 'content-type': 'application/json' } }) }
-          return serveSparkRequest(sparkBody, { sessionId, sourcePid, srcPort, signal: req.signal }, ctx)
+          return serveSparkRequest(sparkBody, { sessionId, sourcePid, srcPort, signal: req.signal, orgHeader: req.headers.get('x-kiberos-go-org') }, ctx)
         }
 
         const isNativeCC = headers['user-agent']?.includes('claude-cli/') || !!headers['x-claude-code-agent-id']

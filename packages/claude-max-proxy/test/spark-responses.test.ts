@@ -490,3 +490,82 @@ describe('общее ядро двери (оба маршрута)', () => {
     expect(res.status).toBe(400)
   })
 })
+
+// ─── Шов реестра: орг+пропуск+дверь вместо застывших SPARK_* (случай 19.10, tixi-cold) ───
+
+describe('resolveSparkTarget — реестр вместо застывших SPARK_*', () => {
+  async function registryFixture() {
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-spark-reg-'))
+    const reg = join(dir, 'go-orgs.yaml')
+    const toks = join(dir, '.go-tokens.json')
+    writeFileSync(reg, [
+      'active: console-dead',
+      'orgs:',
+      '  - name: console-dead',
+      '    workspace: org_DEAD',
+      '    synqtask_org_uid: uid-dead',
+      '    auth: console',
+      '    base_url: https://opencode.ai/inference/go/openai/v1',
+      '  - name: console-live',
+      '    workspace: org_LIVE',
+      '    synqtask_org_uid: uid-live',
+      '    auth: console',
+      '    base_url: https://opencode.ai/inference/go/openai/v1',
+    ].join('\n'))
+    writeFileSync(toks, JSON.stringify({ orgs: {
+      'console-dead': { access_token: 'TOK_DEAD', expiry_ms: Date.now() + 3_600_000 },
+      'console-live': { access_token: 'TOK_LIVE', expiry_ms: Date.now() + 3_600_000 },
+    } }))
+    return { reg, toks }
+  }
+
+  test('орг из ЗАГОЛОВКА, пропуск из файла, дверь из org.base_url (не константа)', async () => {
+    const mod = await import('../src/modules/spark-responses.js')
+    const { reg, toks } = await registryFixture()
+    const cfg = {
+      sparkApiKey: null, sparkUpstreamUrl: 'https://zen.example', sparkUserAgent: 'ua',
+      sparkReasoningEffort: 'minimal' as const, sparkOrgId: null,
+      goRegistryPath: reg, goTokensPath: toks,
+    }
+    const t = mod.resolveSparkTarget({ config: cfg, emit: () => {} }, 'uid-live')
+    expect(t.orgName).toBe('console-live')
+    expect(t.secret).toBe('TOK_LIVE')
+    expect(t.headers['x-opencode-org-id']).toBe('org_LIVE')
+    // 🔴 Дверь — из реестра, а не зеновский дефолт: без этого консольная орг умерла бы.
+    expect(t.upstreamBase).toBe('https://opencode.ai/inference/go/openai/v1')
+  })
+
+  test('без заголовка — заданная active (НЕ подменяется на живую); названной нет — отказ', async () => {
+    const mod = await import('../src/modules/spark-responses.js')
+    const { reg, toks } = await registryFixture()
+    const cfg = {
+      sparkApiKey: null, sparkUpstreamUrl: 'https://zen.example', sparkUserAgent: 'ua',
+      sparkReasoningEffort: 'minimal' as const, sparkOrgId: null,
+      goRegistryPath: reg, goTokensPath: toks,
+    }
+    const byActive = mod.resolveSparkTarget({ config: cfg, emit: () => {} }, null)
+    expect(byActive.orgName).toBe('console-dead')   // заданная active, квоту pickOrg не проверяет
+    expect(byActive.secret).toBe('TOK_DEAD')
+    // Рельс no-live-account-migration: названной орг нет → отказ, не соседняя.
+    expect(() => mod.resolveSparkTarget({ config: cfg, emit: () => {} }, 'uid-ghost')).toThrow(/нет/)
+  })
+
+  test('реестр не задан → застывшее окружение, прежнее поведение (совместимость выкатки)', async () => {
+    const mod = await import('../src/modules/spark-responses.js')
+    const t = mod.resolveSparkTarget({
+      config: {
+        sparkApiKey: 'K', sparkUpstreamUrl: 'https://zen.example/', sparkUserAgent: 'ua',
+        sparkReasoningEffort: 'minimal', sparkOrgId: 'org_FROZEN',
+        goRegistryPath: null, goTokensPath: null,
+      },
+      emit: () => {},
+    }, 'uid-ignored')
+    expect(t.secret).toBe('K')
+    expect(t.headers['x-opencode-org-id']).toBe('org_FROZEN')
+    expect(t.upstreamBase).toBe('https://zen.example')
+    expect(t.orgName).toBeNull()
+  })
+})

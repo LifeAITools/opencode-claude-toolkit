@@ -1290,13 +1290,13 @@ export function adoptFromSiblingCards(
   selfPath: string,
   myPid: number,
   myBinding: string | undefined,
-): { memberId?: string; memberName?: string; tmuxSession?: string } {
-  const out: { memberId?: string; memberName?: string; tmuxSession?: string } = {}
+): { memberId?: string; tmuxSession?: string } {
+  const out: { memberId?: string; tmuxSession?: string } = {}
   try {
     for (const name of readdirSync(dir)) {
       if (!name.endsWith('.json') || join(dir, name) === selfPath) continue
       let sib: {
-        pid?: number; memberId?: string; memberName?: string
+        pid?: number; memberId?: string
         tmux_binding_id?: string; binding_id?: string; tmux_session_id?: string
       }
       try { sib = JSON.parse(readFileSync(join(dir, name), 'utf-8')) } catch { continue }
@@ -1307,7 +1307,6 @@ export function adoptFromSiblingCards(
       if (sib.tmux_session_id) out.tmuxSession = sib.tmux_session_id
       if (sib.tmux_binding_id && typeof sib.memberId === 'string' && sib.memberId && sib.memberId !== 'unknown') {
         out.memberId = sib.memberId
-        if (sib.memberName) out.memberName = sib.memberName
         if (byBinding) break
       }
     }
@@ -1843,14 +1842,12 @@ export async function startWakeListener(
     // fall back to the resolved identity when there is no sibling (standalone
     // HTTP agent with no lat-context spawn).
     let discoveryMemberId = resolvedIdentity.memberId
-    let discoveryMemberName = resolvedIdentity.memberName ?? _agentIdentity?.name ?? resolvedIdentity.memberId
     // Усвоение полей из sibling-карточки CLI lat-context — ПО ПРИВЯЗКЕ (не по pid: карточку CLI
     // пишет свой процесс). Чинит memberId, который прежним матчем по pid не усваивался никогда.
     {
       const adopted = adoptFromSiblingCards(resolvedDiscoveryDir, discoveryPath, process.pid, process.env.KIBEROS_BINDING_ID)
       if (adopted.memberId) {
         discoveryMemberId = adopted.memberId
-        discoveryMemberName = adopted.memberName ?? discoveryMemberName
         dbg(`discovery: adopting sibling memberId=${adopted.memberId}`)
       }
     }
@@ -1861,7 +1858,6 @@ export async function startWakeListener(
       sessionId: config.sessionId,
       agentInstanceId: config.agentInstanceId,
       memberId: discoveryMemberId,
-      memberName: discoveryMemberName,
       pid: process.pid,
       startedAt: new Date().toISOString(),
       transport: 'http',
@@ -1874,7 +1870,6 @@ export async function startWakeListener(
       // Wake subscriptions (REQ-02)
       subscribe: _currentSubscribe ?? undefined,
       subscribePreset: _currentSubscribePreset ?? undefined,
-      memberType: _currentMemberType,
       contract: 'agent-presence/1',
       harness: 'opencode',
       ...(process.env.KIBEROS_BINDING_ID ? { binding_id: process.env.KIBEROS_BINDING_ID } : {}),

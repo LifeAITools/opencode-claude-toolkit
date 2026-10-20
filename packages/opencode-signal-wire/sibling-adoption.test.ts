@@ -20,11 +20,10 @@ describe('усвоение sibling-карточки по привязке', () =
     writeFileSync(self, JSON.stringify({ pid: 100, contract: 'agent-presence/1' }))
     writeFileSync(join(d, '200-vibe_x_owner_01.json'), JSON.stringify({
       pid: 200, tmux_binding_id: 'vibe_x_owner_01', tmux_session_id: 'ctx-a-vibe_x_owner_01',
-      memberId: 'real-member', memberName: 'x-owner',
+      memberId: 'real-member',
     }))
     const r = adoptFromSiblingCards(d, self, 100, 'vibe_x_owner_01')
     expect(r.memberId).toBe('real-member')
-    expect(r.memberName).toBe('x-owner')
     expect(r.tmuxSession).toBe('ctx-a-vibe_x_owner_01')
   })
 

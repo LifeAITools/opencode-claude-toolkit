@@ -139,8 +139,6 @@ export interface DiscoveryFile {
   /** Transport type for routing */
   transport: AgentTransport
   // Stage 2.1: Chain tracking (REQ-16a)
-  /** Agent display name */
-  memberName?: string
   /** Parent agent memberId (null = root agent) */
   parentMemberId?: string | null
   /** Parent agent sessionId */
@@ -155,8 +153,6 @@ export interface DiscoveryFile {
   subscribe?: string[]
   /** Active preset name (human/agent/pm/quiet) — informational */
   subscribePreset?: string
-  /** Member type: 'human' (OAuth), 'agent' (X-Agent-Id), 'unknown' */
-  memberType?: 'human' | 'agent' | 'unknown'
   /**
    * Договор agent-presence/1 (claude-code-sdk/PRPs/agent-platform-ssot/06-wake-delivery-contract.md):
    * запись САМА называет программу, место агента и свою дверь, чтобы роутер не угадывал.

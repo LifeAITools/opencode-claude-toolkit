@@ -33,6 +33,12 @@ function v1Input(ctx: any): Record<string, unknown> {
   }
 }
 
+function v2dbg(line: string): void {
+  const f = process.env.OPENCODE_CLAUDE_V2_DEBUG_FILE
+  if (!f) return
+  try { require('node:fs').appendFileSync(f, line + '\n') } catch { /* журнал не должен ломать порт */ }
+}
+
 export default Plugin.define({
   id: 'opencode-claude-max',
   async setup(ctx: any) {
@@ -43,15 +49,50 @@ export default Plugin.define({
     // даём хуку временный конфиг, забираем то, что он добавил, и кладём в реестр.
     // [типы] форма записи реестра снята живьём: reg.add({ provider: { id, name, ... } }).
     if (typeof hooks?.config === 'function') {
+      // 🔴 ФОРМА РЕЕСТРА ИЗМЕРЕНА ЖИВЬЁМ 21.10 (обёртка в конфиге v2 + --print-logs):
+      //   reg.add({ info, models: [...] })  — РАБОТАЕТ, модель потом разрешается по `-m <provider>/<model>`;
+      //   reg.add({ provider: {...} })       — БРОСАЕТ `N.info.id` (у записи нет поля `info`);
+      //   models ОБЪЕКТОМ (как у v1)          — БРОСАЕТ `e.map is not a function`: реестр ждёт МАССИВ.
+      // Прежняя форма падала в try/catch, и «11 моделей зарегистрировано» в журнале v1 означало
+      // регистрацию В СВОЙ временный объект, а не в реестр v2 — модель оставалась недоступной.
+      //
+      // 🔴 И ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ ЛОВУШКИ: v1-хук асинхронный, а `provider.transform` — СИНХРОННЫЙ.
+      // Раньше `reg.add` стоял в `.then(...)`, то есть регистрация происходила ПОСЛЕ того, как
+      // opencode уже разрешил модель, — и добавка не успевала. Поэтому конфиг считается ЗАРАНЕЕ,
+      // на `setup` (он async), а внутри transform остаётся только синхронная запись в реестр.
+      // 🔴 v1-хук НИЧЕГО НЕ ВОЗВРАЩАЕТ — он МУТИРУЕТ переданный объект. Взять `return` значит
+      // получить `undefined` и зарегистрировать ноль моделей, при том что журнал v1 бодро скажет
+      // «11 моделей зарегистрировано»: он писал в СВОЙ объект, а мы читали чужой ответ.
+      const cfgSink: any = { provider: {} }
+      await hooks.config(cfgSink)
+      const entries = Object.entries((cfgSink.provider ?? {}) as Record<string, any>)
       ctx.provider.transform((reg: any) => {
-        const tmp: any = { provider: {} }
-        void Promise.resolve(hooks.config(tmp)).then(() => {
-          for (const [id, entry] of Object.entries(tmp.provider ?? {})) {
-            try {
-              reg.add({ provider: { id, name: id, ...(entry as object) } })
-            } catch { /* провайдер уже есть — не повод падать на старте */ }
+        for (const [id, e] of entries) {
+          // v1 кладёт адрес двери в `api`, пакет — в `npm`; v2 ждёт `settings.baseURL` и `package`.
+          const info = {
+            id,
+            name: e?.name ?? id,
+            activation: 'auto' as const,
+            ...(e?.npm ? { package: e.npm } : {}),
+            ...(e?.api ? { settings: { baseURL: e.api } } : {}),
           }
-        })
+          // 🔴 v2 читает `model.time.released` при построении модели — у v1-записи этого поля нет,
+          // и без него падение уже ПОСЛЕ разрешения по имени (`rH.time.released`), то есть выглядит
+          // как поломка провайдера, а не как недостающее поле метаданных.
+          const released = new Date(0).toISOString()
+          const models = (Object.values(e?.models ?? {}) as any[]).map((m) => ({
+            ...m,
+            time: (m as any)?.time ?? { released },
+          }))
+          try {
+            reg.add({ info, models })
+            v2dbg(`add ok ${id} models=${models.length} first=${models[0]?.id ?? '-'}`)
+          } catch (err: any) {
+            v2dbg(`add failed ${id}: ${err?.message ?? err}`)
+            // transform вызывается на каждого провайдера, а setup — один раз: второй проход обновляет.
+            try { reg.update({ info, models }); v2dbg(`update ok ${id}`) } catch (e2: any) { v2dbg(`update failed ${id}: ${e2?.message ?? e2}`) }
+          }
+        }
       })
     }
 

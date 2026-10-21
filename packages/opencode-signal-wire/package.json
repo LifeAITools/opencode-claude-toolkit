@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kiberos/signal-wire-core": "^0.42.2"
+    "@kiberos/signal-wire-core": "^0.48.1"
   },
   "peerDependencies": {
     "solid-js": "*"

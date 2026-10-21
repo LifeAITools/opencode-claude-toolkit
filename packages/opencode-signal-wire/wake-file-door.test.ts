@@ -76,6 +76,19 @@ describe('opencode: файловая дверь побудки', () => {
     expect(existsSync(file.replace('0001', '0002'))).toBe(true)
   })
 
+  test('два файла с ОДНИМ event_id — ОДНА доставка (дедуп ядра ≥0.48.0)', async () => {
+    // Контракт ядра, на который опирается дверь: одна побудка = одна доставка, даже если файл
+    // успел продублироваться (два писателя, повторная выкладка). Ожидание «двух» закрепляло бы
+    // дефект: агент получал одну и ту же побудку несколько раз.
+    const { home, file } = setup()
+    const second = file.replace('0001', '0002')
+    writeFileSync(second, JSON.stringify({ summary: 'копия', member_id: 'm', event_id: 'e1' }))
+    const { d, sent, receipts } = deps(home)
+    await pollFileDoor(d)
+    expect(sent).toHaveLength(1)
+    expect(receipts).toEqual(['e1'])
+  })
+
   test('агент занят — письмо лежит в файле, сервер о сессии не спрашивают', async () => {
     const { home, file } = setup()
     let asked = false

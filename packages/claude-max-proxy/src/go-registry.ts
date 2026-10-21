@@ -17,6 +17,12 @@ export interface GoOrg {
   workspace: string
   auth: 'console' | 'api_key'
   baseUrl: string
+  /**
+   * Адрес сервера входа (поле `account_url` реестра) — у него просят продление пропуска:
+   * `POST <accountUrl>/auth/device/token`, ровно как `account_url` читает go_refresher.py.
+   * Нет поля — продлевать некуда, и это отказ `no_account_url`, а не догадка об адресе.
+   */
+  accountUrl: string | null
   synqtaskOrgUid: string | null
   /** Имя переменной окружения с ключом — только для auth=api_key. */
   env: string | null
@@ -46,6 +52,7 @@ export function parseRegistry(text: string): GoRegistry {
       workspace: String(e.workspace ?? ''),
       auth,
       baseUrl: String(e.base_url ?? ''),
+      accountUrl: e.account_url ? String(e.account_url) : null,
       synqtaskOrgUid: e.synqtask_org_uid ? String(e.synqtask_org_uid) : null,
       env: e.env ? String(e.env) : null,
       priority: Number(e.priority ?? 0),

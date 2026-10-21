@@ -10,8 +10,9 @@
  * Организация: заголовок `x-kiberos-go-org` (uid SynqTask или имя) → иначе рабочая из реестра.
  * Названная и не найденная — 400, НИКОГДА не подмена другой (no-live-account-migration).
  *
- * Секрет берётся только через withGoCredential (единая точка выдачи); значение нигде не
- * логируется. Каждый вызов, включая отказ сети и отказ квоты, пишет ровно одну запись
+ * Секрет берётся только через withFreshGoCredential (единая точка выдачи; при выключенном
+ * GO_TOKEN_REFRESH_ENABLED она ведёт себя РОВНО как withGoCredential — только читает);
+ * значение нигде не логируется. Каждый вызов, включая отказ сети и отказ квоты, пишет ровно одну запись
  * provider-dump/v1 (контрольный вопрос 4 архитектуры).
  *
  * ПРОГРЕВА здесь нет и быть не может, пока warmQuotaShareMax = 0 (решение фаундера 15.10):
@@ -21,7 +22,8 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } from '../go-registry.js'
-import { withGoCredential, GoCredentialError } from '../go-credentials.js'
+import { GoCredentialError } from '../go-credentials.js'
+import { withFreshGoCredential, forceRefreshGoCredential, goTokenRefreshEnabled } from '../go-token-refresh.js'
 import {
   newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, bodyField, classifyError,
   extractUsageChat, extractUsageResponses, usageFromSseText, type CallKind,
@@ -118,15 +120,19 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   rec.request.body_bytes = raw.byteLength
   rec.request.body_sha256 = sha256(raw)
 
+  // Продление — за флагом (рельс R8): пока его не включили, здесь ровно прежнее чтение.
+  const refreshOn = goTokenRefreshEnabled(process.env)
+  const credSrc = {
+    tokensPath: cfg.goTokensPath, environ: process.env, now: Date.now, userAgent: cfg.goUserAgent,
+  }
+
   let org
   let cred
   try {
     org = pickOrg(registry(), req.headers.get(ORG_HEADER))
     rec.org_id = org.name
     rec.provider_org_ref = org.workspace
-    cred = withGoCredential(org, {
-      tokensPath: cfg.goTokensPath, environ: process.env, now: Date.now, userAgent: cfg.goUserAgent,
-    })
+    cred = await withFreshGoCredential(org, credSrc)
   } catch (err: any) {
     const status = err instanceof GoOrgError ? 400 : 503
     const msg = String(err?.message ?? err).slice(0, 300)
@@ -140,21 +146,54 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
 
   const url = org.baseUrl.replace(/\/$/, '') + path
   rec.request.url = url
-  const upstreamHeaders: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     ...cred.headers,
     'content-type': 'application/json',
-    authorization: `Bearer ${cred.secret}`,
     // Постоянный на всех: шлюз скоупит кэш этим заголовком (архитектура R6 — не менять до замера 5.4).
     'x-opencode-session': cfg.goProviderSession,
   }
-  rec.request.headers = redactHeaders(upstreamHeaders)
+  const send = (secret: string) => fetch(url, {
+    method: 'POST',
+    headers: { ...baseHeaders, authorization: `Bearer ${secret}` },
+    body: raw, signal: req.signal,
+  })
+  rec.request.headers = redactHeaders({ ...baseHeaders, authorization: `Bearer ${cred.secret}` })
 
   ctx.emit({ level: 'info', kind: EVENT.GO_REQUEST, sessionId, org: org.name, model, stream: wantStream, callKind: kind })
 
-  let upstream: Response
-  try {
-    upstream = await fetch(url, { method: 'POST', headers: upstreamHeaders, body: raw, signal: req.signal })
-  } catch (err: any) {
+  // Не больше ДВУХ попыток и никаких циклов. 401 у организации-консоли — единственный сигнал,
+  // которому верим на слово: продлеваем ОДИН раз и повторяем запрос ОДИН раз. Продление не
+  // удалось — клиенту проходит исходный 401 (дверь не падает из-за чужой сети).
+  let upstream: Response | null = null
+  let networkErr: any = null
+  for (let attemptNo = 0; attemptNo < 2; attemptNo++) {
+    try {
+      upstream = await send(cred.secret)
+      networkErr = null
+    } catch (err: any) {
+      upstream = null
+      networkErr = err
+      break
+    }
+    if (!(upstream.status === 401 && attemptNo === 0 && refreshOn && org.auth === 'console')) break
+    // Тело первого 401 не читаем — освобождаем соединение, иначе оно висит до сборки мусора.
+    try { await upstream.body?.cancel() } catch { /* уже закрыто */ }
+    let renewed
+    try {
+      renewed = await forceRefreshGoCredential(org, credSrc, { failedToken: cred.secret })
+    } catch (err: any) {
+      ctx.emit({
+        level: 'error', kind: EVENT.GO_ERROR, sessionId, org: org.name,
+        msg: `дверь Go: продление после 401 не удалось: ${String(err?.message ?? err).slice(0, 200)}`,
+      })
+      break
+    }
+    cred = renewed
+    rec.request.headers = redactHeaders({ ...baseHeaders, authorization: `Bearer ${cred.secret}` })
+  }
+
+  if (!upstream) {
+    const err = networkErr
     const msg = err?.name === 'AbortError' ? 'client aborted' : `gateway unreachable: ${err?.message}`
     rec.error = classifyError(null, true)
     rec.timing.total_ms = Date.now() - t0

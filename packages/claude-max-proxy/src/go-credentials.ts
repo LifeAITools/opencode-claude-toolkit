@@ -16,8 +16,19 @@
 import { readFileSync } from 'node:fs'
 import type { GoOrg } from './go-registry.js'
 
+/**
+ * Причина отказа. `no_*` и `expired` — прежняя точка выдачи (только чтение); `refresh_*`,
+ * `no_account_url` и `write_failed` добавляет go-token-refresh.ts, когда продление включено.
+ * Список расширен аддитивно: прежние значения и их сравнения не меняются.
+ */
+export type GoCredentialReason =
+  | 'no_state' | 'no_token' | 'expired' | 'no_env_key'
+  | 'no_account_url' | 'no_refresh_token'
+  | 'refresh_network' | 'refresh_ua_banned' | 'refresh_http' | 'refresh_bad_body'
+  | 'write_failed'
+
 export class GoCredentialError extends Error {
-  constructor(public readonly org: string, public readonly reason: 'no_state' | 'no_token' | 'expired' | 'no_env_key', msg: string) {
+  constructor(public readonly org: string, public readonly reason: GoCredentialReason, msg: string) {
     super(msg)
   }
 }

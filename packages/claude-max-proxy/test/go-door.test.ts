@@ -229,3 +229,98 @@ describe('goDoorReadiness', () => {
     expect(r.missing).toEqual(['GO_TOKENS_PATH'])
   })
 })
+
+/**
+ * Продление по 401 (GO_TOKEN_REFRESH_ENABLED='true'): ОДНО продление и ОДИН повтор.
+ *
+ * ЖИВЁТ ЗДЕСЬ, А НЕ ОТДЕЛЬНЫМ ФАЙЛОМ, нарочно: `ctx` двери — глобал на процесс, а
+ * PROVIDER_DUMP_DIR — переменная процесса; Bun гоняет файлы без изоляции, и второй init
+ * в другом файле уже один раз увёл дамп соседа (проверено: 3 падения в общем прогоне).
+ */
+describe('go-door: 401 → продление → один повтор', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'go-door-refresh-'))
+  const tokens = join(dir, 'tokens.json')
+  const dumpDir = join(dir, 'dump')
+  const calls = { chat: 0, refresh: 0, auth: [] as Array<string | null> }
+  const DAY = 86_400_000
+  let gateway: ReturnType<typeof Bun.serve>
+  let handler: (req: Request) => Promise<Response>
+  let savedFlag: string | undefined
+  let savedDump: string | undefined
+
+  const body = (o: unknown, status = 200) =>
+    new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } })
+
+  beforeAll(() => {
+    gateway = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const path = new URL(req.url).pathname
+        if (path === '/auth/device/token') {
+          calls.refresh++
+          return body({ access_token: 'DOOR-NEW', refresh_token: 'DOOR-R2', expires_in: 2_592_000 })
+        }
+        if (path.endsWith('/chat/completions')) {
+          calls.chat++
+          if (calls.chat === 1) return body({ error: { message: 'token expired' } }, 401)
+          calls.auth.push(req.headers.get('authorization'))
+          return body({ id: 'x', usage: { prompt_tokens: 1, completion_tokens: 1 } })
+        }
+        return new Response('not found', { status: 404 })
+      },
+    })
+    const base = `http://127.0.0.1:${gateway.port}`
+    writeFileSync(join(dir, 'reg.yaml'), [
+      'active: org-b',
+      `usage_url: ${base}/usage`,
+      'orgs:',
+      '  - name: org-b',
+      '    workspace: wrk_B',
+      '    auth: console',
+      `    account_url: ${base}`,
+      `    base_url: ${base}/openai/v1`,
+      '    priority: 1',
+      '',
+    ].join('\n'))
+    // Пропуск СВЕЖИЙ: порог не срабатывает, продление обязано случиться именно по 401.
+    writeFileSync(tokens, JSON.stringify({
+      orgs: { 'org-b': { access_token: 'DOOR-OLD', refresh_token: 'DOOR-R1', expiry_ms: Date.now() + 20 * DAY } },
+    }))
+    savedDump = process.env.PROVIDER_DUMP_DIR
+    savedFlag = process.env.GO_TOKEN_REFRESH_ENABLED
+    process.env.PROVIDER_DUMP_DIR = dumpDir
+    process.env.GO_TOKEN_REFRESH_ENABLED = 'true'
+    const mod = createGoDoorModule()
+    mod.init({
+      emit: () => {},
+      config: {
+        goRegistryPath: join(dir, 'reg.yaml'), goTokensPath: tokens,
+        goUserAgent: 'kiberos-chat/1.0', goProviderSession: 'fixed-session',
+      } as any,
+      proxyClient: {} as any, managedSessions: {} as any, version: 'test',
+    })
+    handler = (req) => mod.routes.find(r => r.path === '/go/chat/completions')!.handler(req, { requestIP: () => null })
+  })
+
+  afterAll(() => {
+    gateway.stop(true)
+    if (savedDump === undefined) delete process.env.PROVIDER_DUMP_DIR
+    else process.env.PROVIDER_DUMP_DIR = savedDump
+    if (savedFlag === undefined) delete process.env.GO_TOKEN_REFRESH_ENABLED
+    else process.env.GO_TOKEN_REFRESH_ENABLED = savedFlag
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('401 консольной организации: одно продление, один повтор с новым пропуском', async () => {
+    const res = await handler(new Request('http://x/go/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-litellm-session-id': 'conv-401' },
+      body: JSON.stringify({ model: 'deepseek-v4.1-flash', messages: [{ role: 'user', content: 'hi' }] }),
+    }))
+    expect(res.status).toBe(200)
+    expect(calls.chat).toBe(2)
+    expect(calls.refresh).toBe(1)
+    expect(calls.auth.at(-1)).toBe('Bearer DOOR-NEW')
+    expect(JSON.parse(readFileSync(tokens, 'utf8')).orgs['org-b'].access_token).toBe('DOOR-NEW')
+  })
+})

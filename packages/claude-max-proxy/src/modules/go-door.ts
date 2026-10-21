@@ -24,6 +24,7 @@ import { EVENT } from '../event-bus.js'
 import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } from '../go-registry.js'
 import { pickOrgByHeadroom, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
+import { dirname, join } from 'node:path'
 import { GoCredentialError } from '../go-credentials.js'
 import { withFreshGoCredential, forceRefreshGoCredential, goTokenRefreshEnabled } from '../go-token-refresh.js'
 import {
@@ -47,7 +48,12 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any) {
   const w = (wanted ?? '').trim()
   if (w) return pickOrg(reg, w)
   if (cfg.goTokensPath) {
-    const quotas = readOrgQuotas(QUOTA_STATUS_OPENCODE_GO_JSON)
+    // 🔴 ОТЧЁТ КВОТЫ ЖИВЁТ РЯДОМ С РЕЕСТРОМ И ВХОДАМИ, А НЕ В `~/.claude-local`: на сервере его
+    // привозит доставка в тот же смонтированный каталог (`/go/quota-status-opencode-go.json`).
+    // Порядок: явная переменная → рядом с хранилищем пропусков → прежний домашний путь (машина).
+    const quotaPath = process.env.GO_QUOTA_PATH
+      ?? (cfg.goTokensPath ? join(dirname(cfg.goTokensPath), 'quota-status-opencode-go.json') : QUOTA_STATUS_OPENCODE_GO_JSON)
+    const quotas = readOrgQuotas(quotaPath)
     const haveToken = readStoreOrgNames(cfg.goTokensPath)
     const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n))
     if (byHeadroom.org) return byHeadroom.org

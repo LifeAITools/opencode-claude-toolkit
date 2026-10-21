@@ -22,6 +22,8 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } from '../go-registry.js'
+import { pickOrgByHeadroom, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
+import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { GoCredentialError } from '../go-credentials.js'
 import { withFreshGoCredential, forceRefreshGoCredential, goTokenRefreshEnabled } from '../go-token-refresh.js'
 import {
@@ -32,6 +34,34 @@ import { resolveSessionIdentity, readCallerSession, CALLER_SESSION_HEADERS } fro
 import type { ProxyConfig } from '../config.js'
 
 const ORG_HEADER = 'x-kiberos-go-org'
+
+/**
+ * Кого обслуживать. Явно названную организацию берём как есть (рельс no-live-account-migration:
+ * решение человека не оспариваем). Без заголовка — по ЗАПАСУ, а не по `active:` реестра: с момента,
+ * когда дверь становится единственным путём, `active:` ведёт весь флот в одну организацию, и она
+ * упирается молча. Замер 21.10: `active: hello` при 7д=0.91 против свежей 0/0/0 рядом.
+ */
+let warnedNoQuota = false
+
+function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any) {
+  const w = (wanted ?? '').trim()
+  if (w) return pickOrg(reg, w)
+  if (cfg.goTokensPath) {
+    const quotas = readOrgQuotas(QUOTA_STATUS_OPENCODE_GO_JSON)
+    const haveToken = readStoreOrgNames(cfg.goTokensPath)
+    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n))
+    if (byHeadroom.org) return byHeadroom.org
+    // 🔴 ГРОМКО, А НЕ ТИХО: «замера нет» на сервере означает, что файл квоты не привезён.
+    // Без этой строки выбор по запасу молча вырождается в `active:` — то есть в ровно ту беду,
+    // ради которой он написан (весь флот в одну почти исчерпанную организацию).
+    if (quotas.length === 0 && !warnedNoQuota) {
+      warnedNoQuota = true
+      console.warn('GO_ORG_PICK_NO_QUOTA файл отчёта квоты не прочитан — выбор организации вернулся к `active:` реестра; запас организаций НЕ учитывается')
+    }
+  }
+  // Замера нет вовсе — ведём себя как раньше: `active:` реестра. «Нечего мерить» ≠ «нечего брать».
+  return pickOrg(reg, null)
+}
 const CALL_KIND_HEADER = 'x-kiberos-call-kind'
 const ACTOR_HEADER = 'x-kiberos-user'
 /** Сколько текста потока держим для разбора usage и дампа. */
@@ -129,7 +159,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let org
   let cred
   try {
-    org = pickOrg(registry(), req.headers.get(ORG_HEADER))
+    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg)
     rec.org_id = org.name
     rec.provider_org_ref = org.workspace
     cred = await withFreshGoCredential(org, credSrc)

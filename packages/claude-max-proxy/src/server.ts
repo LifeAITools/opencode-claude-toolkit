@@ -49,6 +49,7 @@
 import { loadConfig } from './config.js'
 import { emit, BusEventEmitterAdapter } from './event-bus.js'
 import { startLogger } from './logger.js'
+import { startGoProactiveRefresh } from './go-proactive-refresh.js'
 import { processAlive } from './session-tracker.js'
 import { ProxyConfigCredentialsAdapter } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
@@ -359,6 +360,18 @@ const stopIdentityWatch = startIdentityWatch()
 // здесь по той же причине, что и остальные сторожа: подписчик, умирающий вместе с сессией,
 // хуже отсутствующего.
 const stopDoorWatch = startDoorWatch(cfg)
+// Продление пропусков Go по расписанию — по ВСЕМ организациям реестра, а не только по тем,
+// которые позвали. За выключателем GO_TOKEN_REFRESH_ENABLED: пока он не задан, таймера нет
+// вовсе. См. go-proactive-refresh.ts — там записано, почему ленивой проверки недостаточно.
+const stopGoRefresh = startGoProactiveRefresh(
+  {
+    registryPath: cfg.goRegistryPath,
+    tokensPath: cfg.goTokensPath,
+    environ: process.env,
+    userAgent: cfg.goUserAgent,
+  },
+  { log: (line) => console.info(line) },
+)
 // And the alerts leave the log file: detecting a storm and writing it to disk
 // is what let a 52-minute outage reach the founder by feel instead of by
 // notification on 2026-08-24. See local-alert.ts.
@@ -668,6 +681,7 @@ async function shutdown(): Promise<void> {
   stopHeartbeat()
   stopStormWatch()
   stopIdentityWatch()
+  stopGoRefresh()
   stopLocalAlert()
   stopKaPurchaseNotice()
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.

@@ -85,7 +85,7 @@ describe('отображение в окна — дословно по стро�
 })
 
 describe('плоский ключ окон для конвейера ядра', () => {
-  test('quotaWindows — тот же массив окон всех поставщиков одним списком', () => {
+  test('quotaWindows — тот же массив окон всех поставщиков одним списком, каждое окно С НАЗВАНИЕМ поставщика', () => {
     const sw = new SignalWire({ serverUrl: 'http://127.0.0.1:0', sessionId: 'ses_qw', rulesPath: join(process.env.SW_HEARTBEAT_DIR!, 'none.json'), platform: 'opencode' })
     const w1 = { kind: '5h', util: 0, measuredAt: NOW.toISOString() }
     const w2 = { kind: '7d', util: 0.16, measuredAt: NOW.toISOString() }
@@ -93,8 +93,30 @@ describe('плоский ключ окон для конвейера ядра', 
       { provider: 'zhipu', measuredAt: NOW.toISOString(), limits: [], windows: [w1] },
       { provider: 'zai', measuredAt: NOW.toISOString(), limits: [], windows: [w2] },
     ])
-    expect((sw.getCurrentRuntimeMeta() as any).quotaWindows).toEqual([w1, w2])
+    // 🔴 `provider` ОБЯЗАН доехать до окна: ядро строит ключ (provider, kind). Без него три
+    // разных `7d` от трёх поставщиков выглядят тремя неразличимыми, и слияние выберет
+    // один из трёх и выдаст его за все (задача bb1dc4a1).
+    expect((sw.getCurrentRuntimeMeta() as any).quotaWindows).toEqual([
+      { ...w1, provider: 'zhipu' },
+      { ...w2, provider: 'zai' },
+    ])
     sw.trackProviderQuota(null)
     expect((sw.getCurrentRuntimeMeta() as any).quotaWindows).toBeUndefined()
+  })
+
+  test('три поставщика с одинаковым kind остаются ТРЕМЯ различимыми окнами', () => {
+    const sw = new SignalWire({ serverUrl: 'http://127.0.0.1:0', sessionId: 'ses_qw2', rulesPath: join(process.env.SW_HEARTBEAT_DIR!, 'none.json'), platform: 'opencode' })
+    const m = NOW.toISOString()
+    sw.trackProviderQuota([
+      { provider: 'zhipu', measuredAt: m, limits: [], windows: [{ kind: '7d', util: 1, measuredAt: m }] },
+      { provider: 'zai', measuredAt: m, limits: [], windows: [{ kind: '7d', util: 0.009, measuredAt: m }] },
+      { provider: 'go', measuredAt: m, limits: [], windows: [{ kind: '7d', util: 0.75, measuredAt: m }] },
+    ])
+    const flat = (sw.getCurrentRuntimeMeta() as any).quotaWindows as Array<{ provider: string; kind: string; util: number }>
+    expect(flat.map((w) => [w.provider, w.kind, w.util])).toEqual([
+      ['zhipu', '7d', 1],
+      ['zai', '7d', 0.009],
+      ['go', '7d', 0.75],
+    ])
   })
 })

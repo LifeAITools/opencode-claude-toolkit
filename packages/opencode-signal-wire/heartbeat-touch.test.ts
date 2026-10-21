@@ -84,7 +84,9 @@ describe('opencode: след жизни на каждом событии', () =>
     sw.trackProviderQuota([{ provider: 'zai', measuredAt: '2026-10-06T06:00:00.000Z', limits: [], windows: [w1, w2] }])
     await sw.evaluateHook(event(sid))
     const hb = JSON.parse(readFileSync(heartbeatPath(dir(), sid), 'utf-8'))
-    expect(hb.windows).toEqual([w1, w2])
+    // Окно несёт поставщика: без него ядро не различает одинаковые `kind` от разных
+    // поставщиков (задача bb1dc4a1, слияние по ключу (provider, kind)).
+    expect(hb.windows).toEqual([{ ...w1, provider: 'zai' }, { ...w2, provider: 'zai' }])
   })
 
   test('без лимитов ключа windows нет — а не пустой список', async () => {

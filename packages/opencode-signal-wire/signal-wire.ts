@@ -767,7 +767,9 @@ export class SignalWire {
     // Плоский ключ окон для конвейера ядра (heartbeat.windows читает его, как у хука):
     // тот же массив окон всех поставщиков одним списком.
     if (this.lastProviderQuota) {
-      const flat = this.lastProviderQuota.flatMap((q) => q.windows.map((w) => ({ ...w })))
+      const flat = this.lastProviderQuota.flatMap((q) =>
+        q.windows.map((w) => ({ ...w, provider: q.provider })),
+      )
       if (flat.length > 0) meta.quotaWindows = flat
     }
 

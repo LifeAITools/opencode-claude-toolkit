@@ -70,6 +70,26 @@ describe('withGoCredential', () => {
     try { withGoCredential(pickOrg(reg, 'org-b'), src()); throw new Error('must throw') }
     catch (e: any) { expect(e).toBeInstanceOf(GoCredentialError); expect(e.reason).toBe('expired'); expect(String(e.message)).not.toContain('SECRET-B') }
   })
+  // Замер 22.10 (вход hello@sealform.dev): вход ложится в ОЧЕРЕДЬ `.go-tokens.incoming.json`,
+  // а хранилище до слияния его не содержит. Дверь читала только хранилище и отвечала
+  // «нет пропуска» на живую, только что оплаченную организацию.
+  test('пропуск берётся из ОЧЕРЕДИ новых входов, даже когда хранилище его ещё не знает', () => {
+    writeFileSync(tokens, JSON.stringify({ orgs: { 'org-a': { access_token: 'SECRET-A', expiry_ms: now + 10 * 60_000 } } }))
+    writeFileSync(join(dir, '.go-tokens.incoming.json'), JSON.stringify({ orgs: { 'org-b': { access_token: 'SECRET-QUEUED', expiry_ms: now + 10 * 60_000 } } }))
+    try {
+      const c = withGoCredential(pickOrg(reg, 'org-b'), src())
+      expect(c.secret).toBe('SECRET-QUEUED')
+    } finally { rmSync(join(dir, '.go-tokens.incoming.json'), { force: true }) }
+  })
+
+  test('очередь НЕ вытесняет более долгий срок из хранилища', () => {
+    writeFileSync(tokens, JSON.stringify({ orgs: { 'org-b': { access_token: 'SECRET-STORE', expiry_ms: now + 60 * 60_000 } } }))
+    writeFileSync(join(dir, '.go-tokens.incoming.json'), JSON.stringify({ orgs: { 'org-b': { access_token: 'SECRET-OLD', expiry_ms: now + 10 * 60_000 } } }))
+    try {
+      expect(withGoCredential(pickOrg(reg, 'org-b'), src()).secret).toBe('SECRET-STORE')
+    } finally { rmSync(join(dir, '.go-tokens.incoming.json'), { force: true }) }
+  })
+
   test('нет пропуска этой организации — отказ, чужой не берётся', () => {
     writeFileSync(tokens, JSON.stringify({ orgs: { 'org-a': { access_token: 'SECRET-A', expiry_ms: now + 10 * 60_000 } } }))
     expect(() => withGoCredential(pickOrg(reg, 'org-b'), src())).toThrow(GoCredentialError)

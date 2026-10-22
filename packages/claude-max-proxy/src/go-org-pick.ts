@@ -17,6 +17,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { GoOrg } from './go-registry.js'
 
 /** Окна одной организации так, как их видит отчёт квоты. Поля могут отсутствовать. */
@@ -127,13 +128,21 @@ function numOrNull(v: unknown): number | null {
 /** Читает хранилище пропусков и говорит, у какой организации там есть вход. Токены не возвращает. */
 export function readStoreOrgNames(path: string | null): Set<string> {
   if (!path) return new Set()
-  try {
-    const doc = JSON.parse(readFileSync(path, 'utf8')) as { orgs?: Record<string, { access_token?: unknown }> }
-    const names = Object.entries(doc.orgs ?? {})
-      .filter(([, v]) => v && typeof v.access_token === 'string' && v.access_token !== '')
-      .map(([k]) => k)
-    return new Set(names)
-  } catch {
-    return new Set()
+  const names = new Set<string>()
+  const collect = (doc: { orgs?: Record<string, { access_token?: unknown }> } | null) => {
+    for (const [k, v] of Object.entries(doc?.orgs ?? {})) {
+      if (v && typeof v.access_token === 'string' && v.access_token !== '') names.add(k)
+    }
   }
+  try { collect(JSON.parse(readFileSync(path, 'utf8'))) } catch { /* нет хранилища — нет имён */ }
+  // 🔴 ОЧЕРЕДЬ НОВЫХ ВХОДОВ ЧИТАЕМ ТОЖЕ (замер 22.10, hello@sealform.dev): вход ложится в
+  // `.go-tokens.incoming.json` и до слияния писателем НЕ виден в основном хранилище. Для выбора
+  // организации это значило «пропуска нет» на живой, только что оплаченной организации — и
+  // выбор по запасу её просто не рассматривал. Писать очередь по-прежнему имеет право только
+  // её писатель; читать — можно, и обновлятор сам давно читает проекцию «своё + входящее».
+  try {
+    const raw = JSON.parse(readFileSync(join(dirname(path), '.go-tokens.incoming.json'), 'utf8')) as any
+    collect(raw && typeof raw === 'object' && raw.orgs ? raw : { orgs: raw })
+  } catch { /* очереди нет — обычный случай */ }
+  return names
 }

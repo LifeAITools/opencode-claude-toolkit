@@ -14,6 +14,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { GoOrg } from './go-registry.js'
 
 /**
@@ -52,6 +53,37 @@ export interface CredentialSources {
 /** Запас: пропуск с меньшим остатком считаем истёкшим для хода — продление не наша, пока перенос не сделан. */
 const EXPIRY_MARGIN_MS = 60_000
 
+/**
+ * Запись организации для ЧТЕНИЯ: хранилище плюс очередь новых входов.
+ *
+ * 🔴 ЗАЧЕМ (замер 22.10, вход hello@sealform.dev). Вход в opencode попадает в очередь
+ * `.go-tokens.incoming.json`, а не в само хранилище. Слить очередь имеет право только её
+ * писатель (go_refresher.py) — иначе у файла окажется два писателя и первый же ротированный
+ * refresh-токен убьёт организацию (риск R8). Но ЧИТАТЬ очередь никому не запрещено: сам
+ * обновлятор давно читает проекцию «своё + входящее» (`effective_state`). Дверь читала только
+ * основное хранилище, поэтому организация, заведённая минуту назад, была для неё НЕВИДИМА —
+ * «в хранилище нет пропуска» на живую, только что оплаченную организацию. Это то же самое
+ * молчание, что и `credential: no_token`, только с другой стороны.
+ *
+ * Побеждает запись с БОЛЬШИМ сроком: входящая могла быть свежее (вход после продления).
+ * Срок не указан хотя бы у одной — тогда главное хранилище, потому что «неизвестно» не должно
+ * вытеснять известное.
+ */
+function entryWithIncoming(state: any, tokensPath: string, orgName: string): any {
+  const own = state?.orgs?.[orgName]
+  const incomingPath = join(dirname(tokensPath), '.go-tokens.incoming.json')
+  let incoming: any
+  try { incoming = JSON.parse(readFileSync(incomingPath, 'utf8')) } catch { return own }
+  const doc = incoming && typeof incoming === 'object' && incoming.orgs ? incoming.orgs : incoming
+  const other = doc?.[orgName]
+  if (!other || typeof other !== 'object' || typeof other.access_token !== 'string' || !other.access_token) return own
+  if (!own?.access_token) return other
+  const a = Number(own.expiry_ms) || null
+  const b = Number(other.expiry_ms) || null
+  if (a === null || b === null) return own
+  return b > a ? other : own
+}
+
 export function withGoCredential(org: GoOrg, src: CredentialSources): GoCredential {
   const headers: Record<string, string> = { 'user-agent': src.userAgent }
   if (org.auth === 'api_key') {
@@ -65,7 +97,7 @@ export function withGoCredential(org: GoOrg, src: CredentialSources): GoCredenti
   let state: any
   try { state = JSON.parse(readFileSync(src.tokensPath, 'utf8')) }
   catch { throw new GoCredentialError(org.name, 'no_state', 'хранилище пропусков Go не читается') }
-  const entry = state?.orgs?.[org.name]
+  const entry = entryWithIncoming(state, src.tokensPath, org.name)
   const secret = entry?.access_token
   if (!secret) throw new GoCredentialError(org.name, 'no_token', `в хранилище нет пропуска организации «${org.name}»`)
   const expiryMs = Number(entry.expiry_ms) || null

@@ -1498,6 +1498,8 @@ export interface ClaudeMaxProviderOptions {
   refreshToken?: string
   expiresAt?: number
   credentialsPath?: string
+  /** Произвольные опции провайдера (v1: opencode.json → provider.options; v2: settings). */
+  providerOptions?: Record<string, unknown>
 }
 
 export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
@@ -1745,4 +1747,83 @@ export function createClaudeMax(options: ClaudeMaxProviderOptions = {}) {
       return createLanguageModel(sdk, modelId, 'claude-max')
     },
   }
+}
+
+// ─── v2 package entry point (`Definition.model`) ──────────────────────────
+/**
+ * `settings`, которые OpenCode 2.0 передаёт в `module.model(modelID, settings)`
+ * (`core/src/model-resolver.ts:221-231`), — плоский объект, собранный ядром:
+ *
+ *   - настройки провайдера (`Provider.Info.settings`) и модели (`Model.Info.settings`),
+ *     слитые `mergeOverlay`; из них ядро ВЫЧИТАЕТ свои ключи
+ *     (`timeout/headerTimeout/chunkTimeout/compaction/transport/fetch` — `Provider.nativeSettings`);
+ *   - настройки выбранного варианта (`variants[n].settings`, например `thinking`);
+ *   - `provider` = `canonical`, если он задан у модели/провайдера;
+ *   - `headers` и `body` — оверлеи запроса (всегда присутствуют, могут быть `undefined`);
+ *   - `apiKey` / `accessToken` / `authToken` — ТОЛЬКО если у провайдера есть credential
+ *     (у нас credential в v2 не заводится: токен подписки читает сам SDK с диска);
+ *   - `baseURL` — из `settings.baseURL` провайдера (наш SDK адрес не принимает: он ходит
+ *     в ту же точку, что v1, — это названное ограничение, а не забытое поле).
+ *
+ * Функция — тот же шов, что и `createClaudeMax().languageModel()`, но с сигнатурой
+ * `Definition.model` из `packages/ai/src/provider-package.ts:14-22`. Возвращает AI-SDK v3
+ * модель; v2 потребляет её через `ctx.aisdk.hook('sdk')` (см. plugin-v2.ts).
+ */
+export interface ClaudeMaxModelSettings extends Record<string, unknown> {
+  baseURL?: string
+  apiKey?: string
+  accessToken?: string
+  authToken?: string
+  credentialsPath?: string
+}
+
+/**
+ * Один экземпляр провайдера на набор настроек: ядро кэширует SDK по ключу из settings
+ * (`core/src/aisdk.ts:334-344`), поэтому создание здесь тоже не должно повторяться —
+ * иначе на каждую модель поднимался бы свой keepalive-движок.
+ *
+ * Ключ — ТОЛЬКО то, что влияет на сам движок: токен, путь к credentials и три опции
+ * keepalive, которые читает `createClaudeMax`. Настройки варианта (`thinking`) и
+ * модели в ключ не входят: иначе выбор `#high` поднимал бы ВТОРОЙ движок, и два
+ * экземпляра грели бы один и тот же кэш.
+ */
+const MODEL_PROVIDERS = new Map<string, ReturnType<typeof createClaudeMax>>()
+const ENGINE_SETTINGS = ['keepalive', 'keepaliveInterval', 'keepaliveIdle'] as const
+
+/** Ключи ядра/транспорта: они не являются опциями нашего провайдера. */
+const NON_PROVIDER_SETTINGS = new Set([
+  'apiKey',
+  'accessToken',
+  'authToken',
+  'baseURL',
+  'body',
+  'credentialsPath',
+  'fetch',
+  'headers',
+  'name',
+  'provider',
+])
+
+export function model(modelID: string, settings: ClaudeMaxModelSettings = {}): LanguageModelV3 {
+  const { apiKey, accessToken, authToken, credentialsPath } = settings
+  const providerOptions: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(settings)) {
+    if (!NON_PROVIDER_SETTINGS.has(key)) providerOptions[key] = value
+  }
+  const token = accessToken ?? authToken ?? apiKey
+  const engineOptions = Object.fromEntries(
+    ENGINE_SETTINGS.filter((key) => key in providerOptions).map((key) => [key, providerOptions[key]]),
+  )
+  const cacheKey = JSON.stringify({ token, credentialsPath, engineOptions })
+  let provider = MODEL_PROVIDERS.get(cacheKey)
+  if (!provider) {
+    provider = createClaudeMax({
+      ...(typeof token === 'string' && token ? { accessToken: token } : {}),
+      ...(typeof credentialsPath === 'string' && credentialsPath ? { credentialsPath } : {}),
+      providerOptions,
+    })
+    MODEL_PROVIDERS.set(cacheKey, provider)
+    dbg(`STARTUP v2 model() provider created (cached=${MODEL_PROVIDERS.size}, opts=${Object.keys(providerOptions).join(',') || '-'})`)
+  }
+  return provider.languageModel(modelID)
 }

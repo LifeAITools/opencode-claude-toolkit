@@ -255,6 +255,15 @@ export function buildGoQuotaStatus(input: {
   // 🔴 ОКНА ВСЕХ ОРГАНИЗАЦИЙ — отдельным списком: потребитель (подвал агента) берёт ту,
   // на которой агент РАБОТАЕТ (по orgUid/имени), а не «активную». Активная остаётся в base
   // для обратной совместимости.
+  // 🔴 ОРГАНИЗАЦИЯ БЕЗ ПРОПУСКА — ЭТО ФАКТ, А НЕ ТИШИНА (просьба home-relishev-general
+  // 22.10: «чтобы отсутствие пропуска не было тишиной»). Организация, вошедшая в opencode, но
+  // не попавшая в хранилище пропусков, в отчёте выглядела ровно как «окон нет» — то же самое,
+  // что «ещё не измерена». Агент садился на неё и падал отказом, а читатель не видел причины.
+  // Признак детерминированный: провайдерская запись `console` без срока жизни пропуска =
+  // пропуска в хранилище нет. Организация на ключе API (`auth: api_key`) срока не имеет по
+  // устройству и в этот признак НЕ попадает — это разные вещи, и склеивать их нельзя.
+  const credentialOf = (o: GoOrgStatus): { credential?: 'no_token' } =>
+    o.auth !== 'api_key' && !o.expires_at_ms ? { credential: 'no_token' } : {}
   const perOrg = (orgs ?? []).map((o) => {
     const u = (o.usage ?? {}) as GoUsage
     const o5 = pct(u.rolling), o7 = pct(u.weekly), oM = pct(u.monthly)
@@ -278,6 +287,13 @@ export function buildGoQuotaStatus(input: {
       ...(status === 'restricted' && typeof o.restricted_reason === 'string' && o.restricted_reason
         ? { restrictedReason: o.restricted_reason } : {}),
       ...(Array.isArray(o.models) && o.models.length ? { models: o.models.map(String) } : {}),
+      // 🔴 ОРГАНИЗАЦИЯ БЕЗ ПРОПУСКА — ЭТО ФАКТ, А НЕ ТИШИНА (просьба home-relishev-general
+      // 22.10, своими словами: «чтобы отсутствие пропуска не было тишиной»). Организация,
+      // вошедшая в opencode, но не попавшая в хранилище пропусков, в отчёте выглядела ровно
+      // как «окон нет» — то же самое, что «ещё не измерена». Агент садился на неё и падал
+      // отказом, а читатель не видел причины. Признак детерминированный: провайдерская
+      // запись `console` без срока жизни пропуска = пропуска в хранилище нет.
+      ...credentialOf(o),
       windows: [win('5h', u.rolling, o5), win('week', u.weekly, o7), win('month', u.monthly, oM)].filter((w) => w.util !== null),
     }
   })

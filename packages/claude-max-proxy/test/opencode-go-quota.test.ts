@@ -226,4 +226,22 @@ describe('статус и модельная привязка организац
     expect(o.status).toBe('active')
     expect('restrictedReason' in o).toBe(false)
   })
+
+  // Просьба home-relishev-general 22.10: организация, вошедшая в opencode без пропуска в
+  // хранилище, раньше читалась как «окон нет» — неотличимо от «ещё не измерена». Агент падал
+  // отказом, а причина не была видна НИКОМУ. Теперь она в отчёте прямым словом.
+  test('организация console без пропуска помечена `credential: no_token` — это не «окон нет»', () => {
+    const o = mk({ name: 'hello@sealform.dev', auth: 'console', active: false, usage: {} }).orgs[0]
+    expect(o.credential).toBe('no_token')
+  })
+
+  test('организация С пропуском поля не несёт — молчание не читается как «сломано»', () => {
+    const o = mk({ name: 'a', auth: 'console', active: true, usage: LIVE, expires_at_ms: 1794551455059 }).orgs[0]
+    expect('credential' in o).toBe(false)
+  })
+
+  test('организация на ключе API поля не несёт: у неё срока нет по устройству', () => {
+    const o = mk({ name: 'a', auth: 'api_key', active: true, usage: LIVE }).orgs[0]
+    expect('credential' in o).toBe(false)
+  })
 })

@@ -140,9 +140,32 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
       const q = await queryProviderQuota(fetch as any, provider, key)
       if (q) out.push(q)
     }))
-    // Окна Go из публичных лимитов и измеренного расхода (provider-go-usage.ts):
-    // вход не нужен, только база. Модели без трафика не везём.
-    try {
+    // 🔴 ОДИН СЧЁТЧИК GO, А НЕ ДВА ПОД ОДНИМ ИМЕНЕМ (замер владельца signal-wire, 22.10.2026:
+    // журнал показывал `providers=["go:0","go:0"]`). Контракт свода: личность окна = (provider, kind),
+    // побеждает поздний `measuredAt`. Две записи с одним `provider: 'go'` схлопывались в ОДНУ — и
+    // оставалась не та: живой замер дал 5ч=0 / 7д=0.0005 по ОЦЕНКЕ РАСХОДА против 5ч=0.17 / 7д=0.06
+    // по ПОДПИСКЕ. Правдоподобное число не про то — худший класс ошибки.
+    //
+    // Поэтому подписка (первоисточник — её отдаёт дверь провайдера) вытесняет оценку, а оценка
+    // остаётся РЕЗЕРВОМ на случай, когда файла нет или он старее ценза. В один проход идёт ровно
+    // один из двух, никогда оба.
+    const goStatus = readGoQuotaStatusWindows(undefined, { org: process.env.KIBEROS_GO_ORG?.trim() || undefined })
+    if (goStatus) {
+      out.push({
+        provider: 'go' as const,
+        measuredAt: goStatus.measuredAt,
+        limits: [],
+        windows: goStatus.windows.map((w) => ({
+          kind: w.kind,
+          util: w.util,
+          ...(w.resetAt ? { resetAt: w.resetAt } : {}),
+          measuredAt: w.measuredAt,
+        })),
+      })
+      logStep('GO_WINDOWS_SOURCE', { source: 'subscription', basis: goStatus.basis })
+    } else try {
+      // РЕЗЕРВ: файла подписки нет или он нечитаем — тогда и только тогда считаем по расходу.
+      logStep('GO_WINDOWS_SOURCE', { source: 'spend-estimate', why: 'subscription file absent or unreadable' })
       const { Database } = await import('bun:sqlite')
       const openDb = (path: string) => new Database(path, { readonly: true }) as any
       const dbPath = process.env.OPENCODE_DB_PATH ?? defaultOpencodeDbPath()
@@ -161,24 +184,6 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
       }
     } catch (e: any) {
       logStep('GO_WINDOWS_FAILED', { error: e?.message ?? String(e) })
-    }
-    // Окна АКТИВНОЙ организации Go — из файла, который пишет прокси
-    // (`quota-status-opencode-go.json`). Первоисточник — сама подписка, а не
-    // наша оценка по базе: `computeGoWindows` выше считает лишь модели с
-    // известным лимитом (Spark), флотские оставались без окон вовсе.
-    const goStatus = readGoQuotaStatusWindows()
-    if (goStatus) {
-      out.push({
-        provider: 'go' as const,
-        measuredAt: goStatus.measuredAt,
-        limits: [],
-        windows: goStatus.windows.map((w) => ({
-          kind: w.kind,
-          util: w.util,
-          ...(w.resetAt ? { resetAt: w.resetAt } : {}),
-          measuredAt: w.measuredAt,
-        })),
-      })
     }
     signalWire.trackProviderQuota(out.length > 0 ? out : null)
     logStep('PROVIDER_QUOTA_REFRESH', { providers: out.map((q) => `${q.provider}:${q.limits.length}`) })

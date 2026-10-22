@@ -64,3 +64,37 @@ describe('окна Go из файла квоты (активная органи�
     expect(readGoQuotaStatusWindows(bad)).toBeNull()
   })
 })
+
+describe('организация ЭТОГО агента, а не активная в файле', () => {
+  // Живой замер 22.10.2026 (владелец signal-wire): в `accounts` файла лежит РОВНО ОДНА запись —
+  // активная, а окна КАЖДОЙ организации — в `orgs[]`. Два агента на разных орг видели одни числа.
+  const body = {
+    measured_at: '2026-10-22T11:53:14.484Z',
+    org: 'hello@uniclowd.com',
+    accounts: {
+      'hello@uniclowd.com': { active: true, windows: [{ window: '5h', util: 0.22 }, { window: 'week', util: 0.08 }] },
+    },
+    orgs: [
+      { name: 'hello@kiberos.app', windows: [{ window: '5h', util: 0.8 }, { window: 'week', util: 0.9 }] },
+      { name: 'hello@uniclowd.com', windows: [{ window: '5h', util: 0.22 }, { window: 'week', util: 0.08 }] },
+    ],
+  }
+
+  test('названа орг агента → берём ЕЁ окна и говорим basis=agent_org', () => {
+    const got = readGoQuotaStatusWindows(writeQuota(body), { org: 'hello@kiberos.app' })!
+    expect(got.basis).toBe('agent_org')
+    expect(got.windows.find((w) => w.kind === '7d')!.util).toBeCloseTo(0.9, 5)
+  })
+
+  test('орг не названа → активная, и basis ЧЕСТНО говорит active_fallback', () => {
+    const got = readGoQuotaStatusWindows(writeQuota(body))!
+    expect(got.basis).toBe('active_fallback')
+    expect(got.windows.find((w) => w.kind === '7d')!.util).toBeCloseTo(0.08, 5)
+  })
+
+  test('названа орг, которой в файле нет → не выдумываем: активная + fallback', () => {
+    const got = readGoQuotaStatusWindows(writeQuota(body), { org: 'nope@example.com' })!
+    expect(got.basis).toBe('active_fallback')
+    expect(got.windows.find((w) => w.kind === '5h')!.util).toBeCloseTo(0.22, 5)
+  })
+})

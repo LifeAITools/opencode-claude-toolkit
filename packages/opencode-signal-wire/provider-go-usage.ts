@@ -156,9 +156,12 @@ export interface GoStatusWindow {
  * известным лимитом (Spark), а флотские модели (`deepseek-*-go`) оставались без
  * окон вовсе — ядро не могло судить паузу по квоте Go.
  *
- * Берётся ТОЛЬКО активная организация: правило, поднятое чужой исчерпанной
- * организацией, попросило бы агента встать зря. Привязка «агент → орг» — шаг
- * слоя провайдеров; до него активная орг — лучшее приближение.
+ * 🔴 ОРГАНИЗАЦИЯ — ЭТОГО АГЕНТА, А НЕ АКТИВНАЯ В ФАЙЛЕ (22.10.2026, находка владельца
+ * signal-wire, замер на живом). В `accounts` файла лежит РОВНО ОДНА запись — активная, а окна
+ * каждой организации лежат в `orgs[]`. Поэтому два агента на разных организациях видели одни и
+ * те же числа, и отличить это от правды было нельзя, пока они совпадали. Источник привязки —
+ * `KIBEROS_GO_ORG` в окружении сессии (пишет пускатель; живьём, без HTTP и кэша). Нет
+ * переменной — падаем на активную и НАЗЫВАЕМ это в `basis`, а не выдаём за назначение.
  *
  * Форма — как у provider-quota: `util` 0..1, `measuredAt` ISO (ценз 300 с у
  * потребителя). `week` → `7d`, `month` → `30d` — ради согласия с тем, как окна
@@ -166,21 +169,42 @@ export interface GoStatusWindow {
  */
 export function readGoQuotaStatusWindows(
   path: string = GO_QUOTA_STATUS_JSON,
-): { measuredAt: string; windows: GoStatusWindow[] } | null {
+  opts: { org?: string } = {},
+): { measuredAt: string; windows: GoStatusWindow[]; basis: 'agent_org' | 'active_fallback' } | null {
   try {
     const d = JSON.parse(readFileSync(path, 'utf8')) as {
       measured_at?: unknown
       updatedAt?: unknown
       org?: unknown
+      orgs?: Array<{ name?: unknown; windows?: unknown }>
       accounts?: Record<string, { active?: unknown; windows?: unknown }>
     }
     const measuredAt = finiteStr(d.measured_at) ?? finiteStr(d.updatedAt)
     if (!measuredAt) return null
     const accounts = d.accounts ?? {}
-    const orgName = finiteStr(d.org)
-    let acct = orgName ? accounts[orgName] : undefined
-    if (!acct) acct = Object.values(accounts).find((a) => a?.active === true)
-    const raw = acct?.windows
+    // 🔴 THE AGENT'S OWN ORG FIRST (owner of this finding: packages-signal-wire-core-owner,
+    // 2026-10-22, measured): `accounts` carries exactly ONE entry — the file's ACTIVE org — while
+    // EVERY org's windows sit in `orgs[]`. Reading the active entry made two agents on two
+    // different orgs see the same numbers, indistinguishable from truth until they disagree.
+    // `KIBEROS_GO_ORG` is the assignment the launcher wrote into this session's environment: live,
+    // no HTTP, no cache, and it changes only at rebirth. Absent ⇒ fall back to the active org and
+    // SAY SO (`basis`), never silently.
+    const wanted = finiteStr(opts.org)
+    let raw: unknown
+    let basis: 'agent_org' | 'active_fallback' = 'active_fallback'
+    if (wanted) {
+      const row = (Array.isArray(d.orgs) ? d.orgs : []).find((o) => finiteStr(o?.name) === wanted)
+      if (row && Array.isArray(row.windows)) {
+        raw = row.windows
+        basis = 'agent_org'
+      }
+    }
+    if (!Array.isArray(raw)) {
+      const orgName = finiteStr(d.org)
+      let acct = orgName ? accounts[orgName] : undefined
+      if (!acct) acct = Object.values(accounts).find((a) => a?.active === true)
+      raw = acct?.windows
+    }
     if (!Array.isArray(raw)) return null
     const KIND: Record<string, string> = { '5h': '5h', week: '7d', month: '30d' }
     const windows: GoStatusWindow[] = []
@@ -195,7 +219,7 @@ export function readGoQuotaStatusWindows(
       if (iso) out.resetAt = iso
       windows.push(out)
     }
-    return windows.length > 0 ? { measuredAt, windows } : null
+    return windows.length > 0 ? { measuredAt, windows, basis } : null
   } catch {
     return null
   }

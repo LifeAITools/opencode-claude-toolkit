@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { mapLimitsToWindows, PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota } from './provider-quota'
+import { describeProviderQuota, mapLimitsToWindows, PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota } from './provider-quota'
 import { SignalWire } from './signal-wire'
 
 process.env.SW_EXEC_OFF = '1'
@@ -118,5 +118,27 @@ describe('плоский ключ окон для конвейера ядра', 
       ['zai', '7d', 0.009],
       ['go', '7d', 0.75],
     ])
+  })
+})
+
+describe('сводка для журнала: оба поля и источник', () => {
+  // Замер 22.10.2026: строка печатала только `limits.length`, и `go:0` читалось как «у Go ноль
+  // ОКОН». Два человека за час прочитали её в одну и ту же ложную сторону.
+  test('go печатается как окна, а не как «ноль»; источник виден', () => {
+    const line = describeProviderQuota([
+      { provider: 'go', source: 'subscription', measuredAt: NOW.toISOString(), limits: [], windows: [
+        { kind: '5h', util: 0.2, measuredAt: NOW.toISOString() },
+        { kind: '7d', util: 0.1, measuredAt: NOW.toISOString() },
+        { kind: '30d', util: 0.05, measuredAt: NOW.toISOString() },
+      ] },
+      { provider: 'zai', measuredAt: NOW.toISOString(), limits: [{ type: 'TOKENS_LIMIT', percentage: 16 }], windows: [] },
+    ])
+    expect(line).toEqual(['go[subscription]:l0/w3', 'zai:l1/w0'])
+  })
+
+  test('пусто и null — пустой список, а не выдуманная строка', () => {
+    expect(describeProviderQuota(null)).toEqual([])
+    expect(describeProviderQuota(undefined)).toEqual([])
+    expect(describeProviderQuota([])).toEqual([])
   })
 })

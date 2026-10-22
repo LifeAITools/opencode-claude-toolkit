@@ -156,3 +156,27 @@ export async function queryProviderQuota(
     return null
   }
 }
+
+/**
+ * СВОДКА ДЛЯ ЖУРНАЛА — и она обязана называть ОБА поля, а не одно.
+ *
+ * 🔴 ЗАМЕР 22.10.2026 (нашёл владелец signal-wire): живая строка печатала
+ * `go:0` — то есть `limits.length`. У записей Go `limits` пуст ПО УСТРОЙСТВУ (окна едут в
+ * `windows`), поэтому строка читалась как «у Go ноль окон», хотя окон было три. ДВА человека
+ * за час прочитали её в одну и ту же ложную сторону и едва не доложили фаундеру «фикс не доехал».
+ *
+ * Это тот же класс, что мы ловили весь день: прибор отвечает правдоподобно не про то — только
+ * теперь в журнале, который читает СЛЕДУЮЩИЙ агент и делает вывод в самом опасном направлении.
+ *
+ * Форма: `<provider>[<source>]:l<лимиты>/w<окна>`. Примеры: `go[subscription]:l0/w3`,
+ * `zai:l3/w0`. Она сама отвечает на вопрос «доехали ли данные» и заодно видна, кто победил —
+ * подписка или резерв.
+ */
+export function describeProviderQuota(quotas: readonly ProviderQuota[] | null | undefined): string[] {
+  return (quotas ?? []).map((q) => {
+    const source = q.source ? `[${q.source}]` : ''
+    const limits = q.limits?.length ?? 0
+    const windows = q.windows?.length ?? 0
+    return `${q.provider}${source}:l${limits}/w${windows}`
+  })
+}

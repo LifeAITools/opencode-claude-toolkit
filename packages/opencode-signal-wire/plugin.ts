@@ -49,7 +49,7 @@ import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
 import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD, readGoQuotaStatusWindows } from './provider-go-usage'
 import { stampSessionLaunch } from './session-stamp'
-import { PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
+import { describeProviderQuota, PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -188,7 +188,7 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
       logStep('GO_WINDOWS_FAILED', { error: e?.message ?? String(e) })
     }
     signalWire.trackProviderQuota(out.length > 0 ? out : null)
-    logStep('PROVIDER_QUOTA_REFRESH', { providers: out.map((q) => `${q.provider}:${q.limits.length}`) })
+    logStep('PROVIDER_QUOTA_REFRESH', { providers: describeProviderQuota(out) })
   } catch (e: any) {
     logStep('PROVIDER_QUOTA_REFRESH_FAILED', { error: e?.message ?? String(e) })
   }

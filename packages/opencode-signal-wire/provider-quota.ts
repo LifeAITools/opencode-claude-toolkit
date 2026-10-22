@@ -187,6 +187,11 @@ export function describeProviderQuota(quotas: readonly ProviderQuota[] | null | 
     const source = q.source ? `[${q.source}]` : ''
     const limits = q.limits?.length ?? 0
     const windows = q.windows?.length ?? 0
-    return `${q.provider}${source}:l${limits}/w${windows}`
+    // ЗНАЧЕНИЯ, А НЕ ТОЛЬКО СЧЁТЧИКИ (просьба владельца signal-wire, 22.10.2026): без чисел разбор
+    // случая «пришло 1 при свежем штампе» упирался в отсутствие данных — ровно как было с `go:0`.
+    const pick = (kind: string) => (q.windows ?? []).find((x) => x.kind === kind)
+    const show = (x: { kind: string; util: number; resetAt?: string } | undefined) =>
+      x ? ` ${x.kind}=${x.util.toFixed(2)}${x.resetAt ? '->' + String(x.resetAt).slice(11, 19) + 'Z' : ''}` : ''
+    return q.provider + source + ':l' + limits + '/w' + windows + show(pick('5h')) + show(pick('7d'))
   })
 }

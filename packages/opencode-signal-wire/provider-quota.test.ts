@@ -133,7 +133,7 @@ describe('сводка для журнала: оба поля и источни�
       ] },
       { provider: 'zai', measuredAt: NOW.toISOString(), limits: [{ type: 'TOKENS_LIMIT', percentage: 16 }], windows: [] },
     ])
-    expect(line).toEqual(['go[subscription]:l0/w3', 'zai:l1/w0'])
+    expect(line).toEqual(['go[subscription]:l0/w3 5h=0.20 7d=0.10', 'zai:l1/w0'])
   })
 
   test('пусто и null — пустой список, а не выдуманная строка', () => {

@@ -92,9 +92,16 @@ describe('организация ЭТОГО агента, а не активна
     expect(got.windows.find((w) => w.kind === '7d')!.util).toBeCloseTo(0.08, 5)
   })
 
-  test('названа орг, которой в файле нет → не выдумываем: активная + fallback', () => {
-    const got = readGoQuotaStatusWindows(writeQuota(body), { org: 'nope@example.com' })!
-    expect(got.basis).toBe('active_fallback')
-    expect(got.windows.find((w) => w.kind === '5h')!.util).toBeCloseTo(0.22, 5)
+  test('названа орг, которой в файле нет → НЕИЗВЕСТНО, а не числа активной', () => {
+    // 🔴 УЖЕСТОЧЕНО 22.10.2026 по живому случаю: подстановка окон АКТИВНОЙ организации вместе с
+    // именем АГЕНТА в `quotaAccountHint` давала «имя от одной организации, числа от другой», и
+    // отличить это от правды было нельзя. Замер: правило `quota-pause-point-5h` позвало агента на
+    // сдачу смены по числу, которого не было.
+    expect(readGoQuotaStatusWindows(writeQuota(body), { org: 'nope@example.com' })).toBeNull()
+  })
+
+  test('орг названа, а окон у неё нет → тоже НЕИЗВЕСТНО', () => {
+    const noWindows = { ...body, orgs: [{ name: 'hello@kiberos.app', windows: [] }] }
+    expect(readGoQuotaStatusWindows(writeQuota(noWindows), { org: 'hello@kiberos.app' })).toBeNull()
   })
 })

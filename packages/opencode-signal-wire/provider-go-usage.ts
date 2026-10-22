@@ -131,7 +131,11 @@ export function computeGoWindows(
   const w = (kind: GoWindow['kind'], frac: number, spent: number | null): GoWindow => {
     const limit = monthly * frac
     const s = spent ?? 0
-    return { kind, util: limit > 0 ? s / limit : 0, spent: s, limit, measuredAt }
+    // 🔴 ЗАЖИМ 0..1. Без него `spent/limit` давал больше единицы — а «util5h=1» означает «окно
+    // исчерпано» и зовёт агента на сдачу смены. Замер 22.10.2026: оценка по расходу выдала 1 при
+    // живом окне (в реестре 0.01) — правдоподобное число не про то, с ценой в ложную сдачу.
+    const ratio = limit > 0 ? s / limit : 0
+    return { kind, util: Math.min(1, Math.max(0, ratio)), spent: s, limit, measuredAt }
   }
   return [w('5h', 0.2, spend5h), w('7d', 0.5, spendWeek), w('30d', 1, spendMonth)]
 }
@@ -194,10 +198,14 @@ export function readGoQuotaStatusWindows(
     let basis: 'agent_org' | 'active_fallback' = 'active_fallback'
     if (wanted) {
       const row = (Array.isArray(d.orgs) ? d.orgs : []).find((o) => finiteStr(o?.name) === wanted)
-      if (row && Array.isArray(row.windows)) {
-        raw = row.windows
-        basis = 'agent_org'
-      }
+      // 🔴 ОРГАНИЗАЦИЯ НАЗВАНА, А ОКОН ПОД НЕЁ НЕТ — ОТВЕЧАЕМ «НЕ ЗНАЮ», А НЕ ЧУЖИМИ ЧИСЛАМИ.
+      // Замер 22.10.2026: без этого гейта агент на организации, которой нет в `orgs[]` (или у
+      // которой окон нет вовсе), получал окна АКТИВНОЙ организации — при этом `quotaAccountHint`
+      // ему подставлялось ЕГО имя. То есть имя от одной организации, числа от другой, и отличить
+      // это от правды было нельзя. «Неизвестно» здесь честнее правдоподобного числа не про то.
+      if (!row || !Array.isArray(row.windows) || row.windows.length === 0) return null
+      raw = row.windows
+      basis = 'agent_org'
     }
     if (!Array.isArray(raw)) {
       const orgName = finiteStr(d.org)

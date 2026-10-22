@@ -79,10 +79,17 @@ describe('плоские поля квоты (договор ядра 6133884)',
     expect(m.quotaAccountHint).toBeUndefined()
   })
 
-  test('источник резерва называется своим словом, а не выдаётся за подписку', () => {
+  test('РЕЗЕРВ В ПЛОСКИЕ ПОЛЯ НЕ ПОПАДАЕТ вовсе', () => {
+    // 🔴 22.10.2026: оценка по расходу всегда штампуется `now`, то есть ВСЕГДА выглядит свежей и
+    // протухнуть не может. Живой случай: она выдала util5h=1 при окне 0.01, и правило позвало
+    // агента на сдачу смены. Оценка не измерение — в плоских полях ей места нет.
     process.env.KIBEROS_GO_ORG = 'hello@kiberos.app'
     const sw = make()
     sw.trackProviderQuota([goQuota({ source: 'spend-estimate' })])
-    expect((sw.getCurrentRuntimeMeta() as any).quotaSource).toBe('spend-estimate')
+    const m: any = sw.getCurrentRuntimeMeta()
+    expect(m.quotaUtil5h).toBeUndefined()
+    expect(m.quotaUtil7d).toBeUndefined()
+    expect(m.quotaAccountHint).toBeUndefined()
+    expect(m.quotaSource).toBeUndefined()
   })
 })

@@ -774,10 +774,21 @@ export class SignalWire {
     {
       const goOrg = process.env.KIBEROS_GO_ORG?.trim()
       const go = goOrg ? this.lastProviderQuota?.find((q) => q.provider === 'go') : undefined
-      const w5h = go?.windows.find((w) => w.kind === '5h')
-      const w7d = go?.windows.find((w) => w.kind === '7d')
-      if (go && (w5h || w7d)) {
-        if (w5h) meta.quotaUtil5h = w5h.util
+      // 🔴 ТОЛЬКО ИЗМЕРЕНИЕ, НЕ ОЦЕНКА. `spend-estimate` — наша арифметика по расходу, у неё
+      // `measuredAt = now`, то есть она ВСЕГДА выглядит свежей, и она не имеет права вести агента
+      // к стене. Замер 22.10.2026: оценка выдала util5h=1 при живом окне (реестр 0.01), правило
+      // `quota-pause-point-5h` позвало агента на сдачу смены — ложная сдача по правдоподобному
+      // числу не про то. Оценку в плоские поля НЕ кладём: пусть будет «неизвестно».
+      const isMeasurement = go?.source !== 'spend-estimate'
+      const w5h = isMeasurement ? go?.windows.find((w) => w.kind === '5h') : undefined
+      const w7d = isMeasurement ? go?.windows.find((w) => w.kind === '7d') : undefined
+      if (go && isMeasurement && (w5h || w7d)) {
+        if (w5h) {
+          meta.quotaUtil5h = w5h.util
+          // Сброс окна — детерминированный признак протухания: окно со сбросом в прошлом
+          // недействительно, что бы ни лежало в измерении.
+          if (w5h.resetAt) meta.quotaResetAt = w5h.resetAt
+        }
         if (w7d) meta.quotaUtil7d = w7d.util
         meta.quotaAccountHint = goOrg
         if (go.source) meta.quotaSource = go.source

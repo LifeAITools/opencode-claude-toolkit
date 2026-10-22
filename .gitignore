@@ -39,3 +39,7 @@ packages/claude-max-proxy/dist/
 .env.synqtask
 packages/proxy-core/dist/
 packages/opencode-qwen-oauth/dist/
+
+# Python bytecode (scripts/*.py are run directly, nothing to ship)
+__pycache__/
+*.pyc

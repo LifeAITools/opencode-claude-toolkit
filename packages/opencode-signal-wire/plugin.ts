@@ -153,6 +153,7 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
     if (goStatus) {
       out.push({
         provider: 'go' as const,
+        source: 'subscription' as const,
         measuredAt: goStatus.measuredAt,
         limits: [],
         windows: goStatus.windows.map((w) => ({
@@ -177,6 +178,7 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
         if (!windows) continue
         out.push({
           provider: 'go' as const,
+          source: 'spend-estimate' as const,
           measuredAt: new Date(nowMs).toISOString(),
           limits: [],
           windows: windows.map((w) => ({ kind: w.kind, util: w.util, measuredAt: w.measuredAt })),

@@ -760,6 +760,33 @@ export class SignalWire {
     if (agentName) meta.agentName = agentName
     if (this.lastQuotaUtil5h != null) meta.quotaUtil5h = this.lastQuotaUtil5h
     if (this.lastQuotaUtil7d != null) meta.quotaUtil7d = this.lastQuotaUtil7d
+    // 🔴 ПЛОСКИЕ ПОЛЯ ИЗ СЧЁТЧИКА, КОТОРЫЙ ОБСЛУЖИВАЕТ ЭТУ СЕССИЮ (договор ядра, коммит
+    // 6133884). Заголовки rate-limit приходят только от двери Anthropic — у сессии на Go их не
+    // бывает, поэтому выше два поля остаются пустыми навсегда, хотя окна Go ЕСТЬ в
+    // `providerQuota`. Ядро НЕ может спроецировать их само: по `provider`/`runtime.provider`
+    // нельзя вывести, какой счётчик чей, и любая его эвристика дала бы правдоподобное число не
+    // про тот счёт. Адаптер знает точно: сессия на Go-оси названа `KIBEROS_GO_ORG`, а её окна —
+    // единственная запись `provider: 'go'` (после 22.10 их ровно одна).
+    //
+    // НЕ заполняем намеренно: `quotaPool*` (пул — про несколько счетов; копия своего числа
+    // заставила бы агента «сверить два источника», которых один) и `quotaStale` (без
+    // доказанной старости отсутствие честнее ярлыка).
+    {
+      const goOrg = process.env.KIBEROS_GO_ORG?.trim()
+      const go = goOrg ? this.lastProviderQuota?.find((q) => q.provider === 'go') : undefined
+      const w5h = go?.windows.find((w) => w.kind === '5h')
+      const w7d = go?.windows.find((w) => w.kind === '7d')
+      if (go && (w5h || w7d)) {
+        if (w5h) meta.quotaUtil5h = w5h.util
+        if (w7d) meta.quotaUtil7d = w7d.util
+        meta.quotaAccountHint = goOrg
+        if (go.source) meta.quotaSource = go.source
+        const at = Date.parse(go.measuredAt)
+        if (Number.isFinite(at)) {
+          meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
+        }
+      }
+    }
     // Расход сессии из базы opencode — для правил и как половина договора spend.
     if (this.lastSpend) meta.spend = { ...this.lastSpend }
     // Лимиты поставщиков — для правил; виды окон толкует потребитель.

@@ -262,8 +262,18 @@ export function buildGoQuotaStatus(input: {
   // Признак детерминированный: провайдерская запись `console` без срока жизни пропуска =
   // пропуска в хранилище нет. Организация на ключе API (`auth: api_key`) срока не имеет по
   // устройству и в этот признак НЕ попадает — это разные вещи, и склеивать их нельзя.
-  const credentialOf = (o: GoOrgStatus): { credential?: 'no_token' } =>
-    o.auth !== 'api_key' && !o.expires_at_ms ? { credential: 'no_token' } : {}
+  const credentialOf = (o: GoOrgStatus): { credential?: 'no_token' | 'rejected' } => {
+    // Пропуска нет вовсе: провайдерская запись `console` без срока жизни.
+    if (o.auth !== 'api_key' && !o.expires_at_ms) return { credential: 'no_token' }
+    // Пропуск/ключ ЕСТЬ, а поставщик его отвергает (`api_key_expired`, `authentication_error`,
+    // 401). Это тоже не «окон нет»: организация непригодна по причине, которую читатель обязан
+    // видеть, иначе агент упирается в отказ без объяснения. Текст причины остаётся в
+    // `usage_error` у двери реестра; в отчёт едет только класс — без чужих подробностей.
+    if (typeof o.usage_error === 'string' && /401|authentication_error|api_key_expired|Unauthorized/i.test(o.usage_error)) {
+      return { credential: 'rejected' }
+    }
+    return {}
+  }
   const perOrg = (orgs ?? []).map((o) => {
     const u = (o.usage ?? {}) as GoUsage
     const o5 = pct(u.rolling), o7 = pct(u.weekly), oM = pct(u.monthly)

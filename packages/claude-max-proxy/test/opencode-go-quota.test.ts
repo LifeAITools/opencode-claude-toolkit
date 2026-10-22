@@ -240,8 +240,22 @@ describe('статус и модельная привязка организац
     expect('credential' in o).toBe(false)
   })
 
-  test('организация на ключе API поля не несёт: у неё срока нет по устройству', () => {
+  test('организация на ключе API без жалоб поля не несёт: у неё срока нет по устройству', () => {
     const o = mk({ name: 'a', auth: 'api_key', active: true, usage: LIVE }).orgs[0]
     expect('credential' in o).toBe(false)
+  })
+
+  // Вторая половина того же молчания: пропуск ЕСТЬ, а поставщик его отвергает. Замер 22.10 —
+  // `relishev@gmail.com`, api_key_expired: организация непригодна, а отчёт говорил «окон нет».
+  test('отвергнутый ключ/пропуск назван `credential: rejected`, а не выдан за «окон нет»', () => {
+    const o = mk({ name: 'a', auth: 'api_key', active: false, usage: {},
+      usage_error: 'отказ 401 / authentication_error: {"code":"api_key_expired"}' }).orgs[0]
+    expect(o.credential).toBe('rejected')
+  })
+
+  test('отказ 401 у console-организации тоже назван — причина та же, дверь другая', () => {
+    const o = mk({ name: 'a', auth: 'console', active: false, expires_at_ms: 1794551455059, usage: {},
+      usage_error: 'отказ 401 / AuthError: Unauthorized' }).orgs[0]
+    expect(o.credential).toBe('rejected')
   })
 })

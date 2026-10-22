@@ -1861,15 +1861,15 @@ export async function startWakeListener(
       pid: process.pid,
       startedAt: new Date().toISOString(),
       transport: 'http',
-      // Stage 2.1: Chain tracking (REQ-16a)
-      parentMemberId: _parentMemberId,
-      parentSessionId: _parentSessionId,
-      spawnDepth: _currentDepth ?? 0,
-      maxSpawnDepth: _agentIdentity?.budget?.maxSpawnDepth ?? 2,
-      maxSubagents: _agentIdentity?.budget?.maxSubagents ?? 5,
+      // 🔴 22.10.2026: здесь БОЛЬШЕ НЕТ вызывных полей — parentMemberId, parentSessionId,
+      // spawnDepth, maxSpawnDepth, maxSubagents, subscribePreset. Их дом — ЗАПРОС (wake-router
+      // берёт глубину из req.caller, лимиты из метаданных члена, родителя из запроса на провижн),
+      // а копия в карточке была третьим домом того же факта: замер владельца lat-context
+      // (22.10) — 32 живые карточки несли все шесть, ни одного читателя ИЗ КАРТОЧКИ.
+      // `contract` остаётся: это не вызывный факт, а САМООПИСАНИЕ записи — по нему читатель
+      // понимает, какой ревизии формы он смотрит, и без него новый читатель обязан угадывать.
       // Wake subscriptions (REQ-02)
       subscribe: _currentSubscribe ?? undefined,
-      subscribePreset: _currentSubscribePreset ?? undefined,
       contract: 'agent-presence/1',
       harness: 'opencode',
       ...(process.env.KIBEROS_BINDING_ID ? { binding_id: process.env.KIBEROS_BINDING_ID } : {}),

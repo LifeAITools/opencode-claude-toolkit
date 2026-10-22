@@ -25,6 +25,7 @@ import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } f
 import { pickOrgByHeadroom, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { GoCredentialError } from '../go-credentials.js'
 import { withFreshGoCredential, forceRefreshGoCredential, goTokenRefreshEnabled } from '../go-token-refresh.js'
 import {
@@ -51,8 +52,16 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any) {
     // 🔴 ОТЧЁТ КВОТЫ ЖИВЁТ РЯДОМ С РЕЕСТРОМ И ВХОДАМИ, А НЕ В `~/.claude-local`: на сервере его
     // привозит доставка в тот же смонтированный каталог (`/go/quota-status-opencode-go.json`).
     // Порядок: явная переменная → рядом с хранилищем пропусков → прежний домашний путь (машина).
+    // 🔴 ДОМАШНИЙ ПУТЬ — ЭТО НЕ «ПРЕЖНИЙ», А НУЖНЫЙ (замер 22.10, сразу после выката 1.1.68):
+    // на этой машине сборщик пишет отчёт в `~/.claude-local/`, а рядом с хранилищем его НЕТ
+    // (`kiberos-app/litellm/quota-status-opencode-go.json` отсутствует). Дверь читала только
+    // «рядом с хранилищем», получала ноль строк и молча возвращалась к `active:` — то есть
+    // к организации, которая уже исчерпана. Живой ход без заголовка ушёл в hello@uniclowd.com
+    // (5ч 1.00) и получил 429, хотя рядом стояла hello@sealform.dev с 0/0/0. Поэтому при
+    // отсутствии файла рядом с хранилищем читаем домашний, и только потом уступаем `active:`.
+    const besideStore = cfg.goTokensPath ? join(dirname(cfg.goTokensPath), 'quota-status-opencode-go.json') : null
     const quotaPath = process.env.GO_QUOTA_PATH
-      ?? (cfg.goTokensPath ? join(dirname(cfg.goTokensPath), 'quota-status-opencode-go.json') : QUOTA_STATUS_OPENCODE_GO_JSON)
+      ?? (besideStore && existsSync(besideStore) ? besideStore : QUOTA_STATUS_OPENCODE_GO_JSON)
     const quotas = readOrgQuotas(quotaPath)
     const haveToken = readStoreOrgNames(cfg.goTokensPath)
     const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n))

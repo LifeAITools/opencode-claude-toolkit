@@ -186,8 +186,16 @@ export function readActiveAccountEmail(
   let db: Database | null = null
   try {
     db = new Database(dbPath, { readonly: true })
+    // 🔴 БЕЗ `ORDER BY id` И С ПРОВЕРКОЙ ЧИСЛА СТРОК (поправка владельца реестра 23.10).
+    // `account_state` по устройству держит ОДНУ строку. `order by id limit 1` при двух строках
+    // молча выбрал бы меньший id и выдал бы выбор за факт — тот же класс, что мы весь месяц
+    // ловим. Две строки = «не знаем, какая из них в работе», а не «возьмём первую».
+    const count = db.query('select count(*) as n from account_state').get() as { n?: unknown } | null
+    const rows = typeof count?.n === 'number' ? count.n : -1
+    if (rows === 0) return { email: null, orgId: null, error: 'no account_state row' }
+    if (rows !== 1) return { email: null, orgId: null, error: `account_state has ${rows} rows — which pair is in use is unknown` }
     const state = db
-      .query('select id, active_account_id, active_org_id from account_state order by id limit 1')
+      .query('select active_account_id, active_org_id from account_state limit 1')
       .get() as { active_account_id?: unknown; active_org_id?: unknown } | null
     if (!state) return { email: null, orgId: null, error: 'no account_state row' }
     const orgId = typeof state.active_org_id === 'string' && state.active_org_id.trim()
@@ -321,6 +329,11 @@ export function buildGoQuotaStatus(input: {
     updatedAt: measuredAt.toISOString(),
     measured_at: measuredAt.toISOString(),
     org,
+    // 🔴 `org` — РЕШЕНИЕ, А НЕ ЗАМЕР (просьба владельца реестра 23.10): это имя организации,
+    // куда МЫ решили направлять (строка `active:` командой `use`), и его читает пускатель.
+    // Без пометки через месяц никто не отличит решение от измерения. Замер лежит рядом:
+    // `activeSources.accountState`.
+    orgSource: 'registry_decision',
     active,
     activeReason: resolution.reason,
     activeSources: resolution.sources,

@@ -25,7 +25,8 @@ import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } f
 import { pickOrgByHeadroom, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { dirname, join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { existsSync, writeFileSync } from 'node:fs'
 import { GoCredentialError } from '../go-credentials.js'
 import { withFreshGoCredential, forceRefreshGoCredential, goTokenRefreshEnabled } from '../go-token-refresh.js'
 import {
@@ -148,6 +149,100 @@ const prefixMemory = new Map<string, {
   at: number
 }>()
 
+/**
+ * ГОЛОВА ИСТОРИИ ДЛЯ СНИМКА — чтобы на ПЕРВОЙ же переписи назвать не только место,
+ * но и ЧТО ИМЕННО стояло в этом месте до и после.
+ *
+ * 🔴 ЗАЧЕМ ОТДЕЛЬНО ОТ `prefixMemory` (слово фаундера 23.10: «в логах показать, ГДЕ байты
+ * разошлись и что поменялось»). Хеши отвечают «сообщение #3 изменилось», но не «с ТАКОГО
+ * на ТАКОЕ». Полные тела в памяти держать нельзя — 2000 сессий по мегабайту; поэтому
+ * храним ГОЛОВУ: первые `HEAD_SNIPPETS` сообщений, каждое обрезано по `SNIPPET_CHARS`.
+ * 92% переписей (замер 23.10) — «промпт вырос, а кэша нет», то есть расхождение в РАННЕЙ
+ * части; голова его покрывает. Не покрыло — так и пишем, а не делаем вид.
+ *
+ * Память ограничена отдельно от `prefixMemory`: 200 сессий × 8 сообщений × 2 КБ ≈ 3 МБ
+ * худшего случая, против 2000×… у полного слепка. Перепись после долгого простоя всё равно
+ * не про движок (кэш истёк), поэтому старые сессии вытесняются первыми и не в ущерб.
+ */
+const HEAD_SNIPPETS = 8
+const SNIPPET_CHARS = 2048
+const SNIPPET_SESSIONS_MAX = 200
+const headSnippets = new Map<string, string[]>()
+
+/** Сколько первых сообщений сессии мы помним — для честного «покрыто/не покрыто». */
+export function rememberedHeadLength(sessionId: string | null): number {
+  return sessionId ? (headSnippets.get(sessionId)?.length ?? 0) : 0
+}
+
+/** Голова ПРЕДЫДУЩЕЙ истории — снимается ДО `commitPrefix`, иначе сравнивали бы новое с новым. */
+function headOf(sessionId: string | null): string[] | undefined {
+  return sessionId ? headSnippets.get(sessionId) : undefined
+}
+
+function rememberHead(sessionId: string, msgs: any[]): void {
+  const head = msgs.slice(0, HEAD_SNIPPETS).map((m) => {
+    try { return JSON.stringify(m).slice(0, SNIPPET_CHARS) } catch { return '<unserializable>' }
+  })
+  if (headSnippets.size >= SNIPPET_SESSIONS_MAX && !headSnippets.has(sessionId)) {
+    const oldest = headSnippets.keys().next().value
+    if (oldest !== undefined) headSnippets.delete(oldest)
+  }
+  headSnippets.set(sessionId, head)
+}
+
+/** Каталог снимков — тот же, что у дампов тел: его TTL и потолок объёма (body-capture)
+ *  накрывают и наши файлы, поэтому отдельной политики хранения не заводим. */
+function snapshotDir(): string {
+  return process.env.CLAUDE_MAX_PROXY_CAPTURE_DIR
+    ?? join(homedir(), '.claude-local', 'proxy-body-dumps')
+}
+
+/**
+ * Снимок ОДНОГО разошедшегося сообщения: до и после, плюс всё, что нужно, чтобы связать
+ * файл с журналом и с конкретной сессией. Ошибка записи запрос не роняет — снимок это
+ * доказательство, а не путь обслуживания.
+ */
+export function writeRewriteSnapshot(input: {
+  sessionId: string
+  model: string | null
+  analysis: PrefixAnalysis
+  prevSnippet: string | null
+  curSnippet: string | null
+  now: number
+}): string | null {
+  const { sessionId, model, analysis, prevSnippet, curSnippet, now } = input
+  if (process.env.CLAUDE_MAX_PROXY_CAPTURE_BODIES === '0') return null
+  const safeSid = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64)
+  const path = join(snapshotDir(), `go-rewrite-${safeSid}-${now}.json`)
+  const payload = {
+    ts: new Date(now).toISOString(),
+    door: 'opencode-go',
+    sessionId,
+    model,
+    firstDiffIndex: analysis.firstDiffIndex ?? null,
+    role: analysis.role ?? null,
+    prevMsgs: analysis.prevMsgs ?? null,
+    msgs: analysis.msgs ?? null,
+    toolsChanged: analysis.toolsChanged === true,
+    idleMs: analysis.idleMs ?? null,
+    cacheTtlMs: analysis.cacheTtlMs ?? null,
+    avoidableRewrite: analysis.avoidableRewrite === true,
+    // Обрезка НАЗВАНА: читатель должен видеть, что перед ним голова сообщения, а не всё.
+    snippetChars: SNIPPET_CHARS,
+    prev: prevSnippet,
+    cur: curSnippet,
+  }
+  // Запись СИНХРОННАЯ: файл ≤ нескольких килобайт, а перепись — редкий путь (~3% вызовов).
+  // Асинхронная запись сделала бы результат непроверяемым: функция вернула бы путь, которого
+  // в эту минуту ещё нет, и испытание не отличило бы «записал» от «не записал».
+  try {
+    writeFileSync(path, JSON.stringify(payload, null, 2))
+    return path
+  } catch {
+    return null
+  }
+}
+
 export type PrefixVerdict = 'first' | 'append' | 'rewrite' | 'unknown'
 
 /** Где именно разошлось: индекс сообщения, его роль, простой и цена переписи. */
@@ -224,6 +319,8 @@ export function commitPrefix(
     tools: sha256(JSON.stringify(body?.tools ?? null)).slice(0, 12),
     at: now,
   })
+  // Голова — ДО того, как её заменит следующая история: иначе снимок сравнивал бы новое с новым.
+  rememberHead(sessionId, msgs)
   return compareToPrevious(prev, msgs, body, now, cacheTtlMs)
 }
 
@@ -457,6 +554,9 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
       },
     }), { status: 400, headers: { 'content-type': 'application/json' } })
   }
+  // Голову ПРЕДЫДУЩЕЙ истории снимаем ДО сдвига состояния: после `commitPrefix` в памяти
+  // лежит уже новое, и снимок сравнивал бы новое с новым — то есть молчал бы всегда.
+  const prevHead = analysis.verdict === 'rewrite' ? headOf(sessionId) : undefined
   // Не остановили — только теперь сдвигаем состояние (ответ не нужен: он уже посчитан).
   commitPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
   if (analysis.verdict === 'rewrite') {
@@ -475,10 +575,27 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
         ? 'сменился набор инструментов — префикс переписан'
         : `кэш истёк по времени (простой ${idleMin} мин ≥ TTL ${ttlMin} мин) — это холодная запись, а не работа движка`
     const tail = analysis.toolsChanged ? '' : '; tools те же'
+    // СНИМОК МЕСТА: «сообщение #N изменилось» без «с чего на что» отправляет читателя гадать.
+    // Пишем только когда место попало в запомненную голову — иначе честно говорим, почему нет.
+    const idx = analysis.firstDiffIndex
+    let snapshotNote = '; снимок не снят (место за пределами запомненной головы)'
+    if (!sessionId) {
+      snapshotNote = '; снимок не снят (сессия не опознана)'
+    } else if (idx !== undefined && prevHead && idx < prevHead.length) {
+      let curSnippet: string | null = null
+      try { curSnippet = JSON.stringify(parsed.messages[idx]).slice(0, SNIPPET_CHARS) } catch { curSnippet = null }
+      const path = writeRewriteSnapshot({
+        sessionId, model, analysis,
+        prevSnippet: prevHead[idx] ?? null,
+        curSnippet,
+        now: Date.now(),
+      })
+      snapshotNote = path ? `; снимок ${path}` : '; снимок не снят (запись не удалась или снимки выключены)'
+    }
     ctx.emit({
       level: 'info', kind: EVENT.GO_PREFIX_REWRITE, sessionId, model,
       msg: `дверь Go: ${cause}; ${where}; `
-        + `было ${analysis.prevMsgs ?? '?'}, стало ${analysis.msgs ?? '?'}${tail}`,
+        + `было ${analysis.prevMsgs ?? '?'}, стало ${analysis.msgs ?? '?'}${tail}${snapshotNote}`,
     })
   }
 

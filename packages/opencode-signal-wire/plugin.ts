@@ -150,6 +150,16 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
     // остаётся РЕЗЕРВОМ на случай, когда файла нет или он старее ценза. В один проход идёт ровно
     // один из двух, никогда оба.
     const goStatus = readGoQuotaStatusWindows(undefined, { org: process.env.KIBEROS_GO_ORG?.trim() || undefined })
+    // 🔴 ИСТЁКШИЕ ОКНА НАЗВАНЫ, а не вычтены тихо: иначе снаружи не отличить «окно сброшено» от
+    // «данных нет» — и первый случай читается как второй, то есть как поломка сборщика.
+    if (goStatus?.expired?.length) {
+      logStep('GO_WINDOWS_EXPIRED', {
+        org: process.env.KIBEROS_GO_ORG?.trim() || null,
+        expired: goStatus.expired,
+        measuredAt: goStatus.measuredAt,
+        kept: goStatus.windows.length,
+      })
+    }
     if (goStatus) {
       out.push({
         provider: 'go' as const,

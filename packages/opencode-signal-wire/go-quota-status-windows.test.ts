@@ -35,7 +35,9 @@ describe('окна Go из файла квоты (активная органи�
         },
       },
     })
-    const r = readGoQuotaStatusWindows(p)!
+    // `now` пришпилен ДО сброса: это испытание про разбор файла, а не про ценз по сбросу
+    // (у ценза свои проверки ниже). Без этого фикстура стареет вместе с календарём.
+    const r = readGoQuotaStatusWindows(p, { now: Date.parse('2026-10-16T14:00:00Z') })!
     expect(r.measuredAt).toBe('2026-10-16T13:59:41.197Z')
     expect(r.windows.map((w) => w.kind)).toEqual(['5h', '7d', '30d'])
     expect(r.windows[0]).toEqual({
@@ -103,5 +105,63 @@ describe('организация ЭТОГО агента, а не активна
   test('орг названа, а окон у неё нет → тоже НЕИЗВЕСТНО', () => {
     const noWindows = { ...body, orgs: [{ name: 'hello@kiberos.app', windows: [] }] }
     expect(readGoQuotaStatusWindows(writeQuota(noWindows), { org: 'hello@kiberos.app' })).toBeNull()
+  })
+})
+
+/**
+ * 🔴 ЦЕНЗ ПО СБРОСУ (находка владельца signal-wire-core, 23.10.2026).
+ *
+ * Производитель переписывает файл целиком и переносит СТАРОЕ число под СВЕЖИЙ штамп, поэтому
+ * `measured_at` свежий, а окно может быть уже закрыто. Замер до правки: `reset`=17:21Z, подвал
+ * печатал 5h=0.96 в 21:30Z — четыре часа после сброса, и агент дважды остановил работу на числе,
+ * которое больше никого не ограничивает. Число закрытого окна — не измерение текущего.
+ */
+describe('ценз по сбросу — число закрытого окна не отдаётся как текущее', () => {
+  const file = (windows: unknown[]) => writeQuota({
+    measured_at: '2026-10-23T21:00:00.000Z',
+    org: 'hello@sealform.dev',
+    accounts: { 'hello@sealform.dev': { active: true, windows } },
+  })
+
+  test('5h сброшено 4 часа назад → окно ОТБРОШЕНО и названо истёкшим, остальные на месте', () => {
+    const p = file([
+      { window: '5h', util: 0.96, resetIso: '2026-10-23T17:21:00.000Z' },
+      { window: 'week', util: 0.55, resetIso: '2026-10-27T00:00:00.000Z' },
+    ])
+    const r = readGoQuotaStatusWindows(p, { now: Date.parse('2026-10-23T21:30:00Z') })!
+    expect(r.windows.map((w) => w.kind)).toEqual(['7d'])
+    expect(r.expired).toEqual(['5h'])
+  })
+
+  test('то же окно ДО сброса — отдаётся нормально (ценз не режет живое)', () => {
+    const p = file([{ window: '5h', util: 0.96, resetIso: '2026-10-23T22:21:00.000Z' }])
+    const r = readGoQuotaStatusWindows(p, { now: Date.parse('2026-10-23T21:30:00Z') })!
+    expect(r.windows.map((w) => w.kind)).toEqual(['5h'])
+    expect(r.expired).toBeUndefined()
+  })
+
+  test('ВСЕ окна истекли → пусто и причина названа, а не null (это не «данных нет»)', () => {
+    const p = file([
+      { window: '5h', util: 0.96, resetIso: '2026-10-23T17:21:00.000Z' },
+      { window: 'week', util: 0.55, resetIso: '2026-10-20T00:00:00.000Z' },
+    ])
+    const r = readGoQuotaStatusWindows(p, { now: Date.parse('2026-10-23T21:30:00Z') })!
+    expect(r).not.toBeNull()
+    expect(r.windows).toEqual([])
+    expect(r.expired).toEqual(['5h', '7d'])
+  })
+
+  test('сброса НЕТ вовсе — окно остаётся (fail-open, прежнее поведение)', () => {
+    const p = file([{ window: '5h', util: 0.42 }])
+    const r = readGoQuotaStatusWindows(p, { now: Date.parse('2026-10-23T21:30:00Z') })!
+    expect(r.windows.map((w) => w.kind)).toEqual(['5h'])
+    expect(r.expired).toBeUndefined()
+  })
+
+  test('граница: сброс РОВНО сейчас — окно уже закрыто', () => {
+    const p = file([{ window: '5h', util: 0.9, resetIso: '2026-10-23T21:30:00.000Z' }])
+    const r = readGoQuotaStatusWindows(p, { now: Date.parse('2026-10-23T21:30:00Z') })!
+    expect(r.windows).toEqual([])
+    expect(r.expired).toEqual(['5h'])
   })
 })

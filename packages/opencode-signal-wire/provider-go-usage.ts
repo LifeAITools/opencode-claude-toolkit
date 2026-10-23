@@ -173,8 +173,14 @@ export interface GoStatusWindow {
  */
 export function readGoQuotaStatusWindows(
   path: string = GO_QUOTA_STATUS_JSON,
-  opts: { org?: string } = {},
-): { measuredAt: string; windows: GoStatusWindow[]; basis: 'agent_org' | 'active_fallback' } | null {
+  opts: { org?: string; now?: number } = {},
+): {
+  measuredAt: string
+  windows: GoStatusWindow[]
+  basis: 'agent_org' | 'active_fallback'
+  /** Окна, чей срок ИСТЁК: их числа — про закрытое окно и НЕ переезжают в новое. */
+  expired?: string[]
+} | null {
   try {
     const d = JSON.parse(readFileSync(path, 'utf8')) as {
       measured_at?: unknown
@@ -216,18 +222,40 @@ export function readGoQuotaStatusWindows(
     if (!Array.isArray(raw)) return null
     const KIND: Record<string, string> = { '5h': '5h', week: '7d', month: '30d' }
     const windows: GoStatusWindow[] = []
+    // 🔴 ЦЕНЗ ПО СБРОСУ — ЗДЕСЬ, А НЕ У ЧИТАТЕЛЯ (находка владельца signal-wire, 23.10.2026).
+    // Производитель переписывает файл целиком и переносит СТАРОЕ число под СВЕЖИЙ штамп, поэтому
+    // `measuredAt` свежий, а окно может быть уже закрыто. Замер до правки: `reset`=17:21Z, а
+    // подвал печатал 5h=0.96 в 21:30Z — четыре часа ПОСЛЕ сброса, и агент дважды остановил работу
+    // на числе, которое больше никого не ограничивает.
+    // Читатель такое не различит: число выглядит живым. Число, чей срок истёк, — это НЕ измерение
+    // текущего окна, поэтому оно здесь не отдаётся вовсе, а окно НАЗЫВАЕТСЯ истёкшим.
+    const now = opts.now ?? Date.now()
+    const expired: string[] = []
     for (const w of raw) {
       if (!w || typeof w !== 'object') continue
       const ww = w as { window?: unknown; util?: unknown; resetIso?: unknown }
       const kind = typeof ww.window === 'string' ? (KIND[ww.window] ?? ww.window) : null
       const util = typeof ww.util === 'number' && Number.isFinite(ww.util) ? ww.util : null
       if (!kind || util === null) continue
-      const out: GoStatusWindow = { kind, util, measuredAt }
       const iso = finiteStr(ww.resetIso)
-      if (iso) out.resetAt = iso
-      windows.push(out)
+      if (iso) {
+        const resetMs = Date.parse(iso)
+        if (Number.isFinite(resetMs) && resetMs <= now) {
+          // Окно закрыто: util принадлежит ему же и в новом окне не значит ничего.
+          expired.push(kind)
+          continue
+        }
+        const out: GoStatusWindow = { kind, util, measuredAt, resetAt: iso }
+        windows.push(out)
+        continue
+      }
+      // Сброс НЕИЗВЕСТЕН — судить не по чему, окно остаётся (fail-open: прежнее поведение).
+      windows.push({ kind, util, measuredAt })
     }
-    return windows.length > 0 ? { measuredAt, windows, basis } : null
+    if (windows.length > 0) return { measuredAt, windows, basis, ...(expired.length ? { expired } : {}) }
+    // Все окна закрыты: текущих измерений нет. Отдаём явное «пусто + причина», а не null,
+    // чтобы потребитель мог сказать «сброшено», а не «данных нет вовсе».
+    return expired.length > 0 ? { measuredAt, windows, basis, expired } : null
   } catch {
     return null
   }

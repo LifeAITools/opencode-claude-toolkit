@@ -17,6 +17,7 @@
  * идёт в DashScope): GET /zen/go/v1/models ключом из auth.json → id с приставкой
  * `opencode-go/`, плюс алиасы LiteLLM, чей api_base ведёт в zen/go.
  */
+import { Database } from 'bun:sqlite'
 import { createHash } from 'crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
@@ -135,6 +136,77 @@ export async function readGoRegistry(
   }
 }
 
+/**
+ * Какая пара «аккаунт/организация» ДЕЙСТВИТЕЛЬНО в работе — по двум источникам.
+ *
+ * ЗАЧЕМ (22.10.2026): отчёт раньше ПИСАЛ утверждение, скопированное из реестра
+ * (`orgs[].active`), и источники разошлись — агент работал на одной организации,
+ * а файл говорил «активна другая». Теперь `active` не хранится, а выводится из
+ * `account_state` (таблица opencode), и расхождение честно называется `неизвестно`.
+ * Чистая функция: без ввода-вывода, испытания без базы.
+ */
+export interface ActiveOrgResolution {
+  /** Подтверждённое имя активной организации либо null, когда источники не сошлись. */
+  name: string | null
+  /** Что сказал каждый источник — присутствует ВСЕГДА, чтобы `unknown` называл причину. */
+  sources: { registry: string | null; accountState: string | null }
+  /** Машиночитаемая причина, когда `name` null. */
+  reason: 'agreed' | 'account_state_unreadable' | 'account_email_not_in_registry' | 'sources_disagree'
+}
+
+export function resolveActiveOrg(input: {
+  /** Имя организации из реестра, у которой `active === true` (null — такой нет). */
+  registryActive: string | null
+  /** email из `account_state` → `account` (null — прочитать не удалось). */
+  accountEmail: string | null
+  registryOrgNames: string[]
+}): ActiveOrgResolution {
+  const clean = (v: string | null): string | null =>
+    typeof v === 'string' && v.trim() ? v.trim() : null
+  const accountEmail = clean(input.accountEmail)
+  const registryActive = clean(input.registryActive)
+  const sources = { registry: registryActive, accountState: accountEmail }
+  if (!accountEmail) return { name: null, sources, reason: 'account_state_unreadable' }
+  const names = (Array.isArray(input.registryOrgNames) ? input.registryOrgNames : []).map((n) => String(n).trim())
+  if (!names.includes(accountEmail)) return { name: null, sources, reason: 'account_email_not_in_registry' }
+  if (registryActive === accountEmail) return { name: accountEmail, sources, reason: 'agreed' }
+  return { name: null, sources, reason: 'sources_disagree' }
+}
+
+/**
+ * Читает email активного аккаунта из базы opencode (`account_state` → `account`).
+ *
+ * ЗАЧЕМ: единственный источник правды о том, на какой паре агент работает СЕЙЧАС.
+ * Реестр знает лишь то, что ему сказали командой `use`, и 22.10 источники разошлись.
+ * Ошибка НИКОГДА не бросается: `unknown` должен уметь назвать причину, а не уронить сбор.
+ */
+export function readActiveAccountEmail(
+  dbPath: string,
+): { email: string | null; orgId: string | null; error: string | null } {
+  let db: Database | null = null
+  try {
+    db = new Database(dbPath, { readonly: true })
+    const state = db
+      .query('select id, active_account_id, active_org_id from account_state order by id limit 1')
+      .get() as { active_account_id?: unknown; active_org_id?: unknown } | null
+    if (!state) return { email: null, orgId: null, error: 'no account_state row' }
+    const orgId = typeof state.active_org_id === 'string' && state.active_org_id.trim()
+      ? state.active_org_id.trim()
+      : null
+    const accountId = typeof state.active_account_id === 'string' ? state.active_account_id.trim() : ''
+    if (!accountId) return { email: null, orgId, error: 'no active_account_id' }
+    const row = db.query('select email from account where id = ?').get(accountId) as { email?: unknown } | null
+    if (!row) return { email: null, orgId, error: 'account row not found' }
+    const email = typeof row.email === 'string' ? row.email.trim() : ''
+    if (!email) return { email: null, orgId, error: 'empty account email' }
+    return { email, orgId, error: null }
+  } catch (e) {
+    return { email: null, orgId: null, error: `account_state unreadable: ${String((e as Error)?.message ?? e).slice(0, 120)}` }
+  } finally {
+    try { db?.close() } catch {}
+  }
+}
+
 /** Модели подписки: GET /models тем же ключом → `opencode-go/<id>`. */
 export async function goSubscriptionModels(
   apiKey: string | null,
@@ -206,10 +278,12 @@ const isoOf = (v: unknown): string | null => {
 export function buildGoQuotaStatus(input: {
   usage: GoUsage | null
   error: string | null
-  /** Имя активной организации из реестра — её числа здесь и лежат. */
+  /** Имя организации, чьи числа лежат в плоских полях отчёта (ПРЕДМЕТ чисел). */
   org: string
-  /** true — через эту организацию сейчас ходит посредник (меняется командой `use`). */
-  active: boolean
+  /** 🔴 Какая пара в работе — не копия из реестра, а СВЕРКА реестра с `account_state`
+   * opencode. `name === null` — источники не сошлись или база не прочитана: тогда
+   * `active` будет null, а причина названа в `activeReason`/`activeSources`. */
+  activeOrg: ActiveOrgResolution
   accountHint: string
   models: string[]
   modelsSource: string
@@ -222,7 +296,25 @@ export function buildGoQuotaStatus(input: {
    * Мост обязателен, иначе лат-контекст не сопоставит орг агента с записью. */
   orgUids?: Record<string, string>
 }): Record<string, unknown> {
-  const { usage, error, org, active, accountHint, models, modelsSource, measuredAt, orgs, orgUids } = input
+  const { usage, error, org, activeOrg, accountHint, models, modelsSource, measuredAt, orgs, orgUids } = input
+  // 🔴 `active` больше НЕ копируется из реестра: подтверждение берётся из сверки с
+  // `account_state`. Неизвестно — null (никогда false: «не активна» — тоже утверждение).
+  // Старый вызов без `activeOrg` не роняем — считаем, что подтверждения нет.
+  const resolution: ActiveOrgResolution = activeOrg ?? {
+    name: null,
+    sources: { registry: null, accountState: null },
+    reason: 'account_state_unreadable',
+  }
+  // 🔴 РАЗДЕЛЕНИЕ СМЫСЛОВ: `org` — ПРЕДМЕТ плоских чисел (та организация, чьи окна здесь);
+  // `active` — ПОДТВЕРЖДЕНО ли, что этот предмет сейчас в работе. Одно другого не влечёт.
+  const active: boolean | null = resolution.name ? true : null
+  // 🔴 ИНВАРИАНТ: `resolution.name` непусто ТОЛЬКО когда реестр и `account_state` назвали
+  // одно имя, а `org` — это имя активной организации реестра того же ответа. Значит
+  // подтверждённое имя всегда совпадает с предметом плоских чисел; ветки «активна другая»
+  // не существует, и писать её — значит держать код, до которого не доходит ни один вызов.
+  const activityNote = resolution.name
+    ? ', активна'
+    : `, активность не подтверждена (${resolution.reason})`
   const base = {
     version: 1,
     provider: 'opencode-go',
@@ -230,6 +322,8 @@ export function buildGoQuotaStatus(input: {
     measured_at: measuredAt.toISOString(),
     org,
     active,
+    activeReason: resolution.reason,
+    activeSources: resolution.sources,
     models,
     models_source: modelsSource,
   }
@@ -283,7 +377,9 @@ export function buildGoQuotaStatus(input: {
       name: o.name,
       // uid — мост к `member.orgUid`; нет в карте — поля нет (потребитель не выдумывает).
       ...(orgUids?.[o.name] ? { uid: orgUids[o.name] } : {}),
-      active: o.active === true,
+      // 🔴 Только при ПОДТВЕРЖДЁННОЙ паре: проставить false всем — значит утверждать
+      // «не активна» там, где мы не знаем. Неизвестно → поля НЕТ ни у одной.
+      ...(resolution.name ? { active: o.name === resolution.name } : {}),
       util5h: o5 === null ? null : o5 / 100,
       util7d: o7 === null ? null : o7 / 100,
       utilMonth: oM === null ? null : oM / 100,
@@ -324,8 +420,8 @@ export function buildGoQuotaStatus(input: {
         windows,
         level,
         message: windows.length === 0
-          ? `opencode-go (${org}${active ? ', активна' : ', не активна'}): план не ограничивает окна.`
-          : `opencode-go (${org}${active ? ', активна' : ', не активна'}): ` + windows.map((w) => `${w.window} ${pc(w.util as number)}`).join(', ') + '.',
+          ? `opencode-go (${org}${activityNote}): план не ограничивает окна.`
+          : `opencode-go (${org}${activityNote}): ` + windows.map((w) => `${w.window} ${pc(w.util as number)}`).join(', ') + '.',
       },
     },
   }
@@ -348,6 +444,9 @@ export interface CollectOptions {
   now?: () => Date
   /** Подмена запуска двери в испытаниях (по умолчанию — python3 execFile). */
   runner?: Runner
+  /** Путь к базе opencode (по умолчанию `OPENCODE_DB_PATH` или ~/.local/share/opencode/opencode.db).
+   *  Нужен испытаниям, чтобы не читать живую базу. */
+  dbPath?: string
 }
 
 export async function collectOnce(opts: CollectOptions): Promise<Record<string, unknown>> {
@@ -365,6 +464,16 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
   const activeOrg = registry
     ? (registry.orgs.find((o) => o.active === true) ?? registry.orgs[0] ?? null)
     : null
+  // 🔴 Кто в работе — СВЕРКА, а не копия: реестр говорит одно, `account_state` — другое,
+  // и 22.10 они разошлись. База читается напрямую, путь переопределяется для испытаний.
+  const dbPath = opts.dbPath ?? process.env.OPENCODE_DB_PATH
+    ?? join(homedir(), '.local', 'share', 'opencode', 'opencode.db')
+  const accountEmail = readActiveAccountEmail(dbPath).email
+  const activeOrgResolution = resolveActiveOrg({
+    registryActive: registry?.orgs.find((o) => o.active === true)?.name ?? null,
+    accountEmail,
+    registryOrgNames: (registry?.orgs ?? []).map((o) => o.name),
+  })
   let litellmAliases: string[] = []
   let litellmSource = 'litellm config unread'
   try {
@@ -380,7 +489,7 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
     usage: activeOrg?.usage ?? null,
     error: doorError ?? activeOrg?.usage_error ?? null,
     org: activeOrg?.name ?? 'unknown',
-    active: activeOrg?.active === true,
+    activeOrg: activeOrgResolution,
     accountHint: activeOrg?.name ?? 'opencode-go-unknown',
     models,
     modelsSource: [sub.source, litellmSource].join('; '),

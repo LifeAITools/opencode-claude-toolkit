@@ -32,7 +32,8 @@ const okFetch = (body: unknown) => (async () => ({
 describe('построение файла из usage активной организации', () => {
   test('percent целый → доля; message называет организацию', () => {
     const s: any = buildGoQuotaStatus({
-      usage: LIVE, error: null, org: 'console-berezovskaya', active: true,
+      usage: LIVE, error: null, org: 'console-berezovskaya',
+      activeOrg: { name: 'console-berezovskaya', sources: { registry: 'console-berezovskaya', accountState: 'console-berezovskaya' }, reason: 'agreed' },
       accountHint: 'console-berezovskaya', models: [], modelsSource: '', measuredAt: AT,
     })
     const a = s.accounts['console-berezovskaya']
@@ -51,12 +52,14 @@ describe('построение файла из usage активной орган
   test('percent клампится, кривой сброс — null', () => {
     const s: any = buildGoQuotaStatus({
       usage: { rolling: { status: 'capped', percent: 137, resetsAt: 'nope' } },
-      error: null, org: 'x', active: false, accountHint: 'x', models: [], modelsSource: '', measuredAt: AT,
+      error: null, org: 'x', activeOrg: { name: null, sources: { registry: null, accountState: null }, reason: 'account_state_unreadable' },
+      accountHint: 'x', models: [], modelsSource: '', measuredAt: AT,
     })
     expect(s.accounts.x.util5h).toBe(1)
     expect(s.accounts.x.windows[0].status).toBe('capped')
     expect(s.accounts.x.windows[0].resetAt).toBeNull()
-    expect(s.accounts.x.message).toContain('не активна')
+    // Сверки нет → это ЗАЯВЛЕННОЕ «неизвестно», а не «не активна» (22.10).
+    expect(s.accounts.x.message).toContain('активность не подтверждена')
   })
 
   test('нет usage — названное отсутствие, accounts пусто', () => {
@@ -152,10 +155,13 @@ describe('сборка целиком (без сети)', () => {
       const s: any = await collectOnce({
         authJsonPath: auth, litellmConfigPath: join(dir, 'nope.yaml'),
         goRefresherPath: '/door.py', outPath: out, fetcher: fetchFn, runner, now: () => AT,
+        // Базы нет → пара не подтверждена. Испытание не должно читать ЖИВУЮ базу opencode.
+        dbPath: join(dir, 'opencode.db'),
       })
       expect(s.provider).toBe('opencode-go')
       expect(s.org).toBe('console-berezovskaya')
-      expect(s.active).toBe(true)
+      expect(s.active).toBeNull()
+      expect(s.activeReason).toBe('account_state_unreadable')
       const onDisk = JSON.parse(readFileSync(out, 'utf8'))
       expect(onDisk.org).toBe('console-berezovskaya')
       expect(Object.keys(onDisk.accounts)).toEqual(['console-berezovskaya'])

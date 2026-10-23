@@ -139,28 +139,73 @@ export function goDoorReadiness(cfg: ProxyConfig): { configured: boolean; missin
  * продолжилась (append), кэш должен попасть. Если не равен — ранняя часть переписана.
  */
 const PREFIX_MEMORY_MAX = 2000
-const prefixMemory = new Map<string, { full: string; msgs: number; at: number }>()
+const prefixMemory = new Map<string, {
+  full: string
+  msgHashes: string[]
+  roles: string[]
+  tools: string
+  at: number
+}>()
 
 export type PrefixVerdict = 'first' | 'append' | 'rewrite' | 'unknown'
 
-export function prefixVerdict(sessionId: string | null, body: any, now = Date.now()): PrefixVerdict {
-  if (!sessionId) return 'unknown'
+/** Где именно разошлось: индекс сообщения, его роль и сменились ли tools. */
+export interface PrefixAnalysis {
+  verdict: PrefixVerdict
+  /** Индекс ПЕРВОГО разошедшегося сообщения (в терминах прошлой истории). */
+  firstDiffIndex?: number
+  role?: string
+  prevMsgs?: number
+  msgs?: number
+  toolsChanged?: boolean
+}
+
+function msgHash(m: unknown): string { return sha256(JSON.stringify(m)).slice(0, 12) }
+
+export function analyse(sessionId: string | null, body: any, now: number): PrefixAnalysis {
+  if (!sessionId) return { verdict: 'unknown' }
   const msgs = Array.isArray(body?.messages) ? body.messages : null
-  if (!msgs || msgs.length === 0) return 'unknown'
+  if (!msgs || msgs.length === 0) return { verdict: 'unknown' }
   const cacheable = msgs.slice(0, -1)
   const prefixSha = sha256(JSON.stringify(cacheable))
   const fullSha = sha256(JSON.stringify(msgs))
+  const msgHashes = msgs.map(msgHash)
+  const roles = msgs.map((m: any) => (typeof m?.role === 'string' ? m.role : '?'))
+  const tools = sha256(JSON.stringify(body?.tools ?? null)).slice(0, 12)
   const prev = prefixMemory.get(sessionId)
-  // Память ограничена: длинная сессия не должна растить процесс. Старое вытесняется первым.
+
   if (prefixMemory.size >= PREFIX_MEMORY_MAX && !prev) {
     const oldest = prefixMemory.keys().next().value
     if (oldest !== undefined) prefixMemory.delete(oldest)
   }
-  prefixMemory.set(sessionId, { full: fullSha, msgs: msgs.length, at: now })
-  if (!prev) return 'first'
-  // Пустая история (одно сообщение) — читать из кэша нечего, но и переписывать нечего.
-  if (cacheable.length === 0) return 'first'
-  return prev.full === prefixSha ? 'append' : 'rewrite'
+  prefixMemory.set(sessionId, { full: fullSha, msgHashes, roles, tools, at: now })
+
+  if (!prev) return { verdict: 'first', msgs: msgs.length }
+  if (cacheable.length === 0) return { verdict: 'first', msgs: msgs.length }
+  // 🔴 tools ВХОДЯТ В КЭШИРУЕМЫЙ ПРЕФИКС наравне с сообщениями: продолжение истории при
+  // смене набора инструментов — всё равно промах, и назвать его «append» значило бы соврать.
+  if (prev.full === prefixSha && prev.tools === tools) return { verdict: 'append', msgs: msgs.length }
+
+  // Расхождение: ищем первое сообщение, которое перестало совпадать с отправленным прошлый раз.
+  let firstDiff: number | undefined
+  const common = Math.min(prev.msgHashes.length, cacheable.length)
+  for (let i = 0; i < common; i++) {
+    if (prev.msgHashes[i] !== msgHash(cacheable[i])) { firstDiff = i; break }
+  }
+  // Прошлая история была длиннее, а общий префикс совпал — историю обрезали.
+  if (firstDiff === undefined && prev.msgHashes.length > cacheable.length) firstDiff = cacheable.length
+  return {
+    verdict: 'rewrite',
+    ...(firstDiff !== undefined ? { firstDiffIndex: firstDiff, role: prev.roles[firstDiff] ?? '?' } : {}),
+    prevMsgs: prev.msgHashes.length,
+    msgs: msgs.length,
+    toolsChanged: prev.tools !== tools,
+  }
+}
+
+/** Совместимость: прежняя сигнатура (строка) — ею пользуются испытания и внешние вызовы. */
+export function prefixVerdict(sessionId: string | null, body: any, now = Date.now()): PrefixVerdict {
+  return analyse(sessionId, body, now).verdict
 }
 
 async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Response> {
@@ -208,11 +253,17 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
 
   // Названный разрыв префикса — одна строка, только когда действительно переписано:
   // дописывание идут тысячами в час и называть их незачем.
-  const verdict = prefixVerdict(sessionId, parsed)
-  if (verdict === 'rewrite') {
+  const analysis = analyse(sessionId, parsed, Date.now())
+  if (analysis.verdict === 'rewrite') {
+    // Названо МЕСТО, а не только факт: без него нельзя ответить «кто и что поменял».
+    const where = analysis.firstDiffIndex === undefined
+      ? 'место расхождения не определено'
+      : `первое расхождение — сообщение #${analysis.firstDiffIndex} (role=${analysis.role})`
     ctx.emit({
       level: 'info', kind: EVENT.GO_PREFIX_REWRITE, sessionId, model,
-      msg: `дверь Go: история переписана (не продолжение) — кэш на этом вызове промахнётся; msgs=${Array.isArray(parsed?.messages) ? parsed.messages.length : 0}`,
+      msg: `дверь Go: история переписана — кэш промахнётся; ${where}; `
+        + `было ${analysis.prevMsgs ?? '?'}, стало ${analysis.msgs ?? '?'}`
+        + `${analysis.toolsChanged ? '; tools ИЗМЕНИЛИСЬ' : '; tools те же'}`,
     })
   }
 

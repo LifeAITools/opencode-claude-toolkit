@@ -56,3 +56,38 @@ describe('prefixVerdict — продолжение истории или пер�
     expect(prefixVerdict(b, { messages: [m('X'), m('b2'), m('b3')] })).toBe('rewrite')
   })
 })
+
+describe('prefixAnalysis — ГДЕ разошлось (слово фаундера 23.10: «идентифицировать место»)', () => {
+  const m = (role: string, t: string) => ({ role, content: t })
+  const s = () => `ses_${Math.random().toString(36).slice(2)}`
+
+  test('место расхождения названо индексом и ролью, а не «что-то поменялось»', async () => {
+    const { analyse } = await import('../src/modules/go-door.js')
+    const id = s()
+    analyse(id, { messages: [m('system', 'S'), m('user', 'u1'), m('user', 'u2')] }, 1)
+    const a = analyse(id, { messages: [m('system', 'S'), m('user', 'ИЗМЕНЕНО'), m('user', 'u2'), m('user', 'u3')] }, 2)
+    expect(a.verdict).toBe('rewrite')
+    expect(a.firstDiffIndex).toBe(1)
+    expect(a.role).toBe('user')
+    expect(a.prevMsgs).toBe(3)
+    expect(a.msgs).toBe(4)
+  })
+
+  test('сменились system или tools — это видно отдельно', async () => {
+    const { analyse } = await import('../src/modules/go-door.js')
+    const id = s()
+    analyse(id, { tools: [{ name: 'a' }], messages: [m('system', 'S'), m('user', 'u')] }, 1)
+    const a = analyse(id, { tools: [{ name: 'a' }, { name: 'b' }], messages: [m('system', 'S'), m('user', 'u'), m('user', 'v')] }, 2)
+    expect(a.verdict).toBe('rewrite')
+    expect(a.toolsChanged).toBe(true)
+  })
+
+  test('продолжение не считается расхождением', async () => {
+    const { analyse } = await import('../src/modules/go-door.js')
+    const id = s()
+    analyse(id, { messages: [m('system', 'S'), m('user', 'u1')] }, 1)
+    const a = analyse(id, { messages: [m('system', 'S'), m('user', 'u1'), m('user', 'u2')] }, 2)
+    expect(a.verdict).toBe('append')
+    expect(a.firstDiffIndex).toBeUndefined()
+  })
+})

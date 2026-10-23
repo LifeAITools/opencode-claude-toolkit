@@ -342,7 +342,14 @@ export function translateFromResponsesObject(res: ResponsesObject): FromResponse
       usage: {
         input_tokens: res.usage?.input_tokens ?? 0,
         output_tokens: res.usage?.output_tokens ?? 0,
-        ...(cachedTokens > 0 ? { cache_read_input_tokens: cachedTokens } : {}),
+        // 🔴 ВСЕГДА, ВКЛЮЧАЯ НОЛЬ (замер 23.10 по просьбе владельца tixi-cold). Прежнее правило
+        // «нет кэша — нет поля» заставляло потребителя читать ОТСУТСТВИЕ как «провайдер кэш не
+        // измеряет», и его прибор честно писал `[CACHE_UNMEASURED]`, пока кэш читался на 94%.
+        // Ноль здесь — ИЗМЕРЕНИЕ, а не подставленное значение: эта ветка исполняется только
+        // после ответа поставщика с usage, то есть «ни один токен префикса не прочитан» известно
+        // точно. Разница «нечего кэшировать» и «кэш холодный» для потребителя одна и та же —
+        // выгоды от кэша на этом вызове нет.
+        cache_read_input_tokens: cachedTokens,
       },
     },
     droppedReasoning,
@@ -420,7 +427,10 @@ export async function transformResponsesSSEToAnthropic(
             usage: {
               input_tokens: usage.input_tokens,
               output_tokens: 0,
-              ...(usage.cached_tokens > 0 ? { cache_read_input_tokens: usage.cached_tokens } : {}),
+              // Всегда, включая ноль: отсутствие поля потребитель читает как «кэш не измеряется»
+              // (см. комментарий в небатчевой ветке). Здесь ноль означает «пока неизвестно, но
+              // прочитано ноль» — финальный счёт приедет в `message_delta`.
+              cache_read_input_tokens: usage.cached_tokens,
             },
           },
         })
@@ -497,7 +507,8 @@ export async function transformResponsesSSEToAnthropic(
           usage: {
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
-            ...(usage.cached_tokens > 0 ? { cache_read_input_tokens: usage.cached_tokens } : {}),
+            // Всегда, включая ноль — причина та же: отсутствие поля читают как «не измеряется».
+            cache_read_input_tokens: usage.cached_tokens,
           },
         })
         send({ type: 'message_stop' })

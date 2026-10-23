@@ -336,7 +336,11 @@ describe('transformResponsesSSEToAnthropic', () => {
     expect(tail.usage.output_tokens).toBe(100)
   })
 
-  test('a COLD stream omits cache_read_input_tokens (mirrors the non-streaming branch), keeps output', async () => {
+  // 🔴 ПЕРЕПИСАНО 23.10: прежнее ожидание («холодный поток НЕ несёт поля») кодировало дефект.
+  // Потребитель (tixi-cold) читал отсутствие как «провайдер кэш не измеряет» и писал
+  // [CACHE_UNMEASURED], пока кэш читался на 94%. Ноль — измерение: ветка исполняется только
+  // после ответа поставщика с usage, то есть «прочитано ноль» известно точно.
+  test('a COLD stream carries cache_read_input_tokens = 0 — отсутствие поля читается как «не измеряется»', async () => {
     const upstream = makeResponsesSSE([
       { type: 'response.output_text.delta', item_id: 'it_1', delta: 'ok' },
       { type: 'response.output_item.done', item: { id: 'it_1', type: 'message' } },
@@ -346,7 +350,8 @@ describe('transformResponsesSSEToAnthropic', () => {
       await transformResponsesSSEToAnthropic(upstream, { messageId: 'msg_test', model: 'muse-spark-1.3-contributor' }),
     )
     const tail = events[events.map(e => e.type).lastIndexOf('message_delta')]
-    expect('cache_read_input_tokens' in tail.usage).toBe(false)
+    expect(tail.usage.cache_read_input_tokens).toBe(0)
+    expect('cache_read_input_tokens' in tail.usage).toBe(true)
     expect(tail.usage.output_tokens).toBe(50)
   })
 
@@ -431,7 +436,9 @@ describe('кэш-чтение из деталей usage', () => {
       output: [{ type: 'message', content: [{ type: 'output_text', text: 'hi' }] }],
     } as any)
     expect(cold.cachedTokens).toBe(0)
-    expect('cache_read_input_tokens' in cold.message.usage).toBe(false)
+    // Переписано 23.10 (см. соседний тест): ноль обязан доехать — иначе потребитель не отличит
+    // «кэш не прочитан» от «провайдер не измеряет».
+    expect(cold.message.usage.cache_read_input_tokens).toBe(0)
   })
 
   test('стрим: usage из completed с деталями доезжает до onComplete', async () => {

@@ -148,29 +148,93 @@ export async function readGoRegistry(
 export interface ActiveOrgResolution {
   /** Подтверждённое имя активной организации либо null, когда источники не сошлись. */
   name: string | null
+  /** НА ЧЁМ основано подтверждение: по идентификаторам (сильный) или по именам (слабый). */
+  basis: 'workspace_id' | 'label' | null
   /** Что сказал каждый источник — присутствует ВСЕГДА, чтобы `unknown` называл причину. */
-  sources: { registry: string | null; accountState: string | null }
-  /** Машиночитаемая причина, когда `name` null. */
-  reason: 'agreed' | 'account_state_unreadable' | 'account_email_not_in_registry' | 'sources_disagree'
+  sources: {
+    registry: string | null
+    registryWorkspace: string | null
+    accountState: string | null
+    accountId: string | null
+    accountOrgId: string | null
+  }
+  /** Машиночитаемая причина. `labelMismatch` — факт один, разошлись ПОДПИСИ. */
+  reason:
+    | 'agreed'
+    | 'agreed_by_label'
+    | 'labelMismatch'
+    | 'account_state_unreadable'
+    | 'account_email_not_in_registry'
+    | 'sources_disagree'
 }
 
+/**
+ * КАНОН — ИДЕНТИФИКАТОР, А НЕ ИМЯ (поправка владельца реестра 23.10, и он прав).
+ *
+ * Мы с ним джойнили РАЗНЫЕ величины: я `active_account_id → account.email` (почта УЧЁТКИ),
+ * он `active_org_id → workspace` в реестре (имя ОРГАНИЗАЦИИ). Сегодня они совпадают только
+ * потому, что в opencode одна учётка = одна организация и имя орг равно почте. В день, когда
+ * это перестанет быть так, разойдутся не справочники, а САМИ ВЕЛИЧИНЫ, и сверка имён этого
+ * не поймает — она подтвердит совпадение подписей при разных фактах.
+ *
+ * Поэтому сверка идёт по паре `(activeAccountId, activeOrgId)`, когда обе стороны её несут;
+ * имена остаются ЯРЛЫКАМИ для человека. `labelMismatch` — важный отдельный исход: пара
+ * совпала, а названия разные, значит факт один и пускатель тут ни при чём. Валить его в
+ * `sources_disagree` значило бы через месяц не отличить «вход был в другую организацию» от
+ * «мы по-разному её назвали».
+ */
 export function resolveActiveOrg(input: {
-  /** Имя организации из реестра, у которой `active === true` (null — такой нет). */
-  registryActive: string | null
-  /** email из `account_state` → `account` (null — прочитать не удалось). */
+  /** Активная запись реестра: имя (ярлык) и `workspace` (идентификатор организации). */
+  registryActive: { name: string | null; workspace: string | null } | null
+  /** email из `account_state` → `account` (ярлык учётки). */
   accountEmail: string | null
+  /** `account_state.active_account_id` — идентификатор учётки. */
+  accountId?: string | null
+  /** `account_state.active_org_id` — идентификатор организации. */
+  accountOrgId?: string | null
   registryOrgNames: string[]
 }): ActiveOrgResolution {
-  const clean = (v: string | null): string | null =>
+  const clean = (v: string | null | undefined): string | null =>
     typeof v === 'string' && v.trim() ? v.trim() : null
   const accountEmail = clean(input.accountEmail)
-  const registryActive = clean(input.registryActive)
-  const sources = { registry: registryActive, accountState: accountEmail }
-  if (!accountEmail) return { name: null, sources, reason: 'account_state_unreadable' }
+  const registryName = clean(input.registryActive?.name ?? null)
+  const registryWorkspace = clean(input.registryActive?.workspace ?? null)
+  const accountId = clean(input.accountId ?? null)
+  const accountOrgId = clean(input.accountOrgId ?? null)
+  const sources = {
+    registry: registryName,
+    registryWorkspace,
+    accountState: accountEmail,
+    accountId,
+    accountOrgId,
+  }
+  if (!accountEmail) return { name: null, basis: null, sources, reason: 'account_state_unreadable' }
+
+  // Сильная сверка: пара идентификаторов. Только она отвечает на «тот ли это факт».
+  if (registryWorkspace && accountOrgId) {
+    if (registryWorkspace !== accountOrgId) {
+      return { name: null, basis: 'workspace_id', sources, reason: 'sources_disagree' }
+    }
+    // Пара совпала. Ярлыки могут при этом разойтись — это НЕ спор источников.
+    if (!registryName) return { name: null, basis: 'workspace_id', sources, reason: 'sources_disagree' }
+    return {
+      name: registryName,
+      basis: 'workspace_id',
+      sources,
+      reason: registryName === accountEmail ? 'agreed' : 'labelMismatch',
+    }
+  }
+
+  // Слабая сверка: идентификаторов нет хотя бы с одной стороны — сравниваем ярлыки и НАЗЫВАЕМ,
+  // что основание слабое. Молча выдать это за `agreed` значило бы приравнять подпись к факту.
   const names = (Array.isArray(input.registryOrgNames) ? input.registryOrgNames : []).map((n) => String(n).trim())
-  if (!names.includes(accountEmail)) return { name: null, sources, reason: 'account_email_not_in_registry' }
-  if (registryActive === accountEmail) return { name: accountEmail, sources, reason: 'agreed' }
-  return { name: null, sources, reason: 'sources_disagree' }
+  if (!names.includes(accountEmail)) {
+    return { name: null, basis: 'label', sources, reason: 'account_email_not_in_registry' }
+  }
+  if (registryName === accountEmail) {
+    return { name: accountEmail, basis: 'label', sources, reason: 'agreed_by_label' }
+  }
+  return { name: null, basis: 'label', sources, reason: 'sources_disagree' }
 }
 
 /**
@@ -182,7 +246,7 @@ export function resolveActiveOrg(input: {
  */
 export function readActiveAccountEmail(
   dbPath: string,
-): { email: string | null; orgId: string | null; error: string | null } {
+): { email: string | null; accountId: string | null; orgId: string | null; error: string | null } {
   let db: Database | null = null
   try {
     db = new Database(dbPath, { readonly: true })
@@ -192,24 +256,24 @@ export function readActiveAccountEmail(
     // ловим. Две строки = «не знаем, какая из них в работе», а не «возьмём первую».
     const count = db.query('select count(*) as n from account_state').get() as { n?: unknown } | null
     const rows = typeof count?.n === 'number' ? count.n : -1
-    if (rows === 0) return { email: null, orgId: null, error: 'no account_state row' }
-    if (rows !== 1) return { email: null, orgId: null, error: `account_state has ${rows} rows — which pair is in use is unknown` }
+    if (rows === 0) return { email: null, accountId: null, orgId: null, error: 'no account_state row' }
+    if (rows !== 1) return { email: null, accountId: null, orgId: null, error: `account_state has ${rows} rows — which pair is in use is unknown` }
     const state = db
       .query('select active_account_id, active_org_id from account_state limit 1')
       .get() as { active_account_id?: unknown; active_org_id?: unknown } | null
-    if (!state) return { email: null, orgId: null, error: 'no account_state row' }
+    if (!state) return { email: null, accountId: null, orgId: null, error: 'no account_state row' }
     const orgId = typeof state.active_org_id === 'string' && state.active_org_id.trim()
       ? state.active_org_id.trim()
       : null
     const accountId = typeof state.active_account_id === 'string' ? state.active_account_id.trim() : ''
-    if (!accountId) return { email: null, orgId, error: 'no active_account_id' }
+    if (!accountId) return { email: null, accountId: null, orgId, error: 'no active_account_id' }
     const row = db.query('select email from account where id = ?').get(accountId) as { email?: unknown } | null
-    if (!row) return { email: null, orgId, error: 'account row not found' }
+    if (!row) return { email: null, accountId, orgId, error: 'account row not found' }
     const email = typeof row.email === 'string' ? row.email.trim() : ''
-    if (!email) return { email: null, orgId, error: 'empty account email' }
-    return { email, orgId, error: null }
+    if (!email) return { email: null, accountId, orgId, error: 'empty account email' }
+    return { email, accountId, orgId, error: null }
   } catch (e) {
-    return { email: null, orgId: null, error: `account_state unreadable: ${String((e as Error)?.message ?? e).slice(0, 120)}` }
+    return { email: null, accountId: null, orgId: null, error: `account_state unreadable: ${String((e as Error)?.message ?? e).slice(0, 120)}` }
   } finally {
     try { db?.close() } catch {}
   }
@@ -336,6 +400,13 @@ export function buildGoQuotaStatus(input: {
     orgSource: 'registry_decision',
     active,
     activeReason: resolution.reason,
+    // 🔴 СЫРЫЕ ИДЕНТИФИКАТОРЫ ПАРЫ рядом с ярлыками (просьба владельца реестра 23.10):
+    // канон — идентификатор, имя — подпись для человека. Иначе в день, когда учётка и
+    // организация перестанут быть один-к-одному, сверка имён подтвердит совпадение подписей
+    // при разных фактах.
+    activeAccountId: resolution.sources.accountId,
+    activeOrgId: resolution.sources.accountOrgId,
+    activeBasis: resolution.basis,
     activeSources: resolution.sources,
     models,
     models_source: modelsSource,
@@ -481,10 +552,15 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
   // и 22.10 они разошлись. База читается напрямую, путь переопределяется для испытаний.
   const dbPath = opts.dbPath ?? process.env.OPENCODE_DB_PATH
     ?? join(homedir(), '.local', 'share', 'opencode', 'opencode.db')
-  const accountEmail = readActiveAccountEmail(dbPath).email
+  const accountState = readActiveAccountEmail(dbPath)
+  const registryActiveOrg = registry?.orgs.find((o) => o.active === true) ?? null
   const activeOrgResolution = resolveActiveOrg({
-    registryActive: registry?.orgs.find((o) => o.active === true)?.name ?? null,
-    accountEmail,
+    registryActive: registryActiveOrg
+      ? { name: registryActiveOrg.name ?? null, workspace: registryActiveOrg.workspace ?? null }
+      : null,
+    accountEmail: accountState.email,
+    accountId: accountState.accountId,
+    accountOrgId: accountState.orgId,
     registryOrgNames: (registry?.orgs ?? []).map((o) => o.name),
   })
   let litellmAliases: string[] = []

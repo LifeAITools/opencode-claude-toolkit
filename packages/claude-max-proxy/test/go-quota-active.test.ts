@@ -290,3 +290,68 @@ describe('buildGoQuotaStatus — подтверждение вместо коп�
     expect(build(disagreed()).org).toBe('hello@sealform.dev')
   })
 })
+
+/**
+ * 🔴 ЦЕНЗ ПО СБРОСУ У ПРОИЗВОДИТЕЛЯ (находка владельца signal-wire-core и просьба
+ * home-relishev-general, 23.10.2026). Писатель переписывает файл целиком и переносил
+ * СТАРОЕ число под СВЕЖИЙ `measured_at`: 5ч-окно сброшено в 17:21Z, а в 21:30Z файл
+ * показывал 0.96, и агент дважды остановил работу. Потребителям угадывать нельзя —
+ * решение принимается здесь, у источника.
+ */
+describe('окно с истёкшим сроком не переносится как текущее число', () => {
+  const build = (usage: any, measuredAt: Date) => buildGoQuotaStatus({
+    usage, error: null, org: 'hello@sealform.dev',
+    activeOrg: { name: 'hello@sealform.dev', basis: 'workspace_id', reason: 'agreed',
+      sources: { registry: 'hello@sealform.dev', registryWorkspace: 'org-1', accountState: 'hello@sealform.dev', accountId: 'acc-1', accountOrgId: 'org-1' } },
+    accountHint: 'hello@sealform.dev', models: [], modelsSource: '', measuredAt,
+  }) as any
+
+  const USAGE = {
+    rolling: { status: 'ok', percent: 96, resetsAt: '2026-10-23T17:21:00.000Z' },
+    weekly: { status: 'ok', percent: 86, resetsAt: '2026-10-27T00:00:00.000Z' },
+    monthly: { status: 'ok', percent: 44, resetsAt: '2026-11-22T19:44:00.000Z' },
+  }
+
+  test('5h сброшено → util5h null, окно остаётся с expired:true и своим resetAt', () => {
+    const s = build(USAGE, new Date('2026-10-23T21:30:00Z'))
+    expect(s.accounts['hello@sealform.dev'].util5h).toBeNull()
+    const w5 = s.accounts['hello@sealform.dev'].windows.find((w: any) => w.window === '5h')
+    expect(w5.expired).toBe(true)
+    expect(w5.util).toBeNull()
+    expect(w5.resetIso).toBe('2026-10-23T17:21:00.000Z')
+    // Живые окна не тронуты
+    expect(s.accounts['hello@sealform.dev'].util7d).toBeCloseTo(0.86)
+  })
+
+  test('то же окно ДО сброса — число на месте, expired НЕ ставится', () => {
+    const s = build(USAGE, new Date('2026-10-23T17:00:00Z'))
+    const w5 = s.accounts['hello@sealform.dev'].windows.find((w: any) => w.window === '5h')
+    expect(w5.util).toBeCloseTo(0.96)
+    expect(w5.expired).toBeUndefined()
+  })
+
+  test('сообщение называет сброс словами, а не «null%»', () => {
+    const s = build(USAGE, new Date('2026-10-23T21:30:00Z'))
+    expect(s.accounts['hello@sealform.dev'].message).toContain('5h сброшено')
+    expect(s.accounts['hello@sealform.dev'].message).not.toContain('null')
+  })
+
+  test('окно БЕЗ resetAt остаётся (fail-open: судить не по чему)', () => {
+    const s = build({ rolling: { status: 'ok', percent: 30 }, weekly: USAGE.weekly, monthly: USAGE.monthly },
+      new Date('2026-10-23T21:30:00Z'))
+    expect(s.accounts['hello@sealform.dev'].util5h).toBeCloseTo(0.3)
+  })
+
+  test('ценз работает и для окон каждой организации в orgs[]', () => {
+    const s = buildGoQuotaStatus({
+      usage: USAGE, error: null, org: 'hello@sealform.dev',
+      activeOrg: { name: null, basis: null, reason: 'sources_disagree',
+        sources: { registry: 'hello@sealform.dev', registryWorkspace: 'org-1', accountState: 'hello@torqhub.net', accountId: 'acc-9', accountOrgId: 'org-9' } },
+      accountHint: 'x', models: [], modelsSource: '', measuredAt: new Date('2026-10-23T21:30:00Z'),
+      orgs: [{ name: 'hello@sealform.dev', usage: USAGE } as any],
+    }) as any
+    expect(s.orgs[0].util5h).toBeNull()
+    const w5 = s.orgs[0].windows.find((w: any) => w.window === '5h')
+    expect(w5.expired).toBe(true)
+  })
+})

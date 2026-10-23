@@ -346,6 +346,24 @@ const isoOf = (v: unknown): string | null => {
   return ms === null ? null : new Date(ms).toISOString()
 }
 
+/**
+ * Окно ЗАКРЫТО: его число относится к завершившемуся окну и в новом не значит ничего.
+ *
+ * 🔴 ЗАЧЕМ (находка владельца signal-wire-core, 23.10.2026, замер на живом): производитель
+ * переписывает файл целиком и переносит СТАРОЕ число под СВЕЖИЙ `measured_at`. Живой случай —
+ * 5ч-окно сброшено в 17:21Z, а в 21:30Z файл показывал `util5h=0.96` (реально было 0.79), и
+ * агент дважды остановил работу на числе, которое больше никого не ограничивает.
+ *
+ * Читателю это не различить: число выглядит живым, потому что штамп свежий. Поэтому решение
+ * принимается ЗДЕСЬ, у производителя: число закрытого окна не переносится вовсе, окно
+ * называется `expired` и сохраняет свой `resetAt`. Потребителям больше не надо угадывать.
+ * `resetAt` неизвестен — судить не по чему, число остаётся (fail-open, прежнее поведение).
+ */
+const windowClosed = (w: GoWindowUsage | undefined, nowMs: number): boolean => {
+  const ms = isoMs(w?.resetsAt)
+  return ms !== null && ms <= nowMs
+}
+
 /** Файл в форме quota-status.json с provider:"opencode-go". Чистая функция — испытывается без сети. */
 export function buildGoQuotaStatus(input: {
   usage: GoUsage | null
@@ -415,20 +433,31 @@ export function buildGoQuotaStatus(input: {
     return { ...base, error: error ?? 'no_usage', accounts: {} }
   }
   const pct = (w?: GoWindowUsage) => clampPct(w?.percent)
-  const util5h = pct(usage.rolling)
-  const util7d = pct(usage.weekly)
-  const utilMonth = pct(usage.monthly)
+  // «Сейчас» — тот же штамп, что уедет в файл: ценз и измерение обязаны смотреть одними часами,
+  // иначе внутри одного файла два разных «сейчас».
+  const nowMs = measuredAt.getTime()
+  const livePct = (w?: GoWindowUsage): number | null => (windowClosed(w, nowMs) ? null : pct(w))
+  const util5h = livePct(usage.rolling)
+  const util7d = livePct(usage.weekly)
+  const utilMonth = livePct(usage.monthly)
   const longest = util7d === null ? utilMonth : utilMonth === null ? util7d : Math.max(util7d, utilMonth)
   const level = classifyLevel(util5h === null ? null : util5h / 100, longest === null ? null : longest / 100)
-  const win = (name: string, w: GoWindowUsage | undefined, util: number | null) => ({
-    window: name,
-    util: util === null ? null : util / 100,
-    status: typeof w?.status === 'string' ? w.status : null,
-    resetAt: isoMs(w?.resetsAt),
-    resetIso: isoOf(w?.resetsAt),
-  })
+  const win = (name: string, w: GoWindowUsage | undefined, util: number | null) => {
+    const expired = windowClosed(w, nowMs)
+    return {
+      window: name,
+      // Число закрытого окна — null: оно не про ЭТО окно. Само окно остаётся, чтобы читатель
+      // видел «сброшено такого-то числа», а не пустое место.
+      util: util === null ? null : util / 100,
+      status: typeof w?.status === 'string' ? w.status : null,
+      resetAt: isoMs(w?.resetsAt),
+      resetIso: isoOf(w?.resetsAt),
+      ...(expired ? { expired: true } : {}),
+    }
+  }
   const windows = [win('5h', usage.rolling, util5h), win('week', usage.weekly, util7d), win('month', usage.monthly, utilMonth)]
-    .filter((w) => w.util !== null)
+    // Окно без числа ОСТАЁТСЯ, если оно закрыто: «сброшено» — факт, а не отсутствие данных.
+    .filter((w) => w.util !== null || w.expired === true)
   const pc = (v: number) => (Math.round(v * 1000) / 10) + '%'
   // 🔴 ОКНА ВСЕХ ОРГАНИЗАЦИЙ — отдельным списком: потребитель (подвал агента) берёт ту,
   // на которой агент РАБОТАЕТ (по orgUid/имени), а не «активную». Активная остаётся в base
@@ -454,7 +483,8 @@ export function buildGoQuotaStatus(input: {
   }
   const perOrg = (orgs ?? []).map((o) => {
     const u = (o.usage ?? {}) as GoUsage
-    const o5 = pct(u.rolling), o7 = pct(u.weekly), oM = pct(u.monthly)
+    // Тот же ценз по сбросу, что и у активной организации: у КАЖДОЙ орг свои окна и свой сброс.
+    const o5 = livePct(u.rolling), o7 = livePct(u.weekly), oM = livePct(u.monthly)
     const lng = o7 === null ? oM : oM === null ? o7 : Math.max(o7, oM)
     const status = typeof o.status === 'string' && o.status ? o.status : 'active'
     return {
@@ -484,7 +514,8 @@ export function buildGoQuotaStatus(input: {
       // отказом, а читатель не видел причины. Признак детерминированный: провайдерская
       // запись `console` без срока жизни пропуска = пропуска в хранилище нет.
       ...credentialOf(o),
-      windows: [win('5h', u.rolling, o5), win('week', u.weekly, o7), win('month', u.monthly, oM)].filter((w) => w.util !== null),
+      windows: [win('5h', u.rolling, o5), win('week', u.weekly, o7), win('month', u.monthly, oM)]
+        .filter((w) => w.util !== null || w.expired === true),
     }
   })
   return {
@@ -503,9 +534,16 @@ export function buildGoQuotaStatus(input: {
         resetMonthAt: isoOf(usage.monthly?.resetsAt),
         windows,
         level,
+        // Закрытое окно называется словами, а не `null%`: «сброшено 17:21» — это факт, а
+        // «null%» читается как поломка замера. Ровно тот класс, из-за которого число
+        // закрытого окна и попадало в подвал как живое.
         message: windows.length === 0
           ? `opencode-go (${org}${activityNote}): план не ограничивает окна.`
-          : `opencode-go (${org}${activityNote}): ` + windows.map((w) => `${w.window} ${pc(w.util as number)}`).join(', ') + '.',
+          : `opencode-go (${org}${activityNote}): ` + windows.map((w) => (
+            w.expired === true
+              ? `${w.window} сброшено${w.resetIso ? ' ' + String(w.resetIso).slice(11, 16) + 'Z' : ''}`
+              : `${w.window} ${pc(w.util as number)}`
+          )).join(', ') + '.',
       },
     },
   }

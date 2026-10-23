@@ -19,7 +19,7 @@
  */
 import { Database } from 'bun:sqlite'
 import { createHash } from 'crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { CLAUDE_LOCAL, classifyLevel } from './quota-paths.js'
@@ -541,7 +541,7 @@ export function buildGoQuotaStatus(input: {
           ? `opencode-go (${org}${activityNote}): план не ограничивает окна.`
           : `opencode-go (${org}${activityNote}): ` + windows.map((w) => (
             w.expired === true
-              ? `${w.window} сброшено${w.resetIso ? ' ' + String(w.resetIso).slice(11, 16) + 'Z' : ''}`
+              ? `${w.window} сброшено${w.resetIso ? ' ' + String(w.resetIso).slice(11, 16) + 'Z' : ''} (окно началось заново)`
               : `${w.window} ${pc(w.util as number)}`
           )).join(', ') + '.',
       },
@@ -554,6 +554,92 @@ export function writeAtomic(path: string, body: unknown): void {
   const tmp = `${path}.tmp-${process.pid}`
   writeFileSync(tmp, JSON.stringify(body, null, 2) + '\n')
   renameSync(tmp, path)
+}
+
+/**
+ * СОБЫТИЕ ПЕРЕХОДА, А НЕ СОСТОЯНИЕ (просьба фаундера через home-relishev-general, 23.10.2026):
+ * «включая кейс, когда квота сбросилась, а факта об этом не пришло — может надо, чтобы приходил».
+ *
+ * Зачем: файл отчёта отвечает «как СЕЙЧАС», и потребитель, не видевший прошлого снимка, не может
+ * отличить «окно только что сброшено» от «оно сброшено давно» и от «данных нет». Событие снимает
+ * это угадывание: одна строка на ПЕРЕХОД, ровно один раз.
+ *
+ * 🔴 КАК ГАРАНТИРУЕТСЯ «РОВНО ОДИН РАЗ» БЕЗ ВТОРОГО ФАЙЛА СОСТОЯНИЯ: ключ перехода —
+ * `(org, window, previousResetAt)`, и он же лежит в журнале. Перед записью журнал читается
+ * (хвост, ограниченно), и строка с тем же ключом второй раз не пишется. Перезапуск службы,
+ * повторный снимок и дрожание расписания молчат. Новый цикл окна даёт НОВЫЙ `resetAt` — то есть
+ * новый ключ и новое событие.
+ */
+export interface QuotaResetEvent {
+  schema: 1
+  at: string
+  org: string
+  window: string
+  kind: 'reset'
+  /** Момент, который был сроком ЗАКРЫВШЕГОСЯ окна: по нему событие и опознаётся. */
+  previousResetAt: string
+  detectedBy: 'quota-collector'
+}
+
+/** Ключ перехода — то же, что делает событие единственным. */
+export const resetEventKey = (org: string, window: string, previousResetAt: string): string =>
+  `${org}|${window}|${previousResetAt}`
+
+/** Читает ключи уже записанных переходов (хвост файла, не весь: журнал растёт медленно, но вечно). */
+export function readResetEventKeys(path: string, maxBytes = 256 * 1024): Set<string> {
+  const keys = new Set<string>()
+  try {
+    const buf = readFileSync(path)
+    const tail = buf.length > maxBytes ? buf.subarray(buf.length - maxBytes) : buf
+    for (const line of tail.toString('utf8').split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const e = JSON.parse(line) as Partial<QuotaResetEvent>
+        if (typeof e.org === 'string' && typeof e.window === 'string' && typeof e.previousResetAt === 'string') {
+          keys.add(resetEventKey(e.org, e.window, e.previousResetAt))
+        }
+      } catch { /* битая строка не рушит чтение остальных */ }
+    }
+  } catch { /* файла нет — переходов ещё не было */ }
+  return keys
+}
+
+/**
+ * Какие переходы записать. ЧИСТАЯ функция: ни файлов, ни часов — всё приходит на вход.
+ * Берутся только ЗАКРЫТЫЕ окна: у живого окна перехода не было.
+ */
+export function resetTransitions(input: {
+  org: string
+  windows: ReadonlyArray<{ window: string; resetIso?: string | null; expired?: boolean }>
+  at: string
+  seen: ReadonlySet<string>
+}): QuotaResetEvent[] {
+  const out: QuotaResetEvent[] = []
+  for (const w of input.windows) {
+    if (w.expired !== true) continue
+    const prev = typeof w.resetIso === 'string' && w.resetIso ? w.resetIso : null
+    // Без срока перехода не существует: «истекло когда-то» — не факт о конкретном окне.
+    if (!prev) continue
+    if (input.seen.has(resetEventKey(input.org, w.window, prev))) continue
+    out.push({
+      schema: 1, at: input.at, org: input.org, window: w.window,
+      kind: 'reset', previousResetAt: prev, detectedBy: 'quota-collector',
+    })
+  }
+  return out
+}
+
+/** Дописывает события. Ошибка записи НЕ роняет сбор квоты — журнал это весть, а не путь обслуживания. */
+export function appendResetEvents(path: string, events: readonly QuotaResetEvent[]): number {
+  if (events.length === 0) return 0
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    appendFileSync(path, events.map((e) => JSON.stringify(e)).join('\n') + '\n', { mode: 0o600 })
+    try { chmodSync(path, 0o600) } catch { /* файл мог быть создан раньше с другим режимом */ }
+    return events.length
+  } catch {
+    return 0
+  }
 }
 
 export interface CollectOptions {
@@ -569,6 +655,8 @@ export interface CollectOptions {
   /** Путь к базе opencode (по умолчанию `OPENCODE_DB_PATH` или ~/.local/share/opencode/opencode.db).
    *  Нужен испытаниям, чтобы не читать живую базу. */
   dbPath?: string
+  /** Журнал СОБЫТИЙ перехода (по умолчанию рядом с отчётом, `quota-events.jsonl`). */
+  eventsPath?: string
 }
 
 export async function collectOnce(opts: CollectOptions): Promise<Record<string, unknown>> {
@@ -625,6 +713,21 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
     orgUids: readOrgUids(ORG_UIDS_JSON),
   })
   writeAtomic(opts.outPath, status)
+  // СОБЫТИЯ ПЕРЕХОДА — рядом с отчётом, после его записи. Ошибка журнала квоту не отменяет:
+  // отчёт уже на диске, а весть — дополнение к нему, не его условие.
+  try {
+    const eventsPath = opts.eventsPath ?? process.env.GO_QUOTA_EVENTS_PATH
+      ?? join(dirname(opts.outPath), 'quota-events.jsonl')
+    const orgs = Array.isArray((status as any).orgs) ? (status as any).orgs : []
+    const seen = readResetEventKeys(eventsPath)
+    const events = orgs.flatMap((o: any) => resetTransitions({
+      org: String(o?.name ?? ''),
+      windows: Array.isArray(o?.windows) ? o.windows : [],
+      at: measuredAt.toISOString(),
+      seen,
+    })).filter((e: QuotaResetEvent) => e.org !== '')
+    appendResetEvents(eventsPath, events)
+  } catch { /* журнал переходов — весть, а не путь обслуживания */ }
   return status
 }
 

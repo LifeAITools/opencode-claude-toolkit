@@ -15,12 +15,16 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
+  appendResetEvents,
   buildGoQuotaStatus,
   readActiveAccountEmail,
+  readResetEventKeys,
+  resetEventKey,
+  resetTransitions,
   resolveActiveOrg,
   type ActiveOrgResolution,
 } from '../src/opencode-go-quota.js'
@@ -353,5 +357,74 @@ describe('окно с истёкшим сроком не переносится 
     expect(s.orgs[0].util5h).toBeNull()
     const w5 = s.orgs[0].windows.find((w: any) => w.window === '5h')
     expect(w5.expired).toBe(true)
+  })
+})
+
+/**
+ * СОБЫТИЕ ПЕРЕХОДА (просьба фаундера через home-relishev-general, 23.10.2026): «квота сбросилась,
+ * а факта об этом не пришло — надо, чтобы приходил». Файл отчёта отвечает «как сейчас»; событие —
+ * «что произошло»: одна строка на переход, ровно один раз, с моментом закрывшегося окна.
+ */
+describe('журнал переходов квоты — факт, а не догадка по разнице состояний', () => {
+  const expired = (window: string, resetIso: string) => ({ window, resetIso, expired: true })
+  const live = (window: string, resetIso: string) => ({ window, resetIso })
+
+  test('закрытое окно даёт ОДНО событие с ключом (org, window, previousResetAt)', () => {
+    const ev = resetTransitions({
+      org: 'hello@sealform.dev',
+      windows: [expired('5h', '2026-10-23T22:21:00.000Z')],
+      at: '2026-10-23T22:26:00.000Z',
+      seen: new Set(),
+    })
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toMatchObject({
+      schema: 1, org: 'hello@sealform.dev', window: '5h', kind: 'reset',
+      previousResetAt: '2026-10-23T22:21:00.000Z', detectedBy: 'quota-collector',
+    })
+    expect(ev[0].at).toBe('2026-10-23T22:26:00.000Z')
+  })
+
+  test('повторный снимок того же перехода МОЛЧИТ (ровно один раз)', () => {
+    const seen = new Set([resetEventKey('hello@sealform.dev', '5h', '2026-10-23T22:21:00.000Z')])
+    expect(resetTransitions({
+      org: 'hello@sealform.dev', windows: [expired('5h', '2026-10-23T22:21:00.000Z')],
+      at: '2026-10-23T22:31:00.000Z', seen,
+    })).toHaveLength(0)
+  })
+
+  test('новый цикл окна — НОВЫЙ срок, значит и новое событие', () => {
+    const seen = new Set([resetEventKey('hello@sealform.dev', '5h', '2026-10-23T22:21:00.000Z')])
+    const ev = resetTransitions({
+      org: 'hello@sealform.dev', windows: [expired('5h', '2026-10-24T03:21:00.000Z')],
+      at: '2026-10-24T03:26:00.000Z', seen,
+    })
+    expect(ev).toHaveLength(1)
+    expect(ev[0].previousResetAt).toBe('2026-10-24T03:21:00.000Z')
+  })
+
+  test('живое окно и окно без срока событий не дают', () => {
+    expect(resetTransitions({
+      org: 'x', windows: [live('5h', '2026-10-24T03:21:00.000Z'), { window: '7d', expired: true }],
+      at: '2026-10-23T22:26:00.000Z', seen: new Set(),
+    })).toHaveLength(0)
+  })
+
+  test('журнал: дописали, прочли ключи, второй такой же не добавился', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'go-events-'))
+    dirs.push(dir)
+    const p = join(dir, 'quota-events.jsonl')
+    const ev = resetTransitions({
+      org: 'hello@sealform.dev', windows: [expired('5h', '2026-10-23T22:21:00.000Z')],
+      at: '2026-10-23T22:26:00.000Z', seen: readResetEventKeys(p),
+    })
+    expect(appendResetEvents(p, ev)).toBe(1)
+    const again = resetTransitions({
+      org: 'hello@sealform.dev', windows: [expired('5h', '2026-10-23T22:21:00.000Z')],
+      at: '2026-10-23T22:31:00.000Z', seen: readResetEventKeys(p),
+    })
+    expect(again).toHaveLength(0)
+    expect(readFileSync(p, 'utf8').trim().split('\n')).toHaveLength(1)
+    // Режим 0600: журнал не должен быть читаем всем.
+    expect(statSync(p).mode & 0o777).toBe(0o600)
   })
 })

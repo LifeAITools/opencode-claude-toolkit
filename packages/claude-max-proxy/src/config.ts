@@ -89,6 +89,32 @@ export interface ProxyConfig {
   // it per conversation before measurement 5.4 says what changes).
   goProviderSession: string
 
+  // Сторож переписи для двери Go. Замер 23.10 по 72 часам трафика Go: перезапись
+  // из-за смены префикса — 2.8% токенов входа (517 млн из 18.2 млрд), и 92% из них
+  // «промпт вырос, а кэша нет», то есть перепись при ЖИВОМ кэше. Сторож нужен ровно
+  // для этого случая: остановить ход, который покупает заново уже оплаченный префикс,
+  // и назвать место расхождения. По умолчанию ВЫКЛЮЧЕН: пока он не проверен на живом
+  // трафике, включение — решение человека, а не следствие выката.
+  goRewriteGuardEnabled: boolean
+  // Порог в токенах: ниже него перепись дешевле разбирательства, чем отказ. Оценка
+  // токенов — bodyBytes/4 (тот же способ, что у стожа Anthropic); 50000 — тот же
+  // порядок, что у KA_REWRITE_WARN_TOKENS, и отсекает мелкие сессии.
+  goRewriteGuardMinTokens: number
+  // Метка согласия в ПОСЛЕДНЕМ сообщении пользователя — человек или агент может
+  // напечатать её сам, без CLI и без файла. Та же метка, что у сторожа Anthropic.
+  goRewriteGuardMarker: string
+  // Файл одноразовых пропусков (consent), общий с SDK: срок жизни пропуска —
+  // см. goRewriteGuardGrantTtlSec. Путь через expandHome, чтобы `~` работал.
+  goRewriteGuardGrantPath: string
+  // Сколько живёт кэш GO-маршрута. 2700 с (45 мин) — граница «кэш ещё жив» по
+  // измеренной кривой этой двери (53 674 вызова / 72 ч): доля чтений падает
+  // 95% (<5 мин) → 85% (15–20) → 37% (40–45), а после 45 мин медиана обваливается
+  // до 0.5%, то есть кэша нет. Значение попадает и в решение, и в текст отказа.
+  goRewriteGuardCacheTtlSec: number
+  // Срок жизни одноразового пропуска согласия, секунды. 180 с — как у CLI-формы
+  // Anthropic: пропуск должен дождаться ближайшего хода, но не пережить его.
+  goRewriteGuardGrantTtlSec: number
+
   // Subscription compat layer (hot-configurable for binary distribution)
   ccCompatVersion: string
   extraBetaFlags: string[]
@@ -215,6 +241,17 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     goTokensPath: read('GO_TOKENS_PATH', '', fileEnv) || null,
     goUserAgent: read('GO_USER_AGENT', 'kiberos-chat/1.0', fileEnv),
     goProviderSession: read('GO_PROVIDER_SESSION', 'kiberos-litellm-subagents', fileEnv),
+
+    // Сторож переписи двери Go — выключен по умолчанию (см. комментарий у полей).
+    goRewriteGuardEnabled: readBool('GO_REWRITE_GUARD_ENABLED', false, fileEnv),
+    goRewriteGuardMinTokens: readInt('GO_REWRITE_GUARD_MIN_TOKENS', 50000, fileEnv),
+    goRewriteGuardMarker: read('GO_REWRITE_GUARD_MARKER', '[%cache-rewrite-ok%]', fileEnv),
+    goRewriteGuardGrantPath: expandHome(read(
+      'GO_REWRITE_GUARD_GRANT_PATH', '~/.claude-local/cache-rewrite-grants.json', fileEnv,
+    )),
+    // 45 мин — измеренное колено кэша на маршруте Go (см. комментарий у поля).
+    goRewriteGuardCacheTtlSec: readInt('GO_REWRITE_GUARD_CACHE_TTL_SEC', 2700, fileEnv),
+    goRewriteGuardGrantTtlSec: readInt('GO_REWRITE_GUARD_GRANT_TTL_SEC', 180, fileEnv),
     sparkReasoningEffort: (['minimal', 'low', 'medium', 'high'].includes(read('SPARK_REASONING_EFFORT', 'minimal', fileEnv))
       ? read('SPARK_REASONING_EFFORT', 'minimal', fileEnv)
       : 'minimal') as 'minimal' | 'low' | 'medium' | 'high',

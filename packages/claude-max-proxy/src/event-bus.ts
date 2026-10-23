@@ -114,6 +114,8 @@ export type EventKind =
   | 'GO_REQUEST_UNIDENTIFIED'
   /** Префикс запроса НЕ продолжает предыдущий: история переписана, кэш промахнётся. */
   | 'GO_PREFIX_REWRITE'
+  /** Перепись при ЖИВОМ кэше остановлена: ход вернул 400, состояние префикса не сдвинуто. */
+  | 'GO_PREFIX_REWRITE_BLOCKED'
   /** Дверь Go загружена, но не настроена: пути реестра/пропусков не заданы, дверь ответит 503. */
   | 'GO_DOOR_UNCONFIGURED'
   /** За окно почти ни один вызов двери не прошёл: дверь стоит и не пропускает (любая причина). */
@@ -192,6 +194,7 @@ export const EVENT = {
   GO_ERROR: 'GO_ERROR',
   GO_REQUEST_UNIDENTIFIED: 'GO_REQUEST_UNIDENTIFIED',
   GO_PREFIX_REWRITE: 'GO_PREFIX_REWRITE',
+  GO_PREFIX_REWRITE_BLOCKED: 'GO_PREFIX_REWRITE_BLOCKED',
   GO_DOOR_UNCONFIGURED: 'GO_DOOR_UNCONFIGURED',
   DOOR_PASSES_NOTHING: 'DOOR_PASSES_NOTHING',
   HUMAN_MODE_SET: 'HUMAN_MODE_SET',

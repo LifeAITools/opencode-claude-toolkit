@@ -33,6 +33,7 @@ import {
   extractUsageChat, extractUsageResponses, usageFromSseText, type CallKind,
 } from '../provider-dump.js'
 import { resolveSessionIdentity, readCallerSession, CALLER_SESSION_HEADERS } from '../session-identity.js'
+import { consumeConsent } from '@life-ai-tools/claude-code-sdk'
 import type { ProxyConfig } from '../config.js'
 
 const ORG_HEADER = 'x-kiberos-go-org'
@@ -149,7 +150,7 @@ const prefixMemory = new Map<string, {
 
 export type PrefixVerdict = 'first' | 'append' | 'rewrite' | 'unknown'
 
-/** Где именно разошлось: индекс сообщения, его роль и сменились ли tools. */
+/** Где именно разошлось: индекс сообщения, его роль, простой и цена переписи. */
 export interface PrefixAnalysis {
   verdict: PrefixVerdict
   /** Индекс ПЕРВОГО разошедшегося сообщения (в терминах прошлой истории). */
@@ -158,33 +159,94 @@ export interface PrefixAnalysis {
   prevMsgs?: number
   msgs?: number
   toolsChanged?: boolean
+  /** Сколько прошло с прошлого вызова этой сессии (`now - prev.at`). */
+  idleMs?: number
+  /**
+   * Перепись ПРИ ЖИВОМ КЭШЕ: кэш ещё должен был попасть, значит промах — не работа
+   * движка, а изменение промпта. Именно этот случай сторож и останавливает.
+   */
+  avoidableRewrite?: boolean
+  /** Срок жизни кэша, принятый в решении (мс). Передаётся снаружи, из env здесь не читается. */
+  cacheTtlMs?: number
 }
+
+/** Сколько живёт кэш по умолчанию, если вызывающий не назвал своё (45 мин, колено Go). */
+const DEFAULT_CACHE_TTL_MS = 2700_000
 
 function msgHash(m: unknown): string { return sha256(JSON.stringify(m)).slice(0, 12) }
 
-export function analyse(sessionId: string | null, body: any, now: number): PrefixAnalysis {
-  if (!sessionId) return { verdict: 'unknown' }
+/**
+ * ПРОЧИТАТЬ префикс сессии, ничего не записывая.
+ *
+ * 🔴 Отделено от `commitPrefix` ради сторожа: решение «остановить» принимается ДО того,
+ * как состояние сдвинуто, иначе отказ сам стал бы переписью — следующий честный ход
+ * сравнивался бы с телом, которое мы отказались обслуживать. Чистая функция ещё и
+ * честнее в испытаниях: два вызова подряд не могут изменить ответ друг другу.
+ */
+export function assessPrefix(
+  sessionId: string | null,
+  body: any,
+  opts: { now?: number; cacheTtlMs?: number } = {},
+): PrefixAnalysis {
+  const now = opts.now ?? Date.now()
+  const cacheTtlMs = opts.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
+  if (!sessionId) return { verdict: 'unknown', cacheTtlMs }
   const msgs = Array.isArray(body?.messages) ? body.messages : null
-  if (!msgs || msgs.length === 0) return { verdict: 'unknown' }
-  const cacheable = msgs.slice(0, -1)
-  const prefixSha = sha256(JSON.stringify(cacheable))
-  const fullSha = sha256(JSON.stringify(msgs))
-  const msgHashes = msgs.map(msgHash)
-  const roles = msgs.map((m: any) => (typeof m?.role === 'string' ? m.role : '?'))
-  const tools = sha256(JSON.stringify(body?.tools ?? null)).slice(0, 12)
-  const prev = prefixMemory.get(sessionId)
+  if (!msgs || msgs.length === 0) return { verdict: 'unknown', cacheTtlMs }
+  return compareToPrevious(prefixMemory.get(sessionId), msgs, body, now, cacheTtlMs)
+}
 
+/**
+ * ЗАПИСАТЬ новый слепок сессии и вернуть анализ против ПРЕДЫДУЩЕЙ записи.
+ *
+ * Так `commitPrefix` в одиночку ведёт себя ровно как прежний `analyse`, а пара
+ * `assessPrefix` + `commitPrefix` даёт тот же ответ, что один `analyse`.
+ */
+export function commitPrefix(
+  sessionId: string | null,
+  body: any,
+  opts: { now?: number; cacheTtlMs?: number } = {},
+): PrefixAnalysis {
+  const now = opts.now ?? Date.now()
+  const cacheTtlMs = opts.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
+  if (!sessionId) return { verdict: 'unknown', cacheTtlMs }
+  const msgs = Array.isArray(body?.messages) ? body.messages : null
+  if (!msgs || msgs.length === 0) return { verdict: 'unknown', cacheTtlMs }
+  const prev = prefixMemory.get(sessionId)
   if (prefixMemory.size >= PREFIX_MEMORY_MAX && !prev) {
     const oldest = prefixMemory.keys().next().value
     if (oldest !== undefined) prefixMemory.delete(oldest)
   }
-  prefixMemory.set(sessionId, { full: fullSha, msgHashes, roles, tools, at: now })
+  prefixMemory.set(sessionId, {
+    full: sha256(JSON.stringify(msgs)),
+    msgHashes: msgs.map(msgHash),
+    roles: msgs.map((m: any) => (typeof m?.role === 'string' ? m.role : '?')),
+    tools: sha256(JSON.stringify(body?.tools ?? null)).slice(0, 12),
+    at: now,
+  })
+  return compareToPrevious(prev, msgs, body, now, cacheTtlMs)
+}
 
-  if (!prev) return { verdict: 'first', msgs: msgs.length }
-  if (cacheable.length === 0) return { verdict: 'first', msgs: msgs.length }
+/** Общий разбор: единственное место, где решается append/rewrite/first. */
+function compareToPrevious(
+  prev: { full: string; msgHashes: string[]; roles: string[]; tools: string; at: number } | undefined,
+  msgs: any[],
+  body: any,
+  now: number,
+  cacheTtlMs: number,
+): PrefixAnalysis {
+  const cacheable = msgs.slice(0, -1)
+  const prefixSha = sha256(JSON.stringify(cacheable))
+  const tools = sha256(JSON.stringify(body?.tools ?? null)).slice(0, 12)
+
+  if (!prev) return { verdict: 'first', msgs: msgs.length, cacheTtlMs }
+  if (cacheable.length === 0) return { verdict: 'first', msgs: msgs.length, cacheTtlMs }
+  const idleMs = Math.max(0, now - prev.at)
   // 🔴 tools ВХОДЯТ В КЭШИРУЕМЫЙ ПРЕФИКС наравне с сообщениями: продолжение истории при
   // смене набора инструментов — всё равно промах, и назвать его «append» значило бы соврать.
-  if (prev.full === prefixSha && prev.tools === tools) return { verdict: 'append', msgs: msgs.length }
+  if (prev.full === prefixSha && prev.tools === tools) {
+    return { verdict: 'append', msgs: msgs.length, idleMs, cacheTtlMs }
+  }
 
   // Расхождение: ищем первое сообщение, которое перестало совпадать с отправленным прошлый раз.
   let firstDiff: number | undefined
@@ -194,18 +256,81 @@ export function analyse(sessionId: string | null, body: any, now: number): Prefi
   }
   // Прошлая история была длиннее, а общий префикс совпал — историю обрезали.
   if (firstDiff === undefined && prev.msgHashes.length > cacheable.length) firstDiff = cacheable.length
+  const toolsChanged = prev.tools !== tools
   return {
     verdict: 'rewrite',
     ...(firstDiff !== undefined ? { firstDiffIndex: firstDiff, role: prev.roles[firstDiff] ?? '?' } : {}),
     prevMsgs: prev.msgHashes.length,
     msgs: msgs.length,
-    toolsChanged: prev.tools !== tools,
+    toolsChanged,
+    idleMs,
+    // Смена инструментов — не «движок сломал кэш»: префикс обязан измениться, и сторож
+    // здесь молчит. Измерение 23.10: таких меньшинство, но называть их виноватыми нельзя.
+    avoidableRewrite: !toolsChanged && idleMs < cacheTtlMs,
+    cacheTtlMs,
   }
+}
+
+/**
+ * Совместимость: прежняя сигнатура `analyse(sessionId, body, now)` — ею пользуются
+ * испытания и внешние вызовы. Теперь это тонкий псевдоним `commitPrefix`.
+ */
+export function analyse(sessionId: string | null, body: any, now: number = Date.now()): PrefixAnalysis {
+  return commitPrefix(sessionId, body, { now })
 }
 
 /** Совместимость: прежняя сигнатура (строка) — ею пользуются испытания и внешние вызовы. */
 export function prefixVerdict(sessionId: string | null, body: any, now = Date.now()): PrefixVerdict {
   return analyse(sessionId, body, now).verdict
+}
+
+/**
+ * Остановить ли ход. Чистое решение — без файлов, без env, без побочных эффектов:
+ * поэтому матрицу условий можно проверить целиком, не поднимая дверь.
+ */
+export function shouldBlockRewrite(input: {
+  enabled: boolean
+  analysis: PrefixAnalysis
+  predictedTokens: number
+  minTokens: number
+  consented: boolean
+}): boolean {
+  return input.enabled
+    && input.analysis.avoidableRewrite === true
+    && input.predictedTokens >= input.minTokens
+    && !input.consented
+}
+
+/**
+ * Метка согласия в ПОСЛЕДНЕМ сообщении пользователя (диалект OpenAI).
+ * `content` бывает строкой или массивом частей — читаем оба, никогда не бросаем.
+ */
+export function hasMarkerInLastUserMessage(body: any, marker: string): boolean {
+  try {
+    const msgs = Array.isArray(body?.messages) ? body.messages : []
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m?.role !== 'user') continue
+      const content = m.content
+      let text = ''
+      if (typeof content === 'string') text = content
+      else if (Array.isArray(content)) {
+        const parts: string[] = []
+        for (const p of content) {
+          if (typeof p === 'string') parts.push(p)
+          else if (p && typeof p === 'object') {
+            if (typeof p.text === 'string') parts.push(p.text)
+            else if (typeof p.input_text === 'string') parts.push(p.input_text)
+          }
+        }
+        text = parts.join('\n')
+      }
+      return text.includes(marker)
+    }
+    return false
+  } catch {
+    return false
+  }
 }
 
 async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Response> {
@@ -253,17 +378,107 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
 
   // Названный разрыв префикса — одна строка, только когда действительно переписано:
   // дописывание идут тысячами в час и называть их незачем.
-  const analysis = analyse(sessionId, parsed, Date.now())
+  //
+  // 🔴 ПОРЯДОК РЕШЕНИЯ (23.10). Сначала ЧИТАЕМ префикс, потом решаем, потом (если не
+  // остановили) записываем. Отказ не сдвигает состояние: иначе остановленный ход сам
+  // стал бы переписью, и следующий честный сравнивался бы с телом, которое мы не обслужили.
+  const cacheTtlMs = cfg.goRewriteGuardCacheTtlSec * 1000
+  const analysis = assessPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
+  const predictedTokens = Math.round(raw.byteLength / 4)
+  // Согласие читаем ТОЛЬКО на холодном пути (перепись при живом кэше): пропуск
+  // одноразовый и удаляется при чтении, поэтому на append/first его трогать нельзя.
+  let consented = false
+  // 🔴 Только при включённом стороже: пропуск ОДНОРАЗОВЫЙ и удаляется при чтении,
+  // поэтому выключенный сторож не имеет права его сжигать.
+  if (cfg.goRewriteGuardEnabled && analysis.avoidableRewrite === true && sessionId) {
+    consented = hasMarkerInLastUserMessage(parsed, cfg.goRewriteGuardMarker)
+      || consumeConsent(cfg.goRewriteGuardGrantPath, sessionId)
+  }
+  if (shouldBlockRewrite({
+    enabled: cfg.goRewriteGuardEnabled,
+    analysis,
+    predictedTokens,
+    minTokens: cfg.goRewriteGuardMinTokens,
+    consented,
+  })) {
+    const whereRu = analysis.firstDiffIndex === undefined
+      ? 'место расхождения не определено'
+      : `первое расхождение — сообщение #${analysis.firstDiffIndex} (role=${analysis.role})`
+    // Текст клиенту — английский, как у сторожа Anthropic; журнал — русский. Смешивать
+    // языки внутри одной фразы нельзя: читатель посреди английского предложения
+    // спотыкается на русском вставном обороте.
+    const whereEn = analysis.firstDiffIndex === undefined
+      ? 'the divergence point is unknown'
+      : `first divergence at message #${analysis.firstDiffIndex} (role=${analysis.role})`
+    const idleMin = Math.round((analysis.idleMs ?? 0) / 60_000)
+    const ttlMin = Math.round((analysis.cacheTtlMs ?? cacheTtlMs) / 60_000)
+    const consentHttp = `POST http://127.0.0.1:${cfg.proxyPort}/admin/cache-rewrite-ok `
+      + `{"sessionId":"${sessionId}"}`
+    // 🔴 НАЧАЛО «Cache guard» — ОПУБЛИКОВАННЫЙ КОНТРАКТ (как у сторожа Anthropic):
+    // соседи опознают наш отказ именно по этому началу, а не по типу, которого у CLI нет.
+    const message = `Cache guard: this turn on the Go door would rewrite ~${predictedTokens} `
+      + `tokens of a prefix whose cache is still alive (idle ${idleMin} min < ttl ${ttlMin} min) — `
+      + `${whereEn}, was ${analysis.prevMsgs ?? '?'} messages, now ${analysis.msgs ?? '?'}. `
+      + `TO PROCEED: include ${cfg.goRewriteGuardMarker} in your next message, `
+      + `or grant out-of-band: ${consentHttp}. Consent is single-use. `
+      + `(Disable: GO_REWRITE_GUARD_ENABLED=false.)`
+
+    rec.response.status = 400
+    rec.error = { kind: 'client', provider_type: null }
+    rec.timing.total_ms = Date.now() - t0
+    writeDump(rec)
+    ctx.emit({
+      level: 'error', kind: EVENT.GO_PREFIX_REWRITE_BLOCKED, sessionId, model,
+      msg: `дверь Go: остановлена перепись при ЖИВОМ кэше — ~${predictedTokens} токенов `
+        + `(простой ${idleMin} мин < TTL ${ttlMin} мин); ${whereRu}; `
+        + `было ${analysis.prevMsgs ?? '?'}, стало ${analysis.msgs ?? '?'}; `
+        + `согласия нет (${cfg.goRewriteGuardMarker} или пропуск)`,
+    })
+    return new Response(JSON.stringify({
+      error: {
+        type: 'cache_rewrite_guard',
+        door: 'opencode-go',
+        sessionId,
+        predictedTokens,
+        minTokens: cfg.goRewriteGuardMinTokens,
+        idleMs: analysis.idleMs ?? null,
+        cacheTtlMs: analysis.cacheTtlMs ?? cacheTtlMs,
+        firstDiffIndex: analysis.firstDiffIndex ?? null,
+        role: analysis.role ?? null,
+        prevMsgs: analysis.prevMsgs ?? null,
+        msgs: analysis.msgs ?? null,
+        toolsChanged: analysis.toolsChanged === true,
+        consent: {
+          marker: cfg.goRewriteGuardMarker,
+          http: consentHttp,
+          disable: 'GO_REWRITE_GUARD_ENABLED=false',
+        },
+        message,
+      },
+    }), { status: 400, headers: { 'content-type': 'application/json' } })
+  }
+  // Не остановили — только теперь сдвигаем состояние (ответ не нужен: он уже посчитан).
+  commitPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
   if (analysis.verdict === 'rewrite') {
     // Названо МЕСТО, а не только факт: без него нельзя ответить «кто и что поменял».
     const where = analysis.firstDiffIndex === undefined
       ? 'место расхождения не определено'
       : `первое расхождение — сообщение #${analysis.firstDiffIndex} (role=${analysis.role})`
+    // 🔴 ТРИ ПРИЧИНЫ, А НЕ ОДНА (23.10): «переписано» без причины читается как «движок
+    // сломал кэш». На деле перепись при живом кэше — вина отправителя, смена инструментов —
+    // законное изменение префикса, а истёкший кэш — холодная запись, и виноватых нет.
+    const idleMin = Math.round((analysis.idleMs ?? 0) / 60_000)
+    const ttlMin = Math.round((analysis.cacheTtlMs ?? cacheTtlMs) / 60_000)
+    const cause = analysis.avoidableRewrite
+      ? `перепись при ЖИВОМ кэше (простой ${idleMin} мин < TTL ${ttlMin} мин) — кэш промахнётся`
+      : analysis.toolsChanged
+        ? 'сменился набор инструментов — префикс переписан'
+        : `кэш истёк по времени (простой ${idleMin} мин ≥ TTL ${ttlMin} мин) — это холодная запись, а не работа движка`
+    const tail = analysis.toolsChanged ? '' : '; tools те же'
     ctx.emit({
       level: 'info', kind: EVENT.GO_PREFIX_REWRITE, sessionId, model,
-      msg: `дверь Go: история переписана — кэш промахнётся; ${where}; `
-        + `было ${analysis.prevMsgs ?? '?'}, стало ${analysis.msgs ?? '?'}`
-        + `${analysis.toolsChanged ? '; tools ИЗМЕНИЛИСЬ' : '; tools те же'}`,
+      msg: `дверь Go: ${cause}; ${where}; `
+        + `было ${analysis.prevMsgs ?? '?'}, стало ${analysis.msgs ?? '?'}${tail}`,
     })
   }
 

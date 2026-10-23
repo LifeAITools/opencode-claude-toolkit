@@ -123,6 +123,46 @@ export function goDoorReadiness(cfg: ProxyConfig): { configured: boolean; missin
   return { configured: missing.length === 0, missing }
 }
 
+/**
+ * ПРЕФИКС ЗАПРОСА: продолжает прошлый или переписан — по одному слепку на вызов.
+ *
+ * 🔴 ЗАЧЕМ (слово фаундера 23.10: «если есть движки, которые ломают кэш — вычислить, чтобы
+ * поправили у себя код и были байт-идентичны»). Замер по 72 часам трафика Go: первые вызовы
+ * сессии дают всего **0.2%** токенов входа, а перезапись из-за смены префикса — **2.8%**
+ * (517 млн из 18.2 млрд), и 92% из них — «промпт вырос, а кэша нет». Тело запроса в базе
+ * посредника НЕ хранится (`messages = {}`), поэтому снаружи видно ЧТО случилось и не видно
+ * КАКОЙ. Здесь — только слепки, без тел: кэш поставщика держится за ПРЕФИКС, поэтому
+ * вопрос «продолжение или переписывание» решается двумя хешами.
+ *
+ * Как читается: `prefix` = всё, кроме последнего сообщения (то, что должно прочитаться из
+ * кэша); `full` = все сообщения. Если нынешний `prefix` равен прошлому `full` — история
+ * продолжилась (append), кэш должен попасть. Если не равен — ранняя часть переписана.
+ */
+const PREFIX_MEMORY_MAX = 2000
+const prefixMemory = new Map<string, { full: string; msgs: number; at: number }>()
+
+export type PrefixVerdict = 'first' | 'append' | 'rewrite' | 'unknown'
+
+export function prefixVerdict(sessionId: string | null, body: any, now = Date.now()): PrefixVerdict {
+  if (!sessionId) return 'unknown'
+  const msgs = Array.isArray(body?.messages) ? body.messages : null
+  if (!msgs || msgs.length === 0) return 'unknown'
+  const cacheable = msgs.slice(0, -1)
+  const prefixSha = sha256(JSON.stringify(cacheable))
+  const fullSha = sha256(JSON.stringify(msgs))
+  const prev = prefixMemory.get(sessionId)
+  // Память ограничена: длинная сессия не должна растить процесс. Старое вытесняется первым.
+  if (prefixMemory.size >= PREFIX_MEMORY_MAX && !prev) {
+    const oldest = prefixMemory.keys().next().value
+    if (oldest !== undefined) prefixMemory.delete(oldest)
+  }
+  prefixMemory.set(sessionId, { full: fullSha, msgs: msgs.length, at: now })
+  if (!prev) return 'first'
+  // Пустая история (одно сообщение) — читать из кэша нечего, но и переписывать нечего.
+  if (cacheable.length === 0) return 'first'
+  return prev.full === prefixSha ? 'append' : 'rewrite'
+}
+
 async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Response> {
   const t0 = Date.now()
   const cfg = ctx.config
@@ -140,10 +180,11 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   const raw = new Uint8Array(await req.arrayBuffer())
   let model: string | null = null
   let wantStream = false
+  let parsed: any = null
   try {
-    const j = JSON.parse(new TextDecoder().decode(raw))
-    model = typeof j.model === 'string' ? j.model : null
-    wantStream = j.stream === true
+    parsed = JSON.parse(new TextDecoder().decode(raw))
+    model = typeof parsed.model === 'string' ? parsed.model : null
+    wantStream = parsed.stream === true
   } catch {
     return errorResponse(400, 'Invalid JSON body', 'invalid_request_error')
   }
@@ -164,6 +205,16 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   rec.actor = actor
   rec.request.body_bytes = raw.byteLength
   rec.request.body_sha256 = sha256(raw)
+
+  // Названный разрыв префикса — одна строка, только когда действительно переписано:
+  // дописывание идут тысячами в час и называть их незачем.
+  const verdict = prefixVerdict(sessionId, parsed)
+  if (verdict === 'rewrite') {
+    ctx.emit({
+      level: 'info', kind: EVENT.GO_PREFIX_REWRITE, sessionId, model,
+      msg: `дверь Go: история переписана (не продолжение) — кэш на этом вызове промахнётся; msgs=${Array.isArray(parsed?.messages) ? parsed.messages.length : 0}`,
+    })
+  }
 
   // Продление — за флагом (рельс R8): пока его не включили, здесь ровно прежнее чтение.
   const refreshOn = goTokenRefreshEnabled(process.env)

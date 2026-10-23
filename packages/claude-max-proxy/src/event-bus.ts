@@ -112,6 +112,8 @@ export type EventKind =
   | 'GO_ERROR'
   /** Запрос к двери Go без имени сессии — обслужен, но прогрев на нём не вооружается. */
   | 'GO_REQUEST_UNIDENTIFIED'
+  /** Префикс запроса НЕ продолжает предыдущий: история переписана, кэш промахнётся. */
+  | 'GO_PREFIX_REWRITE'
   /** Дверь Go загружена, но не настроена: пути реестра/пропусков не заданы, дверь ответит 503. */
   | 'GO_DOOR_UNCONFIGURED'
   /** За окно почти ни один вызов двери не прошёл: дверь стоит и не пропускает (любая причина). */
@@ -189,6 +191,7 @@ export const EVENT = {
   GO_COMPLETE: 'GO_COMPLETE',
   GO_ERROR: 'GO_ERROR',
   GO_REQUEST_UNIDENTIFIED: 'GO_REQUEST_UNIDENTIFIED',
+  GO_PREFIX_REWRITE: 'GO_PREFIX_REWRITE',
   GO_DOOR_UNCONFIGURED: 'GO_DOOR_UNCONFIGURED',
   DOOR_PASSES_NOTHING: 'DOOR_PASSES_NOTHING',
   HUMAN_MODE_SET: 'HUMAN_MODE_SET',

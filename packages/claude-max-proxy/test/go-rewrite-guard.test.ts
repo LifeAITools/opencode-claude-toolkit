@@ -22,6 +22,7 @@ import {
   assessPrefix,
   commitPrefix,
   hasMarkerInLastUserMessage,
+  rewrittenTokens,
   shouldBlockRewrite,
   type PrefixAnalysis,
 } from '../src/modules/go-door.js'
@@ -165,5 +166,36 @@ describe('consent-пропуск из SDK — одноразовый', () => {
     grantConsent(path, s, 180_000)
     expect(consumeConsent(path, s)).toBe(true)
     expect(consumeConsent(path, s)).toBe(false)
+  })
+})
+
+
+describe('rewrittenTokens — сколько КЭША перепишется, а не сколько весит запрос', () => {
+  // 🔴 Слово фаундера 24.10: «проверяет байт-идентичность слепка и того, что агент шлёт, чтобы
+  // детектировать, СКОЛЬКО КЭША перепишется». До этой правки порог считался по всему телу: у
+  // сессии на 300k токенов правка первой строки давала «~300k» и упиралась в порог, хотя
+  // переписывается только хвост.
+  const big = (t: string) => ({ role: 'user', content: t.repeat(400) })
+
+  test('расхождение в начале — считаем хвост, а не всю историю', () => {
+    const msgs = [big('a'), big('b'), big('c'), big('d')]
+    const parsed = { messages: msgs, tools: [] }
+    const whole = Math.round(JSON.stringify(parsed).length / 4)
+    const tail = rewrittenTokens(parsed, { verdict: 'rewrite', firstDiffIndex: 2 } as PrefixAnalysis)
+    expect(tail).toBeGreaterThan(0)
+    // Хвост заметно меньше целого — именно на этом порог и должен срабатывать.
+    expect(tail).toBeLessThan(whole / 2)
+  })
+
+  test('сменился набор инструментов — переписывается всё, префикс новый', () => {
+    const parsed = { messages: [big('a'), big('b')], tools: [{ name: 'x' }] }
+    const whole = Math.round(JSON.stringify(parsed).length / 4)
+    expect(rewrittenTokens(parsed, { verdict: 'rewrite', firstDiffIndex: 1, toolsChanged: true } as PrefixAnalysis)).toBe(whole)
+  })
+
+  test('место расхождения неизвестно — не преуменьшаем убыток', () => {
+    const parsed = { messages: [big('a')], tools: [] }
+    const whole = Math.round(JSON.stringify(parsed).length / 4)
+    expect(rewrittenTokens(parsed, { verdict: 'unknown' } as PrefixAnalysis)).toBe(whole)
   })
 })

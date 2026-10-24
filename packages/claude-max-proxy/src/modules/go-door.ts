@@ -385,6 +385,27 @@ export function prefixVerdict(sessionId: string | null, body: any, now = Date.no
  * Остановить ли ход. Чистое решение — без файлов, без env, без побочных эффектов:
  * поэтому матрицу условий можно проверить целиком, не поднимая дверь.
  */
+/**
+ * СКОЛЬКО ТОКЕНОВ ПЕРЕПИШЕТСЯ — а не сколько весит запрос.
+ *
+ * Кэш ключуется ПРЕФИКСОМ: всё, что до первого расхождения, читается дёшево. Платим за то, что
+ * после него, плюс за весь запрос, если сменился набор инструментов (тогда префикс новый с нуля).
+ * Неизвестное расхождение — считаем весь запрос: не преуменьшать убыток.
+ *
+ * Оценка в токенах — по объёму JSON/4, тем же курсом, что у Anthropic. Это оценка, и она
+ * называется оценкой; точное число даёт только сам ответ поставщика, после того как запись уже
+ * случилась и переплачена.
+ */
+export function rewrittenTokens(parsed: any, analysis: PrefixAnalysis): number {
+  const all = () => Math.round(JSON.stringify(parsed ?? {}).length / 4)
+  if (analysis.toolsChanged) return all()
+  const idx = analysis.firstDiffIndex
+  if (idx === undefined) return all()
+  const msgs = Array.isArray(parsed?.messages) ? parsed.messages : []
+  if (msgs.length === 0) return all()
+  return Math.round(JSON.stringify(msgs.slice(Math.max(0, idx))).length / 4)
+}
+
 export function shouldBlockRewrite(input: {
   enabled: boolean
   analysis: PrefixAnalysis
@@ -481,7 +502,14 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   // стал бы переписью, и следующий честный сравнивался бы с телом, которое мы не обслужили.
   const cacheTtlMs = cfg.goRewriteGuardCacheTtlSec * 1000
   const analysis = assessPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
-  const predictedTokens = Math.round(raw.byteLength / 4)
+  // 🔴 ПОРОГ СЧИТАЕТСЯ ПО ПЕРЕПИСЫВАЕМОЙ ЧАСТИ, А НЕ ПО ВСЕМУ ТЕЛУ (слово фаундера 24.10:
+  // «проверяет байт-идентичность слепка и того, что агент шлёт, чтобы детектировать, СКОЛЬКО КЭША
+  // перепишется»). Раньше здесь стоял `raw.byteLength / 4` — размер ВСЕГО запроса. У сессии на
+  // 300k токенов любая правка в начале давала «~300k» и упиралась в порог, хотя реально
+  // переписывается только хвост после расхождения; и наоборот, дописывание в конце считалось
+  // переписью целиком. Сторож обязан мерить убыток, а не размер запроса.
+  const totalTokens = Math.round(raw.byteLength / 4)
+  const predictedTokens = rewrittenTokens(parsed, analysis)
   // Согласие читаем ТОЛЬКО на холодном пути (перепись при живом кэше): пропуск
   // одноразовый и удаляется при чтении, поэтому на append/first его трогать нельзя.
   let consented = false
@@ -514,7 +542,8 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     // 🔴 НАЧАЛО «Cache guard» — ОПУБЛИКОВАННЫЙ КОНТРАКТ (как у сторожа Anthropic):
     // соседи опознают наш отказ именно по этому началу, а не по типу, которого у CLI нет.
     const message = `Cache guard: this turn on the Go door would rewrite ~${predictedTokens} `
-      + `tokens of a prefix whose cache is still alive (idle ${idleMin} min < ttl ${ttlMin} min) — `
+      + `tokens (of ~${totalTokens} in the request) of a prefix whose cache is still alive `
+      + `(idle ${idleMin} min < ttl ${ttlMin} min) — `
       + `${whereEn}, was ${analysis.prevMsgs ?? '?'} messages, now ${analysis.msgs ?? '?'}. `
       + `TO PROCEED: include ${cfg.goRewriteGuardMarker} in your next message, `
       + `or grant out-of-band: ${consentHttp}. Consent is single-use. `

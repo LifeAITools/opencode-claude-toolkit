@@ -263,10 +263,39 @@ export interface PrefixAnalysis {
   avoidableRewrite?: boolean
   /** Срок жизни кэша, принятый в решении (мс). Передаётся снаружи, из env здесь не читается. */
   cacheTtlMs?: number
+  /**
+   * Кэш УЖЕ ИСТЁК по времени: простой больше срока жизни и префикс не совпал. Это не вина
+   * движка — это холодная запись, и она дорога ровно так же, как тёплая перепись. Отдельное
+   * поле, а не вывод читателя: различить «кэш истёк» и «префикс сменился» обязан тот, кто
+   * знает и время, и слепок.
+   */
+  cacheExpired?: boolean
 }
 
 /** Сколько живёт кэш по умолчанию, если вызывающий не назвал своё (45 мин, колено Go). */
 const DEFAULT_CACHE_TTL_MS = 2700_000
+
+/**
+ * Состояние холодного сторожа и его авто-отказа. Модульное, а не в конфиге, потому что откат —
+ * это РЕШЕНИЕ ВО ВРЕМЕНИ: конфиг читается один раз при старте, а «мы перекрыли кислород» надо
+ * остановить на живом процессе, не перезапуская его (перезапуск сам по себе — перезапись кэша).
+ */
+let coldGuardReverted = false
+let coldGuardArmedAt = 0
+let coldGuardRefusals = 0
+let coldGuardPassed = 0
+
+/** Для испытаний: вернуть сторож в исходное состояние. */
+export function resetColdGuardState(): void {
+  coldGuardReverted = false
+  coldGuardArmedAt = 0
+  coldGuardRefusals = 0
+  coldGuardPassed = 0
+}
+
+export function coldGuardState(): { reverted: boolean; refusals: number; passed: number } {
+  return { reverted: coldGuardReverted, refusals: coldGuardRefusals, passed: coldGuardPassed }
+}
 
 function msgHash(m: unknown): string { return sha256(JSON.stringify(m)).slice(0, 12) }
 
@@ -364,6 +393,7 @@ function compareToPrevious(
     // Смена инструментов — не «движок сломал кэш»: префикс обязан измениться, и сторож
     // здесь молчит. Измерение 23.10: таких меньшинство, но называть их виноватыми нельзя.
     avoidableRewrite: !toolsChanged && idleMs < cacheTtlMs,
+    cacheExpired: !toolsChanged && idleMs >= cacheTtlMs,
     cacheTtlMs,
   }
 }
@@ -408,15 +438,59 @@ export function rewrittenTokens(parsed: any, analysis: PrefixAnalysis): number {
 
 export function shouldBlockRewrite(input: {
   enabled: boolean
+  /** Второй случай — холодная перепись после истёкшего кэша. Отдельный ключ, не тот же самый. */
+  coldEnabled?: boolean
   analysis: PrefixAnalysis
   predictedTokens: number
   minTokens: number
   consented: boolean
 }): boolean {
-  return input.enabled
-    && input.analysis.avoidableRewrite === true
-    && input.predictedTokens >= input.minTokens
-    && !input.consented
+  if (!input.enabled || input.consented) return false
+  if (input.predictedTokens < input.minTokens) return false
+  // Тёплая перепись: кэш ещё должен был попасть — вина отправителя.
+  if (input.analysis.avoidableRewrite === true) return true
+  // Холодная: кэш истёк, платим за большой префикс заново. Природа другая, ключ другой.
+  return input.coldEnabled === true && input.analysis.cacheExpired === true
+}
+
+/**
+ * Учесть исход хода для авто-отказа: пропуск или отказ. Вызывается в обоих концах решения,
+ * чтобы «остановили и никто не прошёл» было измерением, а не догадкой.
+ */
+function noteColdGuardOutcome(cfg: { goRewriteGuardAutoRevertSec: number }, passed: boolean): void {
+  const windowMs = cfg.goRewriteGuardAutoRevertSec * 1000
+  if (windowMs <= 0 || coldGuardReverted) return
+  if (coldGuardArmedAt === 0) coldGuardArmedAt = Date.now()
+  if (passed) coldGuardPassed += 1
+  else coldGuardRefusals += 1
+  if (shouldAutoRevert({
+    elapsedMs: Date.now() - coldGuardArmedAt,
+    windowMs,
+    refusals: coldGuardRefusals,
+    passed: coldGuardPassed,
+  })) {
+    coldGuardReverted = true
+  }
+}
+
+/**
+ * 🔴 АВТО-ОТКАТ СТОРОЖА (слово фаундера 24.10.2026: «включай, если готово, но с автоматическим
+ * откатом, если всё поплывёт и все агенты не смогут общаться, чтобы через минуту откатилось»).
+ *
+ * Условие — НЕ время само по себе: по таймеру сторож выключился бы и тогда, когда всё в порядке.
+ * Условие — «нас остановили, и после этого НИКТО не прошёл»: значит мы не защищаем кэш, а
+ * перекрыли кислород. Ноль трафика при этом откатом НЕ считается: молчащая дверь — не поломка,
+ * и выключать сторожа из-за тишины значило бы никогда не проверить его на живом.
+ */
+export function shouldAutoRevert(input: {
+  elapsedMs: number
+  windowMs: number
+  refusals: number
+  passed: number
+}): boolean {
+  if (input.windowMs <= 0) return false
+  if (input.elapsedMs < input.windowMs) return false
+  return input.refusals > 0 && input.passed === 0
 }
 
 /**
@@ -520,12 +594,14 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let consented = false
   // 🔴 Только при включённом стороже: пропуск ОДНОРАЗОВЫЙ и удаляется при чтении,
   // поэтому выключенный сторож не имеет права его сжигать.
-  if (cfg.goRewriteGuardEnabled && analysis.avoidableRewrite === true && sessionId) {
+  const coldGuardOn = cfg.goRewriteGuardColdEnabled && !coldGuardReverted
+  if ((cfg.goRewriteGuardEnabled || coldGuardOn) && (analysis.avoidableRewrite === true || analysis.cacheExpired === true) && sessionId) {
     consented = hasMarkerInLastUserMessage(parsed, cfg.goRewriteGuardMarker)
       || consumeConsent(cfg.goRewriteGuardGrantPath, sessionId)
   }
   if (shouldBlockRewrite({
-    enabled: cfg.goRewriteGuardEnabled,
+    enabled: cfg.goRewriteGuardEnabled || coldGuardOn,
+    coldEnabled: coldGuardOn,
     analysis,
     predictedTokens,
     minTokens: modelMeta?.rewriteMinTokens ?? cfg.goRewriteGuardMinTokens,
@@ -546,9 +622,14 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
       + `{"sessionId":"${sessionId}"}`
     // 🔴 НАЧАЛО «Cache guard» — ОПУБЛИКОВАННЫЙ КОНТРАКТ (как у сторожа Anthropic):
     // соседи опознают наш отказ именно по этому началу, а не по типу, которого у CLI нет.
+    // Текст называет, ЧЕМ эта перепись плоха: кэш жив (виноват отправитель) или уже истёк
+    // (виновато время, но платим столько же). Один и тот же отказ с разной причиной читался бы
+    // как один и тот же случай, и виновного искали бы не там.
+    const why = analysis.cacheExpired === true
+      ? `of a prefix whose cache has EXPIRED (idle ${idleMin} min >= ttl ${ttlMin} min) — this is a COLD write`
+      : `of a prefix whose cache is still alive (idle ${idleMin} min < ttl ${ttlMin} min)`
     const message = `Cache guard: this turn on the Go door would rewrite ~${predictedTokens} `
-      + `tokens (of ~${totalTokens} in the request) of a prefix whose cache is still alive `
-      + `(idle ${idleMin} min < ttl ${ttlMin} min) — `
+      + `tokens (of ~${totalTokens} in the request) ${why} — `
       + `${whereEn}, was ${analysis.prevMsgs ?? '?'} messages, now ${analysis.msgs ?? '?'}. `
       + `TO PROCEED: include ${cfg.goRewriteGuardMarker} in your next message, `
       + `or grant out-of-band: ${consentHttp}. Consent is single-use. `
@@ -558,10 +639,21 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     rec.error = { kind: 'client', provider_type: null }
     rec.timing.total_ms = Date.now() - t0
     writeDump(rec)
+    const wasCold = analysis.cacheExpired === true
+    // Учитываем отказ ДО выхода: авто-откат решает по числам, а не по обещаниям.
+    noteColdGuardOutcome(cfg, false)
+    if (coldGuardReverted) {
+      ctx.emit({
+        level: 'error', kind: EVENT.GO_COLD_GUARD_AUTOREVERT, sessionId, model,
+        msg: `🔴 сторож ХОЛОДНОЙ переписи снят АВТО-ОТКАТОМ: остановили ход и после этого ни один `
+          + `не прошёл — значит перекрыли кислород, а не защитили кэш. Дверь снова пропускает. `
+          + `Отказов ${coldGuardRefusals}, пропусков ${coldGuardPassed}.`,
+      })
+    }
     ctx.emit({
       level: 'error', kind: EVENT.GO_PREFIX_REWRITE_BLOCKED, sessionId, model,
-      msg: `дверь Go: остановлена перепись при ЖИВОМ кэше — ~${predictedTokens} токенов `
-        + `(простой ${idleMin} мин < TTL ${ttlMin} мин); ${whereRu}; `
+      msg: `дверь Go: остановлена ${wasCold ? 'ХОЛОДНАЯ перепись (кэш истёк)' : 'перепись при ЖИВОМ кэше'} — ~${predictedTokens} токенов `
+        + `(простой ${idleMin} мин, TTL ${ttlMin} мин); ${whereRu}; `
         + `было ${analysis.prevMsgs ?? '?'}, стало ${analysis.msgs ?? '?'}; `
         + `согласия нет (${cfg.goRewriteGuardMarker} или пропуск)`,
     })
@@ -591,6 +683,9 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   // Голову ПРЕДЫДУЩЕЙ истории снимаем ДО сдвига состояния: после `commitPrefix` в памяти
   // лежит уже новое, и снимок сравнивал бы новое с новым — то есть молчал бы всегда.
   const prevHead = analysis.verdict === 'rewrite' ? headOf(sessionId) : undefined
+  // Прошли — значит сторож не перекрыл кислород. Учитываем ИМЕННО пропуск: авто-откат
+  // смотрит на пару «были отказы / были пропуски», а не на время.
+  noteColdGuardOutcome(cfg, true)
   // Не остановили — только теперь сдвигаем состояние (ответ не нужен: он уже посчитан).
   commitPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
   if (analysis.verdict === 'rewrite') {

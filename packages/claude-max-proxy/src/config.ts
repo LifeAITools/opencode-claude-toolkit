@@ -114,6 +114,16 @@ export interface ProxyConfig {
   // Срок жизни одноразового пропуска согласия, секунды. 180 с — как у CLI-формы
   // Anthropic: пропуск должен дождаться ближайшего хода, но не пережить его.
   goRewriteGuardGrantTtlSec: number
+  // 🔴 ХОЛОДНАЯ ПЕРЕПИСЬ — ОТДЕЛЬНЫЙ КЛЮЧ (фаундер 24.10.2026: «включай, если готово, но с
+  // автоматическим откатом, если всё поплывёт»). Основной сторож останавливает только перепись
+  // при ЖИВОМ кэше; этот ключ добавляет второй случай — кэш уже истёк, и ход покупает большой
+  // префикс заново. Отдельный ключ, а не изменение поведения по умолчанию: у случаев разная
+  // природа, и включать их надо по отдельности.
+  goRewriteGuardColdEnabled: boolean
+  // 🔴 АВТО-ОТКАТ: сколько секунд наблюдать, прежде чем признать, что сторож всех остановил.
+  // Условие откката — не время само по себе (иначе он выключится и при полном порядке), а
+  // «были отказы И НИ ОДНОГО пропуска»: значит мы тормозим и ничего не доходит. 0 = выключено.
+  goRewriteGuardAutoRevertSec: number
 
   // Subscription compat layer (hot-configurable for binary distribution)
   ccCompatVersion: string
@@ -252,6 +262,8 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     // 45 мин — измеренное колено кэша на маршруте Go (см. комментарий у поля).
     goRewriteGuardCacheTtlSec: readInt('GO_REWRITE_GUARD_CACHE_TTL_SEC', 2700, fileEnv),
     goRewriteGuardGrantTtlSec: readInt('GO_REWRITE_GUARD_GRANT_TTL_SEC', 180, fileEnv),
+    goRewriteGuardColdEnabled: readBool('GO_REWRITE_GUARD_COLD_ENABLED', false, fileEnv),
+    goRewriteGuardAutoRevertSec: readInt('GO_REWRITE_GUARD_AUTOREVERT_SEC', 120, fileEnv),
     sparkReasoningEffort: (['minimal', 'low', 'medium', 'high'].includes(read('SPARK_REASONING_EFFORT', 'minimal', fileEnv))
       ? read('SPARK_REASONING_EFFORT', 'minimal', fileEnv)
       : 'minimal') as 'minimal' | 'low' | 'medium' | 'high',

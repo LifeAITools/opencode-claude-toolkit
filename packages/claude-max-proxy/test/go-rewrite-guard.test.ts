@@ -23,6 +23,7 @@ import {
   commitPrefix,
   hasMarkerInLastUserMessage,
   rewrittenTokens,
+  shouldAutoRevert,
   shouldBlockRewrite,
   type PrefixAnalysis,
 } from '../src/modules/go-door.js'
@@ -197,5 +198,52 @@ describe('rewrittenTokens — сколько КЭША перепишется, а
     const parsed = { messages: [big('a')], tools: [] }
     const whole = Math.round(JSON.stringify(parsed).length / 4)
     expect(rewrittenTokens(parsed, { verdict: 'unknown' } as PrefixAnalysis)).toBe(whole)
+  })
+})
+
+describe('холодная перепись и АВТО-ОТКАТ', () => {
+  // 🔴 Слово фаундера 24.10.2026: «включай, если готово, но с автоматическим откатом, если всё
+  // поплывёт и все агенты не смогут общаться, чтобы через минуту откатилось обратно».
+  const warm = (over: Partial<PrefixAnalysis> = {}): PrefixAnalysis =>
+    ({ verdict: 'rewrite', avoidableRewrite: true, cacheExpired: false, ...over })
+  const cold = (over: Partial<PrefixAnalysis> = {}): PrefixAnalysis =>
+    ({ verdict: 'rewrite', avoidableRewrite: false, cacheExpired: true, ...over })
+
+  test('холодная перепись НЕ блокируется, пока второй ключ выключен', () => {
+    expect(shouldBlockRewrite({ enabled: true, analysis: cold(), predictedTokens: 10_000_000, minTokens: 50_000, consented: false })).toBe(false)
+  })
+
+  test('холодная перепись блокируется только своим ключом', () => {
+    expect(shouldBlockRewrite({ enabled: true, coldEnabled: true, analysis: cold(), predictedTokens: 90_000, minTokens: 50_000, consented: false })).toBe(true)
+  })
+
+  test('ниже порога не блокируется ни в одном случае', () => {
+    expect(shouldBlockRewrite({ enabled: true, coldEnabled: true, analysis: cold(), predictedTokens: 49_999, minTokens: 50_000, consented: false })).toBe(false)
+    expect(shouldBlockRewrite({ enabled: true, analysis: warm(), predictedTokens: 49_999, minTokens: 50_000, consented: false })).toBe(false)
+  })
+
+  test('согласие снимает блокировку в обоих случаях', () => {
+    expect(shouldBlockRewrite({ enabled: true, coldEnabled: true, analysis: cold(), predictedTokens: 90_000, minTokens: 50_000, consented: true })).toBe(false)
+  })
+
+  // АВТО-ОТКАТ: условие — «остановили и никто не прошёл», а не «прошло время».
+  test('окно не истекло — не откатываем', () => {
+    expect(shouldAutoRevert({ elapsedMs: 30_000, windowMs: 60_000, refusals: 5, passed: 0 })).toBe(false)
+  })
+
+  test('всех остановили и ни один не прошёл — откатываем', () => {
+    expect(shouldAutoRevert({ elapsedMs: 61_000, windowMs: 60_000, refusals: 3, passed: 0 })).toBe(true)
+  })
+
+  test('хоть один прошёл — сторож не перекрыл кислород, не откатываем', () => {
+    expect(shouldAutoRevert({ elapsedMs: 61_000, windowMs: 60_000, refusals: 30, passed: 1 })).toBe(false)
+  })
+
+  test('тишина — не поломка: ноль трафика откатом не считается', () => {
+    expect(shouldAutoRevert({ elapsedMs: 600_000, windowMs: 60_000, refusals: 0, passed: 0 })).toBe(false)
+  })
+
+  test('окно 0 — авто-откат выключен', () => {
+    expect(shouldAutoRevert({ elapsedMs: 600_000, windowMs: 0, refusals: 10, passed: 0 })).toBe(false)
   })
 })

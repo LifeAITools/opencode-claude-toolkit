@@ -79,6 +79,41 @@ where rn > 1 or rn = 1
 group by 1
 order by 1;`
 
+/**
+ * 🔴 ЧИСТАЯ ЛИНИЯ: считать потери ТОЛЬКО у тех сессий, где предыдущий вызов был полным попаданием.
+ *
+ * Слово фаундера 24.10.2026: «побудка не 84% — там скорее всего подмешиваются странные кейсы,
+ * которые мы не выделили». Он прав. Без этого условия в «промахи» попадают сессии, у которых и
+ * до этого было плохо: предыдущий вызов отказал (в бурю 429) или уже прочитал половину.
+ * Промах такой сессии — не работа времени, а её собственная история, и в среднем он выглядит как
+ * «кэш умер за 20 минут».
+ */
+const CLEAN_SQL = `
+with s as (
+  select coalesce(metadata->>'session_id', metadata->'spend_logs_metadata'->>'go_session') ses,
+         "startTime" t, prompt_tokens pt,
+         nullif(metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens','')::int cached
+  from "LiteLLM_SpendLogs"
+  where "startTime" > now() - interval '${HOURS} hours' and model = '${MODEL}'
+    and prompt_tokens > 20000
+    and coalesce(metadata->>'session_id', metadata->'spend_logs_metadata'->>'go_session') is not null
+), o as (
+  select ses,t,pt,cached,
+         extract(epoch from (t - lag(t) over (partition by ses order by t)))/60.0 idle,
+         lag(cached) over (partition by ses order by t) prev_cached,
+         lag(pt) over (partition by ses order by t) prev_pt,
+         row_number() over (partition by ses order by t) rn
+  from s
+), known as (
+  select * from o
+  where cached is not null and rn > 1 and idle is not null
+    and prev_cached is not null and prev_pt is not null and prev_cached > 0.9*prev_pt
+)
+select ${BUCKETS} bucket, count(*) n,
+       round(percentile_cont(0.5) within group (order by 100.0*cached/pt)::numeric, 1) median_pct,
+       round(100.0*sum(case when cached > 0.9*pt then 1 else 0 end)/count(*), 1) full_hit_pct
+from known group by 1 order by 1;`
+
 const unknownSql = `
 select count(*) from "LiteLLM_SpendLogs"
 where "startTime" > now() - interval '${HOURS} hours'
@@ -101,7 +136,9 @@ const rows = run(SQL).trim().split('\n').filter(Boolean).map((line) => line.spli
 const unknown = run(unknownSql).trim()
 
 const pad = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
-console.log(`\nМаршрут: ${MODEL}   окно: ${HOURS} ч\n`)
+const cleanRows = run(CLEAN_SQL).trim().split('\n').filter(Boolean).map((line) => line.split('\t'))
+
+console.log(`\nМаршрут: ${MODEL}   окно: ${HOURS} ч   (все вызовы с известной цифрой)\n`)
 console.log(pad('окно простоя', 24) + pad('n', 8) + pad('медиана', 10) + pad('полных', 10) + 'ровно 0')
 console.log('-'.repeat(62))
 for (const [bucket, n, median, full, zero] of rows) {
@@ -110,3 +147,12 @@ for (const [bucket, n, median, full, zero] of rows) {
 console.log('-'.repeat(62))
 console.log(`строк, где поставщик НЕ отдал цифру (NULL, исключены): ${unknown}`)
 console.log('🔴 NULL — это «не измерено», а не ноль. Именно их свёртывание в 0 дало ложную аномалию 24.10.')
+
+console.log(`\nЧИСТАЯ ЛИНИЯ: только сессии, где ПРЕДЫДУЩИЙ вызов был полным попаданием\n`)
+console.log(pad('окно простоя', 24) + pad('n', 8) + pad('медиана', 10) + 'полных')
+console.log('-'.repeat(50))
+for (const [bucket, n, median, full] of cleanRows) {
+  console.log(pad(bucket ?? '', 24) + pad(n ?? '', 8) + pad(`${median ?? '-'}%`, 10) + `${full ?? '-'}%`)
+}
+console.log('-'.repeat(50))
+console.log('Здесь промах — работа ВРЕМЕНИ. Смешанная таблица выше включает сессии, у которых было плохо и до этого.')

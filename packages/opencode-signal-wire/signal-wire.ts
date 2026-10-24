@@ -38,6 +38,7 @@ import {
 import type { WakeEvent } from './wake-types'
 import type { SessionSpend } from './session-spend'
 import type { ProviderQuota } from './provider-quota'
+import { readGoQuotaPool } from './provider-go-usage'
 
 /**
  * Model context window SSOT (mirrors @life-ai-tools/claude-code-sdk/src/models.ts).
@@ -792,6 +793,20 @@ export class SignalWire {
         if (w7d) meta.quotaUtil7d = w7d.util
         meta.quotaAccountHint = goOrg
         if (go.source) meta.quotaSource = go.source
+        // 🔴 ПУЛ И УРОВЕНЬ — ИЗ РЕЕСТРА, А НЕ ПУСТЫЕ (слово фаундера 24.10: «в подвале не
+        // показывается статистика по организации; если цикл замкнут, всё должно браться из
+        // реестра и показываться»). `quotaPool*` раньше не заполнялись намеренно — в
+        // `providerQuota` лежала ОДНА запись go, и «пул» из неё был бы моим же числом под чужим
+        // именем. Теперь отчёт несёт ВСЕ организации, поэтому минимум по ним — настоящая величина:
+        // это и есть запас флота, по которому видно, есть ли куда переезжать. Отсутствие остаётся
+        // отсутствием: нет ни одного числа — поля нет, а не ноль.
+        const pool = readGoQuotaPool(undefined, { org: goOrg })
+        if (pool) {
+          if (pool.pool5h !== null) meta.quotaPoolUtil5h = pool.pool5h
+          if (pool.pool7d !== null) meta.quotaPoolUtil7d = pool.pool7d
+          meta.quotaPoolAccounts = pool.accounts
+          if (pool.level) meta.quotaLevel = pool.level
+        }
         const at = Date.parse(go.measuredAt)
         if (Number.isFinite(at)) {
           meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))

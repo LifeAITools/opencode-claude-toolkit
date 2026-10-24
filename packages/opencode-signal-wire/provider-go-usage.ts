@@ -143,6 +143,11 @@ export function computeGoWindows(
 /** Файл окон подписки Go, который пишет прокси (claude-max-proxy/opencode-go-quota.ts). */
 export const GO_QUOTA_STATUS_JSON = join(homedir(), '.claude-local', 'quota-status-opencode-go.json')
 
+/** Путь отчёта с правом переопределения: испытания не должны читать ЖИВОЙ файл машины. */
+export function goQuotaStatusPath(): string {
+  return process.env.GO_QUOTA_STATUS_JSON?.trim() || GO_QUOTA_STATUS_JSON
+}
+
 export interface GoStatusWindow {
   kind: string
   /** Доля 0..1. */
@@ -171,8 +176,64 @@ export interface GoStatusWindow {
  * потребителя). `week` → `7d`, `month` → `30d` — ради согласия с тем, как окна
  * зовёт Claude-снимок и `GoWindow`. Нет файла или окон — null (не выдумываем).
  */
+/**
+ * 🔴 ПУЛ — ЭТО НЕ КОПИЯ МОЕГО ЧИСЛА, А МИНИМУМ ПО РЕЕСТРУ (слово фаундера 24.10: «в подвале не
+ * показывается статистика по организации, а всё должно браться из реестра и показываться»).
+ *
+ * Раньше `quotaPool*` не заполнялись намеренно: в `lastProviderQuota` лежала ОДНА запись go —
+ * окна моей организации, — и «пул» из неё был бы тем же числом под другим именем, то есть
+ * заставлял бы агента «сверять два источника», которых один.
+ *
+ * Сейчас отчёт несёт ВСЕ организации реестра (`orgs[]`), поэтому пул — настоящая величина: минимум
+ * по всем, у кого есть число, с тем же цензом по сбросу, что и у своих окон (закрытое окно числа
+ * не даёт). Отсутствие остаётся отсутствием: нет ни одного числа — пула нет, а не ноль.
+ */
+export function readGoQuotaPool(
+  path: string = goQuotaStatusPath(),
+  opts: { org?: string; now?: number } = {},
+): { pool5h: number | null; pool7d: number | null; accounts: number; level: string | null } | null {
+  try {
+    const d = JSON.parse(readFileSync(path, 'utf8')) as {
+      orgs?: Array<{ name?: unknown; util5h?: unknown; util7d?: unknown; level?: unknown; windows?: unknown }>
+    }
+    if (!Array.isArray(d?.orgs) || d.orgs.length === 0) return null
+    const now = opts.now ?? Date.now()
+    const wanted = finiteStr(opts.org)
+    const live = (o: { util5h?: unknown; util7d?: unknown; windows?: unknown }, key: '5h' | 'week'): number | null => {
+      // Ценз по сбросу тот же, что у своих окон: закрытое окно числа не даёт.
+      const ws = Array.isArray(o.windows) ? (o.windows as Array<{ window?: unknown; resetIso?: unknown }>) : []
+      const w = ws.find((x) => x?.window === key)
+      if (w) {
+        const iso = finiteStr(w.resetIso)
+        if (iso) {
+          const ms = Date.parse(iso)
+          if (Number.isFinite(ms) && ms <= now) return null
+        }
+      }
+      const raw = key === '5h' ? o.util5h : o.util7d
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
+    }
+    let pool5h: number | null = null
+    let pool7d: number | null = null
+    let accounts = 0
+    let level: string | null = null
+    for (const o of d.orgs) {
+      const a = live(o, '5h')
+      const b = live(o, 'week')
+      if (a !== null || b !== null) accounts += 1
+      if (a !== null) pool5h = pool5h === null ? a : Math.min(pool5h, a)
+      if (b !== null) pool7d = pool7d === null ? b : Math.min(pool7d, b)
+      if (wanted && finiteStr(o?.name) === wanted) level = finiteStr(o?.level) ?? null
+    }
+    if (pool5h === null && pool7d === null) return null
+    return { pool5h, pool7d, accounts, level }
+  } catch {
+    return null
+  }
+}
+
 export function readGoQuotaStatusWindows(
-  path: string = GO_QUOTA_STATUS_JSON,
+  path: string = goQuotaStatusPath(),
   opts: { org?: string; now?: number } = {},
 ): {
   measuredAt: string

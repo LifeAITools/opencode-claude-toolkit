@@ -794,15 +794,6 @@ export class ProxyClient {
   /** Total session count. */
   sessionCount(): number { return this.store.size() }
 
-  /**
-   * 🔴 УБОРКА МЁРТВЫХ СЕССИЙ (24.10.2026). Метод был у хранилища и не вызывался ниоткуда: сессии
-   * с неопознанным владельцем жили по 15 часов и давали тысячи строк тикания в журнал. Здесь —
-   * проходимый путь для пульса, чтобы уборщик не остался комментарием.
-   */
-  reapDeadSessions(): string[] {
-    return (this.store as any).reapDead?.() ?? []
-  }
-
   /** Mark a session as Worker-managed (heartbeat-based liveness instead of PID). */
   markManagedSession(sessionId: string, workerId: string, ttlMs?: number): boolean {
     return (this.store as any).markManaged?.(sessionId, workerId, ttlMs) ?? false

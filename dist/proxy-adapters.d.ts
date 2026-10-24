@@ -33,6 +33,7 @@ export declare class ConsoleEventEmitter implements IEventEmitter {
 export declare class NullEventEmitter implements IEventEmitter {
     emit(_event: ProxyEvent): void;
 }
+export declare const UNRESOLVED_PID_IDLE_TTL_MS: number;
 export declare class InMemorySessionStore<EngineT = unknown> implements ISessionStore<EngineT> {
     private sessions;
     private readonly liveness;

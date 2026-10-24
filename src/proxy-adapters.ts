@@ -202,6 +202,15 @@ export class NullEventEmitter implements IEventEmitter {
 // Multi-host scenarios would implement a Redis-backed ISessionStore instead,
 // but ProxyClient doesn't care about the backing — it just calls the port.
 
+/**
+ * Сколько держать сессию, чей владелец НЕ ОПОЗНАН, прежде чем признать её брошенной.
+ *
+ * Два часа — не срок жизни кэша: кэш живёт час, и после двух простоя запись не может быть
+ * полезна ни прогреву, ни учёту. До границы молчим, потому что неизвестный владелец — не
+ * доказательство смерти (владелец может быть за прокси и жив).
+ */
+export const UNRESOLVED_PID_IDLE_TTL_MS = 2 * 60 * 60 * 1000
+
 export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<EngineT> {
   private sessions = new Map<string, Session<EngineT>>()
   private readonly liveness: ILivenessChecker
@@ -257,7 +266,20 @@ export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<En
   reapDead(): string[] {
     const killed: string[] = []
     for (const [sid, sess] of this.sessions.entries()) {
-      if (sess.pid === null) continue  // no PID = never reap
+      // 🔴 СЕССИЯ БЕЗ PID НЕ УМИРАЛА НИКОГДА (замер 24.10.2026). Здесь стояло
+      // `if (sess.pid === null) continue` — и пять сессий, пришедших без заголовка сессии и без
+      // `metadata.user_id`, прожили 15 часов: движок прогрева тикал по ним 5056 строк в журнал,
+      // хотя греть было нечего (кэш живёт час). Владельца не знаем — но и держать неизвестное
+      // живым вечно нельзя: после ДВУХ часов простоя запись не может быть ни живой, ни полезной.
+      // До границы молчим: неопознанный владелец — не доказательство смерти.
+      if (sess.pid === null) {
+        if (Date.now() - sess.lastRequestAt > UNRESOLVED_PID_IDLE_TTL_MS) {
+          try { (sess.engine as any)?.stop?.() } catch { /* best-effort */ }
+          this.sessions.delete(sid)
+          killed.push(sid)
+        }
+        continue
+      }
       // Reap if PID is dead OR re-parented to init (owner died, kernel reparented)
       const dead = sess.pid === 1 || !this.liveness.isAlive(sess.pid)
       if (dead) {

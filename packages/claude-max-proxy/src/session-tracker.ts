@@ -12,6 +12,15 @@ import { spawnSync } from 'bun'
 import { KeepaliveEngine, readOwnerPassport, type KeepaliveEngineOptions } from '@life-ai-tools/claude-code-sdk'
 import { emit } from './event-bus.js'
 
+/**
+ * Сколько держать сессию, чей владелец НЕ ОПОЗНАН, прежде чем признать её брошенной.
+ *
+ * Два часа — не «срок жизни кэша»: кэш живёт час, и после двух простоя запись не может быть
+ * полезна ни для прогрева, ни для учёта. До этой границы молчим: неизвестный владелец — не
+ * доказательство смерти, и убивать живую сессию нельзя (владелец может быть просто за прокси).
+ */
+export const UNRESOLVED_PID_IDLE_TTL_MS = 2 * 60 * 60 * 1000
+
 export interface TrackedSession {
   sessionId: string
   pid: number | null
@@ -172,6 +181,29 @@ export class SessionTracker {
             staleSinceMs: age,
           })
         }
+        continue
+      }
+      // 🔴 СЕССИЯ БЕЗ ОПОЗНАННОГО PID НЕ УМИРАЕТ НИКОГДА — ЕСЛИ НЕ СКАЗАТЬ ЕЙ ЭТОГО (замер
+      // 24.10.2026). У сессий, пришедших без заголовка и без `metadata.user_id`, `pid === null`
+      // (в журнале `pidUnresolved=true`), поэтому проверка ниже их не касалась: пять таких
+      // записей прожили 15 часов и дали **5056 строк** тикания в журнал, хотя греть в них было
+      // нечего (`registrySize=0`, кэш давно мёртв). Хуже: `reapDead()` не вызывался НИОТКУДА —
+      // уборщик был написан и не подключён.
+      //
+      // Правило: владельца не знаем, но кэш живёт час — значит после ДВУХ часов простоя
+      // запись не может быть ни живой, ни полезной. Это не «нашли смерть», это «перестали
+      // держать неизвестное живым».
+      if (sess.pid === null && now - sess.lastRequestAt > UNRESOLVED_PID_IDLE_TTL_MS) {
+        sess.engine.stop()
+        this.sessions.delete(sid)
+        killed.push(sid)
+        emit({
+          level: 'info',
+          kind: 'SESSION_DEAD',
+          sessionId: sid,
+          reason: 'unresolved_pid_idle',
+          idleSec: Math.floor((now - sess.lastRequestAt) / 1000),
+        })
         continue
       }
       // Normal PID-based liveness

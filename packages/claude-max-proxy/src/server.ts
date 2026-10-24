@@ -331,6 +331,10 @@ try {
 const tracker = {
   size: () => proxyClient.sessionCount(),
   list: () => proxyClient.listSessions(),
+  // 🔴 Уборщик мёртвых сессий существовал и НЕ БЫЛ ПОДКЛЮЧЁН (замер 24.10.2026): пять сессий с
+  // неопознанным владельцем прожили 15 часов и дали 5056 строк тикания в журнал. Теперь пульс
+  // зовёт его на своём такте.
+  reapDead: () => proxyClient.reapDeadSessions(),
 }
 
 // Stale managed session cleanup now handled by ManagedSessionService.start()

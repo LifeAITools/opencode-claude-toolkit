@@ -20,6 +20,12 @@ import { identityWindow } from './identity-watch.js'
 interface HeartbeatTracker {
   list(): Array<{ engine: unknown }>
   size(): number
+  /**
+   * 🔴 УБОРКА ДОЛЖНА БЫТЬ ПОДКЛЮЧЕНА (замер 24.10.2026). `reapDead()` был написан и НЕ ВЫЗЫВАЛСЯ
+   * ниоткуда: сессии с неопознанным владельцем жили 15 часов и дали 5056 строк тикания в журнал.
+   * Уборщик без вызова — это не уборщик, а комментарий с кодом.
+   */
+  reapDead(): string[]
 }
 import { bus, emit } from './event-bus.js'
 import { readFileSync } from 'fs'
@@ -152,6 +158,9 @@ export function startHeartbeat(
 
   const timer = setInterval(() => {
     pruneOld()
+    // Уборка мёртвых сессий — на том же такте, что и пульс: отдельного таймера не заводим,
+    // иначе их станет два и один переживёт другого.
+    try { tracker.reapDead() } catch { /* уборка не имеет права уронить пульс */ }
 
     // Token expiry countdown (read from credentials file)
     let tokenExpiresInSec: number | null = null

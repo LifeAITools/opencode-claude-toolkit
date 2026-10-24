@@ -297,7 +297,13 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     // секунде; пересчитать, когда трафик пойдёт через нашу дверь.
     cacheTtlSec: 2_100,
     rewriteMinTokens: 50_000,
-    coldRewriteAfterSec: 1_200,
+    // 🔴 5 МИНУТ, А НЕ 20 (слово фаундера 24.10.2026 и замер по большим сессиям).
+    // Он описал форму работы агента точно: «работает, работает, потом ОСТАНОВИЛСЯ подождать и опять
+    // запустился — и вот в этот момент происходит холодная запись». Замер подтверждает: при запросах
+    // >200k доля промахов растёт с простоем — 1.8% до 30 c, 4.7% на 2–5 мин, 10.4% на 5–10, 31.3%
+    // после 20. Значит дорогая запись не «после 20 минут», а на ПЕРВОМ ХОДЕ ПОСЛЕ ПАУЗЫ, и порог
+    // должен стоять там, где риск уже вырос, а не там, где он стал правилом.
+    coldRewriteAfterSec: 300,
   },
   'muse-spark-1.3-contributor': {
     name: 'Muse Spark 1.3 Contributor (OpenCode Go)',
@@ -310,7 +316,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     cost: { input: 0.10, output: 0.20, cacheRead: 0.002, cacheWrite: 0.10 },
     cacheTtlSec: 1_800,
     rewriteMinTokens: 50_000,
-    coldRewriteAfterSec: 1_200,
+    coldRewriteAfterSec: 300,
   },
 }
 

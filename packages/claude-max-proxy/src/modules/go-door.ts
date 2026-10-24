@@ -711,8 +711,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     const message = `Cache guard: this turn on the Go door would rewrite ~${predictedTokens} `
       + `tokens (of ~${totalTokens} in the request) ${why} — `
       + `${whereEn}, was ${analysis.prevMsgs ?? '?'} messages, now ${analysis.msgs ?? '?'}. `
-      + `TO PROCEED: include ${cfg.goRewriteGuardMarker} in your next message, `
-      + `or grant out-of-band: ${consentHttp}. Consent is single-use. `
+      + `TWO WAYS FORWARD, and both are deliberate: (1) CONTINUE this session — include `
+      + `${cfg.goRewriteGuardMarker} in your next message (or grant out-of-band: ${consentHttp}; `
+      + `consent is single-use), and the write is paid knowingly; (2) START FRESH — restart the agent `
+      + `so it re-primes from a clean prefix instead of rewriting a large warm cache. `
       + `(Disable: GO_REWRITE_GUARD_ENABLED=false.)`
 
     rec.response.status = 400

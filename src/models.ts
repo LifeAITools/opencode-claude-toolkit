@@ -72,6 +72,30 @@ export interface ModelMetadata {
     cacheRead: number
     cacheWrite: number
   }
+  /**
+   * МАРШРУТ, который обслуживает модель. Отсутствие поля = `anthropic` (историческое
+   * поведение, все записи до 24.10.2026).
+   *
+   * 🔴 ЗАЧЕМ (слово фаундера 24.10.2026: «разве нет реестра моделей и провайдеров, или мы
+   * каждый раз хардкодим?»). До этого реестр знал ТОЛЬКО Claude, а модели Go жили в конфиге
+   * посредника со своими ценами, подогнанными руками. Одна ось — одно место.
+   *
+   * Потребители, которые регистрируют МОДЕЛИ CLAUDE у провайдера, обязаны пропускать чужие
+   * маршруты: `provider !== 'opencode-go'`. Иначе модели Go всплывут в списке Claude.
+   */
+  provider?: 'anthropic' | 'opencode-go'
+  /**
+   * Сколько живёт кэш префикса у ЭТОЙ модели (секунды). Отсутствие = глобальная настройка
+   * (`GO_REWRITE_GUARD_CACHE_TTL_SEC`). Поле появилось 24.10.2026: порог был один на всех,
+   * а у разных моделей и маршрутов срок кэша разный — «одно число на всех» это то же самое
+   * «число без своего предмета», только в виде настройки.
+   */
+  cacheTtlSec?: number
+  /**
+   * Порог «сколько токенов ПЕРЕПИШЕТСЯ», выше которого сторож останавливает ход.
+   * Отсутствие = глобальная настройка (`GO_REWRITE_GUARD_MIN_TOKENS`).
+   */
+  rewriteMinTokens?: number
 }
 
 /**
@@ -220,6 +244,39 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     adaptiveThinking: false,
     samplingParams: true,
     cost: { input: 0.80, output: 4, cacheRead: 0.08, cacheWrite: 1 },
+  },
+
+  // ── МАРШРУТ OpenCode Go ────────────────────────────────────────────────────────────────
+  // 🔴 ЭТИ ДВЕ ЗАПИСИ ЖИЛИ В КОНФИГЕ ПОСРЕДНИКА, а не в реестре (до 24.10.2026). Цены были
+  // подогнаны там же по 998 замерам (`console-log-fit-998`), и выходило три места с числами о
+  // моделях: здесь, в алиасах и в конфиге. Теперь цена и настройки сторожа — тут, а конфиг
+  // посредника остаётся тем, что он есть: маршрут и учётные данные.
+  //
+  // `cacheWrite` у обеих — по цене входа: отдельной платы за запись кэша у Go нет
+  // (комментарий владельца конфига).
+  'deepseek-v4.1-flash-go': {
+    name: 'DeepSeek V4.1 Flash (OpenCode Go)',
+    context: 1_048_576,
+    defaultOutput: 32_000,
+    maxOutput: 64_000,
+    adaptiveThinking: false,
+    samplingParams: true,
+    provider: 'opencode-go',
+    cost: { input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0.15 },
+    cacheTtlSec: 2_700,
+    rewriteMinTokens: 50_000,
+  },
+  'muse-spark-1.3-contributor': {
+    name: 'Muse Spark 1.3 Contributor (OpenCode Go)',
+    context: 1_000_000,
+    defaultOutput: 32_000,
+    maxOutput: 64_000,
+    adaptiveThinking: false,
+    samplingParams: true,
+    provider: 'opencode-go',
+    cost: { input: 0.10, output: 0.20, cacheRead: 0.002, cacheWrite: 0.10 },
+    cacheTtlSec: 2_700,
+    rewriteMinTokens: 50_000,
   },
 }
 

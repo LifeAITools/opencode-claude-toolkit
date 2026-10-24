@@ -439,6 +439,10 @@ export default {
         }
 
         for (const [id, info] of Object.entries(MAX_MODELS)) {
+          // 🔴 РЕЕСТР ОДИН, А ПРОВАЙДЕРОВ ДВА (24.10.2026). Модели Go живут в том же
+          // `MAX_MODELS`, но это НЕ модели Claude: регистрировать их под `claude-max` значит
+          // показать агенту чужую модель с нашим маршрутом. Чужой маршрут пропускаем.
+          if (info.provider === 'opencode-go') continue
           // Adaptive-thinking support sourced from SSOT instead of hardcoded
           // substring check. Model table at src/models.ts controls this.
           const isAdaptive = supportsAdaptiveThinking(id)

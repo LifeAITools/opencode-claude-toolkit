@@ -298,6 +298,10 @@ export default {
         }
 
         for (const [id, info] of Object.entries(MAX_MODELS)) {
+          // 🔴 РЕЕСТР ОДИН, А ПРОВАЙДЕРОВ ДВА (24.10.2026). Модели Go живут в том же
+          // `MAX_MODELS`, но это НЕ модели Claude: регистрировать их под `claude-max` значит
+          // показать агенту чужую модель с нашим маршрутом. Чужой маршрут пропускаем.
+          if (info.provider === 'opencode-go') continue
           config.provider['claude-max'].models[id] = {
             id,
             name: `${info.name} (Max)`,

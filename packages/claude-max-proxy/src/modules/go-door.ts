@@ -34,7 +34,7 @@ import {
   extractUsageChat, extractUsageResponses, usageFromSseText, type CallKind,
 } from '../provider-dump.js'
 import { resolveSessionIdentity, readCallerSession, CALLER_SESSION_HEADERS } from '../session-identity.js'
-import { consumeConsent } from '@life-ai-tools/claude-code-sdk'
+import { consumeConsent, getModelMetadata } from '@life-ai-tools/claude-code-sdk'
 import type { ProxyConfig } from '../config.js'
 
 const ORG_HEADER = 'x-kiberos-go-org'
@@ -500,7 +500,12 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   // 🔴 ПОРЯДОК РЕШЕНИЯ (23.10). Сначала ЧИТАЕМ префикс, потом решаем, потом (если не
   // остановили) записываем. Отказ не сдвигает состояние: иначе остановленный ход сам
   // стал бы переписью, и следующий честный сравнивался бы с телом, которое мы не обслужили.
-  const cacheTtlMs = cfg.goRewriteGuardCacheTtlSec * 1000
+  // 🔴 ПОРОГИ БЕРУТСЯ У МОДЕЛИ, А НАСТРОЙКА — ТОЛЬКО ЗАПАСНОЙ ВАРИАНТ (24.10.2026, слово
+  // фаундера: «лучше задавать отдельно для каждой модели и провайдера»). Реестр теперь несёт
+  // `cacheTtlSec` и `rewriteMinTokens` у каждой записи; глобальная настройка остаётся для
+  // моделей, которых в реестре нет, — отсутствие поля не должно менять поведение.
+  const modelMeta = typeof model === 'string' && model ? getModelMetadata(model) : undefined
+  const cacheTtlMs = (modelMeta?.cacheTtlSec ?? cfg.goRewriteGuardCacheTtlSec) * 1000
   const analysis = assessPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
   // 🔴 ПОРОГ СЧИТАЕТСЯ ПО ПЕРЕПИСЫВАЕМОЙ ЧАСТИ, А НЕ ПО ВСЕМУ ТЕЛУ (слово фаундера 24.10:
   // «проверяет байт-идентичность слепка и того, что агент шлёт, чтобы детектировать, СКОЛЬКО КЭША
@@ -523,7 +528,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     enabled: cfg.goRewriteGuardEnabled,
     analysis,
     predictedTokens,
-    minTokens: cfg.goRewriteGuardMinTokens,
+    minTokens: modelMeta?.rewriteMinTokens ?? cfg.goRewriteGuardMinTokens,
     consented,
   })) {
     const whereRu = analysis.firstDiffIndex === undefined

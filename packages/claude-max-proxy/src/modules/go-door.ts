@@ -26,7 +26,7 @@ import { pickOrgByHeadroom, readOrgQuotas, readStoreOrgNames } from '../go-org-p
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync, readFileSync, renameSync } from 'node:fs'
 import { GoCredentialError } from '../go-credentials.js'
 import { withFreshGoCredential, forceRefreshGoCredential, goTokenRefreshEnabled } from '../go-token-refresh.js'
 import {
@@ -149,6 +149,95 @@ const prefixMemory = new Map<string, {
   system?: string
   at: number
 }>()
+
+/**
+ * 🔴 РЕЕСТР ПРЕФИКСОВ ПЕРЕЖИВАЕТ ПЕРЕЗАПУСК (слово фаундера 24.10.2026): «система перезапустится,
+ * у нас этот реестр должен быть сохранён и подняться, чтобы не терять данные».
+ *
+ * Зачем это важно, а не «на всякий случай»: слепок нужен, чтобы следующий ход сессии сравнить с
+ * предыдущим. Без него после каждого перезапуска ПЕРВЫЙ ход каждой живой сессии выглядит как
+ * «первый в жизни» — сторож молчит, а сессия на 900 тысяч токенов платит полную запись ровно в тот
+ * момент, когда мы её и должны были остановить. Плюс теряется отметка времени последнего хода, а
+ * она и есть вход в решение о простое.
+ *
+ * Хранение: один JSON рядом с остальным состоянием, запись атомарная и С ЗАДЕРЖКОЙ (раз в 5 с), иначе
+ * каждая мысль агента тянула бы запись мегабайтов. Потолок числа сессий и возраста — чтобы файл не
+ * рос вечно.
+ */
+const PREFIX_REGISTRY_PATH = join(homedir(), '.claude-local', 'go-prefix-registry.json')
+const PREFIX_REGISTRY_MAX_SESSIONS = 500
+const PREFIX_REGISTRY_MAX_AGE_MS = 24 * 60 * 60 * 1000
+const PREFIX_REGISTRY_FLUSH_MS = 5_000
+/** Сколько хэшей сообщений держим на сессию: длиннее — сравниваем только голову. */
+const PREFIX_REGISTRY_MAX_HASHES = 2_000
+
+let prefixDirty = false
+let prefixFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function prunePrefixRegistry(now = Date.now()): void {
+  for (const [sid, entry] of prefixMemory) {
+    if (now - entry.at > PREFIX_REGISTRY_MAX_AGE_MS) prefixMemory.delete(sid)
+  }
+  if (prefixMemory.size <= PREFIX_REGISTRY_MAX_SESSIONS) return
+  const byAge = [...prefixMemory.entries()].sort((a, b) => a[1].at - b[1].at)
+  for (const [sid] of byAge.slice(0, prefixMemory.size - PREFIX_REGISTRY_MAX_SESSIONS)) {
+    prefixMemory.delete(sid)
+  }
+}
+
+function flushPrefixRegistry(): void {
+  prefixFlushTimer = null
+  if (!prefixDirty) return
+  prefixDirty = false
+  try {
+    prunePrefixRegistry()
+    const payload = { version: 1, savedAt: new Date().toISOString(), sessions: Object.fromEntries(prefixMemory) }
+    const tmp = `${PREFIX_REGISTRY_PATH}.tmp-${process.pid}`
+    writeFileSync(tmp, JSON.stringify(payload))
+    renameSync(tmp, PREFIX_REGISTRY_PATH)
+  } catch {
+    // Сохранение слепка — удобство, а не путь обслуживания: не сумели — работаем как раньше,
+    // но говорим об этом в журнал, чтобы «не сохранилось» не читалось потом как «не было».
+    prefixDirty = true
+  }
+}
+
+function markPrefixDirty(): void {
+  prefixDirty = true
+  if (prefixFlushTimer) return
+  prefixFlushTimer = setTimeout(flushPrefixRegistry, PREFIX_REGISTRY_FLUSH_MS)
+  // Таймер не должен держать процесс живым.
+  ;(prefixFlushTimer as any).unref?.()
+}
+
+/** Поднять реестр с диска. Битый или отсутствующий файл — пустой реестр, а не падение. */
+function loadPrefixRegistry(): void {
+  try {
+    if (!existsSync(PREFIX_REGISTRY_PATH)) return
+    const body = JSON.parse(readFileSync(PREFIX_REGISTRY_PATH, 'utf8')) as {
+      sessions?: Record<string, { full?: unknown; msgHashes?: unknown; roles?: unknown; tools?: unknown; system?: unknown; at?: unknown }>
+    }
+    const now = Date.now()
+    for (const [sid, e] of Object.entries(body?.sessions ?? {})) {
+      if (typeof e?.full !== 'string' || typeof e?.tools !== 'string') continue
+      if (!Array.isArray(e?.msgHashes) || !Array.isArray(e?.roles)) continue
+      if (typeof e?.at !== 'number' || now - e.at > PREFIX_REGISTRY_MAX_AGE_MS) continue
+      prefixMemory.set(sid, {
+        full: e.full,
+        msgHashes: (e.msgHashes as string[]).slice(0, PREFIX_REGISTRY_MAX_HASHES),
+        roles: (e.roles as string[]).slice(0, PREFIX_REGISTRY_MAX_HASHES),
+        tools: e.tools,
+        ...(typeof e.system === 'string' ? { system: e.system } : {}),
+        at: e.at,
+      })
+    }
+  } catch {
+    // Битый файл — начинаем с пустого: хуже было бы упасть на старте.
+    prefixMemory.clear()
+  }
+}
+
+loadPrefixRegistry()
 
 /**
  * ГОЛОВА ИСТОРИИ ДЛЯ СНИМКА — чтобы на ПЕРВОЙ же переписи назвать не только место,
@@ -368,6 +457,8 @@ export function commitPrefix(
   })
   // Голова — ДО того, как её заменит следующая история: иначе снимок сравнивал бы новое с новым.
   rememberHead(sessionId, msgs)
+  // Отметка времени хода и слепок — то, что должно пережить перезапуск.
+  markPrefixDirty()
   return compareToPrevious(prev, msgs, body, now, cacheTtlMs)
 }
 

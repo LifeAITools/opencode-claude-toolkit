@@ -188,6 +188,37 @@ export interface GoStatusWindow {
  * по всем, у кого есть число, с тем же цензом по сбросу, что и у своих окон (закрытое окно числа
  * не даёт). Отсутствие остаётся отсутствием: нет ни одного числа — пула нет, а не ноль.
  */
+/**
+ * 🔴 ЧЬИМ ИМЕНЕМ СЕССИЯ РЕАЛЬНО ХОДИТ — ДЛЯ ПРЯМОГО ПРОВАЙДЕРА ЭТО НЕ ПРИВЯЗКА РОЖДЕНИЯ.
+ *
+ * Замер 24.10.2026 (фаундер: «у тебя неверные данные, я же загрузил»): подвал печатал
+ * `hello@sealform.dev` (ярлык, записанный при рождении в 06:37, недельное окно 100%) и `critical`,
+ * хотя сессия работала и не отказывала НИ РАЗУ. Причина: прямой провайдер (`opencode-go/…`) идёт
+ * в opencode со СВОИМ входом, и вход этот — не привязка лаунчера. Вход лежит в `account_state`
+ * базы opencode, и на тот момент там была `hello@mailclowd.com` — свежая, с запасом.
+ *
+ * То есть ярлык был не «устаревшим» — он был ЧУЖИМ предметом, а числа рядом — правдой про этот
+ * чужой предмет. Ровно тот класс, который ловим весь месяц.
+ *
+ * Здесь отдаётся ИЗМЕРЕННЫЙ вход: `activeSources.accountState` из отчёта (он уже сверяет реестр с
+ * базой). Ничего не хранится и не переписывается; нет поля — `null`, а не догадка.
+ */
+export function readGoActiveAccountOrg(
+  path: string = goQuotaStatusPath(),
+): { org: string; measuredAt: string | null } | null {
+  try {
+    const d = JSON.parse(readFileSync(path, 'utf8')) as {
+      measured_at?: unknown
+      activeSources?: { accountState?: unknown }
+    }
+    const org = finiteStr((d?.activeSources ?? {}).accountState)
+    if (!org) return null
+    return { org, measuredAt: finiteStr(d?.measured_at) ?? null }
+  } catch {
+    return null
+  }
+}
+
 export function readGoQuotaPool(
   path: string = goQuotaStatusPath(),
   opts: { org?: string; now?: number } = {},

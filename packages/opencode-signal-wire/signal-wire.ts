@@ -38,7 +38,7 @@ import {
 import type { WakeEvent } from './wake-types'
 import type { SessionSpend } from './session-spend'
 import type { ProviderQuota } from './provider-quota'
-import { readGoQuotaPool } from './provider-go-usage'
+import { readGoActiveAccountOrg, readGoQuotaPool, readGoQuotaStatusWindows } from './provider-go-usage'
 
 /**
  * Model context window SSOT (mirrors @life-ai-tools/claude-code-sdk/src/models.ts).
@@ -774,7 +774,27 @@ export class SignalWire {
     // доказанной старости отсутствие честнее ярлыка).
     {
       const goOrg = process.env.KIBEROS_GO_ORG?.trim()
-      const go = goOrg ? this.lastProviderQuota?.find((q) => q.provider === 'go') : undefined
+      // 🔴 ДЛЯ ПРЯМОГО ПРОВАЙДЕРА ЯРЛЫК РОЖДЕНИЯ — НЕ ПОДПИСЬ, А ЧУЖОЙ ПРЕДМЕТ (замер 24.10.2026:
+      // подвал печатал `hello@sealform.dev` с недельным 100% и `critical`, хотя сессия работала и
+      // не отказывала ни разу). Прямой `opencode-go/…` идёт в opencode СО СВОИМ входом, и вход
+      // этот — не привязка лаунчера: она пишется один раз при рождении и с тех пор протухает.
+      // Берём ИЗМЕРЕННЫЙ вход из отчёта (`activeSources.accountState`) и ОКНА ТОГО ЖЕ входа —
+      // имя и числа обязаны быть про один предмет, иначе это ровно то число без предмета, которое
+      // мы ловим весь месяц. У посредника (`kiberos-go`) привязка — настоящая: там она и есть
+      // маршрут, поэтому его не трогаем.
+      // Два независимых признака прямого маршрута: имя провайдера и префикс модели. Одного мало —
+      // написание провайдера у нас не зафиксировано контрактом, а модель приходит как
+      // `opencode-go/<модель>`. Ошибка здесь стоит дорого с двух сторон, поэтому лучше требовать
+      // согласия двух свидетельств, чем угадывать по одному.
+      const direct = this.lastProvider === 'opencode-go' || this.lastModel?.startsWith('opencode-go/') === true
+      const accountOrg = direct ? readGoActiveAccountOrg(undefined)?.org : undefined
+      const subjectOrg = accountOrg ?? goOrg
+      const fromReport = accountOrg && accountOrg !== goOrg
+        ? readGoQuotaStatusWindows(undefined, { org: accountOrg })
+        : null
+      const go = fromReport
+        ? { source: 'subscription' as const, measuredAt: fromReport.measuredAt, windows: fromReport.windows }
+        : (subjectOrg ? this.lastProviderQuota?.find((q) => q.provider === 'go') : undefined)
       // 🔴 ТОЛЬКО ИЗМЕРЕНИЕ, НЕ ОЦЕНКА. `spend-estimate` — наша арифметика по расходу, у неё
       // `measuredAt = now`, то есть она ВСЕГДА выглядит свежей, и она не имеет права вести агента
       // к стене. Замер 22.10.2026: оценка выдала util5h=1 при живом окне (реестр 0.01), правило
@@ -791,7 +811,7 @@ export class SignalWire {
           if (w5h.resetAt) meta.quotaResetAt = w5h.resetAt
         }
         if (w7d) meta.quotaUtil7d = w7d.util
-        meta.quotaAccountHint = goOrg
+        meta.quotaAccountHint = subjectOrg
         if (go.source) meta.quotaSource = go.source
         // 🔴 ПУЛ И УРОВЕНЬ — ИЗ РЕЕСТРА, А НЕ ПУСТЫЕ (слово фаундера 24.10: «в подвале не
         // показывается статистика по организации; если цикл замкнут, всё должно браться из
@@ -800,7 +820,7 @@ export class SignalWire {
         // именем. Теперь отчёт несёт ВСЕ организации, поэтому минимум по ним — настоящая величина:
         // это и есть запас флота, по которому видно, есть ли куда переезжать. Отсутствие остаётся
         // отсутствием: нет ни одного числа — поля нет, а не ноль.
-        const pool = readGoQuotaPool(undefined, { org: goOrg })
+        const pool = readGoQuotaPool(undefined, { org: subjectOrg })
         if (pool) {
           if (pool.pool5h !== null) meta.quotaPoolUtil5h = pool.pool5h
           if (pool.pool7d !== null) meta.quotaPoolUtil7d = pool.pool7d

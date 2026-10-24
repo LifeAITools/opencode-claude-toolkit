@@ -273,7 +273,12 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     samplingParams: true,
     provider: 'opencode-go',
     cost: { input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0.15 },
-    cacheTtlSec: 2_700,
+    // 🔴 30 МИНУТ, А НЕ 45 (замер 24.10.2026 по сегодняшнему трафику Go, 28 009 вызовов,
+    // префиксы >20k): доля ХОЛОДНЫХ записей по окну простоя — 0–5 мин 25%, 15–20 71%,
+    // 20–25 38%, 30–45 63%, 45–60 86%, >60 100%. Кривая, а не граница: 45 минут как «кэш ещё
+    // жив» слишком оптимистично — к 45–60 мин он мёртв в 86% случаев. 30 минут — точка, где
+    // шансы сравнялись.
+    cacheTtlSec: 1_800,
     rewriteMinTokens: 50_000,
     coldRewriteAfterSec: 1_200,
   },
@@ -286,7 +291,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     samplingParams: true,
     provider: 'opencode-go',
     cost: { input: 0.10, output: 0.20, cacheRead: 0.002, cacheWrite: 0.10 },
-    cacheTtlSec: 2_700,
+    cacheTtlSec: 1_800,
     rewriteMinTokens: 50_000,
     coldRewriteAfterSec: 1_200,
   },

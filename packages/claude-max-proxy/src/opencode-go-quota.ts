@@ -168,6 +168,39 @@ function parseDoorJson(raw: string): { body: unknown; noise: string | null } {
 }
 
 /**
+ * 🔴 ПОСЛЕДНИЙ ИЗМЕРЕННЫЙ СПИСОК — И ЕГО СОБСТВЕННЫЙ ВОЗРАСТ.
+ *
+ * Слово фаундера 24.10.2026: «хотелось бы алгоритм бронебойный, а не защиту, за которой надо
+ * подтирать». Отсюда правило: когда дверь не ответила, отчёт НЕ стирает картину. Организации
+ * переносятся из предыдущего файла вместе с его `measured_at` — потому что пустой массив `orgs`
+ * в отчёте это утверждение «организаций нет», которого мы не измеряли, и онемевшая дверь такого
+ * права не даёт.
+ *
+ * `measured_at_ms` берётся из ТОГО ЖЕ `measured_at`, что уедет в файл: два разных «сейчас» в
+ * одном снимке — ровно тот дефект, который чинили в 1.1.80.
+ */
+function readPreviousGoReport(
+  path: string,
+): { active?: string; measured_at: string; measured_at_ms: number; orgs: GoRegistryStatus['orgs'] } | null {
+  try {
+    const body = JSON.parse(readFileSync(path, 'utf8')) as { active?: unknown; measured_at?: unknown; orgs?: unknown }
+    if (!Array.isArray(body?.orgs) || body.orgs.length === 0) return null
+    const stamp = typeof body.measured_at === 'string' ? body.measured_at : null
+    if (!stamp) return null
+    const ms = Date.parse(stamp)
+    if (!Number.isFinite(ms)) return null
+    return {
+      active: typeof body.active === 'string' ? body.active : undefined,
+      measured_at: stamp,
+      measured_at_ms: ms,
+      orgs: body.orgs as GoRegistryStatus['orgs'],
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Какая пара «аккаунт/организация» ДЕЙСТВИТЕЛЬНО в работе — по двум источникам.
  *
  * ЗАЧЕМ (22.10.2026): отчёт раньше ПИСАЛ утверждение, скопированное из реестра
@@ -460,17 +493,20 @@ export function buildGoQuotaStatus(input: {
     models,
     models_source: modelsSource,
   }
-  if (!usage) {
-    return { ...base, error: error ?? 'no_usage', accounts: {} }
-  }
+  // 🔴 ПУЛ НЕ ЗАВИСИТ ОТ ОКОН АКТИВНОЙ ОРГАНИЗАЦИИ (замер 24.10.2026, слово фаундера: «нужен
+  // алгоритм бронебойный, а не защита»). Раньше отсутствие `usage` у активной организации
+  // возвращало отчёт БЕЗ массива `orgs` — то есть пул, из которого выбирают организацию на
+  // рождении, исчезал из-за того, что ОДНА организация не отдала окна. Теперь `orgs` собирается
+  // всегда, а «окон активной нет» — это отдельный факт в `error`, а не повод стереть пул.
+  const u: GoUsage = usage ?? {}
   const pct = (w?: GoWindowUsage) => clampPct(w?.percent)
   // «Сейчас» — тот же штамп, что уедет в файл: ценз и измерение обязаны смотреть одними часами,
   // иначе внутри одного файла два разных «сейчас».
   const nowMs = measuredAt.getTime()
   const livePct = (w?: GoWindowUsage): number | null => (windowClosed(w, nowMs) ? null : pct(w))
-  const util5h = livePct(usage.rolling)
-  const util7d = livePct(usage.weekly)
-  const utilMonth = livePct(usage.monthly)
+  const util5h = livePct(u.rolling)
+  const util7d = livePct(u.weekly)
+  const utilMonth = livePct(u.monthly)
   const longest = util7d === null ? utilMonth : utilMonth === null ? util7d : Math.max(util7d, utilMonth)
   const level = classifyLevel(util5h === null ? null : util5h / 100, longest === null ? null : longest / 100)
   const win = (name: string, w: GoWindowUsage | undefined, util: number | null) => {
@@ -486,7 +522,7 @@ export function buildGoQuotaStatus(input: {
       ...(expired ? { expired: true } : {}),
     }
   }
-  const windows = [win('5h', usage.rolling, util5h), win('week', usage.weekly, util7d), win('month', usage.monthly, utilMonth)]
+  const windows = [win('5h', u.rolling, util5h), win('week', u.weekly, util7d), win('month', u.monthly, utilMonth)]
     // Окно без числа ОСТАЁТСЯ, если оно закрыто: «сброшено» — факт, а не отсутствие данных.
     .filter((w) => w.util !== null || w.expired === true)
   const pc = (v: number) => (Math.round(v * 1000) / 10) + '%'
@@ -549,6 +585,9 @@ export function buildGoQuotaStatus(input: {
         .filter((w) => w.util !== null || w.expired === true),
     }
   })
+  if (!usage) {
+    return { ...base, orgs: perOrg, error: error ?? 'no_usage', accounts: {} }
+  }
   return {
     ...base,
     orgs: perOrg,
@@ -698,10 +737,33 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
   // чей ключ лежит в auth.json (09.10: вторая организация обслуживает, первая
   // исчерпана — подвал показывал первую). Ключ из auth.json остаётся ТОЛЬКО для
   // списка моделей подписки.
-  const [{ registry, error: doorError }, sub] = await Promise.all([
+  const [{ registry: readRegistry, error: doorError }, sub] = await Promise.all([
     readGoRegistry(opts.goRefresherPath, opts.runner),
     goSubscriptionModels(apiKey, fetcher),
   ])
+  // 🔴 ПУСТОТА — НЕ ИЗМЕРЕНИЕ (слово фаундера 24.10.2026: «хотелось бы алгоритм бронебойный, а не
+  // защиту, за которой надо подтирать»). Дверь не ответила → раньше отчёт писался БЕЗ массива
+  // `orgs` и со СВЕЖИМ `measured_at` от `now()`: файл выглядел как обычный отчёт, а для того, кто
+  // выбирает организацию на рождении, пустой список означал «выбирать нечего» — свежая
+  // организация молча пропускалась, и заметить это было нечем.
+  // Теперь поломка чтения не стирает картину: переносится ПОСЛЕДНИЙ ИЗМЕРЕННЫЙ список ВМЕСТЕ С
+  // ЕГО СОБСТВЕННЫМ `measured_at`. Числа остаются прежними и несут свой возраст — потребитель
+  // (рождение спрашивает свежий проход старше минуты, жёсткий порог 15 минут отказывается
+  // решать по старой картинке) сам знает, что делать со старыми числами. Соврать свежим штампом
+  // поверх старых чисел — тот самый дефект, который мы уже чинили в 1.1.80.
+  let registry = readRegistry
+  let carried: string | null = null
+  if (!registry) {
+    const prev = readPreviousGoReport(opts.outPath)
+    if (prev) {
+      registry = {
+        active: prev.active,
+        measured_at_ms: prev.measured_at_ms,
+        orgs: prev.orgs,
+      } as GoRegistryStatus
+      carried = prev.measured_at
+    }
+  }
   const activeOrg = registry
     ? (registry.orgs.find((o) => o.active === true) ?? registry.orgs[0] ?? null)
     : null
@@ -731,9 +793,14 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
   }
   const measuredAt = registry?.measured_at_ms ? new Date(registry.measured_at_ms) : now()
   const models = [...sub.models, ...litellmAliases].sort()
+  // Перенос назван в самом отчёте: «числа взяты из снимка 07:06Z» — это факт, который читатель
+  // видит, а не догадка, которую он делает по свежему штампу.
+  const doorErrorNamed = carried
+    ? `${doorError ?? 'door_unavailable'}; orgs carried from ${carried} (their own age, not re-stamped)`
+    : doorError
   const status = buildGoQuotaStatus({
     usage: activeOrg?.usage ?? null,
-    error: doorError ?? activeOrg?.usage_error ?? null,
+    error: doorErrorNamed ?? activeOrg?.usage_error ?? null,
     org: activeOrg?.name ?? 'unknown',
     activeOrg: activeOrgResolution,
     accountHint: activeOrg?.name ?? 'opencode-go-unknown',

@@ -201,6 +201,46 @@ describe('сборка целиком (без сети)', () => {
   test('readGoKey терпит отсутствие файла', () => {
     expect(readGoKey('/nonexistent/auth.json')).toBeNull()
   })
+
+  // 🔴 СЛОВО ФАУНДЕРА 24.10.2026: «хотелось бы алгоритм бронебойный, а не защиту, за которой надо
+  // подтирать». Дверь онемела → раньше писался отчёт БЕЗ `orgs` и соСВЕЖИМ `measured_at` от
+  // `now()`: пустой список читался как «организаций нет», выбиратель на рождении слеп, и заметить
+  // это было нечем. Теперь картина переносится вместе с ЕЁ возрастом.
+  test('дверь онемела — организации переносятся со СВОИМ штампом, а не со свежим', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-goq-'))
+    try {
+      const auth = join(dir, 'auth.json')
+      writeFileSync(auth, JSON.stringify({ 'opencode-go': { type: 'api', key: 'K' } }))
+      const out = join(dir, 'quota-status-opencode-go.json')
+      const OLD = '2026-10-07T09:00:00.000Z'
+      writeFileSync(out, JSON.stringify({
+        active: 'hello@foody7.com',
+        measured_at: OLD,
+        orgs: [
+          { name: 'hello@sealform.dev', active: false, util7d: 1 },
+          { name: 'hello@foody7.com', active: true, util7d: 0 },
+        ],
+      }))
+      const deadDoor = (async () => ({ code: 0, stdout: 'ошибка: реестр не прочитан', stderr: '' })) as any
+      const fetchFn = okFetch({ data: [] })
+      const s: any = await collectOnce({
+        authJsonPath: auth, litellmConfigPath: join(dir, 'nope.yaml'),
+        goRefresherPath: '/door.py', outPath: out, fetcher: fetchFn, runner: deadDoor,
+        now: () => AT, dbPath: join(dir, 'opencode.db'),
+      })
+      const onDisk = JSON.parse(readFileSync(out, 'utf8'))
+      // Картина НЕ стёрта: обе организации на месте.
+      expect(onDisk.orgs.map((o: any) => o.name)).toEqual(['hello@sealform.dev', 'hello@foody7.com'])
+      // И она не притворяется свежей: штамп — прежний, а не `now()`.
+      expect(onDisk.measured_at).toBe(OLD)
+      expect(s.measured_at).toBe(OLD)
+      // Перенос назван в самом отчёте, а не спрятан.
+      expect(String(onDisk.error)).toContain('orgs carried from')
+      expect(String(onDisk.error)).toContain(OLD)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('мост имя→uid (member.orgUid ↔ orgs[])', () => {

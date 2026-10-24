@@ -39,6 +39,20 @@ WARN  UNKNOWN_MODEL_PASSTHROUGH model=claude-XXX
 | 2 | `packages/claude-max-proxy/src/openai-translate.ts` | `DIRECT_MODEL_MAP` (id → id), `PROXY_MODEL_MAP` (`claude-vN-<family>` alias), `SUPPORTED_MODELS` (both entries). |
 | 3 | — | **Nothing else.** If you find yourself editing a model list anywhere else, that list is violating the SSOT rule — refactor it to read `models.ts` instead. |
 
+### Модель НЕ Anthropic (маршрут OpenCode Go и подобные) — с 24.10.2026
+
+Тот же реестр, другое поле. Фаундер, дословно: «разве нет реестра провайдеров, моделей и так
+далее централизованного? или мы каждый раз всё это вручную хардкодим?» До этой даты модели Go
+жили в `litellm/config.yaml` со своими ценами, подогнанными руками, — то есть числа об одной
+вещи лежали в двух местах.
+
+| # | Что | Зачем |
+|---|-----|-------|
+| 1 | `src/models.ts` — запись с `provider: 'opencode-go'` | Иначе потребитель не отличит маршрут и зарегистрирует модель под Claude (см. п.2). |
+| 2 | Ничего в `opencode-claude` / `opencode-plugin` | Оба цикла регистрации сами пропускают `provider === 'opencode-go'`. Список моделей Claude от этого не меняется. |
+| 3 | `cacheTtlSec` и `rewriteMinTokens` — **обязательно** | Это пороги сторожа переписи. Отсутствие поля означает «взять глобальную настройку», и модель молча живёт по чужому числу. |
+| 4 | `litellm/config.yaml` — оставить маршрут и учётные данные | Цена и пороги теперь в реестре; конфиг — про то, куда идти и под чьим пропуском. Дублировать цену НЕ надо. |
+
 ## Forbidden
 
 - ❌ Substring model lists outside `src/models.ts` (capability gates MUST call

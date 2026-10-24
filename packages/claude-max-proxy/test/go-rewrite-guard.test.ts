@@ -177,11 +177,15 @@ describe('rewrittenTokens — сколько КЭША перепишется, а
   // сессии на 300k токенов правка первой строки давала «~300k» и упиралась в порог, хотя
   // переписывается только хвост.
   const big = (t: string) => ({ role: 'user', content: t.repeat(400) })
+  // Целый вес — БАЙТАМИ (utf8), тем же курсом, что в rewrittenTokens: /4 в токены.
+  const wholeOf = (parsed: any) => Math.round(Buffer.byteLength(JSON.stringify({
+    system: parsed?.system ?? null, tools: parsed?.tools ?? null, messages: parsed?.messages ?? [],
+  }), 'utf8') / 4)
 
   test('расхождение в начале — считаем хвост, а не всю историю', () => {
     const msgs = [big('a'), big('b'), big('c'), big('d')]
     const parsed = { messages: msgs, tools: [] }
-    const whole = Math.round(JSON.stringify(parsed).length / 4)
+    const whole = wholeOf(parsed)
     const tail = rewrittenTokens(parsed, { verdict: 'rewrite', firstDiffIndex: 2 } as PrefixAnalysis)
     expect(tail).toBeGreaterThan(0)
     // Хвост заметно меньше целого — именно на этом порог и должен срабатывать.
@@ -190,13 +194,13 @@ describe('rewrittenTokens — сколько КЭША перепишется, а
 
   test('сменился набор инструментов — переписывается всё, префикс новый', () => {
     const parsed = { messages: [big('a'), big('b')], tools: [{ name: 'x' }] }
-    const whole = Math.round(JSON.stringify(parsed).length / 4)
+    const whole = wholeOf(parsed)
     expect(rewrittenTokens(parsed, { verdict: 'rewrite', firstDiffIndex: 1, toolsChanged: true } as PrefixAnalysis)).toBe(whole)
   })
 
   test('место расхождения неизвестно — не преуменьшаем убыток', () => {
     const parsed = { messages: [big('a')], tools: [] }
-    const whole = Math.round(JSON.stringify(parsed).length / 4)
+    const whole = wholeOf(parsed)
     expect(rewrittenTokens(parsed, { verdict: 'unknown' } as PrefixAnalysis)).toBe(whole)
   })
 })
@@ -262,5 +266,32 @@ describe('холодная перепись и АВТО-ОТКАТ', () => {
 
   test('окно 0 — авто-откат выключен', () => {
     expect(shouldAutoRevert({ now: 900_000, lastRefusalAt: 100, lastPassAt: 0, windowMs: 0 })).toBe(false)
+  })
+})
+
+describe('системный промпт — часть префикса', () => {
+  // 🔴 Вопрос владельца wake-router 24.10.2026: «прогрев с неизменным префиксом — это чтение?
+  // или бывает, что префикс чуть другой?» Проверка кода показала хуже: системный промпт не
+  // хэшировался ВООБЩЕ, поэтому прогон со сменённым ТОЛЬКО system считался `append` — сторож
+  // молчал на самой дорогой переписи (меняется голова контекста).
+  const m = (t: string) => ({ role: 'user', content: t })
+  const sys = (t: string) => ({ system: t, messages: [m('a'), m('b')] })
+
+  test('смена ТОЛЬКО системного промпта — это перепись, а не append', () => {
+    const s = session()
+    const first = commitPrefix(s, sys('RAILS v1'), { now: 1_000 })
+    expect(first.verdict).toBe('first')
+    const second = commitPrefix(s, sys('RAILS v2'), { now: 2_000 })
+    expect(second.verdict).toBe('rewrite')
+    // Голова контекста — это НУЛЕВОЕ расхождение: переписывается всё, а не хвост.
+    expect(second.firstDiffIndex).toBe(0)
+    expect(second.avoidableRewrite).toBe(true)
+  })
+
+  test('тот же системный промпт и та же история — не перепись', () => {
+    const s = session()
+    commitPrefix(s, sys('RAILS v1'), { now: 1_000 })
+    const second = commitPrefix(s, sys('RAILS v1'), { now: 2_000 })
+    expect(second.verdict).not.toBe('rewrite')
   })
 })

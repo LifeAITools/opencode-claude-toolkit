@@ -146,6 +146,7 @@ const prefixMemory = new Map<string, {
   msgHashes: string[]
   roles: string[]
   tools: string
+  system?: string
   at: number
 }>()
 
@@ -270,6 +271,8 @@ export interface PrefixAnalysis {
    * знает и время, и слепок.
    */
   cacheExpired?: boolean
+  /** Сменился системный промпт: кэш теряется ЦЕЛИКОМ, и убыток считается по всему телу. */
+  systemChanged?: boolean
 }
 
 /** Сколько живёт кэш по умолчанию, если вызывающий не назвал своё (45 мин, колено Go). */
@@ -346,10 +349,21 @@ export function commitPrefix(
     if (oldest !== undefined) prefixMemory.delete(oldest)
   }
   prefixMemory.set(sessionId, {
+    // 🔴 СИСТЕМНЫЙ ПРОМПТ — ЧАСТЬ ПРЕФИКСА, А НЕ ФОН (нашёл 24.10.2026 по вопросу владельца
+    // wake-router). Раньше хэшировались только сообщения и инструменты, поэтому прогон, у
+    // которого сменился ТОЛЬКО системный промпт (у нас в стартовый контекст подмешиваются рельсы
+    // и знание проекта), считался `append` — то есть сторож молчал на самой дорогой переписи,
+    // какая бывает: меняется голова, кэш теряется целиком.
     full: sha256(JSON.stringify(msgs)),
     msgHashes: msgs.map(msgHash),
     roles: msgs.map((m: any) => (typeof m?.role === 'string' ? m.role : '?')),
     tools: sha256(JSON.stringify(body?.tools ?? null)).slice(0, 12),
+    // 🔴 СИСТЕМНЫЙ ПРОМПТ — ОТДЕЛЬНОЕ СЛЕПОК-ПОЛЕ, И ЭТО ВАЖНО (24.10.2026). Раньше его не
+    // хэшировали вовсе: прогон со сменённым ТОЛЬКО system считался `append`, и сторож молчал на
+    // самой дорогой переписи. Отдельным полем, а не примешанным к сообщениям: смена головы не
+    // даёт расхождения ПО СООБЩЕНИЯМ, и обычный поиск первого расхождения вернул бы «ничего не
+    // изменилось», то есть посчитал бы убыток по хвосту вместо всего префикса.
+    system: sha256(JSON.stringify(body?.system ?? null)).slice(0, 12),
     at: now,
   })
   // Голова — ДО того, как её заменит следующая история: иначе снимок сравнивал бы новое с новым.
@@ -359,7 +373,7 @@ export function commitPrefix(
 
 /** Общий разбор: единственное место, где решается append/rewrite/first. */
 function compareToPrevious(
-  prev: { full: string; msgHashes: string[]; roles: string[]; tools: string; at: number } | undefined,
+  prev: { full: string; msgHashes: string[]; roles: string[]; tools: string; system?: string; at: number } | undefined,
   msgs: any[],
   body: any,
   now: number,
@@ -368,13 +382,20 @@ function compareToPrevious(
   const cacheable = msgs.slice(0, -1)
   const prefixSha = sha256(JSON.stringify(cacheable))
   const tools = sha256(JSON.stringify(body?.tools ?? null)).slice(0, 12)
+  const system = sha256(JSON.stringify(body?.system ?? null)).slice(0, 12)
 
   if (!prev) return { verdict: 'first', msgs: msgs.length, cacheTtlMs }
   if (cacheable.length === 0) return { verdict: 'first', msgs: msgs.length, cacheTtlMs }
   const idleMs = Math.max(0, now - prev.at)
   // 🔴 tools ВХОДЯТ В КЭШИРУЕМЫЙ ПРЕФИКС наравне с сообщениями: продолжение истории при
   // смене набора инструментов — всё равно промах, и назвать его «append» значило бы соврать.
-  if (prev.full === prefixSha && prev.tools === tools) {
+  const systemChanged = (prev.system ?? '') !== system
+  // 🔴 ДВА ВИДА «НИЧЕГО НОВОГО»: добавлено сообщение (прежняя история стала префиксом) и
+  // ПОВТОР ТОЙ ЖЕ ИСТОРИИ (прогрев). Второй случай раньше падал в «историю обрезали» и получал
+  // вердикт `rewrite` — то есть прогрев с неизменным префиксом выглядел переписью. Владелец
+  // wake-router спрашивал именно об этом 24.10.2026.
+  const sameHistory = prev.full === sha256(JSON.stringify(msgs))
+  if ((prev.full === prefixSha || sameHistory) && prev.tools === tools && !systemChanged) {
     return { verdict: 'append', msgs: msgs.length, idleMs, cacheTtlMs }
   }
 
@@ -384,6 +405,10 @@ function compareToPrevious(
   for (let i = 0; i < common; i++) {
     if (prev.msgHashes[i] !== msgHash(cacheable[i])) { firstDiff = i; break }
   }
+  // 🔴 СМЕНА ГОЛОВЫ КОНТЕКСТА — РАСХОЖДЕНИЕ С НУЛЕВОГО СООБЩЕНИЯ. Сообщения при этом совпадают,
+  // поэтому обычный поиск ничего не находит, и убыток посчитался бы по хвосту. На деле меняется
+  // системный промпт — кэш теряется ЦЕЛИКОМ, и назвать это надо честно.
+  if (systemChanged) firstDiff = 0
   // Прошлая история была длиннее, а общий префикс совпал — историю обрезали.
   if (firstDiff === undefined && prev.msgHashes.length > cacheable.length) firstDiff = cacheable.length
   const toolsChanged = prev.tools !== tools
@@ -398,6 +423,7 @@ function compareToPrevious(
     // здесь молчит. Измерение 23.10: таких меньшинство, но называть их виноватыми нельзя.
     avoidableRewrite: !toolsChanged && idleMs < cacheTtlMs,
     cacheExpired: !toolsChanged && idleMs >= cacheTtlMs,
+    ...(systemChanged ? { systemChanged: true } : {}),
     cacheTtlMs,
   }
 }
@@ -431,13 +457,27 @@ export function prefixVerdict(sessionId: string | null, body: any, now = Date.no
  * случилась и переплачена.
  */
 export function rewrittenTokens(parsed: any, analysis: PrefixAnalysis): number {
-  const all = () => Math.round(JSON.stringify(parsed ?? {}).length / 4)
-  if (analysis.toolsChanged) return all()
+  // 🔴 БАЙТЫ, А НЕ ЗНАКИ (слово фаундера 24.4.2026: «должна быть побайтовая проверка, понимающая,
+  // сколько кэша будет записано»). `JSON.stringify(...).length` считает единицы UTF-16: русский
+  // текст — один знак, но два байта, то есть прежняя оценка занижала убыток на русском вдвое.
+  // Токены примерно равны байтам/4 — тем же курсом, что у Anthropic.
+  const bytes = (v: unknown): number => {
+    try { return Buffer.byteLength(JSON.stringify(v ?? null), 'utf8') } catch { return 0 }
+  }
+  const whole = () => Math.round(bytes({
+    system: parsed?.system ?? null,
+    tools: parsed?.tools ?? null,
+    messages: parsed?.messages ?? [],
+  }) / 4)
+  // Сменилась голова контекста — не попадает НИЧЕГО, платим за всё тело.
+  if (analysis.toolsChanged === true || analysis.systemChanged === true) return whole()
   const idx = analysis.firstDiffIndex
-  if (idx === undefined) return all()
+  if (idx === undefined) return whole()
   const msgs = Array.isArray(parsed?.messages) ? parsed.messages : []
-  if (msgs.length === 0) return all()
-  return Math.round(JSON.stringify(msgs.slice(Math.max(0, idx))).length / 4)
+  if (msgs.length === 0) return whole()
+  // Система и инструменты СОВПАЛИ — они читаются из кэша и в убыток не входят. Платим только
+  // за сообщения от места расхождения: всё, что до него, попадает.
+  return Math.round(bytes(msgs.slice(Math.max(0, idx))) / 4)
 }
 
 export function shouldBlockRewrite(input: {

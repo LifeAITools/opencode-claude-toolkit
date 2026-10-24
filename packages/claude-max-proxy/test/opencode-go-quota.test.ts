@@ -98,6 +98,33 @@ describe('дверь реестра kiberos-app', () => {
     const runner = (async () => ({ code: 2, stdout: '', stderr: 'boom' })) as any
     expect((await readGoRegistry('/door.py', runner)).error).toBe('go_refresher_exit_2')
   })
+
+  // 🔴 ЗАМЕР 24.10.2026: в момент заведения новой организации дверь напечатала русскую строку
+  // журнала в тот же stdout, что и JSON. Разбор целого упал на «Unrecognized token 'о'», отчёт
+  // записался БЕЗ `orgs` (пятнадцать организаций стали нулём), и выбиратель на рождении получил
+  // «выбирать нечего» — свежая организация молча пропущена, ошибки не видит никто.
+  test('журнальная строка рядом с JSON не обнуляет реестр, но и не проглатывается', async () => {
+    const body = JSON.stringify({
+      active: 'hello@foody7.com',
+      measured_at_ms: AT.getTime(),
+      orgs: [{ name: 'hello@foody7.com', active: true, usage: LIVE, exhausted: [] }],
+    })
+    const noisy = `завожу новую организацию hello@mailclowd.com\n${body}`
+    const runner = (async () => ({ code: 0, stdout: noisy, stderr: '' })) as any
+    const { registry, error } = await readGoRegistry('/door.py', runner)
+    expect(registry?.orgs.length).toBe(1)
+    expect(registry?.orgs[0].name).toBe('hello@foody7.com')
+    expect(error).toContain('go_refresher_noisy_stdout')
+    expect(error).toContain('завожу новую организацию')
+  })
+
+  test('в выводе нет объекта вовсе — ошибка называет, что именно пришло', async () => {
+    const runner = (async () => ({ code: 0, stdout: 'ошибка: реестр не прочитан', stderr: '' })) as any
+    const { registry, error } = await readGoRegistry('/door.py', runner)
+    expect(registry).toBeNull()
+    expect(error).toContain('no JSON object in door output')
+    expect(error).toContain('ошибка')
+  })
 })
 
 describe('чьи модели', () => {

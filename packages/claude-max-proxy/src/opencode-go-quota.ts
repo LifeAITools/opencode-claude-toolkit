@@ -128,11 +128,42 @@ export async function readGoRegistry(
   try {
     const r = await run('python3', [doorPath, 'status', '--json'])
     if (r.code !== 0) return { registry: null, error: `go_refresher_exit_${r.code}` }
-    const body = JSON.parse(r.stdout) as GoRegistryStatus
-    if (!body || !Array.isArray(body.orgs)) return { registry: null, error: 'go_refresher_bad_json' }
-    return { registry: body, error: null }
+    const { body, noise } = parseDoorJson(r.stdout)
+    if (!body || !Array.isArray((body as GoRegistryStatus).orgs)) return { registry: null, error: 'go_refresher_bad_json' }
+    // Шум не проглатывается: организации отдаются, а дефект двери едет в отчёт отдельной
+    // ошибкой — иначе он станет невидимым ровно тогда, когда перестанет ломать разбор.
+    return { registry: body as GoRegistryStatus, error: noise ? `go_refresher_noisy_stdout: ${noise}` : null }
   } catch (e) {
     return { registry: null, error: `go_refresher_unavailable: ${String((e as Error).message).slice(0, 200)}` }
+  }
+}
+
+/**
+ * 🔴 ВЫВОД ДВЕРИ БЫВАЕТ НЕЧИСТЫМ, И ПУСТОТА ЗДЕСЬ ДОРОЖЕ ОШИБКИ (замер 24.10.2026).
+ *
+ * `go_refresher.py status --json` печатает журнал в тот же stdout, что и JSON. В момент, когда
+ * заводилась новая организация, в вывод попала русская строка, `JSON.parse` упал на
+ * «Unrecognized token 'о'», и отчёт записался БЕЗ массива `orgs` — пятнадцать организаций стали
+ * нулём. Для того, кто выбирает организацию на рождении, пустой список означает «выбирать
+ * нечего»: свежая организация молча пропускается, и ошибки не видит никто, потому что отчёт
+ * выглядит как обычный отчёт.
+ *
+ * Поэтому разбор терпимый: сначала целый вывод, затем — единственный объект внутри него. Шум
+ * возвращается вызывающему, а не проглатывается.
+ */
+function parseDoorJson(raw: string): { body: unknown; noise: string | null } {
+  const text = raw.trim()
+  try {
+    return { body: JSON.parse(text), noise: null }
+  } catch {
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start < 0 || end <= start) {
+      throw new Error(`no JSON object in door output: ${text.slice(0, 80)}`)
+    }
+    const body = JSON.parse(text.slice(start, end + 1))
+    const around = `${text.slice(0, start)}\n${text.slice(end + 1)}`.trim().slice(0, 120)
+    return { body, noise: around || 'non-json around object' }
   }
 }
 

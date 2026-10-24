@@ -213,8 +213,20 @@ describe('холодная перепись и АВТО-ОТКАТ', () => {
     expect(shouldBlockRewrite({ enabled: true, analysis: cold(), predictedTokens: 10_000_000, minTokens: 50_000, consented: false })).toBe(false)
   })
 
-  test('холодная перепись блокируется только своим ключом', () => {
+  test('дорогая запись блокируется только своим ключом', () => {
     expect(shouldBlockRewrite({ enabled: true, coldEnabled: true, analysis: cold(), predictedTokens: 90_000, minTokens: 50_000, consented: false })).toBe(true)
+  })
+
+  // 🔴 Колено (20 мин) — ДРУГОЕ число, чем срок жизни кэша (45 мин): кэш может быть ещё жив,
+  // а запись уже стоит как холодный старт. Вызывающий говорит это полем `coldRewrite`.
+  test('кэш ещё жив, но перепись после колена — блокируется холодным ключом', () => {
+    const warmButLate = { verdict: 'rewrite' as const, avoidableRewrite: true, cacheExpired: false }
+    expect(shouldBlockRewrite({ enabled: false, coldEnabled: true, coldRewrite: true, analysis: warmButLate, predictedTokens: 90_000, minTokens: 50_000, consented: false })).toBe(true)
+  })
+
+  test('до колена та же перепись холодным ключом не блокируется', () => {
+    const warmEarly = { verdict: 'rewrite' as const, avoidableRewrite: true, cacheExpired: false }
+    expect(shouldBlockRewrite({ enabled: false, coldEnabled: true, coldRewrite: false, analysis: warmEarly, predictedTokens: 90_000, minTokens: 50_000, consented: false })).toBe(false)
   })
 
   test('ниже порога не блокируется ни в одном случае', () => {
@@ -227,23 +239,28 @@ describe('холодная перепись и АВТО-ОТКАТ', () => {
   })
 
   // АВТО-ОТКАТ: условие — «остановили и никто не прошёл», а не «прошло время».
-  test('окно не истекло — не откатываем', () => {
-    expect(shouldAutoRevert({ elapsedMs: 30_000, windowMs: 60_000, refusals: 5, passed: 0 })).toBe(false)
+  test('окно с последнего отказа не истекло — не откатываем', () => {
+    expect(shouldAutoRevert({ now: 100_000, lastRefusalAt: 70_000, lastPassAt: 0, windowMs: 60_000 })).toBe(false)
   })
 
-  test('всех остановили и ни один не прошёл — откатываем', () => {
-    expect(shouldAutoRevert({ elapsedMs: 61_000, windowMs: 60_000, refusals: 3, passed: 0 })).toBe(true)
+  test('отказ был, окно истекло, пропусков после — откатываем', () => {
+    expect(shouldAutoRevert({ now: 131_000, lastRefusalAt: 70_000, lastPassAt: 0, windowMs: 60_000 })).toBe(true)
   })
 
-  test('хоть один прошёл — сторож не перекрыл кислород, не откатываем', () => {
-    expect(shouldAutoRevert({ elapsedMs: 61_000, windowMs: 60_000, refusals: 30, passed: 1 })).toBe(false)
+  test('хоть один прошёл ПОСЛЕ отказа — кислород не перекрыт', () => {
+    expect(shouldAutoRevert({ now: 200_000, lastRefusalAt: 70_000, lastPassAt: 90_000, windowMs: 60_000 })).toBe(false)
   })
 
-  test('тишина — не поломка: ноль трафика откатом не считается', () => {
-    expect(shouldAutoRevert({ elapsedMs: 600_000, windowMs: 60_000, refusals: 0, passed: 0 })).toBe(false)
+  // 🔴 ОКНО СКОЛЬЗЯЩЕЕ: провал ПОСЛЕ более раннего успеха обязан считаться.
+  test('прошлый успех не спасает: новый отказ и тишина после него — откат', () => {
+    expect(shouldAutoRevert({ now: 300_000, lastRefusalAt: 200_000, lastPassAt: 90_000, windowMs: 60_000 })).toBe(true)
+  })
+
+  test('тишина — не поломка: отказов не было вовсе', () => {
+    expect(shouldAutoRevert({ now: 900_000, lastRefusalAt: 0, lastPassAt: 0, windowMs: 60_000 })).toBe(false)
   })
 
   test('окно 0 — авто-откат выключен', () => {
-    expect(shouldAutoRevert({ elapsedMs: 600_000, windowMs: 0, refusals: 10, passed: 0 })).toBe(false)
+    expect(shouldAutoRevert({ now: 900_000, lastRefusalAt: 100, lastPassAt: 0, windowMs: 0 })).toBe(false)
   })
 })

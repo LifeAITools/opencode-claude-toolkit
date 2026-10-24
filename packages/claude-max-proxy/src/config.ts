@@ -120,10 +120,19 @@ export interface ProxyConfig {
   // префикс заново. Отдельный ключ, а не изменение поведения по умолчанию: у случаев разная
   // природа, и включать их надо по отдельности.
   goRewriteGuardColdEnabled: boolean
+  // 🔴 ЯВНОЕ ЗНАЧЕНИЕ ОПЕРАТОРА ВЫШЕ РЕЕСТРА. Пороги живут у модели (24.10), но человеку нужен
+  // способ проверить сторожа на живом, не правя реестр: если ключ задан В ФАЙЛЕ ИЛИ ОКРУЖЕНИИ —
+  // он главный. Иначе порядок такой: значение модели → встроенное умолчание.
+  goRewriteGuardCacheTtlSecExplicit: boolean
+  goRewriteGuardMinTokensExplicit: boolean
   // 🔴 АВТО-ОТКАТ: сколько секунд наблюдать, прежде чем признать, что сторож всех остановил.
   // Условие откката — не время само по себе (иначе он выключится и при полном порядке), а
   // «были отказы И НИ ОДНОГО пропуска»: значит мы тормозим и ничего не доходит. 0 = выключено.
   goRewriteGuardAutoRevertSec: number
+  // Экономическое колено: после какого простоя запись префикса считается дорогой. НЕ срок жизни
+  // кэша — отдельное число (1200 с = 20 мин, слово фаундера и замер wake-router).
+  goRewriteGuardColdAfterSec: number
+  goRewriteGuardColdAfterSecExplicit: boolean
 
   // Subscription compat layer (hot-configurable for binary distribution)
   ccCompatVersion: string
@@ -263,7 +272,17 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
     goRewriteGuardCacheTtlSec: readInt('GO_REWRITE_GUARD_CACHE_TTL_SEC', 2700, fileEnv),
     goRewriteGuardGrantTtlSec: readInt('GO_REWRITE_GUARD_GRANT_TTL_SEC', 180, fileEnv),
     goRewriteGuardColdEnabled: readBool('GO_REWRITE_GUARD_COLD_ENABLED', false, fileEnv),
+    goRewriteGuardCacheTtlSecExplicit:
+      process.env['GO_REWRITE_GUARD_CACHE_TTL_SEC'] !== undefined
+      || Object.prototype.hasOwnProperty.call(fileEnv, 'GO_REWRITE_GUARD_CACHE_TTL_SEC'),
+    goRewriteGuardMinTokensExplicit:
+      process.env['GO_REWRITE_GUARD_MIN_TOKENS'] !== undefined
+      || Object.prototype.hasOwnProperty.call(fileEnv, 'GO_REWRITE_GUARD_MIN_TOKENS'),
     goRewriteGuardAutoRevertSec: readInt('GO_REWRITE_GUARD_AUTOREVERT_SEC', 120, fileEnv),
+    goRewriteGuardColdAfterSec: readInt('GO_REWRITE_GUARD_COLD_AFTER_SEC', 1200, fileEnv),
+    goRewriteGuardColdAfterSecExplicit:
+      process.env['GO_REWRITE_GUARD_COLD_AFTER_SEC'] !== undefined
+      || Object.prototype.hasOwnProperty.call(fileEnv, 'GO_REWRITE_GUARD_COLD_AFTER_SEC'),
     sparkReasoningEffort: (['minimal', 'low', 'medium', 'high'].includes(read('SPARK_REASONING_EFFORT', 'minimal', fileEnv))
       ? read('SPARK_REASONING_EFFORT', 'minimal', fileEnv)
       : 'minimal') as 'minimal' | 'low' | 'medium' | 'high',

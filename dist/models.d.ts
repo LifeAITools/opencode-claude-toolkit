@@ -16,6 +16,7 @@ export interface ModelMetadata {
     provider?: "anthropic" | "opencode-go";
     cacheTtlSec?: number;
     rewriteMinTokens?: number;
+    coldRewriteAfterSec?: number;
 }
 export declare const MAX_MODELS: Record<string, ModelMetadata>;
 export declare const FALLBACK_MODEL: Pick<ModelMetadata, "defaultOutput" | "maxOutput" | "adaptiveThinking">;

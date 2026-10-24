@@ -284,6 +284,8 @@ let coldGuardReverted = false
 let coldGuardArmedAt = 0
 let coldGuardRefusals = 0
 let coldGuardPassed = 0
+let coldGuardLastRefusalAt = 0
+let coldGuardLastPassAt = 0
 
 /** Для испытаний: вернуть сторож в исходное состояние. */
 export function resetColdGuardState(): void {
@@ -291,6 +293,8 @@ export function resetColdGuardState(): void {
   coldGuardArmedAt = 0
   coldGuardRefusals = 0
   coldGuardPassed = 0
+  coldGuardLastRefusalAt = 0
+  coldGuardLastPassAt = 0
 }
 
 export function coldGuardState(): { reverted: boolean; refusals: number; passed: number } {
@@ -438,19 +442,29 @@ export function rewrittenTokens(parsed: any, analysis: PrefixAnalysis): number {
 
 export function shouldBlockRewrite(input: {
   enabled: boolean
-  /** Второй случай — холодная перепись после истёкшего кэша. Отдельный ключ, не тот же самый. */
+  /** Второй случай — дорогая запись после колена. Отдельный ключ, не тот же самый. */
   coldEnabled?: boolean
+  /**
+   * Запись префикса после ЭКОНОМИЧЕСКОГО колена (не «кэш истёк» — кэш может быть жив, но цена
+   * промаха уже сравнялась с ценой новой сессии). Считает вызывающий: он знает и порог модели,
+   * и простой. Функция остаётся чистой.
+   */
+  coldRewrite?: boolean
   analysis: PrefixAnalysis
   predictedTokens: number
   minTokens: number
   consented: boolean
 }): boolean {
-  if (!input.enabled || input.consented) return false
+  if (input.consented) return false
   if (input.predictedTokens < input.minTokens) return false
+  // 🔴 ДВА СЛУЧАЯ — ДВА КЛЮЧА, БЕЗ ОБЩЕГО ГЕЙТА (нашёл на испытании 24.10): раньше `enabled`
+  // гасил и холодный случай, поэтому при выключенном основном сторожа холодный ключ не включал
+  // ничего. Теперь каждый случай спрашивает только свой ключ.
   // Тёплая перепись: кэш ещё должен был попасть — вина отправителя.
-  if (input.analysis.avoidableRewrite === true) return true
-  // Холодная: кэш истёк, платим за большой префикс заново. Природа другая, ключ другой.
-  return input.coldEnabled === true && input.analysis.cacheExpired === true
+  if (input.enabled && input.analysis.avoidableRewrite === true) return true
+  // Дорогая запись после колена: кэш мог истечь, а мог и выжить — платим в любом случае много.
+  // Природа другая, ключ другой, поэтому и поле отдельное.
+  return input.coldEnabled === true && (input.coldRewrite === true || input.analysis.cacheExpired === true)
 }
 
 /**
@@ -461,13 +475,17 @@ function noteColdGuardOutcome(cfg: { goRewriteGuardAutoRevertSec: number }, pass
   const windowMs = cfg.goRewriteGuardAutoRevertSec * 1000
   if (windowMs <= 0 || coldGuardReverted) return
   if (coldGuardArmedAt === 0) coldGuardArmedAt = Date.now()
-  if (passed) coldGuardPassed += 1
-  else coldGuardRefusals += 1
+  const now = Date.now()
+  if (passed) { coldGuardPassed += 1; coldGuardLastPassAt = now }
+  else { coldGuardRefusals += 1; coldGuardLastRefusalAt = now }
+  // 🔴 ОКНО — СКОЛЬЗЯЩЕЕ, А НЕ ОТ СТАРТА ПРОЦЕССА. Счётчики «за всё время» делали откат
+  // невозможным после первого же успешного хода: однажды пропустив, сторож уже никогда не
+  // признал бы, что перекрыл кислород. Условие спрашивает про ПОСЛЕДНИЙ отказ, а не про первый.
   if (shouldAutoRevert({
-    elapsedMs: Date.now() - coldGuardArmedAt,
+    now,
+    lastRefusalAt: coldGuardLastRefusalAt,
+    lastPassAt: coldGuardLastPassAt,
     windowMs,
-    refusals: coldGuardRefusals,
-    passed: coldGuardPassed,
   })) {
     coldGuardReverted = true
   }
@@ -483,14 +501,17 @@ function noteColdGuardOutcome(cfg: { goRewriteGuardAutoRevertSec: number }, pass
  * и выключать сторожа из-за тишины значило бы никогда не проверить его на живом.
  */
 export function shouldAutoRevert(input: {
-  elapsedMs: number
+  now: number
+  lastRefusalAt: number
+  lastPassAt: number
   windowMs: number
-  refusals: number
-  passed: number
 }): boolean {
   if (input.windowMs <= 0) return false
-  if (input.elapsedMs < input.windowMs) return false
-  return input.refusals > 0 && input.passed === 0
+  if (!input.lastRefusalAt) return false
+  // Кто-то прошёл ПОСЛЕ последнего отказа — кислород не перекрыт.
+  if (input.lastPassAt >= input.lastRefusalAt) return false
+  // Отказ был, окно с тех пор истекло, и ни один ход не прошёл — вот это и есть поломка.
+  return input.now - input.lastRefusalAt >= input.windowMs
 }
 
 /**
@@ -579,7 +600,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   // `cacheTtlSec` и `rewriteMinTokens` у каждой записи; глобальная настройка остаётся для
   // моделей, которых в реестре нет, — отсутствие поля не должно менять поведение.
   const modelMeta = typeof model === 'string' && model ? getModelMetadata(model) : undefined
-  const cacheTtlMs = (modelMeta?.cacheTtlSec ?? cfg.goRewriteGuardCacheTtlSec) * 1000
+  const cacheTtlSec = cfg.goRewriteGuardCacheTtlSecExplicit
+    ? cfg.goRewriteGuardCacheTtlSec
+    : (modelMeta?.cacheTtlSec ?? cfg.goRewriteGuardCacheTtlSec)
+  const cacheTtlMs = cacheTtlSec * 1000
   const analysis = assessPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
   // 🔴 ПОРОГ СЧИТАЕТСЯ ПО ПЕРЕПИСЫВАЕМОЙ ЧАСТИ, А НЕ ПО ВСЕМУ ТЕЛУ (слово фаундера 24.10:
   // «проверяет байт-идентичность слепка и того, что агент шлёт, чтобы детектировать, СКОЛЬКО КЭША
@@ -594,17 +618,31 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let consented = false
   // 🔴 Только при включённом стороже: пропуск ОДНОРАЗОВЫЙ и удаляется при чтении,
   // поэтому выключенный сторож не имеет права его сжигать.
+  const coldAfterSec = cfg.goRewriteGuardColdAfterSecExplicit
+    ? cfg.goRewriteGuardColdAfterSec
+    : (modelMeta?.coldRewriteAfterSec ?? cfg.goRewriteGuardColdAfterSec)
+  // 🔴 ДОРОГАЯ ЗАПИСЬ = перепись префикса после экономического колена (20 мин у моделей Go).
+  // Срок жизни кэша тут НЕ решает: кэш может быть ещё жив, но промах уже стоит как холодный старт.
+  const coldRewrite = analysis.verdict === 'rewrite'
+    && analysis.toolsChanged !== true
+    && (analysis.idleMs ?? 0) >= coldAfterSec * 1000
   const coldGuardOn = cfg.goRewriteGuardColdEnabled && !coldGuardReverted
-  if ((cfg.goRewriteGuardEnabled || coldGuardOn) && (analysis.avoidableRewrite === true || analysis.cacheExpired === true) && sessionId) {
+  if ((cfg.goRewriteGuardEnabled || coldGuardOn) && (analysis.avoidableRewrite === true || analysis.cacheExpired === true || coldRewrite) && sessionId) {
     consented = hasMarkerInLastUserMessage(parsed, cfg.goRewriteGuardMarker)
       || consumeConsent(cfg.goRewriteGuardGrantPath, sessionId)
   }
+  // 🔴 ДВА КЛЮЧА — ДВА СЛУЧАЯ, И ОНИ НЕ СКЛАДЫВАЮТСЯ В ОДИН (нашёл на испытании 24.10):
+  // `enabled: main || cold` включал бы ТЁПЛУЮ блокировку вместе с холодным ключом, хотя основной
+  // сторож выключен. Каждый случай входит только своим ключом.
   if (shouldBlockRewrite({
-    enabled: cfg.goRewriteGuardEnabled || coldGuardOn,
+    enabled: cfg.goRewriteGuardEnabled,
     coldEnabled: coldGuardOn,
+    coldRewrite,
     analysis,
     predictedTokens,
-    minTokens: modelMeta?.rewriteMinTokens ?? cfg.goRewriteGuardMinTokens,
+    minTokens: cfg.goRewriteGuardMinTokensExplicit
+      ? cfg.goRewriteGuardMinTokens
+      : (modelMeta?.rewriteMinTokens ?? cfg.goRewriteGuardMinTokens),
     consented,
   })) {
     const whereRu = analysis.firstDiffIndex === undefined
@@ -625,8 +663,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     // Текст называет, ЧЕМ эта перепись плоха: кэш жив (виноват отправитель) или уже истёк
     // (виновато время, но платим столько же). Один и тот же отказ с разной причиной читался бы
     // как один и тот же случай, и виновного искали бы не там.
-    const why = analysis.cacheExpired === true
-      ? `of a prefix whose cache has EXPIRED (idle ${idleMin} min >= ttl ${ttlMin} min) — this is a COLD write`
+    const coldMin = Math.round(coldAfterSec / 60)
+    const why = coldRewrite
+      ? `of a prefix after a ${idleMin}-minute gap (>= ${coldMin} min) — this write costs like a COLD start; `
+        + `a NEW SESSION would be cheaper than rewriting`
       : `of a prefix whose cache is still alive (idle ${idleMin} min < ttl ${ttlMin} min)`
     const message = `Cache guard: this turn on the Go door would rewrite ~${predictedTokens} `
       + `tokens (of ~${totalTokens} in the request) ${why} — `

@@ -96,6 +96,16 @@ export interface ModelMetadata {
    * Отсутствие = глобальная настройка (`GO_REWRITE_GUARD_MIN_TOKENS`).
    */
   rewriteMinTokens?: number
+  /**
+   * 🔴 ЭКОНОМИЧЕСКОЕ КОЛЕНО: после какого простоя ЗАПИСЬ префикса считается дорогой (секунды).
+   * Это НЕ срок жизни кэша — тот в `cacheTtlSec`. Кэш может быть ещё жив, но с этого момента
+   * цена промаха и цена новой сессии сравниваются, и человеку пора предложить выбор.
+   *
+   * Замер владельца wake-router 24.10.2026: прогрев $0.00162 против холодного старта $0.0784 —
+   * чтение дешевле в ~48 раз, безубыточность 16.2 ч при шаге 20 мин. Отсюда 1200 с у моделей Go;
+   * это же число называл фаундер («обычно 20 минут»).
+   */
+  coldRewriteAfterSec?: number
 }
 
 /**
@@ -265,6 +275,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     cost: { input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0.15 },
     cacheTtlSec: 2_700,
     rewriteMinTokens: 50_000,
+    coldRewriteAfterSec: 1_200,
   },
   'muse-spark-1.3-contributor': {
     name: 'Muse Spark 1.3 Contributor (OpenCode Go)',
@@ -277,6 +288,7 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     cost: { input: 0.10, output: 0.20, cacheRead: 0.002, cacheWrite: 0.10 },
     cacheTtlSec: 2_700,
     rewriteMinTokens: 50_000,
+    coldRewriteAfterSec: 1_200,
   },
 }
 

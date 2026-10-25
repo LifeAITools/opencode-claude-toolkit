@@ -14,7 +14,14 @@
 ОТКУДА ДАННЫЕ. Журнал посредника `LiteLLM_SpendLogs`:
 `metadata.usage_object.prompt_tokens_details.cached_tokens`. 🔴 Отдельной колонки кэша
 НЕТ, а колонка `cache_hit` ЛЖЁТ (замер 19.10: False на 9573 из 9591 при попаданиях в
-тысячах) — читать её нельзя.
+тысячах) — читать её нельзя. Причина названа владельцем посредника 25.10 по исходнику:
+`cache_hit` ставится ТОЛЬКО собственным кэшем ответов LiteLLM, а раздел `cache:` у нас
+не настроен, поэтому он False по построению.
+
+🔴 NULL — ЭТО НЕ НОЛЬ. `cached_tokens IS NULL` значит «поставщик не отдал цифру», и такие
+строки ИСКЛЮЧАЮТСЯ из ряда (раньше здесь стоял COALESCE(...,0), из-за которого
+неизмеренное считалось промахом — та самая ложная аномалия 24.10). Сколько исключено —
+печатается отдельной строкой, чтобы «нет данных» не выглядело как «всё хорошо».
 
 ЗАПУСК:  python3 scripts/go-cache-cold-watch.py [--hours 24] [--min-prompt 20000] [--json]
 Выход 0 всегда: это прибор, а не гейт. Ненулевой — только если база недоступна.
@@ -33,10 +40,11 @@ DB_NAME = "litellm"
 QUERY = """
 WITH c AS (
   SELECT session_id, "startTime" AS t,
-    COALESCE((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0) AS cached,
+    (metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint AS cached,
     COALESCE((metadata->'usage_object'->>'prompt_tokens')::bigint, 0) AS ptok
   FROM "LiteLLM_SpendLogs"
   WHERE model LIKE '%deepseek%' AND "startTime" > now() - interval '__HOURS__ hours'
+    AND metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens' IS NOT NULL
 ),
 w AS (
   SELECT session_id, t, cached, ptok,
@@ -52,6 +60,13 @@ SELECT
 FROM w
 WHERE pc > 0 AND cached = 0 AND ptok >= __MIN_PROMPT__ AND t > pt
 ORDER BY t DESC
+"""
+
+QUERY_UNMEASURED = """
+SELECT count(*)
+FROM "LiteLLM_SpendLogs"
+WHERE model LIKE '%deepseek%' AND "startTime" > now() - interval '__HOURS__ hours'
+  AND metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens' IS NULL
 """
 
 
@@ -84,13 +99,18 @@ def main() -> int:
         {"at": r[0], "gap_min": float(r[1]), "prompt_tokens": int(r[2]), "session": r[3]}
         for r in rows
     ]
+    unmeasured_rows = run_sql(QUERY_UNMEASURED.replace("__HOURS__", str(a.hours)))
+    unmeasured = int(unmeasured_rows[0][0]) if unmeasured_rows and unmeasured_rows[0] else 0
 
     if a.json:
         print(json.dumps({"hours": a.hours, "min_prompt": a.min_prompt,
-                          "count": len(events), "events": events}, ensure_ascii=False, indent=1))
+                          "count": len(events), "unmeasured_rows": unmeasured,
+                          "events": events}, ensure_ascii=False, indent=1))
         return 0
 
     print(f"Холодные записи OpenCode Go за {a.hours} ч (префикс >= {a.min_prompt} токенов): {len(events)}")
+    if unmeasured:
+        print(f"  исключено неизмеренных строк (cached_tokens IS NULL — это НЕ ноль): {unmeasured}")
     if not events:
         print("  ни одной — либо кэш не промахивался, либо окно пустое (проверь --hours)")
         return 0
@@ -101,8 +121,9 @@ def main() -> int:
         print(f"  … ещё {len(events) - 40}")
     gaps = sorted(e["gap_min"] for e in events)
     print(f"  разрыв: медиана {gaps[len(gaps)//2]:.1f} мин, максимум {gaps[-1]:.1f} мин")
-    print("  ЧИТАЙ ТАК: разрыв меньше ~45 мин = промах НЕ по времени (префикс сменился сам);")
-    print("             разрыв больше ~60 мин = кэш не дожил, и это наш срок для KA.")
+    print("  ЧИТАЙ ТАК (перемер 24.10, 39 863 крупных вызова): перелом 30–40 мин, к 45 — ноль.")
+    print("             разрыв < 30 мин = промах НЕ по времени (префикс сменился сам);")
+    print("             разрыв > 40 мин = кэш не дожил до хода.")
     return 0
 
 

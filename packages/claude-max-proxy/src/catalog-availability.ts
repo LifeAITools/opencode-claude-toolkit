@@ -44,6 +44,16 @@ export interface ReportedHarness {
   harness: string
   version?: string
   models: ReportedModel[]
+  /**
+   * Какие ПРОСТРАНСТВА ИМЁН этот отчёт покрывает, например `["kiberos-go/"]`.
+   *
+   * 🔴 ЗАЧЕМ ЯВНО (26.10.2026, просьба владельца каталога). Раньше область выводилась из
+   * префиксов моделей — и первый же живой прогон спрятал 18 ПРЯМЫХ пар: моё «две модели»
+   * прочиталось как «больше нет ни у кого». Вывод там, где уже горело, — плохая опора;
+   * теперь отчёт НАЗЫВАЕТ свою область, а не оставляет её угадывать. Поле необязательное:
+   * не прислали — потребитель выводит из префиксов, как раньше.
+   */
+  namespaces: string[]
 }
 
 export interface AvailabilityReport {
@@ -252,6 +262,7 @@ export async function buildReport(
       {
         harness: cfg.harness,
         version: undefined,
+        namespaces: [cfg.modelNamespace],
         models: mine.map((id) => ({
           model: `${cfg.modelNamespace}${id}`,
           ok: true,

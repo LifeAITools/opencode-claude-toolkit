@@ -102,7 +102,6 @@ export declare class ProxyClient {
     get rateLimitSnapshot(): Readonly<RateLimitSnapshot>;
     listSessions(): Session<KeepaliveEngine>[];
     sessionCount(): number;
-    reapDeadSessions(): string[];
     markManagedSession(sessionId: string, workerId: string, ttlMs?: number): boolean;
     workerHeartbeat(workerId: string, activeSessionIds: string[]): number;
     unmarkManagedSession(sessionId: string): boolean;

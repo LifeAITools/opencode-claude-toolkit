@@ -221,7 +221,56 @@ const ORG_PIN_MAX = 500
 const ORG_PIN_TTL_MS = 12 * 60 * 60 * 1000
 const orgPins = new Map<string, { org: string; at: number }>()
 
+/**
+ * ВЫДАЧИ ПЕРЕЖИВАЮТ ПЕРЕЗАПУСК ДВЕРИ.
+ *
+ * 🔴 ИЗМЕРЕНО 26.10.2026: память процесса (Map) стиралась каждым выпуском прокси — за вечер
+ * их было четыре, — и живая сессия, уже имевшая выдачу, после перезапуска выбиралась заново:
+ * в следе владельца приложения видны последовательности `pin → quota → pin`. Это ровно та
+ * холодная перезапись префикса (медиана prompt 390 тыс. токенов), ради предотвращения которой
+ * слой и существует. Поэтому выдачи лежат в файле, атомарная запись как у реестра.
+ */
+function orgPinsPath(): string {
+  return process.env.GO_ORG_PINS_PATH ?? `${homedir()}/.claude-local/go-org-pins.json`
+}
+
+let pinsLoaded = false
+
+function loadPins(): void {
+  if (pinsLoaded) return
+  pinsLoaded = true
+  try {
+    const doc = JSON.parse(readFileSync(orgPinsPath(), 'utf8')) as { pins?: Record<string, { org?: unknown; at?: unknown }> }
+    const now = Date.now()
+    for (const [k, v] of Object.entries(doc.pins ?? {})) {
+      if (!v || typeof v.org !== 'string' || typeof v.at !== 'number') continue
+      if (now - v.at > ORG_PIN_TTL_MS) continue
+      orgPins.set(k, { org: v.org, at: v.at })
+    }
+  } catch { /* файла нет или он битый — начинаем с пустого */ }
+}
+
+export function savePins(path = orgPinsPath()): void {
+  try {
+    const now = Date.now()
+    const pins: Record<string, { org: string; at: number }> = {}
+    for (const [k, v] of orgPins) if (now - v.at <= ORG_PIN_TTL_MS) pins[k] = v
+    mkdirSync(dirname(path), { recursive: true })
+    const tmp = `${path}.tmp`
+    writeFileSync(tmp, JSON.stringify({ version: 1, pins }))
+    renameSync(tmp, path)
+  } catch { /* запись не смеет ломать вызов */ }
+}
+
+/** Тестовый вход: подменить содержимое памяти — чтобы проверить файл без вызовов сети. */
+export function restorePinsForTest(entries: Array<[string, { org: string; at: number }]>): void {
+  orgPins.clear()
+  for (const [k, v] of entries) orgPins.set(k, v)
+  pinsLoaded = true
+}
+
 function pinLookup(key: string): string | null {
+  loadPins()
   const hit = orgPins.get(key)
   if (!hit) return null
   if (Date.now() - hit.at > ORG_PIN_TTL_MS) {
@@ -241,6 +290,7 @@ function pinStore(key: string, org: string): void {
     if (oldestKey) orgPins.delete(oldestKey)
   }
   orgPins.set(key, { org, at: Date.now() })
+  savePins()
 }
 
 function callKindOf(req: Request): CallKind {

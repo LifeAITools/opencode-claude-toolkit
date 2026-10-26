@@ -22,7 +22,7 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } from '../go-registry.js'
-import { pickOrgByHeadroom, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
+import { pickOrgByHeadroom, isOrgUsable, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
@@ -66,8 +66,24 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: 
       ?? (besideStore && existsSync(besideStore) ? besideStore : QUOTA_STATUS_OPENCODE_GO_JSON)
     const quotas = readOrgQuotas(quotaPath)
     const haveToken = readStoreOrgNames(cfg.goTokensPath)
-    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n), { stickyKey })
-    if (byHeadroom.org) return byHeadroom.org
+    const has = (n: string) => haveToken.has(n)
+    const key = (stickyKey ?? '').trim()
+    // «Сессию знаем — организация уже выдана»: переиспользуем выданную, пока она годна.
+    if (key) {
+      const pinned = pinLookup(key)
+      if (pinned && isOrgUsable(reg.orgs, quotas, has, pinned)) {
+        const org = reg.orgs.find((o) => o.name === pinned)
+        if (org) {
+          pinStore(key, org.name)
+          return org
+        }
+      }
+    }
+    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, has, { stickyKey: key || null })
+    if (byHeadroom.org) {
+      if (key) pinStore(key, byHeadroom.org.name)
+      return byHeadroom.org
+    }
     // 🔴 ГРОМКО, А НЕ ТИХО: «замера нет» на сервере означает, что файл квоты не привезён.
     // Без этой строки выбор по запасу молча вырождается в `active:` — то есть в ровно ту беду,
     // ради которой он написан (весь флот в одну почти исчерпанную организацию).
@@ -97,29 +113,57 @@ function hashActor(v: string | null): string | null {
 }
 
 /**
- * Ключ РАЗГОВОРА из тела — запасной якорь липкости, когда номер сессии не пришёл.
+ * Ключ ЛИЧНОСТИ разговора, когда номер сессии не пришёл: системный промпт + набор инструментов.
  *
- * 🔴 ПОЧЕМУ ОН НУЖЕН (замер 26.10.2026, сразу после перевода маршрута на дверь):
- * LiteLLM не передаёт `x-opencode-session-id`, поэтому дверь видит `sessionId=null`,
- * `sessions=0` при живом трафике, и вся липкость вырождается в «максимум запаса» — то есть
- * весь флот сидит на ОДНОЙ организации, а когда лидер меняется, разговоры переезжают РАЗОМ
- * и каждый платит холодной перезаписью префикса (медиана prompt 390 тыс. токенов).
+ * 🔴 ПОЧЕМУ НЕ «ПЕРВОЕ НЕ-СИСТЕМНОЕ СООБЩЕНИЕ» (первая версия 1.1.83, отменена в тот же час).
+ * Оно МЕНЯЕТСЯ при уплотнении контекста: клиент присылает пересказ вместо истории, якорь
+ * переезжает — и организация меняется ПОСРЕДИ разговора, то есть сессия платит холодной
+ * перезаписью префикса. Правило фаундера (26.10, дословно): «прыгать между сессиями
+ * категорически плохо… если сессию знаем, значит организация была уже выдана».
  *
- * Якорь берётся из первого НЕ системного сообщения: оно есть в каждом ходе разговора и не
- * меняется, пока разговор растёт. Системный промпт для якоря не годится — у всех сессий
- * одного агента он одинаков.
+ * Системный промпт и набор инструментов уплотнение НЕ меняет — они и дают устойчивый якорь.
+ *
+ * 🔴 ЧЕСТНАЯ ГРАНИЦА: якорь ОДИН на агента, а не на сессию. Новая сессия того же агента
+ * получит ту же организацию, что и предыдущие, — это НЕ прыжок, но и не выдача новой
+ * организации новой сессии. Для выдачи нужен настоящий номер сессии, то есть чтобы посредник
+ * прокидывал `x-opencode-session-id`; пока не прокидывает (замер 26.10: `sessions=0`).
  */
-export function conversationKey(parsed: any): string | null {
+export function agentKey(parsed: any): string | null {
   const msgs = Array.isArray(parsed?.messages) ? parsed.messages : null
-  if (!msgs) return null
-  for (const m of msgs) {
-    if (!m || typeof m !== 'object') continue
-    if (m.role === 'system') continue
-    const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '')
-    if (!text) continue
-    return sha256(text.slice(0, 2000)).slice(0, 16)
+  const sys = msgs ? msgs.filter((m: any) => m && m.role === 'system') : []
+  const tools = Array.isArray(parsed?.tools) ? parsed.tools : null
+  if (sys.length === 0 && !tools) return null
+  return sha256(JSON.stringify(sys) + '|' + JSON.stringify(tools ?? null)).slice(0, 16)
+}
+
+/**
+ * Выданная организация живёт за ключом: «сессию знаем — организация уже выдана».
+ * Память ограничена по числу и сроку; вытесняется самая давняя запись.
+ */
+const ORG_PIN_MAX = 500
+const ORG_PIN_TTL_MS = 12 * 60 * 60 * 1000
+const orgPins = new Map<string, { org: string; at: number }>()
+
+function pinLookup(key: string): string | null {
+  const hit = orgPins.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.at > ORG_PIN_TTL_MS) {
+    orgPins.delete(key)
+    return null
   }
-  return null
+  return hit.org
+}
+
+function pinStore(key: string, org: string): void {
+  if (orgPins.size >= ORG_PIN_MAX) {
+    let oldestKey: string | null = null
+    let oldestAt = Infinity
+    for (const [k, v] of orgPins) {
+      if (v.at < oldestAt) { oldestAt = v.at; oldestKey = k }
+    }
+    if (oldestKey) orgPins.delete(oldestKey)
+  }
+  orgPins.set(key, { org, at: Date.now() })
 }
 
 function callKindOf(req: Request): CallKind {
@@ -936,7 +980,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let org
   let cred
   try {
-    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, sessionId ?? conversationKey(parsed))
+    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, sessionId ?? agentKey(parsed))
     rec.org_id = org.name
     rec.provider_org_ref = org.workspace
     cred = await withFreshGoCredential(org, credSrc)

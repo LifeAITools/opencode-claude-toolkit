@@ -191,3 +191,28 @@ export function readStoreOrgNames(path: string | null): Set<string> {
   } catch { /* очереди нет — обычный случай */ }
   return names
 }
+
+/**
+ * Годится ли НАЗВАННАЯ организация сейчас — те же фильтры, что у выбора.
+ *
+ * 🔴 ЗАЧЕМ ОТДЕЛЬНО. Выданная однажды организация должна ПЕРЕИСПОЛЬЗОВАТЬСЯ, пока она годна
+ * (правило фаундера 26.10: «если сессию знаем — организация была уже выдана»). Но переиспользовать
+ * её вслепую нельзя: пропуск мог исчезнуть, окно — исчерпаться, организацию — закрыть. Тогда
+ * сессию надо переселить ОДИН раз, а не молча получать 401.
+ */
+export function isOrgUsable(
+  orgs: GoOrg[],
+  quotas: OrgQuotaView[],
+  hasCredential: (name: string) => boolean,
+  name: string,
+): boolean {
+  const org = orgs.find((o) => o.name === name)
+  if (!org || org.auth !== 'console') return false
+  if (!hasCredential(org.name)) return false
+  const q = quotas.find((row) => row.name === name)
+  if (!q) return false
+  const status = (q.status ?? 'active').toLowerCase()
+  if (status === 'restricted' || status === 'retired') return false
+  if (exhausted(q)) return false
+  return headroom(q.util5h) !== null
+}

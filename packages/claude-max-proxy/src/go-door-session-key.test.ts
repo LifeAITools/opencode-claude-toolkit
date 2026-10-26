@@ -1,49 +1,51 @@
 /**
- * Якорь липкости из тела. Полюс: LiteLLM не передаёт номер сессии, и без якоря весь флот
- * сидит на одной организации, а при смене лидера переезжает разом — с холодной перезаписью
- * префикса на каждом разговоре (замер 26.10.2026: медиана prompt 390 тыс. токенов).
+ * Якорь липкости, когда номер сессии не пришёл. Полюс — правило фаундера (26.10):
+ * «прыгать между сессиями категорически плохо, потому что сожжём холодный кэш на всех
+ * организациях… если сессию знаем, значит организация была уже выдана».
+ *
+ * Поэтому якорь обязан переживать УПЛОТНЕНИЕ контекста: клиент присылает пересказ вместо
+ * истории, и первое не-системное сообщение меняется. Держимся за системный промпт и инструменты.
  */
 import { describe, expect, test } from 'bun:test'
-import { conversationKey } from './modules/go-door.js'
+import { agentKey } from './modules/go-door.js'
 
-const body = (msgs: unknown[]) => ({ model: 'deepseek-v4.1-flash', messages: msgs })
+const SYS = [{ role: 'system', content: 'ты агент проекта X' }]
+const TOOLS = [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }]
+const body = (msgs: unknown[], extra: Record<string, unknown> = {}) => ({ model: 'm', messages: msgs, ...extra })
 
-describe('ключ разговора для липкости', () => {
-  test('растущий разговор сохраняет ключ — иначе липкость бесполезна', () => {
-    const first = body([
-      { role: 'system', content: 'ты агент' },
-      { role: 'user', content: 'первый вопрос' },
-    ])
-    const later = body([
-      { role: 'system', content: 'ты агент' },
-      { role: 'user', content: 'первый вопрос' },
-      { role: 'assistant', content: 'ответ' },
-      { role: 'user', content: 'второй вопрос' },
-    ])
-    expect(conversationKey(first)).toBeTruthy()
-    expect(conversationKey(later)).toBe(conversationKey(first))
+describe('якорь липкости переживает рост и уплотнение разговора', () => {
+  test('рост разговора ключ не меняет', () => {
+    const first = body([...SYS, { role: 'user', content: 'первый вопрос' }], { tools: TOOLS })
+    const later = body([...SYS, { role: 'user', content: 'первый вопрос' }, { role: 'assistant', content: 'ответ' }, { role: 'user', content: 'второй' }], { tools: TOOLS })
+    expect(agentKey(first)).toBeTruthy()
+    expect(agentKey(later)).toBe(agentKey(first))
   })
 
-  test('разные разговоры получают разные ключи — иначе весь флот на одной организации', () => {
-    const a = conversationKey(body([{ role: 'user', content: 'вопрос A' }, { role: 'user', content: 'x' }]))
-    const b = conversationKey(body([{ role: 'user', content: 'вопрос B' }, { role: 'user', content: 'x' }]))
+  test('УПЛОТНЕНИЕ: история заменена пересказом — ключ тот же', () => {
+    const before = body([...SYS, { role: 'user', content: 'длинная история' }, { role: 'assistant', content: '...' }], { tools: TOOLS })
+    const after = body([...SYS, { role: 'user', content: 'КРАТКОЕ СОДЕРЖАНИЕ разговора' }], { tools: TOOLS })
+    expect(agentKey(after)).toBe(agentKey(before))
+  })
+
+  test('другой системный промпт — другой ключ (другой агент)', () => {
+    const a = agentKey(body([{ role: 'system', content: 'агент A' }], { tools: TOOLS }))
+    const b = agentKey(body([{ role: 'system', content: 'агент B' }], { tools: TOOLS }))
     expect(a).not.toBe(b)
   })
 
-  test('одинаковый системный промпт НЕ склеивает разговоры', () => {
-    const a = conversationKey(body([{ role: 'system', content: 'один и тот же' }, { role: 'user', content: 'A' }]))
-    const b = conversationKey(body([{ role: 'system', content: 'один и тот же' }, { role: 'user', content: 'B' }]))
+  test('другой набор инструментов — другой ключ', () => {
+    const a = agentKey(body(SYS, { tools: TOOLS }))
+    const b = agentKey(body(SYS, { tools: [{ type: 'function', function: { name: 'other' } }] }))
     expect(a).not.toBe(b)
   })
 
-  test('тело без не-системных сообщений → null (честное «якоря нет»)', () => {
-    expect(conversationKey(body([{ role: 'system', content: 'только система' }]))).toBeNull()
-    expect(conversationKey({ model: 'x' })).toBeNull()
-    expect(conversationKey(null)).toBeNull()
+  test('нет ни системы, ни инструментов — честное «якоря нет»', () => {
+    expect(agentKey(body([{ role: 'user', content: 'привет' }]))).toBeNull()
+    expect(agentKey({ model: 'm' })).toBeNull()
+    expect(agentKey(null)).toBeNull()
   })
 
-  test('содержимое частями (мультимодальный вход) тоже даёт якорь', () => {
-    const k = conversationKey(body([{ role: 'user', content: [{ type: 'text', text: 'картинка и текст' }] }]))
-    expect(k).toMatch(/^[0-9a-f]{16}$/)
+  test('ключ — стабильный hex', () => {
+    expect(agentKey(body(SYS, { tools: TOOLS }))).toMatch(/^[0-9a-f]{16}$/)
   })
 })

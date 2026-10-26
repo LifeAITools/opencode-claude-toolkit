@@ -22,7 +22,7 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } from '../go-registry.js'
-import { pickOrgByHeadroom, isOrgUsable, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
+import { pickOrgByTimeToWall, isOrgUsable, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
@@ -87,10 +87,11 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: 
         }
       }
     }
-    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, has, { stickyKey: key || null })
-    if (byHeadroom.org) {
-      if (key) pinStore(key, byHeadroom.org.name)
-      return { org: byHeadroom.org, source: 'quota' }
+    // Порядок двери: named (выше) → pin (выше) → модель «время до стены» → active (ниже).
+    const picked = pickOrgByTimeToWall(reg.orgs, quotas, has, { sessionKey: key || null })
+    if (picked.org) {
+      if (key) pinStore(key, picked.org.name)
+      return { org: picked.org, source: 'quota' }
     }
     // 🔴 ГРОМКО, А НЕ ТИХО: «замера нет» на сервере означает, что файл квоты не привезён.
     // Без этой строки выбор по запасу молча вырождается в `active:` — то есть в ровно ту беду,

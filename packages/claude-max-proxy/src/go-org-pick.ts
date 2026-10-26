@@ -20,6 +20,13 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { GoOrg } from './go-registry.js'
 
+/** Окно организации из отчёта: сколько израсходовано и когда сбросится. */
+export interface OrgWindow {
+  window: string
+  util: number | null
+  resetAt: number | null
+}
+
 /** Окна одной организации так, как их видит отчёт квоты. Поля могут отсутствовать. */
 export interface OrgQuotaView {
   name: string
@@ -28,6 +35,8 @@ export interface OrgQuotaView {
   utilMonth?: number | null
   /** `active | exhausted | restricted | retired` — из реестра; нет поля → считаем `active`. */
   status?: string | null
+  /** Сырые окна (новый отчёт): из них считается время до стены. */
+  windows?: OrgWindow[]
 }
 
 /** Запас по окну: 1 − util. Неизвестное окно запаса не даёт и кандидата не улучшает. */
@@ -57,84 +66,6 @@ export interface PickByHeadroomResult {
  * окно не исчерпано. Нет ни одного кандидата или нет ни одного ЗАМЕРА — `org: null`, и вызывающий
  * откатывается на прежнее правило (`active:`): «замера нет» ≠ «выбирать нечего».
  */
-/** Ширина полосы «почти равного запаса» по умолчанию: 2% пятичасового окна. */
-export const DEFAULT_STICKY_BAND = 0.02
-
-export interface PickOptions {
-  /**
-   * Ключ стабильности (обычно номер сессии). Когда задан, выбор внутри полосы почти равного запаса
-   * держится за этим ключом, а не перескакивает на каждый запрос.
-   *
-   * 🔴 ЗАЧЕМ. Кэш префикса принадлежит АККАУНТУ. Пока организации почти равны (а сразу после сброса
-   * они все 0.01–0.06), выбор «максимум запаса» перекидывается между ними от запроса к запросу —
-   * и каждый перескок означает холодный префикс на новом аккаунте, то есть ту самую дорогую
-   * перезапись, ради предотвращения которой этот слой и существует (замер 26.10: медиана
-   * `cached_tokens` 227–428 тыс. на вызов, то есть флот живёт на кэше).
-   */
-  stickyKey?: string | null
-  /** Ширина полосы. По умолчанию `DEFAULT_STICKY_BAND`. */
-  band?: number
-}
-
-/** FNV-1a: детерминированный и дешёвый — одинаковый ключ даёт одну и ту же организацию. */
-function stableHash(value: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < value.length; i++) {
-    h ^= value.charCodeAt(i)
-    h = Math.imul(h, 0x01000193) >>> 0
-  }
-  return h >>> 0
-}
-
-export function pickOrgByHeadroom(
-  orgs: GoOrg[],
-  quotas: OrgQuotaView[],
-  hasCredential: (name: string) => boolean,
-  opts: PickOptions = {},
-): PickByHeadroomResult {
-  const byName = new Map(quotas.map((q) => [q.name, q]))
-  const scored: Array<{ org: GoOrg; h5: number; h7: number; index: number }> = []
-
-  orgs.forEach((org, index) => {
-    if (org.auth !== 'console') return
-    const q = byName.get(org.name)
-    if (!q) return
-    const status = (q.status ?? 'active').toLowerCase()
-    if (status === 'restricted' || status === 'retired') return
-    if (exhausted(q)) return
-    if (!hasCredential(org.name)) return
-    const h5 = headroom(q.util5h)
-    // Нет пятичасового окна у организации — судить о запасе нечем, в выбор не берём.
-    if (h5 === null) return
-    const h7 = headroom(q.util7d) ?? -1
-    scored.push({ org, h5, h7, index })
-  })
-
-  if (scored.length === 0) return { org: null, reason: 'нет кандидата с замером и пропуском' }
-
-  scored.sort((a, b) => (b.h5 - a.h5) || (b.h7 - a.h7) || (a.index - b.index))
-  const best = scored[0]
-  const key = (opts.stickyKey ?? '').trim()
-  if (key) {
-    const band = typeof opts.band === 'number' && Number.isFinite(opts.band) ? Math.max(0, opts.band) : DEFAULT_STICKY_BAND
-    // Полоса — «почти равные»: лучший плюс все, кто отстал не больше чем на band. Внутри неё выбор
-    // стабилен по ключу; из полосы организация выходит сама, когда реально отстала по запасу.
-    const inBand = scored.filter((s) => best.h5 - s.h5 <= band)
-    if (inBand.length > 1) {
-      const chosen = inBand[stableHash(key) % inBand.length]
-      return {
-        org: chosen.org,
-        reason: `запас 5ч=${chosen.h5.toFixed(2)} 7д=${chosen.h7 < 0 ? '?' : chosen.h7.toFixed(2)}; `
-          + `липко к сессии внутри полосы ${inBand.length} из ${scored.length} (лучший ${best.h5.toFixed(2)})`,
-      }
-    }
-  }
-  return {
-    org: best.org,
-    reason: `запас 5ч=${best.h5.toFixed(2)} 7д=${best.h7 < 0 ? '?' : best.h7.toFixed(2)} среди ${scored.length}`,
-  }
-}
-
 /**
  * Читает отчёт квоты (тот же файл, что рисует подвал агентам). Файл может отсутствовать или быть
  * неполным — это НЕ ошибка выбора: вернём пустой список, и вызывающий откатится на `active:`.
@@ -156,6 +87,15 @@ export function readOrgQuotas(path: string): OrgQuotaView[] {
         util7d: numOrNull(raw.util7d),
         utilMonth: numOrNull(raw.utilMonth),
         status: typeof raw.status === 'string' ? raw.status : null,
+        windows: Array.isArray(raw.windows)
+          ? raw.windows
+            .filter((w: any) => w && typeof w.window === 'string')
+            .map((w: any) => ({
+              window: w.window,
+              util: numOrNull(w.util),
+              resetAt: typeof w.resetAt === 'number' && Number.isFinite(w.resetAt) ? w.resetAt : null,
+            }))
+          : undefined,
       })
     }
     return out
@@ -215,4 +155,133 @@ export function isOrgUsable(
   if (status === 'restricted' || status === 'retired') return false
   if (exhausted(q)) return false
   return headroom(q.util5h) !== null
+}
+
+/** FNV-1a: стабильный тай-брейк, чтобы равные организации не перекидывались между сессиями. */
+function stableHash(value: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h >>> 0
+}
+
+/**
+ * ВРЕМЯ ДО СТЕНЫ — модель выбора организации, заданная фаундером 26.10.2026.
+ *
+ * Зачем вместо «максимума запаса»: запас (1−util) не говорит, КОГДА кончится. Организация
+ * с 70% недели может быть безопаснее, чем с 30% пятичасовой, — всё зависит от скорости и от
+ * того, когда окно сбросится. Поэтому считается скорость расхода и время до стены.
+ *
+ * Формула:
+ *   elapsed = длина_окна − остаток_до_сброса        (окна короче 15 минут не считаем:
+ *                                                    скорость на них неизвестна)
+ *   rate    = util / elapsed                        (доля окна в час)
+ *   ttw     = (1 − util) / rate                     (часы до стены)
+ *   окно СВЯЗЫВАЕТ, только если ttw < остаток_до_сброса — иначе оно сбросится раньше,
+ *                                                     чем упрётся, и пугать им нельзя
+ *   оценка орг = min по СВЯЗЫВАЮЩИМ окнам; нет связывающих → бесконечность (успеет сброситься)
+ *   util ≥ 1 хотя бы по одному окну → организация не кандидат
+ */
+export interface TimeToWall {
+  /** Часы до первой стены среди связывающих окон; `Infinity` — таких нет. */
+  score: number
+  /** Средний остаток по окнам — второй ключ сортировки. */
+  avgHeadroom: number
+  /** Для журнала: чем именно связывает (или что не связывает ничем). */
+  reason: string
+}
+
+const WINDOW_HOURS: Record<string, number> = { '5h': 5, week: 7 * 24, month: 30 * 24 }
+const MIN_ELAPSED_HOURS = 0.25
+
+export function timeToWall(view: OrgQuotaView, nowMs: number): TimeToWall | null {
+  const wins = view.windows ?? []
+  if (wins.length === 0) return null
+  let head = 0
+  let counted = 0
+  let best: number | null = null
+  const binding: string[] = []
+  for (const w of wins) {
+    const len = WINDOW_HOURS[w.window]
+    if (!len || w.util === null || w.resetAt === null) continue
+    const remainingH = Math.max(0, (w.resetAt - nowMs) / 3_600_000)
+    const elapsed = len - remainingH
+    head += 1 - w.util
+    counted++
+    if (elapsed < MIN_ELAPSED_HOURS) continue
+    const rate = w.util / elapsed
+    const ttw = rate <= 1e-9 ? Infinity : Math.max(0, (1 - w.util) / rate)
+    if (ttw < remainingH) {
+      binding.push(`${w.window}=${ttw === Infinity ? '∞' : ttw.toFixed(0)}ч`)
+      if (best === null || ttw < best) best = ttw
+    }
+  }
+  if (counted === 0) return null
+  const avgHeadroom = head / counted
+  return {
+    score: best === null ? Infinity : best,
+    avgHeadroom,
+    reason: binding.length ? `связывают ${binding.join(', ')}` : 'ни одно окно не связывает',
+  }
+}
+
+/**
+ * Выбор организации по времени до стены.
+ *
+ * 🔴 ПОРЯДОК ВАЖНЕЕ ФОРМУЛЫ. Модель применяется ТОЛЬКО когда выдачи ещё нет: запиненная
+ * сессия не переезжает (иначе платит холодной перезаписью префикса — ровно то, от чего
+ * этот слой существует), а явно названная организация вообще не наша логика. Это делает
+ * вызывающий: сюда он приходит уже после проверки пина и заголовка.
+ *
+ * 🔴 ТАЙ-БРЕЙК СТАБИЛЕН ПО СЕССИИ: (оценка desc, средний запас desc, hash(сессия+орг) asc).
+ * Без третьего ключа две сессии с равным запасом перекидывались бы между организациями.
+ */
+export function pickOrgByTimeToWall(
+  orgs: GoOrg[],
+  quotas: OrgQuotaView[],
+  hasCredential: (name: string) => boolean,
+  opts: { nowMs?: number; sessionKey?: string | null } = {},
+): PickByHeadroomResult {
+  const now = opts.nowMs ?? Date.now()
+  const byName = new Map(quotas.map((q) => [q.name, q]))
+  const scored: Array<{ org: GoOrg; score: number; avg: number; tie: number; reason: string }> = []
+  const key = (opts.sessionKey ?? '').trim()
+
+  orgs.forEach((org) => {
+    if (org.auth !== 'console') return
+    const q = byName.get(org.name)
+    if (!q) return
+    const status = (q.status ?? 'active').toLowerCase()
+    if (status === 'restricted' || status === 'retired') return
+    if (!hasCredential(org.name)) return
+    // Стена: любое окно исчерпано — не кандидат, даже если остальные пусты.
+    const walled = [q.util5h, q.util7d, q.utilMonth].some((u) => typeof u === 'number' && u >= 1)
+      || (q.windows ?? []).some((w) => typeof w.util === 'number' && w.util >= 1)
+    if (walled) return
+    const ttw = timeToWall(q, now)
+    if (!ttw) return
+    scored.push({
+      org,
+      score: ttw.score,
+      avg: ttw.avgHeadroom,
+      tie: stableHash(`${key}|${org.name}`),
+      reason: ttw.reason,
+    })
+  })
+
+  if (scored.length === 0) return { org: null, reason: 'нет кандидата с замером и пропуском' }
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score > a.score ? 1 : -1
+    if (b.avg !== a.avg) return b.avg - a.avg
+    return a.tie - b.tie
+  })
+  const best = scored[0]
+  const hours = best.score === Infinity ? '∞' : `${best.score.toFixed(0)}ч`
+  return {
+    org: best.org,
+    reason: `до стены ${hours} (${best.reason}); запас ${(best.avg * 100).toFixed(0)}% среди ${scored.length}`,
+  }
 }

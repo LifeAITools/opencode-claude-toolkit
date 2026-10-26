@@ -3,7 +3,7 @@
  * перевода: свежая организация должна выигрывать у почти исчерпанной, даже если в реестре активна она.
  */
 import { describe, expect, test } from 'bun:test'
-import { pickOrgByHeadroom, readOrgQuotas, readStoreOrgNames, type OrgQuotaView } from './go-org-pick.js'
+import { pickOrgByTimeToWall, timeToWall, readOrgQuotas, readStoreOrgNames, type OrgQuotaView } from './go-org-pick.js'
 import type { GoOrg } from './go-registry.js'
 
 const org = (name: string, over: Partial<GoOrg> = {}): GoOrg => ({
@@ -15,50 +15,80 @@ const q = (name: string, h5: number | null, h7: number | null, status = 'active'
 })
 const all = (names: string[]) => () => true
 
-describe('выбор организации по запасу', () => {
+
+const NOW = 1_800_000_000_000
+const H = 3_600_000
+/** Организация с явными окнами: util и остаток до сброса в часах. */
+const orgWith = (name: string, windows: Array<[string, number, number]>, over: Partial<GoOrg> = {}): GoOrg => org(name, over)
+const view = (name: string, windows: Array<[string, number, number]>, status = 'active'): OrgQuotaView => ({
+  name,
+  status,
+  util5h: windows.find((w) => w[0] === '5h')?.[1] ?? null,
+  util7d: windows.find((w) => w[0] === 'week')?.[1] ?? null,
+  utilMonth: windows.find((w) => w[0] === 'month')?.[1] ?? null,
+  windows: windows.map(([window, util, remainingH]) => ({ window, util, resetAt: NOW + remainingH * H })),
+})
+const pick = (orgs: GoOrg[], quotas: OrgQuotaView[], has = (n: string) => true, sessionKey: string | null = 'ses_a') =>
+  pickOrgByTimeToWall(orgs, quotas, has, { nowMs: NOW, sessionKey })
+
+describe('выбор организации по времени до стены', () => {
   test('свежая выигрывает у почти исчерпанной — даже если исчерпанная помечена active', () => {
-    const orgs = [org('hello'), org('hello@kiberos.app')]
-    const quotas = [q('hello', 0.29, 0.91), q('hello@kiberos.app', 0.02, 0)]
-    const r = pickOrgByHeadroom(orgs, quotas, all(['hello', 'hello@kiberos.app']))
-    expect(r.org?.name).toBe('hello@kiberos.app')
+    const quotas = [
+      view('old', [['5h', 0.9, 1], ['week', 0.95, 20], ['month', 0.9, 300]]),
+      view('fresh', [['5h', 0.02, 4.5], ['week', 0.03, 160], ['month', 0.5, 500]]),
+    ]
+    expect(pick([orgWith('old', []), orgWith('fresh', [])], quotas).org?.name).toBe('fresh')
   })
 
-  test('исчерпанное окно исключает организацию из кандидатов', () => {
-    const orgs = [org('a'), org('b')]
-    const quotas = [q('a', 0.1, 1), q('b', 0.5, 0.5)]
-    expect(pickOrgByHeadroom(orgs, quotas, all(['a', 'b'])).org?.name).toBe('b')
+  test('исчерпанное окно (util ≥ 1) исключает организацию полностью', () => {
+    const quotas = [
+      view('walled', [['5h', 0.1, 4], ['week', 1, 100], ['month', 0.2, 400]]),
+      view('ok', [['5h', 0.5, 2], ['week', 0.5, 80], ['month', 0.5, 400]]),
+    ]
+    expect(pick([orgWith('walled', []), orgWith('ok', [])], quotas).org?.name).toBe('ok')
+  })
+
+  test('окно короче 15 минут не участвует: скорость на нём неизвестна', () => {
+    // 5ч почти не истекло (осталось 4.9ч → elapsed 6 мин), util 0.5 — если бы считалось, «до стены» было бы 6 мин
+    const quotas = [view('short', [['5h', 0.5, 4.9], ['week', 0.2, 100], ['month', 0.2, 400]])]
+    const r = pick([orgWith('short', [])], quotas)
+    expect(r.org?.name).toBe('short')
+    expect(r.reason).not.toContain('5h=')
+  })
+
+  test('НЕсвязывающее окно не пугает: берётся то, которое реально упрётся раньше сброса', () => {
+    // неделя: elapsed 68ч, util 0.1 → ttw ≈ 612ч, а сброс через 100ч → не связывает
+    // месяц: elapsed 220ч, util 0.5 → ttw ≈ 220ч, сброс через 500ч → связывает
+    const quotas = [view('x', [['week', 0.1, 100], ['month', 0.5, 500]])]
+    const ttw = timeToWall(quotas[0], NOW)
+    expect(ttw?.score).toBeCloseTo(220, 0)
+  })
+
+  test('нет ни одного замера → null (вызывающий откатывается на active:)', () => {
+    expect(pickOrgByTimeToWall([org('a')], [], () => true, { nowMs: NOW }).org).toBeNull()
+    expect(pickOrgByTimeToWall([org('a')], [{ name: 'a', status: 'active' }], () => true, { nowMs: NOW }).org).toBeNull()
   })
 
   test('restricted и retired не выбираются, даже при лучшем запасе', () => {
-    const orgs = [org('a'), org('b'), org('c')]
-    const quotas = [q('a', 0.01, 0, 'restricted'), q('b', 0.01, 0, 'retired'), q('c', 0.6, 0.6)]
-    expect(pickOrgByHeadroom(orgs, quotas, all(['a', 'b', 'c'])).org?.name).toBe('c')
+    const quotas = [
+      view('a', [['5h', 0, 4.5], ['week', 0, 160]], 'restricted'),
+      view('b', [['5h', 0, 4.5], ['week', 0, 160]], 'retired'),
+      view('c', [['5h', 0.6, 2], ['week', 0.6, 60]]),
+    ]
+    expect(pick([orgWith('a', []), orgWith('b', []), orgWith('c', [])], quotas).org?.name).toBe('c')
   })
 
-  test('нет пропуска в хранилище — не кандидат (иначе выберем и получим 401)', () => {
-    const orgs = [org('a'), org('b')]
-    const quotas = [q('a', 0.01, 0), q('b', 0.6, 0.6)]
-    expect(pickOrgByHeadroom(orgs, quotas, (n) => n === 'b').org?.name).toBe('b')
+  test('нет пропуска в хранилище — не кандидат', () => {
+    const quotas = [view('a', [['5h', 0, 4.5], ['week', 0, 160]]), view('b', [['5h', 0.6, 2], ['week', 0.6, 60]])]
+    expect(pick([orgWith('a', []), orgWith('b', [])], quotas, (n) => n === 'b').org?.name).toBe('b')
   })
 
-  test('при равном 5ч решает неделя, затем порядок реестра', () => {
-    const orgs = [org('a'), org('b'), org('c')]
-    const quotas = [q('a', 0.5, 0.9), q('b', 0.5, 0.2), q('c', 0.5, 0.2)]
-    expect(pickOrgByHeadroom(orgs, quotas, all(['a', 'b', 'c'])).org?.name).toBe('b')
-  })
-
-  test('замеров нет вовсе → null (вызывающий откатывается на active:)', () => {
-    expect(pickOrgByHeadroom([org('a')], [], all(['a'])).org).toBeNull()
-  })
-
-  test('у организации нет пятичасового окна — о запасе судить нечем, не берём', () => {
-    const quotas = [q('a', null, 0.1)]
-    expect(pickOrgByHeadroom([org('a')], quotas, all(['a'])).org).toBeNull()
-  })
-
-  test('api_key организации не участвуют (у них нет окна подписки)', () => {
-    const orgs = [org('key', { auth: 'api_key' })]
-    expect(pickOrgByHeadroom(orgs, [q('key', 0, 0)], all(['key'])).org).toBeNull()
+  test('равные организации держатся за сессией, а не перекидываются', () => {
+    const quotas = [view('a', [['5h', 0, 4.5], ['week', 0.1, 100]]), view('b', [['5h', 0, 4.5], ['week', 0.1, 100]])]
+    const orgs = [orgWith('a', []), orgWith('b', [])]
+    const seen = new Set<string>()
+    for (let i = 0; i < 30; i++) seen.add(pick(orgs, quotas, undefined, 'ses_same').org!.name)
+    expect([...seen]).toHaveLength(1)
   })
 })
 
@@ -92,59 +122,16 @@ describe('чтение отчёта квоты и хранилища', () => {
  * Липкость к сессии. Полюс тот же, что уронил бы перевод маршрута: кэш префикса принадлежит
  * АККАУНТУ, поэтому перескок организации посреди разговора = холодная перезапись.
  */
-describe('выбор организации липок к сессии', () => {
-  const band = () => {
-    const orgs = [org('a'), org('b'), org('c'), org('d')]
-    const quotas = [q('a', 0.02, 0.03), q('b', 0.03, 0.02), q('c', 0.04, 0.05), q('d', 0.05, 0.04)]
-    return { orgs, quotas, has: all(['a', 'b', 'c', 'd']) }
-  }
 
-  test('один и тот же номер сессии даёт одну и ту же организацию при почти равных запасах', () => {
-    const { orgs, quotas, has } = band()
-    for (const sid of ['ses_1', 'ses_2', 'ses_3']) {
-      const seen = new Set<string>()
-      for (let i = 0; i < 50; i++) {
-        const r = pickOrgByHeadroom(orgs, quotas, has, { stickyKey: sid })
-        if (r.org) seen.add(r.org.name)
-      }
-      expect([...seen]).toHaveLength(1)
-    }
-  })
-
-  test('разные сессии расходятся по полосе, а не садятся на одну организацию', () => {
-    const { orgs, quotas, has } = band()
-    const picked = new Set<string>()
-    for (let i = 0; i < 40; i++) {
-      const r = pickOrgByHeadroom(orgs, quotas, has, { stickyKey: `ses_${i}` })
-      if (r.org) picked.add(r.org.name)
-    }
-    expect(picked.size).toBeGreaterThan(1)
-  })
-
-  test('без номера сессии правило прежнее — побеждает лучший запас', () => {
-    const { orgs, quotas, has } = band()
-    const r = pickOrgByHeadroom(orgs, quotas, has)
-    expect(r.org?.name).toBe('a')
-  })
-
-  test('отставшая сильнее полосы организация из выбора выходит', () => {
-    const orgs = [org('fast'), org('slow')]
-    const near = [q('fast', 0.10, 0), q('slow', 0.11, 0)]
-    const keys = Array.from({ length: 40 }, (_, i) => `ses_${i}`)
-    const before = keys.map((k) => pickOrgByHeadroom(orgs, near, all(['fast', 'slow']), { stickyKey: k }).org?.name)
-    expect(new Set(before).size).toBe(2)
-    // slow просел на 5% — это больше полосы 2%, значит он больше не кандидат ни для какой сессии
-    const after = keys.map((k) => pickOrgByHeadroom(orgs, [q('fast', 0.10, 0), q('slow', 0.15, 0)], all(['fast', 'slow']), { stickyKey: k }).org?.name)
-    expect(new Set(after)).toEqual(new Set(['fast']))
-  })
-
-  test('полоса настраивается: при нулевой полосе остаётся только лучший', () => {
-    const { orgs, quotas, has } = band()
-    const names = new Set<string>()
-    for (let i = 0; i < 20; i++) {
-      const r = pickOrgByHeadroom(orgs, quotas, has, { stickyKey: `ses_${i}`, band: 0 })
-      if (r.org) names.add(r.org.name)
-    }
-    expect([...names]).toEqual(['a'])
+describe('чтение отчёта квоты: окна', () => {
+  test('windows из отчёта разбираются в resetAt/util', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs')
+    const { tmpdir } = require('node:os')
+    const { join } = require('node:path')
+    const d = mkdtempSync(join(tmpdir(), 'qp2-'))
+    const f = join(d, 'q.json')
+    writeFileSync(f, JSON.stringify({ orgs: [{ name: 'o', windows: [{ window: '5h', util: 0.3, resetAt: 123 }] }] }))
+    const rows = readOrgQuotas(f)
+    expect(rows[0].windows).toEqual([{ window: '5h', util: 0.3, resetAt: 123 }])
   })
 })

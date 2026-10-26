@@ -26,7 +26,7 @@ import { pickOrgByHeadroom, isOrgUsable, readOrgQuotas, readStoreOrgNames } from
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-import { existsSync, writeFileSync, readFileSync, renameSync } from 'node:fs'
+import { existsSync, writeFileSync, readFileSync, renameSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { GoCredentialError } from '../go-credentials.js'
 import { withFreshGoCredential, forceRefreshGoCredential, goTokenRefreshEnabled } from '../go-token-refresh.js'
 import {
@@ -95,6 +95,74 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: 
   // Замера нет вовсе — ведём себя как раньше: `active:` реестра. «Нечего мерить» ≠ «нечего брать».
   return pickOrg(reg, null)
 }
+/**
+ * СПУЛ ТЕЛА: последнее тело вызова на сессию — единственный источник ответа «что ИМЕННО
+ * изменилось в префиксе», когда сессия промахнулась кэшем. Без тел видно только «доля чтения
+ * упала», а не место.
+ *
+ * 🔴 ПЕРЕЕХАЛ СЮДА 26.10.2026 из `go_orgs.py` посредника: тот хук узнавал Go-модели по
+ * `litellm_credential_name`, ключ у моделей убран — хук больше не выполняется, и спул вместе с
+ * ним умирал. Пишет тот, кто видит факт: дверь видит тело и знает сессию.
+ *
+ * Контракт прежний: только поля ПРЕФИКСА (служебное и ключи не едут), TTL и потолок каталога.
+ */
+const SPOOL_FIELDS = ['model', 'system', 'messages', 'tools', 'tool_choice', 'max_tokens'] as const
+
+export function spoolPayload(parsed: any): Record<string, unknown> | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const kept: Record<string, unknown> = {}
+  for (const k of SPOOL_FIELDS) {
+    const v = (parsed as any)[k]
+    if (v !== undefined && v !== null) kept[k] = v
+  }
+  if (!kept.messages && !kept.system) return null
+  return kept
+}
+
+let spoolWrites = 0
+
+/** Записать последнее тело на сессию. Молча: любая беда — вызов не тронут. */
+export function spoolWrite(dir: string, key: string, payload: Record<string, unknown>, now = Date.now()): void {
+  try {
+    const safe = key.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64)
+    if (!safe) return
+    mkdirSync(dir, { recursive: true })
+    const cur = `${dir}/${safe}.json`
+    const prev = `${dir}/${safe}.prev.json`
+    if (existsSync(cur)) {
+      try { renameSync(cur, prev) } catch { /* не смогли — перезапишем текущий */ }
+    }
+    writeFileSync(cur, JSON.stringify(payload))
+    if (++spoolWrites % 50 === 0) spoolSweep(dir, now)
+  } catch { /* запись не смеет ломать вызов */ }
+}
+
+/** Убрать старое по TTL и, если каталог перерос потолок, самые старые из остатка. */
+export function spoolSweep(dir: string, now = Date.now()): void {
+  try {
+    const ttlMs = Number(process.env.GO_SPOOL_TTL_SEC ?? 7200) * 1000
+    const maxBytes = Number(process.env.GO_SPOOL_DIR_MAX_BYTES ?? 512 * 1024 * 1024)
+    const rows: Array<{ p: string; m: number; s: number }> = []
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json')) continue
+      const p = `${dir}/${name}`
+      try { const st = statSync(p); rows.push({ p, m: st.mtimeMs, s: st.size }) } catch { /* пропал */ }
+    }
+    let total = 0
+    const alive: typeof rows = []
+    for (const r of rows) {
+      if (now - r.m > ttlMs) { try { unlinkSync(r.p) } catch { /* уже нет */ } } else { alive.push(r); total += r.s }
+    }
+    if (total > maxBytes) {
+      alive.sort((a, b) => a.m - b.m)
+      for (const r of alive) {
+        if (total <= maxBytes) break
+        try { unlinkSync(r.p); total -= r.s } catch { /* уже нет */ }
+      }
+    }
+  } catch { /* уборка не смеет ломать вызов */ }
+}
+
 const CALL_KIND_HEADER = 'x-kiberos-call-kind'
 const ACTOR_HEADER = 'x-kiberos-user'
 /** Сколько текста потока держим для разбора usage и дампа. */
@@ -981,6 +1049,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let cred
   // Якорь выдачи: настоящий номер сессии, если посредник его прокинул, иначе личность агента.
   const orgKey = (sessionId ?? agentKey(parsed) ?? '').trim()
+  if (orgKey) {
+    const payload = spoolPayload(parsed)
+    if (payload) spoolWrite(process.env.GO_SPOOL_DIR ?? `${homedir()}/.claude-local/go-body-spool`, orgKey, payload)
+  }
   try {
     org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, orgKey)
     rec.org_id = org.name

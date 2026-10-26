@@ -21,6 +21,7 @@ const ENV = {
   CATALOG_AVAILABILITY_MODELS_URL: 'https://gateway.invalid/v1/models',
   CATALOG_AVAILABILITY_MODELS_KEY_FILE: '/secret/reader',
   CATALOG_AVAILABILITY_HARNESS: 'claude-code',
+  CATALOG_AVAILABILITY_MODEL_PREFIX: 'm',
 }
 
 const cfg = (over: Partial<CatalogAvailabilityConfig> = {}): CatalogAvailabilityConfig => ({
@@ -51,6 +52,7 @@ describe('настройки', () => {
       'CATALOG_AVAILABILITY_SECRET_FILE',
       'CATALOG_AVAILABILITY_MACHINE',
       'CATALOG_AVAILABILITY_MODELS_KEY_FILE',
+      'CATALOG_AVAILABILITY_MODEL_PREFIX',
     ])
   })
 
@@ -120,6 +122,14 @@ describe('снимок', () => {
         },
       ],
     })
+  })
+
+  test('«*» — осознанное «все модели этой программы»', async () => {
+    const r = await buildReport(cfg({ modelPrefix: '*' }), {
+      fetchImpl: async () => modelsResponse(['kiberos-go/flash', 'claude-opus-4-6']),
+      readFile,
+    })
+    expect(r.report?.harnesses[0].models).toHaveLength(2)
   })
 
   test('префикс оставляет только свои модели', async () => {

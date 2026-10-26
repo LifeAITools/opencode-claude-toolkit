@@ -66,9 +66,14 @@ export interface CatalogAvailabilityConfig {
   /** Имя программы, как его знает каталог (`claude-code`, `opencode`, `dsh`). */
   harness: string
   /**
-   * Какие id из списка фронта принадлежат ЭТОЙ программе. Пусто — все.
-   * Это шов, а не догадка: каталог сводит отчёт с парой по точному id модели,
-   * и «приписать всё всему» было бы враньём на обе стороны.
+   * Какие id из списка фронта принадлежат ЭТОЙ программе. Обязателен; `*` — «все, и я это
+   * осознал».
+   *
+   * 🔴 ПОЧЕМУ НЕ «ВСЕ ПО УМОЛЧАНИЮ». Синк каталога ДОБАВЛЯЕТ пары, о которых отчёт сказал
+   * `ok: true`, а ключ пары — (программа, модель) (`syncLaunchCatalogFromReports`,
+   * `launch-catalog.ts:262`). Значит отчёт «всё подряд под одним именем программы» не просто
+   * шумит: он заводит в каталоге НАСТОЯЩИЕ пары вида «claude-code × kiberos-go/flash», и
+   * человек потом увидит их в меню. Молчание безопасно, выдуманная пара — нет.
    */
   modelPrefix: string
   intervalMs: number
@@ -128,6 +133,9 @@ export function missingSettings(cfg: CatalogAvailabilityConfig): string[] {
   if (!cfg.secretFile) missing.push('CATALOG_AVAILABILITY_SECRET_FILE')
   if (!cfg.machine) missing.push('CATALOG_AVAILABILITY_MACHINE')
   if (!cfg.modelsKeyFile) missing.push('CATALOG_AVAILABILITY_MODELS_KEY_FILE')
+  // Обязателен намеренно: см. комментарий у `modelPrefix` — отчёт «всё под одной программой»
+  // заводит в каталоге пары, которых нет.
+  if (!cfg.modelPrefix) missing.push('CATALOG_AVAILABILITY_MODEL_PREFIX')
   return missing
 }
 
@@ -176,7 +184,7 @@ export async function buildReport(
   if (ids === null) return { report: null, reason: 'models list unavailable (no answer or no key)' }
   if (ids.length === 0) return { report: null, reason: 'models list is empty — an empty snapshot would claim this machine starts nothing' }
 
-  const mine = cfg.modelPrefix === '' ? ids : ids.filter((id) => id.startsWith(cfg.modelPrefix))
+  const mine = cfg.modelPrefix === '*' ? ids : ids.filter((id) => id.startsWith(cfg.modelPrefix))
   if (mine.length === 0) {
     return { report: null, reason: `no models match prefix '${cfg.modelPrefix}' — refusing to report an empty snapshot` }
   }

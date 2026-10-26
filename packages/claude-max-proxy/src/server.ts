@@ -50,6 +50,7 @@ import { loadConfig } from './config.js'
 import { emit, BusEventEmitterAdapter } from './event-bus.js'
 import { startLogger } from './logger.js'
 import { startGoProactiveRefresh } from './go-proactive-refresh.js'
+import { readCatalogAvailabilityConfig, startCatalogAvailability } from './catalog-availability.js'
 import { processAlive } from './session-tracker.js'
 import { ProxyConfigCredentialsAdapter } from './upstream.js'
 import { startHeartbeat } from './heartbeat.js'
@@ -372,6 +373,13 @@ const stopGoRefresh = startGoProactiveRefresh(
   },
   { log: (line) => console.info(line) },
 )
+// Донесения доступности в КАТАЛОГ ЗАПУСКА (PUT /availability) — снимок того, что эта машина
+// объявляет запускаемым. За выключателем CATALOG_AVAILABILITY_ENABLED: пока он не задан, таймера
+// нет вовсе. Почему пустой снимок не отправляется никогда и что именно значит `ok` — записано
+// в catalog-availability.ts, потому что там же и соблюдается.
+const stopCatalogAvailability = startCatalogAvailability(readCatalogAvailabilityConfig(process.env), {
+  log: (line) => console.info(line),
+})
 // And the alerts leave the log file: detecting a storm and writing it to disk
 // is what let a 52-minute outage reach the founder by feel instead of by
 // notification on 2026-08-24. See local-alert.ts.
@@ -682,6 +690,7 @@ async function shutdown(): Promise<void> {
   stopStormWatch()
   stopIdentityWatch()
   stopGoRefresh()
+  stopCatalogAvailability()
   stopLocalAlert()
   stopKaPurchaseNotice()
   // ProxyClient owns reaper + engine lifecycle. Stopping it cleans everything.

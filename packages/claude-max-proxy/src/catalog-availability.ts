@@ -57,6 +57,12 @@ export interface CatalogAvailabilityConfig {
   url: string | null
   /** Файл с секретом писателя (машинная учётка с грантом `launch.report`). */
   secretFile: string | null
+  /**
+   * Имена ключей ВНУТРИ файла, если это env-файл (`KEY=value`), а не готовая строка.
+   * По умолчанию — контракт SynqTask: id машинной учётки и её секрет.
+   */
+  secretIdKey: string
+  secretKey: string
   /** Устойчивое имя этой машины в каталоге. */
   machine: string | null
   /** Откуда читать список моделей фронта. */
@@ -119,6 +125,8 @@ export function readCatalogAvailabilityConfig(environ: Record<string, string | u
     enabled: env(environ, 'CATALOG_AVAILABILITY_ENABLED') === 'true',
     url: env(environ, 'CATALOG_AVAILABILITY_URL'),
     secretFile: env(environ, 'CATALOG_AVAILABILITY_SECRET_FILE'),
+    secretIdKey: env(environ, 'CATALOG_AVAILABILITY_SECRET_ID_KEY') ?? 'SYNQTASK_REPORTER_ID',
+    secretKey: env(environ, 'CATALOG_AVAILABILITY_SECRET_KEY') ?? 'SYNQTASK_REPORTER_SECRET',
     machine: env(environ, 'CATALOG_AVAILABILITY_MACHINE'),
     modelsUrl: env(environ, 'CATALOG_AVAILABILITY_MODELS_URL') ?? 'http://127.0.0.1:4000/v1/models',
     modelsKeyFile: env(environ, 'CATALOG_AVAILABILITY_MODELS_KEY_FILE'),
@@ -147,20 +155,53 @@ export function missingSettings(cfg: CatalogAvailabilityConfig): string[] {
   return missing
 }
 
-function readSecret(path: string, deps: CatalogAvailabilityDeps): string | null {
+/** Сырое содержимое файла — для ключа чтения витрины (он всегда одна строка, не env-файл). */
+function readRaw(path: string, deps: CatalogAvailabilityDeps): string | null {
   try {
-    const raw = (deps.readFile ?? ((p: string) => readFileSync(p, 'utf8')))(path)
-    const v = raw.trim()
+    const v = (deps.readFile ?? ((p: string) => readFileSync(p, 'utf8')))(path).trim()
     return v === '' ? null : v
   } catch {
-    // Файла нет или он нечитаем — это причина не отправлять, а не повод отправить пустое.
     return null
   }
 }
 
+interface WriterCredentials {
+  id: string | null
+  secret: string
+}
+
+/**
+ * Учётные данные писателя из файла. Две законные формы, и обе поддерживаются, потому что
+ * владелец двери выбирает форму, а не я:
+ *   • env-файл (`KEY=value`) — берём id и секрет по именам ключей (контракт SynqTask);
+ *   • готовая строка — тогда это Bearer-токен.
+ * Пустая строка, отсутствующий файл или файл без секрета — это ОТКАЗ, а не «отправим как есть».
+ */
+function readCredentials(cfg: CatalogAvailabilityConfig, deps: CatalogAvailabilityDeps): WriterCredentials | null {
+  let raw: string
+  try {
+    raw = (deps.readFile ?? ((p: string) => readFileSync(p, 'utf8')))(cfg.secretFile as string)
+  } catch {
+    return null
+  }
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+
+  const vars: Record<string, string> = {}
+  for (const line of trimmed.split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line)
+    if (!m) continue
+    vars[m[1]] = m[2].replace(/^["']|["']$/g, '').trim()
+  }
+  const secret = vars[cfg.secretKey]
+  if (secret) return { id: vars[cfg.secretIdKey] ?? null, secret }
+  // Ни одного KEY=value — значит в файле лежит сам токен.
+  return { id: null, secret: trimmed }
+}
+
 /** Список моделей фронта. Пустой список — законный ответ, поэтому отдельно от ошибки. */
 async function fetchModels(cfg: CatalogAvailabilityConfig, deps: CatalogAvailabilityDeps): Promise<string[] | null> {
-  const key = cfg.modelsKeyFile ? readSecret(cfg.modelsKeyFile, deps) : null
+  const key = cfg.modelsKeyFile ? readRaw(cfg.modelsKeyFile, deps) : null
   if (!key) return null
   const f = deps.fetchImpl ?? ((u: string, i?: RequestInit) => fetch(u, i))
   try {
@@ -234,14 +275,26 @@ export async function sendAvailability(
   const { report, reason } = await buildReport(cfg, deps)
   if (!report) return { sent: false, reason }
 
-  const secret = cfg.secretFile ? readSecret(cfg.secretFile, deps) : null
-  if (!secret) return { sent: false, reason: 'secret file missing or unreadable' }
+  const creds = cfg.secretFile ? readCredentials(cfg, deps) : null
+  if (!creds) return { sent: false, reason: 'secret file missing or unreadable' }
+
+  // 🔴 МАШИННАЯ УЧЁТКА — ЭТО ДВА ЗАГОЛОВКА, А НЕ BEARER (замер 26.10.2026): дверь
+  // SynqTask аутентифицирует по `X-Agent-Id` + `X-Agent-Secret`; Bearer с тем же секретом
+  // получает 401. Если в файле лежит готовая строка без пары id — идём Bearer'ом и не делаем
+  // вид, что это одно и то же.
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (creds.id) {
+    headers['x-agent-id'] = creds.id
+    headers['x-agent-secret'] = creds.secret
+  } else {
+    headers.authorization = `Bearer ${creds.secret}`
+  }
 
   const f = deps.fetchImpl ?? ((u: string, i?: RequestInit) => fetch(u, i))
   try {
     const res = await f(cfg.url as string, {
       method: 'PUT',
-      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify(report),
       signal: AbortSignal.timeout(15_000),
     })

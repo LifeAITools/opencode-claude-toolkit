@@ -220,3 +220,51 @@ describe('таймер', () => {
     expect(lines[0]).toContain('CATALOG_AVAILABILITY_MACHINE')
   })
 })
+
+describe('учётные данные писателя', () => {
+  const FILES2: Record<string, string> = {
+    '/secret/env': 'SYNQTASK_REPORTER_ID=abc-123\nSYNQTASK_REPORTER_SECRET=deadbeef\n',
+    '/secret/raw': 'sk-raw-token\n',
+    '/secret/empty': '\n',
+    '/secret/reader': 'reader-key',
+  }
+  const read2 = (p: string) => {
+    const v = FILES2[p]
+    if (v === undefined) throw new Error('ENOENT')
+    return v
+  }
+  const capture = () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = []
+    const fetchImpl = async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/v1/models')) return modelsResponse(['m1'])
+      seen.push({ url: String(url), init })
+      return new Response('{"ok":true}', { status: 200 })
+    }
+    return { seen, fetchImpl }
+  }
+
+  test('env-файл → два заголовка машинной учётки, Bearer не ставится', async () => {
+    const { seen, fetchImpl } = capture()
+    const out = await sendAvailability(cfg({ secretFile: '/secret/env' }), { fetchImpl, readFile: read2 })
+    expect(out.sent).toBe(true)
+    const h = seen[0].init?.headers as Record<string, string>
+    expect(h['x-agent-id']).toBe('abc-123')
+    expect(h['x-agent-secret']).toBe('deadbeef')
+    expect(h.authorization).toBeUndefined()
+  })
+
+  test('готовая строка → Bearer, как было', async () => {
+    const { seen, fetchImpl } = capture()
+    await sendAvailability(cfg({ secretFile: '/secret/raw' }), { fetchImpl, readFile: read2 })
+    const h = seen[0].init?.headers as Record<string, string>
+    expect(h.authorization).toBe('Bearer sk-raw-token')
+    expect(h['x-agent-id']).toBeUndefined()
+  })
+
+  test('пустой файл — отказ, а не «отправим пустое»', async () => {
+    const { seen, fetchImpl } = capture()
+    const out = await sendAvailability(cfg({ secretFile: '/secret/empty' }), { fetchImpl, readFile: read2 })
+    expect(out.sent).toBe(false)
+    expect(seen).toHaveLength(0)
+  })
+})

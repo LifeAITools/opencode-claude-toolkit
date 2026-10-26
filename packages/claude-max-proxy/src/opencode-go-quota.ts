@@ -619,6 +619,29 @@ export function buildGoQuotaStatus(input: {
   }
 }
 
+/**
+ * Копия отчёта по второму адресу (см. `QUOTA_STATUS_OPENCODE_GO_MIRROR` в main).
+ *
+ * Отдельной функцией, а не строкой на месте: единственное, что здесь можно сломать, — это
+ * решить, что провал зеркала отменяет уже записанный отчёт для подвала. Он не отменяет.
+ * Возвращает причину отказа, чтобы вызывающий мог сказать её в журнал; `null` — записано
+ * или зеркала не просили.
+ */
+export function mirrorReport(
+  mirrorPath: string | undefined,
+  body: unknown,
+  write: (path: string, body: unknown) => void = writeAtomic,
+): string | null {
+  const target = mirrorPath?.trim()
+  if (!target) return null
+  try {
+    write(target, body)
+    return null
+  } catch (err: any) {
+    return String(err?.message ?? err).slice(0, 120)
+  }
+}
+
 export function writeAtomic(path: string, body: unknown): void {
   mkdirSync(dirname(path), { recursive: true })
   const tmp = `${path}.tmp-${process.pid}`
@@ -811,6 +834,14 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
     orgUids: readOrgUids(ORG_UIDS_JSON),
   })
   writeAtomic(opts.outPath, status)
+  // 🔴 ЗЕРКАЛО ДЛЯ ТЕХ, КТО ЖИВЁТ В ДРУГОМ КАТАЛОГЕ (26.10.2026). Отчёт читают двое: подвал
+  // агента берёт его из домашнего пути, а хук посредника `go_orgs.py` видит только каталог,
+  // смонтированный в контейнер, — домашнего пути внутри контейнера нет вовсе. Без зеркала
+  // выбор организации Go по запасу молча вырождается в `active:`, то есть весь флот садится
+  // на одну организацию (замер 26.10.2026: 80% вызовов). Пусто — зеркала нет, и это названное
+  // состояние, а не забытое.
+  const mirrorError = mirrorReport(process.env.QUOTA_STATUS_OPENCODE_GO_MIRROR, status)
+  if (mirrorError) console.error(`QUOTA_MIRROR_FAILED reason=${mirrorError}`)
   // СОБЫТИЯ ПЕРЕХОДА — рядом с отчётом, после его записи. Ошибка журнала квоту не отменяет:
   // отчёт уже на диске, а весть — дополнение к нему, не его условие.
   try {

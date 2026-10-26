@@ -268,3 +268,17 @@ describe('учётные данные писателя', () => {
     expect(seen).toHaveLength(0)
   })
 })
+
+describe('таймаут — это неизвестность, а не «не дошло»', () => {
+  test('отвалилось по сроку → так и сказано, с оговоркой', async () => {
+    const fetchImpl = async (url: string) => {
+      if (String(url).endsWith('/v1/models')) return modelsResponse(['m1'])
+      const e = new Error('The operation timed out.')
+      e.name = 'TimeoutError'
+      throw e
+    }
+    const out = await sendAvailability(cfg(), { fetchImpl, readFile })
+    expect(out.sent).toBe(false)
+    expect(out.reason).toContain('MAY have landed')
+  })
+})

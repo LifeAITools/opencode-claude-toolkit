@@ -302,7 +302,17 @@ export async function sendAvailability(
     if (!res.ok) return { sent: false, reason: `catalog answered ${res.status}`, models, status: res.status }
     return { sent: true, models, status: res.status }
   } catch (err: any) {
-    return { sent: false, reason: `catalog unreachable: ${String(err?.message ?? err).slice(0, 120)}` }
+    // 🔴 ТАЙМАУТ — ЭТО НЕ «НЕ ДОШЛО» (замер 26.10.2026): первый же ход по таймеру отвалился по
+    // сроку, а отчёт на двери ПОЯВИЛСЯ. Дверь пишет в хранилище и может ответить позже, чем
+    // наш срок. Назвать это «unreachable» значит потом чинить несуществующую сеть.
+    const name = String(err?.name ?? '')
+    const timedOut = name === 'TimeoutError' || name === 'AbortError' || /timed out/i.test(String(err?.message ?? ''))
+    return {
+      sent: false,
+      reason: timedOut
+        ? 'no answer within the timeout — the report MAY have landed; outcome unknown, not a failure'
+        : `catalog unreachable: ${String(err?.message ?? err).slice(0, 120)}`,
+    }
   }
 }
 

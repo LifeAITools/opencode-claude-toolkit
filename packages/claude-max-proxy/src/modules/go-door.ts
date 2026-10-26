@@ -979,8 +979,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
 
   let org
   let cred
+  // Якорь выдачи: настоящий номер сессии, если посредник его прокинул, иначе личность агента.
+  const orgKey = (sessionId ?? agentKey(parsed) ?? '').trim()
   try {
-    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, sessionId ?? agentKey(parsed))
+    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, orgKey)
     rec.org_id = org.name
     rec.provider_org_ref = org.workspace
     cred = await withFreshGoCredential(org, credSrc)
@@ -1066,6 +1068,14 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     const v = upstream.headers.get(h)
     if (v) passHeaders.set(h, v)
   }
+  // 🔴 СЛЕД ВЫБОРА НАРУЖУ, А НЕ ТОЛЬКО В СВОЙ ЖУРНАЛ.
+  // Выбирает организация ДВЕРЬ, и только дверь знает этот факт; посредник пишет учёт по факту
+  // и без этих заголовков теряет пару «сессия → организация» (замер 26.10: после перевода
+  // маршрута go_org/go_session в журнале посредника стали 0 — его хук узнавал модели Go
+  // по credential-имени, которого у модели больше нет). Правило заказчика: выбирает дверь,
+  // а пишет тот, кто видит факт со стороны.
+  passHeaders.set('x-kiberos-served-org', org.name)
+  if (orgKey) passHeaders.set('x-kiberos-org-key', orgKey)
 
   const finish = (text: string, streamed: boolean) => {
     rec.timing.total_ms = Date.now() - t0

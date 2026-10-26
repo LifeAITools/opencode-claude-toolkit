@@ -57,10 +57,40 @@ export interface PickByHeadroomResult {
  * окно не исчерпано. Нет ни одного кандидата или нет ни одного ЗАМЕРА — `org: null`, и вызывающий
  * откатывается на прежнее правило (`active:`): «замера нет» ≠ «выбирать нечего».
  */
+/** Ширина полосы «почти равного запаса» по умолчанию: 2% пятичасового окна. */
+export const DEFAULT_STICKY_BAND = 0.02
+
+export interface PickOptions {
+  /**
+   * Ключ стабильности (обычно номер сессии). Когда задан, выбор внутри полосы почти равного запаса
+   * держится за этим ключом, а не перескакивает на каждый запрос.
+   *
+   * 🔴 ЗАЧЕМ. Кэш префикса принадлежит АККАУНТУ. Пока организации почти равны (а сразу после сброса
+   * они все 0.01–0.06), выбор «максимум запаса» перекидывается между ними от запроса к запросу —
+   * и каждый перескок означает холодный префикс на новом аккаунте, то есть ту самую дорогую
+   * перезапись, ради предотвращения которой этот слой и существует (замер 26.10: медиана
+   * `cached_tokens` 227–428 тыс. на вызов, то есть флот живёт на кэше).
+   */
+  stickyKey?: string | null
+  /** Ширина полосы. По умолчанию `DEFAULT_STICKY_BAND`. */
+  band?: number
+}
+
+/** FNV-1a: детерминированный и дешёвый — одинаковый ключ даёт одну и ту же организацию. */
+function stableHash(value: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h >>> 0
+}
+
 export function pickOrgByHeadroom(
   orgs: GoOrg[],
   quotas: OrgQuotaView[],
   hasCredential: (name: string) => boolean,
+  opts: PickOptions = {},
 ): PickByHeadroomResult {
   const byName = new Map(quotas.map((q) => [q.name, q]))
   const scored: Array<{ org: GoOrg; h5: number; h7: number; index: number }> = []
@@ -84,6 +114,21 @@ export function pickOrgByHeadroom(
 
   scored.sort((a, b) => (b.h5 - a.h5) || (b.h7 - a.h7) || (a.index - b.index))
   const best = scored[0]
+  const key = (opts.stickyKey ?? '').trim()
+  if (key) {
+    const band = typeof opts.band === 'number' && Number.isFinite(opts.band) ? Math.max(0, opts.band) : DEFAULT_STICKY_BAND
+    // Полоса — «почти равные»: лучший плюс все, кто отстал не больше чем на band. Внутри неё выбор
+    // стабилен по ключу; из полосы организация выходит сама, когда реально отстала по запасу.
+    const inBand = scored.filter((s) => best.h5 - s.h5 <= band)
+    if (inBand.length > 1) {
+      const chosen = inBand[stableHash(key) % inBand.length]
+      return {
+        org: chosen.org,
+        reason: `запас 5ч=${chosen.h5.toFixed(2)} 7д=${chosen.h7 < 0 ? '?' : chosen.h7.toFixed(2)}; `
+          + `липко к сессии внутри полосы ${inBand.length} из ${scored.length} (лучший ${best.h5.toFixed(2)})`,
+      }
+    }
+  }
   return {
     org: best.org,
     reason: `запас 5ч=${best.h5.toFixed(2)} 7д=${best.h7 < 0 ? '?' : best.h7.toFixed(2)} среди ${scored.length}`,

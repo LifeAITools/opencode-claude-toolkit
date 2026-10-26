@@ -87,3 +87,64 @@ describe('чтение отчёта квоты и хранилища', () => {
     expect(readStoreOrgNames(null).size).toBe(0)
   })
 })
+
+/**
+ * Липкость к сессии. Полюс тот же, что уронил бы перевод маршрута: кэш префикса принадлежит
+ * АККАУНТУ, поэтому перескок организации посреди разговора = холодная перезапись.
+ */
+describe('выбор организации липок к сессии', () => {
+  const band = () => {
+    const orgs = [org('a'), org('b'), org('c'), org('d')]
+    const quotas = [q('a', 0.02, 0.03), q('b', 0.03, 0.02), q('c', 0.04, 0.05), q('d', 0.05, 0.04)]
+    return { orgs, quotas, has: all(['a', 'b', 'c', 'd']) }
+  }
+
+  test('один и тот же номер сессии даёт одну и ту же организацию при почти равных запасах', () => {
+    const { orgs, quotas, has } = band()
+    for (const sid of ['ses_1', 'ses_2', 'ses_3']) {
+      const seen = new Set<string>()
+      for (let i = 0; i < 50; i++) {
+        const r = pickOrgByHeadroom(orgs, quotas, has, { stickyKey: sid })
+        if (r.org) seen.add(r.org.name)
+      }
+      expect([...seen]).toHaveLength(1)
+    }
+  })
+
+  test('разные сессии расходятся по полосе, а не садятся на одну организацию', () => {
+    const { orgs, quotas, has } = band()
+    const picked = new Set<string>()
+    for (let i = 0; i < 40; i++) {
+      const r = pickOrgByHeadroom(orgs, quotas, has, { stickyKey: `ses_${i}` })
+      if (r.org) picked.add(r.org.name)
+    }
+    expect(picked.size).toBeGreaterThan(1)
+  })
+
+  test('без номера сессии правило прежнее — побеждает лучший запас', () => {
+    const { orgs, quotas, has } = band()
+    const r = pickOrgByHeadroom(orgs, quotas, has)
+    expect(r.org?.name).toBe('a')
+  })
+
+  test('отставшая сильнее полосы организация из выбора выходит', () => {
+    const orgs = [org('fast'), org('slow')]
+    const near = [q('fast', 0.10, 0), q('slow', 0.11, 0)]
+    const keys = Array.from({ length: 40 }, (_, i) => `ses_${i}`)
+    const before = keys.map((k) => pickOrgByHeadroom(orgs, near, all(['fast', 'slow']), { stickyKey: k }).org?.name)
+    expect(new Set(before).size).toBe(2)
+    // slow просел на 5% — это больше полосы 2%, значит он больше не кандидат ни для какой сессии
+    const after = keys.map((k) => pickOrgByHeadroom(orgs, [q('fast', 0.10, 0), q('slow', 0.15, 0)], all(['fast', 'slow']), { stickyKey: k }).org?.name)
+    expect(new Set(after)).toEqual(new Set(['fast']))
+  })
+
+  test('полоса настраивается: при нулевой полосе остаётся только лучший', () => {
+    const { orgs, quotas, has } = band()
+    const names = new Set<string>()
+    for (let i = 0; i < 20; i++) {
+      const r = pickOrgByHeadroom(orgs, quotas, has, { stickyKey: `ses_${i}`, band: 0 })
+      if (r.org) names.add(r.org.name)
+    }
+    expect([...names]).toEqual(['a'])
+  })
+})

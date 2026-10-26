@@ -47,7 +47,7 @@ const ORG_HEADER = 'x-kiberos-go-org'
  */
 let warnedNoQuota = false
 
-function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any) {
+function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, sessionId: string | null = null) {
   const w = (wanted ?? '').trim()
   if (w) return pickOrg(reg, w)
   if (cfg.goTokensPath) {
@@ -66,7 +66,7 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any) {
       ?? (besideStore && existsSync(besideStore) ? besideStore : QUOTA_STATUS_OPENCODE_GO_JSON)
     const quotas = readOrgQuotas(quotaPath)
     const haveToken = readStoreOrgNames(cfg.goTokensPath)
-    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n))
+    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n), { stickyKey: sessionId })
     if (byHeadroom.org) return byHeadroom.org
     // 🔴 ГРОМКО, А НЕ ТИХО: «замера нет» на сервере означает, что файл квоты не привезён.
     // Без этой строки выбор по запасу молча вырождается в `active:` — то есть в ровно ту беду,
@@ -910,7 +910,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let org
   let cred
   try {
-    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg)
+    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, sessionId)
     rec.org_id = org.name
     rec.provider_org_ref = org.workspace
     cred = await withFreshGoCredential(org, credSrc)

@@ -47,7 +47,7 @@ const ORG_HEADER = 'x-kiberos-go-org'
  */
 let warnedNoQuota = false
 
-function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, sessionId: string | null = null) {
+function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: string | null = null) {
   const w = (wanted ?? '').trim()
   if (w) return pickOrg(reg, w)
   if (cfg.goTokensPath) {
@@ -66,7 +66,7 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, sessionId: 
       ?? (besideStore && existsSync(besideStore) ? besideStore : QUOTA_STATUS_OPENCODE_GO_JSON)
     const quotas = readOrgQuotas(quotaPath)
     const haveToken = readStoreOrgNames(cfg.goTokensPath)
-    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n), { stickyKey: sessionId })
+    const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, (n) => haveToken.has(n), { stickyKey })
     if (byHeadroom.org) return byHeadroom.org
     // 🔴 ГРОМКО, А НЕ ТИХО: «замера нет» на сервере означает, что файл квоты не привезён.
     // Без этой строки выбор по запасу молча вырождается в `active:` — то есть в ровно ту беду,
@@ -94,6 +94,32 @@ function errorResponse(status: number, message: string, type = 'api_error'): Res
 
 function hashActor(v: string | null): string | null {
   return v ? sha256(v).slice(0, 16) : null
+}
+
+/**
+ * Ключ РАЗГОВОРА из тела — запасной якорь липкости, когда номер сессии не пришёл.
+ *
+ * 🔴 ПОЧЕМУ ОН НУЖЕН (замер 26.10.2026, сразу после перевода маршрута на дверь):
+ * LiteLLM не передаёт `x-opencode-session-id`, поэтому дверь видит `sessionId=null`,
+ * `sessions=0` при живом трафике, и вся липкость вырождается в «максимум запаса» — то есть
+ * весь флот сидит на ОДНОЙ организации, а когда лидер меняется, разговоры переезжают РАЗОМ
+ * и каждый платит холодной перезаписью префикса (медиана prompt 390 тыс. токенов).
+ *
+ * Якорь берётся из первого НЕ системного сообщения: оно есть в каждом ходе разговора и не
+ * меняется, пока разговор растёт. Системный промпт для якоря не годится — у всех сессий
+ * одного агента он одинаков.
+ */
+export function conversationKey(parsed: any): string | null {
+  const msgs = Array.isArray(parsed?.messages) ? parsed.messages : null
+  if (!msgs) return null
+  for (const m of msgs) {
+    if (!m || typeof m !== 'object') continue
+    if (m.role === 'system') continue
+    const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '')
+    if (!text) continue
+    return sha256(text.slice(0, 2000)).slice(0, 16)
+  }
+  return null
 }
 
 function callKindOf(req: Request): CallKind {
@@ -910,7 +936,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let org
   let cred
   try {
-    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, sessionId)
+    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, sessionId ?? conversationKey(parsed))
     rec.org_id = org.name
     rec.provider_org_ref = org.workspace
     cred = await withFreshGoCredential(org, credSrc)

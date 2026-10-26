@@ -262,7 +262,10 @@ export async function buildReport(
       {
         harness: cfg.harness,
         version: undefined,
-        namespaces: [cfg.modelNamespace],
+        // 🔴 БЕЗ ЗАВЕДУЩЕГО СЛЭША — в такой форме его ХРАНИТ дверь (замер 26.10.2026:
+        // на провод уходит `kiberos-go/`, в store лежит `kiberos-go`). Две формы одного
+        // имени — это два источника правды; пусть на проводе будет та же, что в хранилище.
+        namespaces: [cfg.modelNamespace.replace(/\/+$/, '')].filter(Boolean),
         models: mine.map((id) => ({
           model: `${cfg.modelNamespace}${id}`,
           ok: true,

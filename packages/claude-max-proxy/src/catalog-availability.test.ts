@@ -117,7 +117,7 @@ describe('снимок', () => {
         {
           harness: 'claude-code',
           version: undefined,
-          namespaces: ['kiberos-go/'],
+          namespaces: ['kiberos-go'],
           models: [
             { model: 'kiberos-go/m2', ok: true, probedAt: '1970-01-01T00:00:00.000Z', detail: expect.stringContaining('not probed') },
             { model: 'kiberos-go/m1', ok: true, probedAt: '1970-01-01T00:00:00.000Z', detail: expect.stringContaining('not probed') },

@@ -47,6 +47,10 @@ export interface DumpRecord {
   door: string
   provider: string
   org_id: string | null
+  /** Откуда дверь взяла организацию: `named` (назвал клиент), `pin` (выдана ранее),
+   *  `quota` (выбрана по времени до стены), `active` (откат). `null` — версия двери,
+   *  которая этого ещё не сообщала; НЕ равно `quota` и не должно трактоваться как выбор. */
+  org_source?: string | null
   provider_org_ref: string | null
   model: string | null
   session_id: string | null

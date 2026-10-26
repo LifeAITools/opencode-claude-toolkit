@@ -17,6 +17,9 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { corsify, requireControlAuth } from '../control-auth.js'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
 import { stuckSessionState, stuckSessionReport, stuckSessionsAll, dropStuck } from '../local-alert.js'
 import { enrichOrgSurface } from '../org-surface.js'
@@ -48,6 +51,36 @@ export function resolveRewriteConsentTtlSec(
   return defaultTtlSec
 }
 
+
+/**
+ * Последняя запись журнала двери про эту сессию: кто её обслужил и откуда взялась организация.
+ *
+ * Читаем только сегодняшний и вчерашний файл и идём с конца: журнал построчный, а сессия
+ * живет часами. Если записи нет — это честное `found:false` («дверь ещё не обслуживала»),
+ * НЕ повод подставлять `active` или организацию по членству.
+ */
+export function servedOrgOf(session: string): { found: boolean; session: string; org?: string; source?: string | null; at?: string; ageSec?: number } {
+  const dir = process.env.PROVIDER_DUMP_DIR ?? join(homedir(), '.claude-local', 'provider-dump')
+  const days = [0, 1].map((d) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10))
+  for (const day of days) {
+    let text = ''
+    try { text = readFileSync(join(dir, `${day}.jsonl`), 'utf8') } catch { continue }
+    const lines = text.split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]
+      if (!line || !line.includes(session)) continue
+      try {
+        const rec = JSON.parse(line) as { session_id?: string | null; org_id?: string | null; org_source?: string | null; ts?: string }
+        if (rec.session_id !== session) continue
+        const at = typeof rec.ts === 'string' ? rec.ts : null
+        const ageSec = at ? Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000)) : undefined
+        return { found: true, session, org: rec.org_id ?? undefined, source: rec.org_source ?? null, at: at ?? undefined, ageSec }
+      } catch { /* битая строка — идём дальше */ }
+    }
+  }
+  return { found: false, session }
+}
+
 export function createAdminModule(onShutdown: () => void): ProxyModule {
   shutdownFn = onShutdown
 
@@ -62,6 +95,21 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
           firstSeenAt: s.firstSeenAt, lastRequestAt: s.lastRequestAt,
         })),
       }),
+    },
+
+    // Кто ОБСЛУЖИЛ сессию — факт из собственного журнала двери, а не догадка из env.
+    // 🔴 Зачем: подвал агента брал организацию из `KIBEROS_GO_ORG` процесса, а у части
+    // агентов переменной нет вовсе — и тогда показывалась организация по членству, которая
+    // может не совпадать с фактической (замер 26.10: у `home-ourhome-owner` в карточке
+    // `ruslan@elishev.com`, а дверь обслуживала `luxeresit@gmail.com`).
+    {
+      method: 'GET',
+      path: '/admin/served-org',
+      handler: async (req) => {
+        const session = (new URL(req.url).searchParams.get('session') ?? '').trim()
+        if (!session) return Response.json({ error: 'session required' }, { status: 400 })
+        return Response.json(servedOrgOf(session))
+      },
     },
 
     // Mark session as Worker-managed

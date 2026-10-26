@@ -1118,6 +1118,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     org = selected.org
     orgSource = selected.source
     rec.org_id = org.name
+    rec.org_source = orgSource
     rec.provider_org_ref = org.workspace
     cred = await withFreshGoCredential(org, credSrc)
   } catch (err: any) {

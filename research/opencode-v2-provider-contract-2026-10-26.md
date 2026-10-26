@@ -132,3 +132,48 @@ for (const [id, config] of Object.entries(item.models ?? {})) {
    при переносе проверять, что именно мы задавали.
 3. Цены — умножить на 1e6 и покрыть испытанием.
 4. `disabled: true` — штатный способ скрыть модель, вместо удаления из списка.
+
+---
+
+## Карта переноса: наша регистрация v1 → v2 (26.10.2026)
+
+Наш код v1: `packages/opencode-plugin/src/index.ts:285-325` (хук `config`).
+Там провайдер и модели описываются объектами, которые v2 не знает вовсе.
+
+| v1 (наш плагин) | v2 (`ConfigProvider.Info` / `ModelConfig`) | что делать |
+|---|---|---|
+| `provider['claude-max'].id` | ключ в `providers` документа | ключом становится само имя провайдера |
+| `name` | `name` | как есть |
+| `api` (base URL) | **поля нет** → `settings.baseURL` | URL переезжает в настройки, не в поле провайдера |
+| `npm: '@ai-sdk/anthropic'` | `package: '@ai-sdk/anthropic'` | переименовать |
+| `env: []` | `env: []` | как есть |
+| `models: {}` | `models: Record<string, ModelConfig>` | как есть |
+| `model.id` | ключ в `models` | у нас имя алиаса — оно и есть ключ |
+| `model.providerID` | **поля нет** | модель уже внутри провайдера |
+| `model.api: {id, url, npm}` | `modelID` (ссылка на каталог) + `settings` | `modelID` — только если модель есть в каталоге провайдера; иначе описать полностью |
+| `capabilities.toolcall` | `capabilities.tools` | переименовать |
+| `capabilities.temperature` | `capabilities.temperature` | как есть, но в v2 это **обязательное** поле при заданном блоке |
+| `capabilities.attachment` | `capabilities.input` | переименовать (мультимодальный вход) |
+| `capabilities.reasoning: true` | `reasoning: { supported: true }` | форма другая — union, а не булево |
+| `cost: {input, output, cache:{read,write}}` | `cost: Cost \| Cost[]`, **USD за МИЛЛИОН** | ×1e6, если значения ненулевые (у нас нули) |
+| `limit: {context, output}` | `limit: {context, input, output}` | как есть; `input` — новое поле |
+| `status: 'active'` | `disabled: boolean` | инверсия: `active` → `disabled: false` (можно не указывать) |
+| `options: {}` | `settings` | переименовать |
+| `headers: {}` | `headers` | как есть |
+
+### Три вещи, которые при переносе ломаются МОЛЧА
+
+1. **Единицы цены** (см. выше): v1 за токен, v2 за миллион.
+2. **`api` против `settings.baseURL`.** В v1 наш URL стоял в `api` и на провайдере, и на каждой модели.
+   В v2 `api` нет вовсе; если просто выкинуть поле — запросы уйдут на канонический адрес провайдера пакета,
+   то есть МИМО нашего прокси, и это будет выглядеть как «плагин не работает».
+3. **`providerID` на модели** в v2 не существует, и попытка его передать — это поле, которого схема не ждёт:
+   оно молча отбрасывается, а не падает с ошибкой. Значит «перенёс и не ругается» ≠ «перенёс верно».
+
+### Порядок работ
+
+1. Плагин отдаёт документ конфига с `providers['claude-max'] = { name, package, env, settings.baseURL, models }`.
+2. Для каждой нашей модели — ключ = имя алиаса; `modelID` только там, где модель есть в каталоге провайдера.
+3. Цены ×1e6 (или не задавать вовсе — у нас подписка и ноль).
+4. Испытание на КОНКРЕТНЫЕ числа: `limit.context` совпадает с реестром, `cost.input` в нужных единицах,
+   и `settings.baseURL` = адрес нашего прокси (а не адрес Anthropic).

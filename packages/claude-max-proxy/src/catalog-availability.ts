@@ -76,6 +76,12 @@ export interface CatalogAvailabilityConfig {
    * человек потом увидит их в меню. Молчание безопасно, выдуманная пара — нет.
    */
   modelPrefix: string
+  /**
+   * Пространство имён каталога, которое приписывается к id модели (например `kiberos-go/`).
+   * Каталог называет пару `opencode:kiberos-go/<id фронта>` — имя модели в отчёте обязано
+   * совпасть с этим точно, иначе синк заведёт пару, которой нет.
+   */
+  modelNamespace: string
   intervalMs: number
 }
 
@@ -116,8 +122,9 @@ export function readCatalogAvailabilityConfig(environ: Record<string, string | u
     machine: env(environ, 'CATALOG_AVAILABILITY_MACHINE'),
     modelsUrl: env(environ, 'CATALOG_AVAILABILITY_MODELS_URL') ?? 'http://127.0.0.1:4000/v1/models',
     modelsKeyFile: env(environ, 'CATALOG_AVAILABILITY_MODELS_KEY_FILE'),
-    harness: env(environ, 'CATALOG_AVAILABILITY_HARNESS') ?? 'claude-code',
+    harness: env(environ, 'CATALOG_AVAILABILITY_HARNESS') ?? 'opencode',
     modelPrefix: env(environ, 'CATALOG_AVAILABILITY_MODEL_PREFIX') ?? '',
+    modelNamespace: env(environ, 'CATALOG_AVAILABILITY_MODEL_NAMESPACE') ?? '',
     intervalMs: num(environ, 'CATALOG_AVAILABILITY_INTERVAL_MS', DEFAULT_INTERVAL_MS),
   }
 }
@@ -136,6 +143,7 @@ export function missingSettings(cfg: CatalogAvailabilityConfig): string[] {
   // Обязателен намеренно: см. комментарий у `modelPrefix` — отчёт «всё под одной программой»
   // заводит в каталоге пары, которых нет.
   if (!cfg.modelPrefix) missing.push('CATALOG_AVAILABILITY_MODEL_PREFIX')
+  if (!cfg.modelNamespace) missing.push('CATALOG_AVAILABILITY_MODEL_NAMESPACE')
   return missing
 }
 
@@ -184,7 +192,14 @@ export async function buildReport(
   if (ids === null) return { report: null, reason: 'models list unavailable (no answer or no key)' }
   if (ids.length === 0) return { report: null, reason: 'models list is empty — an empty snapshot would claim this machine starts nothing' }
 
-  const mine = cfg.modelPrefix === '*' ? ids : ids.filter((id) => id.startsWith(cfg.modelPrefix))
+  // Несколько префиксов через запятую: у фронта модели Go названы по-разному
+  // (`deepseek-v4.1-flash-go`, `muse-spark-1.3-contributor`), общего префикса у них нет.
+  const prefixes = cfg.modelPrefix === '*'
+    ? []
+    : cfg.modelPrefix.split(',').map((p) => p.trim()).filter(Boolean)
+  const mine = cfg.modelPrefix === '*'
+    ? ids
+    : ids.filter((id) => prefixes.some((p) => id.startsWith(p)))
   if (mine.length === 0) {
     return { report: null, reason: `no models match prefix '${cfg.modelPrefix}' — refusing to report an empty snapshot` }
   }
@@ -197,7 +212,7 @@ export async function buildReport(
         harness: cfg.harness,
         version: undefined,
         models: mine.map((id) => ({
-          model: id,
+          model: `${cfg.modelNamespace}${id}`,
           ok: true,
           probedAt,
           detail: 'listed by the gateway; not probed (a probe would spend subscription counters)',

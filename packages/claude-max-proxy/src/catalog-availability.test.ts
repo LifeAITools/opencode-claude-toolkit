@@ -22,6 +22,7 @@ const ENV = {
   CATALOG_AVAILABILITY_MODELS_KEY_FILE: '/secret/reader',
   CATALOG_AVAILABILITY_HARNESS: 'claude-code',
   CATALOG_AVAILABILITY_MODEL_PREFIX: 'm',
+  CATALOG_AVAILABILITY_MODEL_NAMESPACE: 'kiberos-go/',
 }
 
 const cfg = (over: Partial<CatalogAvailabilityConfig> = {}): CatalogAvailabilityConfig => ({
@@ -53,6 +54,7 @@ describe('настройки', () => {
       'CATALOG_AVAILABILITY_MACHINE',
       'CATALOG_AVAILABILITY_MODELS_KEY_FILE',
       'CATALOG_AVAILABILITY_MODEL_PREFIX',
+      'CATALOG_AVAILABILITY_MODEL_NAMESPACE',
     ])
   })
 
@@ -116,8 +118,8 @@ describe('снимок', () => {
           harness: 'claude-code',
           version: undefined,
           models: [
-            { model: 'm2', ok: true, probedAt: '1970-01-01T00:00:00.000Z', detail: expect.stringContaining('not probed') },
-            { model: 'm1', ok: true, probedAt: '1970-01-01T00:00:00.000Z', detail: expect.stringContaining('not probed') },
+            { model: 'kiberos-go/m2', ok: true, probedAt: '1970-01-01T00:00:00.000Z', detail: expect.stringContaining('not probed') },
+            { model: 'kiberos-go/m1', ok: true, probedAt: '1970-01-01T00:00:00.000Z', detail: expect.stringContaining('not probed') },
           ],
         },
       ],
@@ -132,12 +134,15 @@ describe('снимок', () => {
     expect(r.report?.harnesses[0].models).toHaveLength(2)
   })
 
-  test('префикс оставляет только свои модели', async () => {
-    const r = await buildReport(cfg({ modelPrefix: 'kiberos-go/' }), {
-      fetchImpl: async () => modelsResponse(['kiberos-go/flash', 'claude-opus-4-6']),
+  test('несколько префиксов через запятую и пространство имён каталога', async () => {
+    const r = await buildReport(cfg({ modelPrefix: 'deepseek-v4.1-flash-go,muse-spark' }), {
+      fetchImpl: async () => modelsResponse(['deepseek-v4.1-flash-go', 'muse-spark-1.3-contributor', 'claude-opus-5']),
       readFile,
     })
-    expect(r.report?.harnesses[0].models.map((m) => m.model)).toEqual(['kiberos-go/flash'])
+    expect(r.report?.harnesses[0].models.map((m) => m.model)).toEqual([
+      'kiberos-go/deepseek-v4.1-flash-go',
+      'kiberos-go/muse-spark-1.3-contributor',
+    ])
   })
 
   test('ok честно назван объявлением фронта, а не пробой', async () => {

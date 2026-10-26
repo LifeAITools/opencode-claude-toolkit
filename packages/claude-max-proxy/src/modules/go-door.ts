@@ -47,9 +47,17 @@ const ORG_HEADER = 'x-kiberos-go-org'
  */
 let warnedNoQuota = false
 
-function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: string | null = null) {
+/**
+ * Откуда взялась организация. Наружу отдаём заголовком `x-kiberos-org-source`: без этого
+ * нельзя отличить «дверь выбирает» от «клиент прислал готовое имя» — а именно на этой
+ * разнице ломалось правило фаундера 26.10 (агенты шлют `x-kiberos-go-org`, он перебивал
+ * и запас, и запиненную сессию, и разброс по организациям выглядел как наша работа).
+ */
+type OrgSource = 'named' | 'pin' | 'quota' | 'active'
+
+function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: string | null = null): { org: ReturnType<typeof pickOrg>; source: OrgSource } {
   const w = (wanted ?? '').trim()
-  if (w) return pickOrg(reg, w)
+  if (w) return { org: pickOrg(reg, w), source: 'named' }
   if (cfg.goTokensPath) {
     // 🔴 ОТЧЁТ КВОТЫ ЖИВЁТ РЯДОМ С РЕЕСТРОМ И ВХОДАМИ, А НЕ В `~/.claude-local`: на сервере его
     // привозит доставка в тот же смонтированный каталог (`/go/quota-status-opencode-go.json`).
@@ -75,14 +83,14 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: 
         const org = reg.orgs.find((o) => o.name === pinned)
         if (org) {
           pinStore(key, org.name)
-          return org
+          return { org, source: 'pin' }
         }
       }
     }
     const byHeadroom = pickOrgByHeadroom(reg.orgs, quotas, has, { stickyKey: key || null })
     if (byHeadroom.org) {
       if (key) pinStore(key, byHeadroom.org.name)
-      return byHeadroom.org
+      return { org: byHeadroom.org, source: 'quota' }
     }
     // 🔴 ГРОМКО, А НЕ ТИХО: «замера нет» на сервере означает, что файл квоты не привезён.
     // Без этой строки выбор по запасу молча вырождается в `active:` — то есть в ровно ту беду,
@@ -93,7 +101,7 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: 
     }
   }
   // Замера нет вовсе — ведём себя как раньше: `active:` реестра. «Нечего мерить» ≠ «нечего брать».
-  return pickOrg(reg, null)
+  return { org: pickOrg(reg, null), source: 'active' }
 }
 /**
  * СПУЛ ТЕЛА: последнее тело вызова на сессию — единственный источник ответа «что ИМЕННО
@@ -1046,6 +1054,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   }
 
   let org
+  let orgSource: OrgSource = 'active'
   let cred
   // Якорь выдачи: настоящий номер сессии, если посредник его прокинул, иначе личность агента.
   const orgKey = (sessionId ?? agentKey(parsed) ?? '').trim()
@@ -1054,7 +1063,9 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     if (payload) spoolWrite(process.env.GO_SPOOL_DIR ?? `${homedir()}/.claude-local/go-body-spool`, orgKey, payload)
   }
   try {
-    org = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, orgKey)
+    const selected = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, orgKey)
+    org = selected.org
+    orgSource = selected.source
     rec.org_id = org.name
     rec.provider_org_ref = org.workspace
     cred = await withFreshGoCredential(org, credSrc)
@@ -1148,6 +1159,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   // а пишет тот, кто видит факт со стороны.
   passHeaders.set('x-kiberos-served-org', org.name)
   if (orgKey) passHeaders.set('x-kiberos-org-key', orgKey)
+  passHeaders.set('x-kiberos-org-source', orgSource)
 
   const finish = (text: string, streamed: boolean) => {
     rec.timing.total_ms = Date.now() - t0

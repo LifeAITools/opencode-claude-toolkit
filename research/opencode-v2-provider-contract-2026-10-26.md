@@ -79,3 +79,56 @@ for (const [id, config] of Object.entries(item.models ?? {})) {
 - `ConfigProvider.Info` (schema/config/provider.ts) не читал построчно — только по использованию:
   `name`, `env`, `models`, `package`, `settings.baseURL`. Перед реализацией прочитать целиком.
 - Доков v2 (`opencode.ai/v2/docs/plugins`) не касался: там про реестр провайдера молчит, что и было записано ранее.
+
+---
+
+## Дополнение: `ConfigProvider.Info` и `Config.Model` целиком (26.10.2026)
+
+Файл `packages/schema/src/config/provider.ts` (113 строк), прочитан построчно.
+
+### Провайдер — `Info` (provider.ts:100-111)
+
+```ts
+{
+  canonical?: Provider.ID,        // ссылка на канонического провайдера каталога
+  name?: string,
+  env?: string[],                  // из каких переменных окружения брать ключ
+  package?: string,                // пакет, который ходит к провайдеру
+  compatibility?: ProviderCompatibility,
+  settings?, headers?, body?,      // наложения на запрос провайдера
+  models?: Record<string, ModelConfig>,
+}
+```
+
+### Модель — `ModelConfig` (provider.ts:76-98)
+
+```ts
+{
+  modelID?: ID,                    // ← ссылка на модель КАТАЛОГА (наш случай: чужое имя)
+  family?, name?, releaseDate? (YYYY-MM или YYYY-MM-DD), compatibility?, package?,
+  settings?, headers?, body?,
+  capabilities?: { tools?, input?, output?, temperature, reasoning? },   // ПОЛЕ ЧАСТИЧНОЕ
+  variants?: Array<{ id: VariantID, settings?, headers?, body? }>,
+  cost?: Cost | Cost[],
+  disabled?: boolean,
+  limit?: { context?, input?, output? },
+}
+```
+
+`capabilities` — частичная: незаданные поля падают на базу каталога, затем на дефолты.
+`reasoning` — либо `{ supported: false }`, либо `{ supported: true, toggle?, effort?: string[], budget?: {min?,max?} }`.
+
+### 🔴 ЛОВУШКА ЕДИНИЦ: цена в v2 — за МИЛЛИОН токенов
+
+`Money.USDPerMillionTokens` в `Cost.input` / `Cost.output` / `Cache.read` / `Cache.write`.
+В нашем v1-реестре цены за ТОКЕН (`input_cost_per_token` в `config.yaml` = 1.5e-07).
+Прямой перенос даст цену в миллион раз меньше — то есть учёт покажет почти ноль.
+При порте умножать на 1e6, и это должно быть в испытании, а не в голове.
+
+### Что это меняет в плане порта
+
+1. Провайдер объявляется документом: `{ name, env: [...], models: { "<наше имя>": { modelID: "<модель каталога>", … } } }`.
+2. `limit` в v2 — `{ context, input, output }` (в `Model.Info` — `{ context, output }`): поля не совпадают один в один,
+   при переносе проверять, что именно мы задавали.
+3. Цены — умножить на 1e6 и покрыть испытанием.
+4. `disabled: true` — штатный способ скрыть модель, вместо удаления из списка.

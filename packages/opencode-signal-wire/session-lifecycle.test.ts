@@ -90,6 +90,18 @@ describe('человек и конец (PRP 08)', () => {
     expect(m.endFromSessionDeleted({ type: 'session.deleted', properties: { info: { id: 'ses_gone' } } }))
       .toEqual({ sessionId: 'ses_gone' })
     expect(m.endFromSessionDeleted({ type: 'session.deleted', properties: {} })).toBeNull()
+    // 🔴 v2 (opencode 1.19.0): имя `permission.asked`, поля `permission`+`patterns`, без `title`.
+    expect(m.askedFromPermissionUpdated({
+      type: 'permission.asked',
+      properties: { id: 'p2', sessionID: 'ses_v2', permission: 'bash', patterns: ['bun test*'] },
+    })).toEqual({ sessionId: 'ses_v2', kind: 'permission', message: 'bash bun test*', requestId: 'p2' })
+    expect(m.askedFromPermissionUpdated({ type: 'permission.asked', properties: { id: 'p3', sessionID: 'ses_v2' } }))
+      .toEqual({ sessionId: 'ses_v2', kind: 'permission', message: '', requestId: 'p3' })
+    // ответ человека под v2: поле `requestID`, а не `permissionID`
+    expect(m.answeredFromPermissionReplied(
+      { type: 'permission.replied', properties: { sessionID: 'ses_v2', requestID: 'p2', response: 'allow-once' } },
+      mem.recall,
+    )).toEqual({ sessionId: 'ses_v2', kind: 'permission', outcome: 'allow-once', requestId: 'p2' })
   })
 
   test('память видов вытесняет старые', async () => {

@@ -935,9 +935,14 @@ export default {
         // asked/answered/end — тем же узором, только своя сессия. Формы по
         // поправкам: tool нет, kind из памяти, reason опускается, disposed
         // без номера не синтезируется.
-        if ((eventType === 'permission.updated' || eventType === 'permission.replied' || eventType === 'session.deleted') && signalWireEngine) {
+        // 🔴 `permission.asked` — ИМЯ, КОТОРОЕ ШЛЁТ opencode 1.19.0 (SDK v2). Старое
+        // `permission.updated` живёт только в v1 и в бинаре не встречается ни разу (замер
+        // 27.10: 12 против 0). Ветка, сравнивавшая со старым именем, была мертва по построению:
+        // ожидание человека входило в процесс и выбрасывалось без ошибки, поэтому `waiting`
+        // («ждёт вас») не мог зажечься ни у одного opencode-агента.
+        if ((eventType === 'permission.updated' || eventType === 'permission.asked' || eventType === 'permission.replied' || eventType === 'session.deleted') && signalWireEngine) {
           try {
-            if (eventType === 'permission.updated') {
+            if (eventType === 'permission.updated' || eventType === 'permission.asked') {
               const asked = askedFromPermissionUpdated(event)
               if (asked && (!boundSessionId || asked.sessionId === boundSessionId)) {
                 permissionKinds.remember(asked.requestId, asked.kind)

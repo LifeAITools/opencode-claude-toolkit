@@ -135,18 +135,29 @@ export function createPermissionKindMemory(limit = 500): {
 }
 
 /**
- * permission.updated → human.asked. Инструмента в Permission нет — без него
- * (message ← title, requestId ← id). Пустой id — не вопрос.
+ * ОЖИДАНИЕ ЧЕЛОВЕКА → human.asked. ДВА ИМЕНИ ОДНОГО СОБЫТИЯ, и это не запас на всякий случай:
+ * opencode 1.19.0 шлёт `permission.asked` (SDK v2, EventPermissionAsked), а `permission.updated`
+ * (SDK v1 и наш договор до 27.10) в бинаре не встречается НИ РАЗУ. Слушатель старого имени
+ * молчал ВСЕГДА, и «ждёт вас» не могло зажечься ни у одного агента флота.
+ *
+ * ПОЛЯ ТОЖЕ РАЗНЫЕ: v2 несёт `permission` + `patterns` (нет `title`), v1 нёс `title`. Поэтому
+ * текст собирается из того, что есть: сначала старое поле, потом новое имя разрешения с
+ * паттернами — иначе событие придёт, а `message` выйдет пустым (вторая тишина под тем же именем).
+ * Инструмента в событии нет — без него. Пустой id — не вопрос.
  */
 export function askedFromPermissionUpdated(event: any): HumanAsked | null {
-  if (event?.type !== 'permission.updated') return null
+  if (event?.type !== 'permission.updated' && event?.type !== 'permission.asked') return null
   const p = event?.properties ?? {}
   if (typeof p.id !== 'string' || !p.id) return null
   if (typeof p.sessionID !== 'string' || !p.sessionID) return null
+  const patterns = Array.isArray(p.patterns) ? p.patterns.filter((x: unknown) => typeof x === 'string') : []
+  const fromV2 = typeof p.permission === 'string' && p.permission !== ''
+    ? [p.permission, ...patterns].join(' ')
+    : ''
   return {
     sessionId: p.sessionID,
     kind: 'permission',
-    message: typeof p.title === 'string' ? p.title : '',
+    message: typeof p.title === 'string' ? p.title : fromV2,
     requestId: p.id,
   }
 }
@@ -162,13 +173,18 @@ export function answeredFromPermissionReplied(
   if (event?.type !== 'permission.replied') return null
   const p = event?.properties ?? {}
   if (typeof p.sessionID !== 'string' || !p.sessionID) return null
-  if (typeof p.permissionID !== 'string' || !p.permissionID) return null
+  // v2 зовёт поле `requestID`, v1 звало `permissionID` — читаем оба, иначе ответ человека
+  // теряется ровно так же, как терялось само ожидание.
+  const requestId = typeof p.permissionID === 'string' && p.permissionID
+    ? p.permissionID
+    : typeof p.requestID === 'string' ? p.requestID : ''
+  if (!requestId) return null
   if (typeof p.response !== 'string') return null
   return {
     sessionId: p.sessionID,
-    kind: recallKind(p.permissionID) ?? 'permission',
+    kind: recallKind(requestId) ?? 'permission',
     outcome: p.response,
-    requestId: p.permissionID,
+    requestId,
   }
 }
 

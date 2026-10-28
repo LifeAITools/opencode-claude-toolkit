@@ -683,15 +683,32 @@ function compareToPrevious(
   // вердикт `rewrite` — то есть прогрев с неизменным префиксом выглядел переписью. Владелец
   // wake-router спрашивал именно об этом 24.10.2026.
   const sameHistory = prev.full === sha256(JSON.stringify(msgs))
-  if ((prev.full === prefixSha || sameHistory) && prev.tools === tools && !systemChanged) {
+  // 🔴 ПРОДОЛЖЕНИЕ ЛЮБОЙ ДЛИНЫ, А НЕ РОВНО ОДНО СООБЩЕНИЕ (нашёл 28.10.2026, замер: 14 774
+  // «переписи» за сутки, из них 14 727 с неопределённым местом расхождения, и в 12 980 случаях
+  // история выросла РОВНО на 2 сообщения — это обычный ход с одним инструментом:
+  // assistant(tool_use) + user(tool_result)).
+  //
+  // Почему прежняя проверка этого не видела: `prev.full` — хеш ВСЕГО прежнего массива, а
+  // `prefixSha` — хеш нынешнего БЕЗ последнего сообщения. При +1 сообщении эти два массива
+  // совпадают буквально, при +2 и больше — уже нет, хотя префикс не тронут. Так честное
+  // дописывание получало вердикт `rewrite` с `firstDiffIndex=undefined`, а `rewrittenTokens`
+  // на неопределённом месте считает ВСЁ тело — отсюда «~553 415 токенов» и отказ сторожa
+  // на нормальном ходе. Проверять надо не равенство массивов, а то, что прежняя история
+  // целиком лежит в начале нынешней.
+  // Хеши нынешних сообщений считаются ОДИН раз: ниже ими же ищется место расхождения, а
+  // сессия бывает на 2000 сообщений — дважды хешировать её на каждом ходу незачем.
+  const curHashes = cacheable.map(msgHash)
+  const appended = curHashes.length > prev.msgHashes.length
+    && prev.msgHashes.every((h, i) => h === curHashes[i])
+  if ((prev.full === prefixSha || sameHistory || appended) && prev.tools === tools && !systemChanged) {
     return { verdict: 'append', msgs: msgs.length, idleMs, cacheTtlMs }
   }
 
   // Расхождение: ищем первое сообщение, которое перестало совпадать с отправленным прошлый раз.
   let firstDiff: number | undefined
-  const common = Math.min(prev.msgHashes.length, cacheable.length)
+  const common = Math.min(prev.msgHashes.length, curHashes.length)
   for (let i = 0; i < common; i++) {
-    if (prev.msgHashes[i] !== msgHash(cacheable[i])) { firstDiff = i; break }
+    if (prev.msgHashes[i] !== curHashes[i]) { firstDiff = i; break }
   }
   // 🔴 СМЕНА ГОЛОВЫ КОНТЕКСТА — РАСХОЖДЕНИЕ С НУЛЕВОГО СООБЩЕНИЯ. Сообщения при этом совпадают,
   // поэтому обычный поиск ничего не находит, и убыток посчитался бы по хвосту. На деле меняется

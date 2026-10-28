@@ -91,3 +91,58 @@ describe('prefixAnalysis — ГДЕ разошлось (слово фаунде�
     expect(a.firstDiffIndex).toBeUndefined()
   })
 })
+
+/**
+ * 🔴 ДОПИСЫВАНИЕ ЛЮБОЙ ДЛИНЫ (замер 28.10.2026: 12 980 из 14 774 «переписей» за сутки — рост
+ * ровно на 2 сообщения, то есть обычный ход с одним инструментом). Прежняя проверка узнавала
+ * только +1 сообщение, потому что сравнивала хеш всего прошлого массива с хешем нынешнего без
+ * последнего; при +2 они уже не равны, и честное продолжение получало вердикт `rewrite` с
+ * `firstDiffIndex=undefined` — а на неопределённом месте убыток считается по всему телу.
+ */
+describe('prefixVerdict — продолжение истории с инструментом (+2 сообщения и больше)', () => {
+  const m = (role: string, t: string) => ({ role, content: t })
+  const s = () => `ses_${Math.random().toString(36).slice(2)}`
+
+  test('ход с одним инструментом: assistant(tool_use) + user(tool_result) — append', () => {
+    const id = s()
+    prefixVerdict(id, { messages: [m('user', 'u1'), m('assistant', 'a1')] })
+    expect(prefixVerdict(id, {
+      messages: [m('user', 'u1'), m('assistant', 'a1'), m('assistant', 'tool_use'), m('user', 'tool_result')],
+    })).toBe('append')
+  })
+
+  test('два хода подряд с инструментами — каждый append, а не rewrite', () => {
+    const id = s()
+    const hist = [m('user', 'u1'), m('assistant', 'a1')]
+    prefixVerdict(id, { messages: hist })
+    hist.push(m('assistant', 'tool_use'), m('user', 'tool_result'))
+    expect(prefixVerdict(id, { messages: hist })).toBe('append')
+    hist.push(m('assistant', 'tool_use2'), m('user', 'tool_result2'))
+    expect(prefixVerdict(id, { messages: hist })).toBe('append')
+  })
+
+  test('рост на 5 сообщений при нетронутом префиксе — append', () => {
+    const id = s()
+    const hist = [m('user', 'u1'), m('assistant', 'a1')]
+    prefixVerdict(id, { messages: hist })
+    for (let i = 0; i < 5; i++) hist.push(m('assistant', `t${i}`), m('user', `r${i}`))
+    expect(prefixVerdict(id, { messages: hist })).toBe('append')
+  })
+
+  test('рост на 2 сообщения при ИСПОРЧЕННОЙ ранней части — по-прежнему rewrite', () => {
+    const id = s()
+    prefixVerdict(id, { messages: [m('user', 'u1'), m('assistant', 'a1')] })
+    expect(prefixVerdict(id, {
+      messages: [m('user', 'ИЗМЕНЕНО'), m('assistant', 'a1'), m('assistant', 'tool_use'), m('user', 'tool_result')],
+    })).toBe('rewrite')
+  })
+
+  test('рост при смене system — rewrite, а не append', () => {
+    const id = s()
+    prefixVerdict(id, { system: 'S1', messages: [m('user', 'u1'), m('assistant', 'a1')] })
+    expect(prefixVerdict(id, {
+      system: 'S2',
+      messages: [m('user', 'u1'), m('assistant', 'a1'), m('assistant', 'tool_use'), m('user', 'tool_result')],
+    })).toBe('rewrite')
+  })
+})

@@ -277,15 +277,35 @@ describe('системный промпт — часть префикса', () =
   const m = (t: string) => ({ role: 'user', content: t })
   const sys = (t: string) => ({ system: t, messages: [m('a'), m('b')] })
 
-  test('смена ТОЛЬКО системного промпта — это перепись, а не append', () => {
+  // 🔴 ПРАВИЛО УТОЧНЕНО 29.10.2026, И ЭТО НЕ ОСЛАБЛЕНИЕ, А ДРУГОЙ ОТВЕТ НА ТОТ ЖЕ ВОПРОС.
+  // Тогда требовалось: смена system не должна выглядеть `append` — иначе сторож молчит на
+  // самой дорогой переписи. Требование в силе. Изменилось то, ЧЕМ её называть: с 29.10 полоса
+  // префикса = сессия + system, поэтому смена system — это НОВАЯ ПОЛОСА (`first`), а не
+  // «перепись» прежней. Причина — живой случай: служебный вызов «сгенерируй заголовок» приходит
+  // под ТЕМ ЖЕ номером сессии со своим system и затирал слепок основного разговора, после чего
+  // основной ход выглядел переписью с сообщения #0 и сторож его останавливал (две сессии в
+  // петле, 10 и 4 отказа). Сравнивать разные system между собой бессмысленно: это разные кэши.
+  // Молчания по-прежнему нет — новая полоса называется событием `GO_PREFIX_NEW_LANE` с оценкой.
+  test('смена ТОЛЬКО системного промпта — это НОВАЯ ПОЛОСА, а не append и не перепись старой', () => {
     const s = session()
     const first = commitPrefix(s, sys('RAILS v1'), { now: 1_000 })
     expect(first.verdict).toBe('first')
     const second = commitPrefix(s, sys('RAILS v2'), { now: 2_000 })
-    expect(second.verdict).toBe('rewrite')
-    // Голова контекста — это НУЛЕВОЕ расхождение: переписывается всё, а не хвост.
-    expect(second.firstDiffIndex).toBe(0)
-    expect(second.avoidableRewrite).toBe(true)
+    expect(second.verdict).toBe('first')
+    // Прежняя полоса не тронута: тот же system и та же история по-прежнему не перепись.
+    const back = commitPrefix(s, sys('RAILS v1'), { now: 3_000 })
+    expect(back.verdict).toBe('append')
+  })
+
+  test('служебный вызов со своим system не затирает слепок основного разговора', () => {
+    const s = session()
+    const main = { system: 'MAIN', messages: [m('u1'), m('a1')] }
+    commitPrefix(s, main, { now: 1_000 })
+    // «Сгенерируй заголовок»: другой system, короткая своя история, тот же номер сессии.
+    commitPrefix(s, { system: 'TITLE', messages: [m('t1'), m('t2'), m('t3')] }, { now: 2_000 })
+    // Основной разговор продолжается — и обязан остаться append'ом.
+    const next = commitPrefix(s, { system: 'MAIN', messages: [m('u1'), m('a1'), m('a2'), m('u2')] }, { now: 3_000 })
+    expect(next.verdict).toBe('append')
   })
 
   test('тот же системный промпт и та же история — не перепись', () => {

@@ -114,6 +114,8 @@ export type EventKind =
   | 'GO_REQUEST_UNIDENTIFIED'
   /** Префикс запроса НЕ продолжает предыдущий: история переписана, кэш промахнётся. */
   | 'GO_PREFIX_REWRITE'
+  /** Сессия начала НОВУЮ полосу префикса (сменился system) — пишется весь префикс. */
+  | 'GO_PREFIX_NEW_LANE'
   /** Перепись при ЖИВОМ кэше остановлена: ход вернул 400, состояние префикса не сдвинуто. */
   | 'GO_PREFIX_REWRITE_BLOCKED'
   | 'GO_COLD_GUARD_AUTOREVERT'
@@ -195,6 +197,7 @@ export const EVENT = {
   GO_ERROR: 'GO_ERROR',
   GO_REQUEST_UNIDENTIFIED: 'GO_REQUEST_UNIDENTIFIED',
   GO_PREFIX_REWRITE: 'GO_PREFIX_REWRITE',
+  GO_PREFIX_NEW_LANE: 'GO_PREFIX_NEW_LANE',
   GO_PREFIX_REWRITE_BLOCKED: 'GO_PREFIX_REWRITE_BLOCKED',
   GO_COLD_GUARD_AUTOREVERT: 'GO_COLD_GUARD_AUTOREVERT',
   GO_DOOR_UNCONFIGURED: 'GO_DOOR_UNCONFIGURED',

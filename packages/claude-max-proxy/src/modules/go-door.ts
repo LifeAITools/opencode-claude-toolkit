@@ -456,14 +456,16 @@ const SNIPPET_CHARS = 2048
 const SNIPPET_SESSIONS_MAX = 200
 const headSnippets = new Map<string, string[]>()
 
-/** Сколько первых сообщений сессии мы помним — для честного «покрыто/не покрыто». */
-export function rememberedHeadLength(sessionId: string | null): number {
-  return sessionId ? (headSnippets.get(sessionId)?.length ?? 0) : 0
+/** Сколько первых сообщений полосы мы помним — для честного «покрыто/не покрыто». */
+export function rememberedHeadLength(sessionId: string | null, body?: any): number {
+  if (!sessionId) return 0
+  const lane = systemLaneKey(sessionId, body ?? {})
+  return headSnippets.get(lane)?.length ?? 0
 }
 
-/** Голова ПРЕДЫДУЩЕЙ истории — снимается ДО `commitPrefix`, иначе сравнивали бы новое с новым. */
-function headOf(sessionId: string | null): string[] | undefined {
-  return sessionId ? headSnippets.get(sessionId) : undefined
+/** Голова ПРЕДЫДУЩЕЙ истории полосы — снимается ДО `commitPrefix`, иначе сравнивали бы новое с новым. */
+function headOf(lane: string): string[] | undefined {
+  return headSnippets.get(lane)
 }
 
 function rememberHead(sessionId: string, msgs: any[]): void {
@@ -593,6 +595,36 @@ export function coldGuardState(): { reverted: boolean; refusals: number; passed:
 function msgHash(m: unknown): string { return sha256(JSON.stringify(m)).slice(0, 12) }
 
 /**
+ * 🔴 ПОЛОСА ПРЕФИКСА = СЕССИЯ + СИСТЕМНЫЙ ПРОМПТ, А НЕ ОДНА СЕССИЯ (нашёл 29.10.2026).
+ *
+ * Замер, который это открыл: одна и та же сессия (`ses_e7c8bfb7…`) присылает ДВА разных
+ * разговора подряд — служебный «сгенерируй заголовок ветки» (свой system, 4 сообщения) и
+ * основной ход агента (system opencode, 3 сообщения). Один слот памяти на сессию означал,
+ * что служебный вызов затирает слепок основного: следующий ход основного выглядел
+ * «переписью с сообщения #0» — то есть сменой системного промпта, — и сторож холодной
+ * записи его останавливал. Две сессии встали в петлю (10 и 4 отказа), а причина была не в
+ * них, а в том, что разные префиксы делили одно имя.
+ *
+ * Кэш поставщика ключуется ПРЕФИКСОМ, а системный промпт — его первая часть: разные system
+ * = разные кэши, и сравнивать их между собой бессмысленно. Поэтому слот на полосу, а не на
+ * сессию. Побочный, но честный эффект: смена system посреди разговора теперь даёт вердикт
+ * `first` (новой полосы ещё не было), а не «перепись» — сторож её не останавливает, но
+ * смена полосы ВИДНА отдельным событием `GO_PREFIX_NEW_LANE` с оценкой токенов.
+ */
+function systemLaneKey(sessionId: string, body: any): string {
+  return `${sessionId}|${sha256(JSON.stringify(body?.system ?? null)).slice(0, 12)}`
+}
+
+/** Есть ли у этой сессии ДРУГАЯ полоса — чтобы смена system была видна, а не выглядела первым ходом. */
+function hasOtherLane(sessionId: string, lane: string): boolean {
+  const prefix = `${sessionId}|`
+  for (const key of prefixMemory.keys()) {
+    if (key !== lane && key.startsWith(prefix)) return true
+  }
+  return false
+}
+
+/**
  * ПРОЧИТАТЬ префикс сессии, ничего не записывая.
  *
  * 🔴 Отделено от `commitPrefix` ради сторожа: решение «остановить» принимается ДО того,
@@ -610,7 +642,7 @@ export function assessPrefix(
   if (!sessionId) return { verdict: 'unknown', cacheTtlMs }
   const msgs = Array.isArray(body?.messages) ? body.messages : null
   if (!msgs || msgs.length === 0) return { verdict: 'unknown', cacheTtlMs }
-  return compareToPrevious(prefixMemory.get(sessionId), msgs, body, now, cacheTtlMs)
+  return compareToPrevious(prefixMemory.get(systemLaneKey(sessionId, body)), msgs, body, now, cacheTtlMs)
 }
 
 /**
@@ -629,12 +661,13 @@ export function commitPrefix(
   if (!sessionId) return { verdict: 'unknown', cacheTtlMs }
   const msgs = Array.isArray(body?.messages) ? body.messages : null
   if (!msgs || msgs.length === 0) return { verdict: 'unknown', cacheTtlMs }
-  const prev = prefixMemory.get(sessionId)
+  const lane = systemLaneKey(sessionId, body)
+  const prev = prefixMemory.get(lane)
   if (prefixMemory.size >= PREFIX_MEMORY_MAX && !prev) {
     const oldest = prefixMemory.keys().next().value
     if (oldest !== undefined) prefixMemory.delete(oldest)
   }
-  prefixMemory.set(sessionId, {
+  prefixMemory.set(lane, {
     // 🔴 СИСТЕМНЫЙ ПРОМПТ — ЧАСТЬ ПРЕФИКСА, А НЕ ФОН (нашёл 24.10.2026 по вопросу владельца
     // wake-router). Раньше хэшировались только сообщения и инструменты, поэтому прогон, у
     // которого сменился ТОЛЬКО системный промпт (у нас в стартовый контекст подмешиваются рельсы
@@ -653,7 +686,7 @@ export function commitPrefix(
     at: now,
   })
   // Голова — ДО того, как её заменит следующая история: иначе снимок сравнивал бы новое с новым.
-  rememberHead(sessionId, msgs)
+  rememberHead(lane, msgs)
   // Отметка времени хода и слепок — то, что должно пережить перезапуск.
   markPrefixDirty()
   return compareToPrevious(prev, msgs, body, now, cacheTtlMs)
@@ -950,6 +983,21 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     : (modelMeta?.cacheTtlSec ?? cfg.goRewriteGuardCacheTtlSec)
   const cacheTtlMs = cacheTtlSec * 1000
   const analysis = assessPrefix(sessionId, parsed, { now: Date.now(), cacheTtlMs })
+  // 🔴 НОВАЯ ПОЛОСА ПРИ ЖИВОЙ СЕССИИ — СОБЫТИЕ, А НЕ ТИШИНА (29.10.2026).
+  // С тех пор как полоса = сессия + системный промпт, смена system даёт вердикт `first`:
+  // сторож её не останавливает (останавливать нечего — сравнивать не с чем), но и молчать
+  // нельзя: именно такой ход пишет весь префикс заново. Поэтому называем его вслух с
+  // оценкой, а решение о деньгах остаётся за человеком и сторожем, а не за догадкой.
+  if (analysis.verdict === 'first' && sessionId && hasOtherLane(sessionId, systemLaneKey(sessionId, parsed))) {
+    const tokens = Math.round(Buffer.byteLength(JSON.stringify({
+      system: parsed?.system ?? null, tools: parsed?.tools ?? null, messages: parsed?.messages ?? [],
+    }), 'utf8') / 4)
+    ctx.emit({
+      level: 'info', kind: EVENT.GO_PREFIX_NEW_LANE, sessionId, model,
+      msg: `дверь Go: у сессии НОВАЯ полоса префикса (сменился системный промпт) — `
+        + `этот ход запишет ~${tokens} токенов; прежние полосы этой сессии не тронуты`,
+    })
+  }
   // 🔴 ПОРОГ СЧИТАЕТСЯ ПО ПЕРЕПИСЫВАЕМОЙ ЧАСТИ, А НЕ ПО ВСЕМУ ТЕЛУ (слово фаундера 24.10:
   // «проверяет байт-идентичность слепка и того, что агент шлёт, чтобы детектировать, СКОЛЬКО КЭША
   // перепишется»). Раньше здесь стоял `raw.byteLength / 4` — размер ВСЕГО запроса. У сессии на
@@ -1069,7 +1117,9 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   }
   // Голову ПРЕДЫДУЩЕЙ истории снимаем ДО сдвига состояния: после `commitPrefix` в памяти
   // лежит уже новое, и снимок сравнивал бы новое с новым — то есть молчал бы всегда.
-  const prevHead = analysis.verdict === 'rewrite' ? headOf(sessionId) : undefined
+  const prevHead = analysis.verdict === 'rewrite' && sessionId
+    ? headOf(systemLaneKey(sessionId, parsed))
+    : undefined
   // Прошли — значит сторож не перекрыл кислород. Учитываем ИМЕННО пропуск: авто-откат
   // смотрит на пару «были отказы / были пропуски», а не на время.
   noteColdGuardOutcome(cfg, true)

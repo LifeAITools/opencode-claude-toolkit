@@ -137,12 +137,14 @@ describe('prefixVerdict — продолжение истории с инстр�
     })).toBe('rewrite')
   })
 
-  test('рост при смене system — rewrite, а не append', () => {
+  test('рост при смене system — новая полоса (first), а не append', () => {
     const id = s()
     prefixVerdict(id, { system: 'S1', messages: [m('user', 'u1'), m('assistant', 'a1')] })
+    // Полоса = сессия + system (29.10): разные system — разные кэши, сравнивать нечего.
+    // Требование «не append» в силе: молчаливым дописыванием это не считается.
     expect(prefixVerdict(id, {
       system: 'S2',
       messages: [m('user', 'u1'), m('assistant', 'a1'), m('assistant', 'tool_use'), m('user', 'tool_result')],
-    })).toBe('rewrite')
+    })).toBe('first')
   })
 })

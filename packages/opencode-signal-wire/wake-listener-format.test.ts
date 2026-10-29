@@ -65,6 +65,45 @@ describe('формат побудки — текст доставки прихо
   })
 })
 
+describe('воспроизведение из склада — читаемо, но названо воспроизведением', () => {
+  // Жалоба владельца telegram-mcp 29.10.2026: событие `replay:` собирается в адаптере из строки
+  // `synqtask.activity`, роутера в этой дороге нет — и `rendered` не «потерян», его неоткуда
+  // взять. Прежний код называл это дефектом доставки и вставлял объяснение хука вместо письма.
+  const replay = (payload: Record<string, unknown>): WakeEvent => ({
+    eventId: 'replay:act-1:member-1:abc123',
+    source: 'synqtask.activity',
+    type: 'channel_message',
+    priority: 'info',
+    targetMemberId: 'member-1',
+    payload: { replayedFromActivity: true, ...payload },
+    timestamp: '2026-10-29T10:00:00.000Z',
+  })
+
+  test('текст и автор из склада попадают в письмо', () => {
+    const text = wakeText(replay({ text: 'Проверь очередь сборки', authorName: 'Руслан', channelId: 'ch-1' }), 'full')
+    expect(text).toContain('Проверь очередь сборки')
+    expect(text).toContain('Руслан')
+    expect(text).toContain('ch-1')
+    expect(text).not.toContain('Роутер не приложил текст побудки')
+  })
+
+  test('происхождение названо: это воспроизведение, а не живая доставка', () => {
+    const text = wakeText(replay({ text: 'x' }), 'full')
+    expect(text).toContain('Воспроизведение')
+    expect(text).toContain('event-id="replay:')
+  })
+
+  test('в строке склада нет содержания — честно, а не пустой «🔔 WAKE: wake»', () => {
+    const text = wakeText(replay({}), 'full')
+    expect(text.startsWith('<system-reminder')).toBe(true)
+    expect(text).toContain('replayed_from_activity')
+  })
+
+  test('живая доставка без rendered по-прежнему зовётся дефектом доставки', () => {
+    expect(wakeText(deliveredEvent(), 'full')).toContain('Роутер не приложил текст побудки')
+  })
+})
+
 describe('formatWakeMessage — настроечные данные не повторяются в каждой побудке', () => {
   // Слово фаундера 02.10: блок «кто ты, роль, команда, напарники» приходил с каждым сообщением,
   // у одиночки — «Team: none. Teammates: none.». Роль агент получает один раз на старте сессии

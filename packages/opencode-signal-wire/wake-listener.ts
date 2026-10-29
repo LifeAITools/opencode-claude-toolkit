@@ -28,6 +28,7 @@ import type {
 import { DISCOVERY_DIR, discoveryDir, WAKE_EVENT_TYPES } from './wake-types'
 import { FNV_32_PRIME } from './domain-constants'
 import { pollFileDoor } from './wake-file-door'
+import { renderWake } from '@kiberos/signal-wire-core'
 import { hasWindow } from './launch-kind'
 
 // ─── Constants ────────────────────────────────────────────
@@ -854,6 +855,19 @@ export function wakeText(event: WakeEvent, mode: 'full' | 'brief', identity?: Ag
     dbg(`WAKE_TEXT_LOCAL_QUOTA type=${event.type} mode=${mode}`)
     return formatWakeMessage(event, identity)
   }
+  // 🔴 ВОСПРОИЗВЕДЕНИЕ ИЗ СКЛАДА — ЭТО НЕ ДОСТАВКА (жалоба владельца telegram-mcp, 29.10.2026).
+  // Событие `replay:` рождается ЗДЕСЬ из строки `synqtask.activity`; роутера в этой дороге нет
+  // вовсе, поэтому `rendered` не «потерян по пути» — его неоткуда взять. Прежний код считал это
+  // дефектом доставки и вставлял объяснение хука вместо письма: агент на старте читал «роутер не
+  // приложил текст» вместо содержания.
+  //
+  // Рисуем тем же рисовальщиком ядра, что и файловая дверь на случай отсутствия `rendered`
+  // (`renderWake`) — второго рисовальщика не заводим. И НАЗЫВАЕМ происхождение: воспроизведение
+  // честно отличается от живой побудки, и `rendered_v` в квитанции не подделывается.
+  if (isReplayEvent(event)) {
+    dbg(`WAKE_TEXT_REPLAY type=${event.type} source=${event.source} mode=${mode}`)
+    return renderReplayText(event)
+  }
   dbg(`WAKE_TEXT_ABSENT type=${event.type} source=${event.source} mode=${mode}`)
   return absentWakeText(event)
 }
@@ -877,6 +891,50 @@ function isQuotaAdvisoryType(type: string): boolean {
 function absentWakeText(event: WakeEvent): string {
   const esc = (s: string) => s.replace(/"/g, '&quot;')
   return `<system-reminder type="wake" source="${esc(event.source)}" priority="${event.priority}" event-id="${esc(event.eventId)}">Роутер не приложил текст побудки (\`rendered\` отсутствует или непонятной формы). Моё дело — вставить готовое, а не нарисовать своё; сообщи владельцу роутера.</system-reminder>`
+}
+
+/**
+ * Воспроизведение ли это (событие собрано из склада активности, а не пришло от роутера).
+ * Метка ставится при сборке (`activityToWakeEvent`) и переживает любой путь до вставки.
+ */
+function isReplayEvent(event: WakeEvent): boolean {
+  const p = event.payload as Record<string, any> | undefined
+  return p?.replayedFromActivity === true || event.eventId.startsWith('replay:')
+}
+
+/**
+ * Текст воспроизведённой побудки: тот же `renderWake` ядра, что у файловой двери, плюс строка
+ * о происхождении. Ничего не выдумываем — если в строке склада нет ни текста, ни заголовка,
+ * честно говорим, что содержания нет, вместо пустого «🔔 WAKE: wake».
+ */
+function renderReplayText(event: WakeEvent): string {
+  const p = (event.payload ?? {}) as Record<string, any>
+  const text = typeof p.text === 'string' ? p.text
+    : typeof p.body === 'string' ? p.body
+      : typeof p.content === 'string' ? p.content
+        : typeof p.message === 'string' ? p.message : ''
+  const title = typeof p.subject === 'string' ? p.subject
+    : typeof p.title === 'string' ? p.title
+      : typeof p.taskTitle === 'string' ? p.taskTitle
+        : typeof p.task_title === 'string' ? p.task_title : ''
+  const author = typeof p.authorName === 'string' ? p.authorName : (typeof p.author === 'string' ? p.author : '')
+  const channel = typeof p.channelId === 'string' ? p.channelId : (typeof p.channel_id === 'string' ? p.channel_id : '')
+  const taskId = typeof p.taskId === 'string' ? p.taskId : (typeof p.task_id === 'string' ? p.task_id : '')
+  const kind = String(event.type || p.activityType || 'activity')
+
+  const body = renderWake({
+    kind,
+    summary: title || kind,
+    ...(taskId ? { task_id: taskId } : {}),
+    ...(text ? { content: text } : {}),
+    meta: {
+      ...(author ? { from: author } : {}),
+      ...(channel ? { channel: channel } : {}),
+      replayed_from_activity: String(p.activityId ?? p.replaySourceEventId ?? 'unknown'),
+    },
+  } as any)
+  const note = 'Воспроизведение записи склада (не живая доставка роутера).'
+  return `<system-reminder type="wake" source="${event.source}" priority="${event.priority}" event-id="${event.eventId}">${note}\n${body}</system-reminder>`
 }
 
 /** Format wake event with actionable instructions per event type.

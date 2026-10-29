@@ -68,6 +68,13 @@ export interface WakeListenerHandle {
   token: string
   server: ReturnType<typeof Bun.serve>
   stop: () => void
+  /**
+   * 🔴 КАКАЯ СЕССИЯ У ЭТОЙ ДВЕРИ (29.10.2026, задача 47412dc3). Одна дверь обслуживает одну
+   * сессию: впрыск идёт в неё, и слот объявляет её номер. Пока двери не знали своей сессии,
+   * вторая сессия того же процесса не могла привязаться (`SESSION_BIND_AMBIGUOUS`) и ходила
+   * через дверь первой — то есть побудки для неё попадали в чужой разговор.
+   */
+  sessionId?: string
 }
 
 // ─── Agent Identity (CR-02: from SynqTask, DB-03: AGENTS.md fallback) ───
@@ -1072,6 +1079,31 @@ function updateBoundSessionGlobal(sessionId: string | null): void {
 let _agentDirectory: string | null = null
 
 function updateDiscoverySession(sessionId: string, agentInstanceId?: string): boolean {
+  // 🔴 СЛОТ МОГ БЫТЬ ОТЛОЖЕН (старт с «unknown»). Первая привязка — это и есть момент, когда
+  // у процесса появляется НАСТОЯЩИЙ номер сессии, а значит и имя слота; до неё писать было
+  // нечего (см. `_pendingDiscovery`).
+  if (!_discoveryPath && _pendingDiscovery) {
+    try {
+      const dir = _pendingDiscovery.dir
+      const binding = process.env.KIBEROS_BINDING_ID
+      const path = discoveryFilePath(dir, process.pid, binding, sessionId, {
+        sessionsInProcess: rememberProcessSession(process.pid, sessionId),
+      })
+      const data: DiscoveryFile = {
+        ..._pendingDiscovery.data,
+        sessionId,
+        ...(agentInstanceId ? { agentInstanceId } : {}),
+      }
+      writeDiscoverySlot(path, data)
+      _discoveryPath = path
+      _pendingDiscovery = null
+      dbg(`DISCOVERY_WRITTEN_ON_BIND ${path} session=${sessionId}`)
+      return true
+    } catch (e: any) {
+      dbg(`DISCOVERY_WRITE_ON_BIND_FAILED ${e?.message}`)
+      return false
+    }
+  }
   if (!_discoveryPath) {
     dbg('updateDiscoverySession: no discovery path')
     return false
@@ -1104,7 +1136,13 @@ export function bindWakeListenerSession(
     dbg(`SESSION_BIND_WAITING invalid session=${sessionId}`)
     return false
   }
-  if (_cachedSessionId && _cachedSessionId !== 'unknown' && _cachedSessionId !== sessionId) {
+  // 🔴 ОТКАЗ ТОЛЬКО КОГДА ДВЕРЬ ЧУЖАЯ. Прежде отказ срабатывал на любую вторую сессию
+  // процесса — и она оставалась без своей двери (задача 47412dc3). Теперь у каждой сессии
+  // своя дверь со своим портом и слотом, поэтому несовпадение с глобальным кэшем не повод
+  // отказывать: повод — только когда ЭТА дверь объявлена за другую сессию.
+  const handleSession = (handle as WakeListenerHandle).sessionId
+  const ownsHandle = Boolean(handleSession) && handleSession === sessionId
+  if (!ownsHandle && _cachedSessionId && _cachedSessionId !== 'unknown' && _cachedSessionId !== sessionId) {
     dbg(`SESSION_BIND_AMBIGUOUS existing=${_cachedSessionId} candidate=${sessionId} reason=${opts?.reason ?? '-'}`)
     return false
   }
@@ -1314,18 +1352,88 @@ export function adoptFromSiblingCards(
   return out
 }
 
-export function discoveryFilePath(dir: string, pid: number, bindingId: string | undefined, sessionId: string): string {
+export function discoveryFilePath(
+  dir: string,
+  pid: number,
+  bindingId: string | undefined,
+  sessionId: string,
+  opts: { sessionsInProcess?: readonly string[] } = {},
+): string {
   const legacy = join(dir, `${pid}-${sessionId}.json`)
   if (!bindingId) return legacy
-  const byBinding = join(dir, `${pid}-${bindingId.replace(/\//g, '_')}.json`)
+  // 🔴 ДВЕ СЕССИИ В ОДНОМ ПРОЦЕССЕ — ДВА СЛОТА (задача 47412dc3, 29.10.2026).
+  // Прежнее имя зависело только от pid и привязки, поэтому вторая живая сессия того же
+  // процесса либо не получала своего слота, либо затирала первый. Роутер читает ИМЯ ФАЙЛА
+  // безразлично (ключ у него `agentInstanceId`), поэтому второму слоту достаточно добавить
+  // номер сессии к имени — и первый при этом не меняется вовсе, то есть одиночный процесс
+  // остаётся с прежним именем и ни один читатель не переучивается.
+  const known = Boolean(sessionId) && sessionId !== 'unknown'
+  const multi = (opts.sessionsInProcess?.length ?? 0) > 1
+  const byBinding = join(dir, `${pid}-${bindingId.replace(/\//g, '_')}${multi && known ? `-${sessionId}` : ''}.json`)
   try {
-    const existing = JSON.parse(readFileSync(byBinding, 'utf-8')) as { harness?: string; transport?: string }
+    const existing = JSON.parse(readFileSync(byBinding, 'utf-8')) as { harness?: string; transport?: string; sessionId?: string }
     if (existing.harness !== 'opencode' || existing.transport !== 'http') {
       dbg(`DISCOVERY_NAME_TAKEN ${byBinding} (harness=${existing.harness ?? '-'} transport=${existing.transport ?? '-'}) — writing ${legacy}`)
       return legacy
     }
   } catch { /* файла нет или он нечитаем — имя свободно */ }
   return byBinding
+}
+
+/**
+ * Живые сессии этого процесса: pid → номера сессий, для которых уже поднята своя дверь.
+ *
+ * Зачем состояние, а не аргумент: имя слота и `agentInstanceId` обязаны быть РАЗНЫМИ у двух
+ * сессий одного процесса, а решает это момент старта каждой двери — раньше, чем кто-либо
+ * может передать список снаружи. Память чистится вместе с дверью (`forgetProcessSession`).
+ */
+const _processSessions = new Map<number, Set<string>>()
+
+function rememberProcessSession(pid: number, sessionId: string): readonly string[] {
+  const set = _processSessions.get(pid) ?? new Set<string>()
+  if (sessionId && sessionId !== 'unknown') set.add(sessionId)
+  _processSessions.set(pid, set)
+  return [...set]
+}
+
+function forgetProcessSession(pid: number, sessionId: string): void {
+  const set = _processSessions.get(pid)
+  if (!set) return
+  set.delete(sessionId)
+  if (set.size === 0) _processSessions.delete(pid)
+}
+
+/** Сколько живых дверей у процесса — для испытаний и журнала. */
+export function processSessionCount(pid: number): number {
+  return _processSessions.get(pid)?.size ?? 0
+}
+
+/** Данные слота, отложенные до первой привязки: «unknown» — это «ещё не знаю», а не имя. */
+let _pendingDiscovery: { dir: string; data: DiscoveryFile } | null = null
+
+/** Запись слота атомарно (tmp → rename): половина документа читателю — не правда. */
+function writeDiscoverySlot(path: string, data: DiscoveryFile): void {
+  const tmpPath = path + '.tmp'
+  writeFileSync(tmpPath, JSON.stringify(data))
+  renameSync(tmpPath, path)
+}
+
+/**
+ * Убрать мусорный слот прежней ревизии `<pid>-unknown.json`, если он наш и держит ту же
+ * сессию. Чужой файл (другая дверь, другой harness) не трогаем никогда — это не наш слот.
+ */
+function cleanupUnknownSlot(dir: string, pid: number, sessionId: string): void {
+  const ghost = join(dir, `${pid}-unknown.json`)
+  try {
+    const raw = JSON.parse(readFileSync(ghost, 'utf-8')) as {
+      harness?: string; transport?: string; sessionId?: string; pid?: number
+    }
+    if (raw.harness !== 'opencode' || raw.transport !== 'http') return
+    if (raw.pid !== undefined && raw.pid !== pid) return
+    if (raw.sessionId && raw.sessionId !== sessionId) return
+    unlinkSync(ghost)
+    dbg(`DISCOVERY_GHOST_REMOVED ${ghost}`)
+  } catch { /* нет файла или он чужой формы — нечего убирать */ }
 }
 
 /**
@@ -1824,7 +1932,11 @@ export async function startWakeListener(
   // runner with isolated HOME) are honored even if this module was
   // imported before the env var was set.
   const resolvedDiscoveryDir = discoveryDir()
-  const discoveryPath = discoveryFilePath(resolvedDiscoveryDir, process.pid, process.env.KIBEROS_BINDING_ID, config.sessionId)
+  const sessionsInProcess = rememberProcessSession(process.pid, config.sessionId)
+  const discoveryPath = discoveryFilePath(
+    resolvedDiscoveryDir, process.pid, process.env.KIBEROS_BINDING_ID, config.sessionId,
+    { sessionsInProcess },
+  )
   try {
     mkdirSync(resolvedDiscoveryDir, { recursive: true })
     // Set module state from config/reconciled identity
@@ -1852,11 +1964,18 @@ export async function startWakeListener(
       }
     }
 
+    // 🔴 ДВЕ СЕССИИ — ДВА ИМЕНИ ЭТОГО МЕСТА. Роутер держит записи по `agentInstanceId`
+    // (`recordsByInstanceId`): два слота с одинаковым именем схлопываются в один, и вторая
+    // дверь исчезает — ровно то, на что жалуется задача. Первая сессия процесса сохраняет
+    // прежнее имя (ни один читатель не переучивается), вторая получает имя с номером сессии.
+    const instanceId = sessionsInProcess.length > 1
+      ? `${config.agentInstanceId}#${String(config.sessionId).slice(0, 12)}`
+      : config.agentInstanceId
     const discoveryData: DiscoveryFile = {
       port: actualPort,
       token,
       sessionId: config.sessionId,
-      agentInstanceId: config.agentInstanceId,
+      agentInstanceId: instanceId,
       memberId: discoveryMemberId,
       pid: process.pid,
       startedAt: new Date().toISOString(),
@@ -1875,12 +1994,22 @@ export async function startWakeListener(
       ...(process.env.KIBEROS_BINDING_ID ? { binding_id: process.env.KIBEROS_BINDING_ID } : {}),
       door: { kind: 'http', port: actualPort },
     }
-    // Atomic write: tmp → rename (safe against partial writes)
-    const tmpPath = discoveryPath + '.tmp'
-    writeFileSync(tmpPath, JSON.stringify(discoveryData))
-    renameSync(tmpPath, discoveryPath)
-    _discoveryPath = discoveryPath
-    dbg(`discovery file written: ${discoveryPath} member=${discoveryData.memberId ?? 'unregistered'} depth=${discoveryData.spawnDepth} parent=${discoveryData.parentMemberId ?? 'ROOT'}`)
+    // 🔴 СЛОТ ПИШЕТСЯ ТОЛЬКО КОГДА СЕССИЯ ИЗВЕСТНА (29.10.2026, задача 47412dc3).
+    // Прежде на старте писался слот с `sessionId: "unknown"` — файл `<pid>-unknown.json`,
+    // который потом никто не переименовывал: у 16 pid лежали ДВА файла с ОДНОЙ сессией, и
+    // роутер держал лишнюю запись. Теперь такой слот не пишется вовсе: данные ждут в памяти,
+    // и первый же bind по настоящему номеру создаёт файл с правильным именем.
+    if (config.sessionId && config.sessionId !== 'unknown') {
+      writeDiscoverySlot(discoveryPath, discoveryData)
+      _discoveryPath = discoveryPath
+      dbg(`discovery file written: ${discoveryPath} member=${discoveryData.memberId ?? 'unregistered'} instance=${discoveryData.agentInstanceId ?? '-'}`)
+      // Мусорный слот прежней ревизии (`<pid>-unknown.json`) убираем — он наш (opencode/http)
+      // и держит ту же сессию под другим именем.
+      cleanupUnknownSlot(resolvedDiscoveryDir, process.pid, discoveryData.sessionId)
+    } else {
+      _pendingDiscovery = { dir: resolvedDiscoveryDir, data: discoveryData }
+      dbg('DISCOVERY_DEFERRED session=unknown — слот появится при первой привязке')
+    }
   } catch (e: any) {
     dbg('discovery file write failed:', e?.message)
   }
@@ -1987,6 +2116,7 @@ export async function startWakeListener(
     token,
     server,
     stop: cleanup,
+    sessionId: config.sessionId,
   }
 }
 
@@ -1999,6 +2129,9 @@ export function stopWakeListener(handle: WakeListenerHandle): void {
   } catch (e: any) {
     dbg('stopWakeListener error:', e?.message)
   }
+  // Сессия ушла — процесс больше не держит её двери: имя освобождается, иначе следующая
+  // сессия с тем же номером считалась бы «уже обслуженной».
+  if (handle.sessionId) forgetProcessSession(process.pid, handle.sessionId)
 }
 
 // ─── Update Discovery File (CN-05: single writer for all mutations) ─

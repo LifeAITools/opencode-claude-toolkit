@@ -8,14 +8,14 @@ import { processWakeListener, releaseProcessWakeListener, resetProcessSingletons
 
 afterEach(() => resetProcessSingletons())
 
-const fakeHandle = (port: number) => ({ port, token: 't', server: null as any, stop: () => {} })
+const fakeHandle = (port: number, sessionId = 'ses_a') => ({ port, token: 't', server: null as any, stop: () => {}, sessionId })
 
 describe('opencode: общие двери процесса', () => {
   test('второй экземпляр получает тот же приёмник, а не запускает свой', async () => {
     let starts = 0
     const start = async () => { starts++; return fakeHandle(34841) }
-    const a = processWakeListener(start)
-    const b = processWakeListener(start)
+    const a = processWakeListener('ses_a', start)
+    const b = processWakeListener('ses_a', start)
     expect(a.shared).toBe(false)
     expect(b.shared).toBe(true)
     expect((await a.handle)?.port).toBe(34841)
@@ -26,15 +26,15 @@ describe('opencode: общие двери процесса', () => {
   test('сбой запуска отдаётся всем как null, и второй не открывает дверь поверх упавшей', async () => {
     let starts = 0
     const start = async () => { starts++; throw new Error('порт занят') }
-    expect(await processWakeListener(start).handle).toBeNull()
-    expect(await processWakeListener(start).handle).toBeNull()
+    expect(await processWakeListener('ses_a', start).handle).toBeNull()
+    expect(await processWakeListener('ses_a', start).handle).toBeNull()
     expect(starts).toBe(1)
   })
 
   test('дверь закрывает только последний уходящий экземпляр', () => {
     const start = async () => fakeHandle(1)
-    processWakeListener(start)
-    processWakeListener(start)
+    processWakeListener('ses_a', start)
+    processWakeListener('ses_a', start)
     expect(releaseProcessWakeListener()).toBe(false)  // ушёл один — второй ещё живёт
     expect(releaseProcessWakeListener()).toBe(true)   // ушёл последний — закрывать
   })

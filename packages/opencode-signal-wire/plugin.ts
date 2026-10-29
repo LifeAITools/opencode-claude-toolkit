@@ -382,6 +382,15 @@ async function findNewSessionByDirectory(client: any, directory: string, notBefo
  */
 type ProcessSingletons = {
   wake?: Promise<WakeListenerHandle | null>
+  /**
+   * 🔴 ДВЕРЬ НА СЕССИЮ, А НЕ НА ПРОЦЕСС (29.10.2026, задача 47412dc3).
+   * Прежде дверь была одна на процесс: вторая живая сессия получала её же, и побудки для неё
+   * вставлялись в ПЕРВЫЙ разговор (`bindWakeListenerSession` отказывал с
+   * `SESSION_BIND_AMBIGUOUS`). Теперь каждая сессия получает свою дверь со своим портом и
+   * слотом; два экземпляра с ОДНОЙ сессией по-прежнему делят одну дверь — это чинит инцидент
+   * 30.09 (два приёмника на портах 34841/38139 для одного агента), а не отменяет его.
+   */
+  wakeBySession?: Map<string, Promise<WakeListenerHandle | null>>
   quota?: QuotaWatcherHandle | null
   /** Сколько экземпляров opencode держат общие двери; закрывает их последний уходящий. */
   users?: number
@@ -396,13 +405,26 @@ function processSingletons(): ProcessSingletons {
  * отдаётся всем как null — следующий экземпляр не пытается открыть вторую дверь поверх упавшей.
  */
 export function processWakeListener(
+  sessionId: string,
   start: () => Promise<WakeListenerHandle>,
 ): { handle: Promise<WakeListenerHandle | null>; shared: boolean } {
   const s = processSingletons()
   s.users = (s.users ?? 0) + 1
-  if (s.wake) return { handle: s.wake, shared: true }
-  s.wake = start().catch(() => null)
-  return { handle: s.wake, shared: false }
+  s.wakeBySession ??= new Map()
+  const key = sessionId || 'unknown'
+  const existing = s.wakeBySession.get(key)
+  if (existing) return { handle: existing, shared: true }
+  const started = start().catch(() => null)
+  s.wakeBySession.set(key, started)
+  // `wake` остаётся указателем на ПЕРВУЮ дверь: по нему процесс закрывает себя на выходе и
+  // по нему же отвечают читатели, которым нужен «приёмник процесса», а не конкретной сессии.
+  s.wake ??= started
+  return { handle: started, shared: false }
+}
+
+/** Все живые двери процесса — для закрытия на выходе. */
+export function processWakeListeners(): Array<Promise<WakeListenerHandle | null>> {
+  return [...(processSingletons().wakeBySession?.values() ?? [])]
 }
 
 /** Экземпляр уходит. true — он был последним, и общие двери пора закрыть. */
@@ -592,6 +614,68 @@ export default {
       : null
     let wakeHandle: WakeListenerHandle | null = null
     let boundSessionId = sessionId !== 'unknown' ? sessionId : null
+    /**
+     * Открыть дверь для КОНКРЕТНОЙ сессии. Вынесено наверх: ею пользуется и рождение
+     * процесса, и вторая сессия под ним (см. `openDoorForSession`).
+     */
+    const startDoor = (doorSessionId: string) => {
+      let startError: unknown = null
+        logStep('WAKE_LISTENER_STARTING', { sessionId: doorSessionId, agentInstanceId })
+        return startWakeListener({
+          serverUrl,
+          sessionId: doorSessionId,
+          agentInstanceId,
+          memberId,
+          synqtaskUrl: process.env.SYNQTASK_API_URL,
+          signalWire: signalWireEngine,
+          sdkClient: input.client,
+          subscribe,
+          subscribePreset: preset ?? undefined,
+          memberType,
+          // След пути побудки в прод-логе (жалоба 06.10): получение, дубль,
+          // очередь, drain и исход вставки — с eventId, без тел и секретов.
+          onWakeTrace: (step, details) => logStep(step, details),
+          agentRegistration: {
+            enabled: Boolean(agentRegistration?.enabled)
+              || process.env.SYNQTASK_AGENT_REGISTRATION === '1'
+              || process.env.SYNQTASK_REGISTER_AGENT === '1',
+            name: agentRegistration?.name ?? process.env.SYNQTASK_AGENT_NAME,
+            displayName: agentRegistration?.displayName ?? process.env.SYNQTASK_AGENT_DISPLAY_NAME,
+            description: agentRegistration?.description ?? process.env.SYNQTASK_AGENT_DESCRIPTION,
+            spaceId: agentRegistration?.spaceId ?? process.env.SYNQTASK_SPACE_ID,
+          },
+        }).catch((e) => { startError = e; throw e })
+      }
+    /** Двери, уже открытые этим процессом: сессия → дверь (см. `processWakeListener`). */
+    const doorsBySession = new Map<string, WakeListenerHandle>()
+
+    /**
+     * 🔴 У ВТОРОЙ СЕССИИ — СВОЯ ДВЕРЬ (задача 47412dc3, 29.10.2026).
+     * Дверь процесса открывается для той сессии, с которой он родился. Когда под тем же
+     * процессом появляется ДРУГАЯ живая сессия, ей нужна собственная дверь: иначе её побудки
+     * вставлялись бы в чужой разговор. Открытие асинхронное (порт, слот), поэтому привязка
+     * делается по готовности, а вызывающий в этот раз получает `false` — следующее событие
+     * этой сессии застанет дверь уже открытой и привяжется обычно.
+     */
+    const openDoorForSession = (candidate: string, reason: string, instanceId: string): void => {
+      if (doorsBySession.has(candidate)) return
+      void (async () => {
+        const { handle } = processWakeListener(candidate, () => startDoor(candidate))
+        const door = await handle
+        if (!door) {
+          logStep('WAKE_LISTENER_FAILED_OPEN', { reason: 'second_session_door', sessionId: candidate })
+          return
+        }
+        doorsBySession.set(candidate, door)
+        const bound = bindWakeListenerSession(door, candidate, { agentInstanceId: instanceId, reason })
+        if (bound) {
+          boundSessionId = candidate
+          logStep('SESSION_BOUND_OWN_DOOR', { sessionId: candidate, port: door.port, reason })
+        } else {
+          logStep('SESSION_BIND_FAILED_OWN_DOOR', { sessionId: candidate, port: door.port })
+        }
+      })()
+    }
 
     const bindSession = (candidateSessionId: string, reason: string, directory?: string, parentID?: string | null) => {
       if (!candidateSessionId) return false
@@ -610,6 +694,12 @@ export default {
       }
       if (!process.env.OPENCODE_AGENT_INSTANCE_ID && agentInstanceId.includes(':unknown:')) {
         agentInstanceId = `opencode:${candidateSessionId}:${process.pid}`
+      }
+      // Дверь принадлежит ДРУГОЙ сессии — этой нужна своя (см. `openDoorForSession`).
+      const doorSession = wakeHandle?.sessionId
+      if (wakeHandle && doorSession && doorSession !== candidateSessionId) {
+        openDoorForSession(candidateSessionId, reason, agentInstanceId)
+        return false
       }
       const bound = bindWakeListenerSession(wakeHandle, candidateSessionId, { agentInstanceId, reason })
       if (bound) boundSessionId = candidateSessionId
@@ -683,34 +773,7 @@ export default {
     if (oneShot) {
       logStep('WAKE_LISTENER_SKIPPED', { reason: 'one_shot_run', sessionId })
     } else if (serverUrl) {
-      let startError: unknown = null
-      const { handle, shared } = processWakeListener(() => {
-        logStep('WAKE_LISTENER_STARTING', { sessionId, agentInstanceId })
-        return startWakeListener({
-          serverUrl,
-          sessionId,
-          agentInstanceId,
-          memberId,
-          synqtaskUrl: process.env.SYNQTASK_API_URL,
-          signalWire: signalWireEngine,
-          sdkClient: input.client,
-          subscribe,
-          subscribePreset: preset ?? undefined,
-          memberType,
-          // След пути побудки в прод-логе (жалоба 06.10): получение, дубль,
-          // очередь, drain и исход вставки — с eventId, без тел и секретов.
-          onWakeTrace: (step, details) => logStep(step, details),
-          agentRegistration: {
-            enabled: Boolean(agentRegistration?.enabled)
-              || process.env.SYNQTASK_AGENT_REGISTRATION === '1'
-              || process.env.SYNQTASK_REGISTER_AGENT === '1',
-            name: agentRegistration?.name ?? process.env.SYNQTASK_AGENT_NAME,
-            displayName: agentRegistration?.displayName ?? process.env.SYNQTASK_AGENT_DISPLAY_NAME,
-            description: agentRegistration?.description ?? process.env.SYNQTASK_AGENT_DESCRIPTION,
-            spaceId: agentRegistration?.spaceId ?? process.env.SYNQTASK_SPACE_ID,
-          },
-        }).catch((e) => { startError = e; throw e })
-      })
+      const { handle, shared } = processWakeListener(sessionId, () => startDoor(sessionId))
       wakeHandle = await handle
       if (shared) {
         // Второй экземпляр opencode в том же процессе: дверь к агенту уже открыта.
@@ -723,7 +786,7 @@ export default {
           token: wakeHandle.token ? `${wakeHandle.token.slice(0, 8)}...` : 'absent',
         })
       } else {
-        logStep('WAKE_LISTENER_FAILED_OPEN', { error: (startError as any)?.message ?? String(startError) })
+        logStep('WAKE_LISTENER_FAILED_OPEN', { error: 'door did not open' })
       }
       if (wakeHandle) scheduleSessionBindRetries()
     } else {
@@ -1079,12 +1142,17 @@ export default {
             logStep('WAKE_LISTENER_KEPT_FOR_SIBLING', { eventType, directory: cwd })
             return
           }
-          resetProcessSingletons()
           try {
-            if (wakeHandle) {
-              stopWakeListener(wakeHandle)
-              logStep('WAKE_LISTENER_STOPPED', { eventType })
-            }
+            // 🔴 ЗАКРЫВАЮТСЯ ВСЕ ДВЕРИ ПРОЦЕССА, а не только первая (29.10.2026): у второй
+            // сессии теперь своя дверь, и без этого она осталась бы слушать после выхода —
+            // слот на живой pid, порт без хозяина.
+            // Только НАСТОЯЩИЕ ручки: в singleton лежат промисы, и «остановить» промис —
+            // это молча ничего не остановить.
+            const doors = [...new Set([...doorsBySession.values(), ...(wakeHandle ? [wakeHandle] : [])])]
+            for (const door of doors) stopWakeListener(door)
+            if (wakeHandle) stopWakeListener(wakeHandle)
+            resetProcessSingletons()
+            logStep('WAKE_LISTENER_STOPPED', { eventType, doors: doors.length })
           } catch (e: any) {
             logStep('WAKE_LISTENER_STOP_FAILED_OPEN', { error: e?.message ?? String(e) })
           }

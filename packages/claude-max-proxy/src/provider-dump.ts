@@ -112,8 +112,12 @@ export function extractUsageChat(usage: unknown): UsageNorm {
     output: num(u.completion_tokens),
     reasoning: num(u.completion_tokens_details?.reasoning_tokens),
     cache_read: cached,
-    // Явное поле поставщика ПЕРВЫМ; догадка по арифметике — только когда поля нет.
-    cache_write: explicit5m ?? derived,
+    // 🔴 ЯВНОЕ ПОЛЕ БЕРЁМ ТОЛЬКО КОГДА ОНО НЕ НУЛЕВОЕ (нашёл 30.10.2026 на разборе двух
+    // переездов). Поставщик присылает `cache_write_5m: 0` и тогда, когда запись БЫЛА — его
+    // ноль означает «не по этому классу», а не «ничего не писали». Живой случай: ход с
+    // input 812 880 и чтением 30 464 (то есть записано ~782 416) отдавал `cache_write: 0`,
+    // и запись исчезала из учёта. Порядок: положительное явное поле → арифметика ответа.
+    cache_write: (explicit5m && explicit5m > 0 ? explicit5m : derived),
     cache_write_1h: explicit1h,
   }
 }

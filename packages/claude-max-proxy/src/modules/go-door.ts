@@ -89,6 +89,19 @@ function selectOrg(
     // «Сессию знаем — организация уже выдана»: переиспользуем выданную, пока она годна.
     if (key) {
       const pinned = pinLookup(key)
+      if (!pinned && pinExpired) {
+        // Память выдачи истекла — это переезд, а не первая выдача.
+        const picked = pickOrgByTimeToWall(reg.orgs, quotas, has, { sessionKey: key })
+        if (picked.org) {
+          pinStore(key, picked.org.name)
+          return {
+            org: picked.org,
+            source: 'quota',
+            movedFrom: pinExpired.org,
+            movedReason: `pin-ttl-${Math.round(ORG_PIN_TTL_MS / 3_600_000)}h`,
+          }
+        }
+      }
       if (pinned) {
         // 🔴 ПЕРЕСЕЛЕНИЕ СЕССИИ НАЗЫВАЕТСЯ ВСЛУХ, вместе с причиной (30.10.2026).
         // До этого оно было немым: в журнале оставался `source: quota`, и вопрос фаундера
@@ -297,11 +310,23 @@ export function restorePinsForTest(entries: Array<[string, { org: string; at: nu
   pinsLoaded = true
 }
 
+/**
+ * 🔴 ИСТЁКШАЯ ВЫДАЧА — ТОЖЕ ПЕРЕЕЗД, И ЕГО НАДО НАЗВАТЬ (30.10.2026).
+ *
+ * `pinLookup` отдавала null и в двух разных случаях: «выдачи не было никогда» (первая выдача —
+ * законный случай, не переезд) и «выдача была, но её память истекла» (12 часов — это настоящий
+ * переезд на другую организацию и, значит, холодная запись). Пока различие терялось, событие
+ * `GO_ORG_MOVED` не могло быть счётчиком: истёкшая выдача в него не попадала вовсе.
+ */
+let pinExpired: { org: string; at: number } | null = null
+
 function pinLookup(key: string): string | null {
   loadPins()
+  pinExpired = null
   const hit = orgPins.get(key)
   if (!hit) return null
   if (Date.now() - hit.at > ORG_PIN_TTL_MS) {
+    pinExpired = { org: hit.org, at: hit.at }
     orgPins.delete(key)
     return null
   }

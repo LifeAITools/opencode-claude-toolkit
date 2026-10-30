@@ -616,19 +616,20 @@ function systemLaneKey(sessionId: string, body: any): string {
 }
 
 /**
- * Кого сторож не трогает — по `user-agent` зовущего (подстрока, без регистра).
+ * Кого сторож не трогает — по ЯВНОЙ МЕТКЕ ЗОВУЩЕГО (`x-kiberos-caller` по умолчанию).
  *
- * Пустой список = сторож для всех, как раньше. Заведено под живой случай 30.10: разговор в
- * чат-сервисе после 7 часов простоя получал отказы, а у человека нет «новой сессии» — только
- * этот разговор. Решение «платим ли это для чата» — слово фаундера, поэтому по умолчанию пусто.
+ * Почему не по `user-agent`: дверь видит UA ИСХОДЯЩЕГО клиента LiteLLM, он одинаков у всего
+ * трафика, и по нему нельзя отличить чат от агента (попытка 30.10 отменена в тот же день).
+ * Почему не по «нет заголовка сессии»: это отключило бы сторож для любого безымянного трафика —
+ * дыра в обходе, а не поблажка (возражение владельца kiberos-app, верное).
+ *
+ * Совпадение ТОЧНОЕ, без регистра: метка — это имя класса зовущего, а не фрагмент текста.
+ * Пустой список = сторож для всех, как раньше.
  */
-export function guardExemption(userAgent: string | null | undefined, exemptUas: readonly string[]): string | null {
-  const ua = (userAgent ?? '').toLowerCase()
-  if (!ua) return null
-  return exemptUas.find((u) => {
-    const needle = u.trim().toLowerCase()
-    return needle.length > 0 && ua.includes(needle)
-  }) ?? null
+export function callerExemption(mark: string | null | undefined, exemptCallers: readonly string[]): string | null {
+  const v = (mark ?? '').trim().toLowerCase()
+  if (!v) return null
+  return exemptCallers.find((c) => c.trim().toLowerCase() === v) ?? null
 }
 
 /** Есть ли у этой сессии ДРУГАЯ полоса — чтобы смена system была видна, а не выглядела первым ходом. */
@@ -1060,9 +1061,9 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   // 🔴 ИСКЛЮЧЕНИЕ ПО ЗОВУЩЕМУ: список пуст по умолчанию, поведение не меняется ни для кого.
   // Нужен, чтобы «чат не трогаем» было ОДНОЙ СТРОКОЙ в настройке, а не выкаткой кода, и чтобы
   // исключение было видно в журнале (причина отказа названа, а не подразумевается).
-  const guardExemptBy = guardExemption(
-    req.headers.get('user-agent'),
-    cfg.goRewriteGuardExemptUas,
+  const guardExemptBy = callerExemption(
+    req.headers.get(cfg.goRewriteGuardCallerHeader),
+    cfg.goRewriteGuardExemptCallers,
   )
   const guardExempt = Boolean(guardExemptBy)
   if (!guardExempt && shouldBlockRewrite({

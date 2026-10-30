@@ -10,26 +10,27 @@
  * видно в журнале, а не подразумевалось.
  */
 import { describe, expect, test } from 'bun:test'
-import { guardExemption } from '../src/modules/go-door.js'
+import { callerExemption } from '../src/modules/go-door.js'
 
-describe('исключение сторожа по user-agent', () => {
+describe('исключение сторожа по метке зовущего', () => {
   test('пустой список — исключений нет, сторож для всех (поведение не меняется)', () => {
-    expect(guardExemption('kiberos-chat/1.0', [])).toBeNull()
-    expect(guardExemption('opencode/1.2', [])).toBeNull()
-    expect(guardExemption(null, [])).toBeNull()
+    expect(callerExemption('chat', [])).toBeNull()
+    expect(callerExemption(null, [])).toBeNull()
   })
 
-  test('подстрока и регистр не важны', () => {
-    expect(guardExemption('Kiberos-Chat/1.0', ['kiberos-chat'])).toBe('kiberos-chat')
-    expect(guardExemption('kiberos-chat/1.0', ['KIBEROS-CHAT'])).toBe('KIBEROS-CHAT')
+  test('точное совпадение, регистр не важен', () => {
+    expect(callerExemption('Chat', ['chat'])).toBe('chat')
+    expect(callerExemption('chat', ['CHAT'])).toBe('CHAT')
   })
 
-  test('чужой агент под исключение не попадает', () => {
-    expect(guardExemption('opencode/1.2', ['kiberos-chat'])).toBeNull()
-    expect(guardExemption('', ['kiberos-chat'])).toBeNull()
+  test('фрагмент не считается совпадением: метка — имя класса, а не подстрока', () => {
+    // Иначе «chat-bot» подошёл бы под «chat», а «не-chat» — тоже: правило стало бы шире заявленного.
+    expect(callerExemption('chat-bot', ['chat'])).toBeNull()
+    expect(callerExemption('agent', ['chat'])).toBeNull()
+    expect(callerExemption('', ['chat'])).toBeNull()
   })
 
   test('пустые элементы списка не превращаются в «исключить всех»', () => {
-    expect(guardExemption('opencode/1.2', ['', '   '])).toBeNull()
+    expect(callerExemption('agent', ['', '   '])).toBeNull()
   })
 })

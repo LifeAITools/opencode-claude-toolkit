@@ -133,17 +133,23 @@ export interface ProxyConfig {
   // кэша — отдельное число (1200 с = 20 мин, слово фаундера и замер wake-router).
   goRewriteGuardColdAfterSec: number
   /**
-   * 🔴 КОГО СТОРОЖ ХОЛОДНОЙ ЗАПИСИ НЕ ТРОГАЕТ — по `user-agent` (подстрока, без регистра).
+   * 🔴 КОГО СТОРОЖ ХОЛОДНОЙ ЗАПИСИ НЕ ТРОГАЕТ — по ЯВНОЙ МЕТКЕ ЗОВУЩЕГО, а не по `user-agent`.
    *
-   * Заведено 30.10.2026 под ОДИН живой случай: разговор в чат-сервисе (`kiberos-chat`),
-   * вернувшийся после 7 часов простоя, получил 10 отказов подряд — человеку сторож предлагал
-   * «перезапусти сессию», а у человека нет другой сессии, есть только этот разговор.
+   * Почему не по UA (попытка 30.10, отменена в тот же день): дверь видит `user-agent`
+   * ИСХОДЯЩЕГО клиента LiteLLM — он одинаков у всего трафика (`AsyncOpenAI/Python`), поэтому
+   * ключ по UA не различал ни чат, ни агента и не мог ничего исключить по существу.
    *
-   * Сам список ПУСТ ПО УМОЛЧАНИЮ, то есть поведение не меняется ни для кого. Пустым он и должен
-   * остаться, пока фаундер не скажет, платим ли мы такие записи для чата: это вопрос денег
-   * (месячное окно), а не техники. Ключ даёт ответу быть ОДНОЙ СТРОКОЙ в `.env`, а не выкаткой.
+   * Почему не по «нет заголовка сессии» (возражение владельца kiberos-app, верное): тогда
+   * правило отключало бы сторож для ЛЮБОГО трафика без имени сессии — это дыра в обходе, а не
+   * поблажка чату.
+   *
+   * Поэтому — положительный признак: зовущий сам называет себя заголовком
+   * `goRewriteGuardCallerHeader` (по умолчанию `x-kiberos-caller`), и исключение срабатывает
+   * только на перечисленные значения. Список ПУСТ по умолчанию: поведение не меняется ни для
+   * кого, пока фаундер не скажет, платим ли мы такие записи (это про месячное окно).
    */
-  goRewriteGuardExemptUas: string[]
+  goRewriteGuardCallerHeader: string
+  goRewriteGuardExemptCallers: string[]
   goRewriteGuardColdAfterSecExplicit: boolean
 
   // Subscription compat layer (hot-configurable for binary distribution)
@@ -292,7 +298,8 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
       || Object.prototype.hasOwnProperty.call(fileEnv, 'GO_REWRITE_GUARD_MIN_TOKENS'),
     goRewriteGuardAutoRevertSec: readInt('GO_REWRITE_GUARD_AUTOREVERT_SEC', 120, fileEnv),
     goRewriteGuardColdAfterSec: readInt('GO_REWRITE_GUARD_COLD_AFTER_SEC', 1200, fileEnv),
-    goRewriteGuardExemptUas: read('GO_REWRITE_GUARD_EXEMPT_UAS', '', fileEnv)
+    goRewriteGuardCallerHeader: read('GO_REWRITE_GUARD_CALLER_HEADER', 'x-kiberos-caller', fileEnv).toLowerCase(),
+    goRewriteGuardExemptCallers: read('GO_REWRITE_GUARD_EXEMPT_CALLERS', '', fileEnv)
       .split(',')
       .map((v) => v.trim().toLowerCase())
       .filter(Boolean),

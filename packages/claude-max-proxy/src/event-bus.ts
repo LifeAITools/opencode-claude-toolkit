@@ -118,6 +118,8 @@ export type EventKind =
   | 'GO_PREFIX_NEW_LANE'
   /** Сторож не применён: зовущий в списке исключений (см. goRewriteGuardExemptUas). */
   | 'GO_GUARD_EXEMPT'
+  /** Сессия переселена на другую организацию внутри жизни (причина названа). */
+  | 'GO_ORG_MOVED'
   /** Перепись при ЖИВОМ кэше остановлена: ход вернул 400, состояние префикса не сдвинуто. */
   | 'GO_PREFIX_REWRITE_BLOCKED'
   | 'GO_COLD_GUARD_AUTOREVERT'
@@ -201,6 +203,7 @@ export const EVENT = {
   GO_PREFIX_REWRITE: 'GO_PREFIX_REWRITE',
   GO_PREFIX_NEW_LANE: 'GO_PREFIX_NEW_LANE',
   GO_GUARD_EXEMPT: 'GO_GUARD_EXEMPT',
+  GO_ORG_MOVED: 'GO_ORG_MOVED',
   GO_PREFIX_REWRITE_BLOCKED: 'GO_PREFIX_REWRITE_BLOCKED',
   GO_COLD_GUARD_AUTOREVERT: 'GO_COLD_GUARD_AUTOREVERT',
   GO_DOOR_UNCONFIGURED: 'GO_DOOR_UNCONFIGURED',

@@ -22,7 +22,7 @@
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { loadRegistry, pickOrg, GoOrgError, GoRegistryError, type GoRegistry } from '../go-registry.js'
-import { pickOrgByTimeToWall, isOrgUsable, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
+import { pickOrgByTimeToWall, isOrgUsable, orgUnusableReason, readOrgQuotas, readStoreOrgNames } from '../go-org-pick.js'
 import { QUOTA_STATUS_OPENCODE_GO_JSON } from '../opencode-go-quota.js'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
@@ -55,7 +55,17 @@ let warnedNoQuota = false
  */
 type OrgSource = 'named' | 'pin' | 'quota' | 'active'
 
-function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: string | null = null): { org: ReturnType<typeof pickOrg>; source: OrgSource } {
+/**
+ * Причина, по которой ПРЕЖНЯЯ выдача отвергнута на этом вызове. Заполняется `selectOrg` и
+ * читается сразу после него в обработчике — чтобы событие назвало и прежнюю организацию, и
+ * причину. Живёт вне функции, потому что `selectOrg` остаётся чистой по сигнатуре.
+ */
+function selectOrg(
+  reg: GoRegistry,
+  wanted: string | null,
+  cfg: any,
+  stickyKey: string | null = null,
+): { org: ReturnType<typeof pickOrg>; source: OrgSource; movedFrom?: string; movedReason?: string } {
   const w = (wanted ?? '').trim()
   if (w) return { org: pickOrg(reg, w), source: 'named' }
   if (cfg.goTokensPath) {
@@ -79,11 +89,29 @@ function selectOrg(reg: GoRegistry, wanted: string | null, cfg: any, stickyKey: 
     // «Сессию знаем — организация уже выдана»: переиспользуем выданную, пока она годна.
     if (key) {
       const pinned = pinLookup(key)
-      if (pinned && isOrgUsable(reg.orgs, quotas, has, pinned)) {
-        const org = reg.orgs.find((o) => o.name === pinned)
-        if (org) {
-          pinStore(key, org.name)
-          return { org, source: 'pin' }
+      if (pinned) {
+        // 🔴 ПЕРЕСЕЛЕНИЕ СЕССИИ НАЗЫВАЕТСЯ ВСЛУХ, вместе с причиной (30.10.2026).
+        // До этого оно было немым: в журнале оставался `source: quota`, и вопрос фаундера
+        // «почему pin уехал внутри сессии» требовал раскопок вместо одной строки.
+        // Причина берётся из `orgUnusableReason`, а не угадывается: стена, отозванный пропуск
+        // и потерянная строка замера — три разных явления и три разных решения.
+        const why = orgUnusableReason(reg.orgs, quotas, has, pinned)
+        if (why === null) {
+          const org = reg.orgs.find((o) => o.name === pinned)
+          if (org) {
+            pinStore(key, org.name)
+            return { org, source: 'pin' }
+          }
+        } else {
+          // Причина отвергнутой выдачи уезжает наружу вместе с выбором — не через модульную
+          // переменную: иначе обработчик не может ручаться, что читает значение ЭТОГО вызова.
+          return {
+            org: pickOrgByTimeToWall(reg.orgs, quotas, has, { sessionKey: key || null }).org
+              ?? pickOrg(reg, null),
+            source: 'quota',
+            movedFrom: pinned,
+            movedReason: why,
+          }
         }
       }
     }
@@ -1232,6 +1260,15 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     const selected = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, orgKey)
     org = selected.org
     orgSource = selected.source
+    // Переселение ВНУТРИ сессии: была выдача, она отвергнута, выбрана другая. Называем это
+    // событием с причиной — иначе виден только `source: quota`, и «почему уехало» не решается.
+    if (selected.movedFrom && selected.movedFrom !== org.name) {
+      ctx.emit({
+        level: 'info', kind: EVENT.GO_ORG_MOVED, sessionId, model,
+        msg: `дверь Go: сессия переселена ${selected.movedFrom} → ${org.name}; причина — `
+          + `${selected.movedReason}. Переселение внутри сессии = холодная перезапись префикса.`,
+      })
+    }
     rec.org_id = org.name
     rec.org_source = orgSource
     rec.provider_org_ref = org.workspace

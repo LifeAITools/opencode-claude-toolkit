@@ -146,15 +146,40 @@ export function isOrgUsable(
   hasCredential: (name: string) => boolean,
   name: string,
 ): boolean {
+  return orgUnusableReason(orgs, quotas, hasCredential, name) === null
+}
+
+/**
+ * ПОЧЕМУ выданная организация больше не годится — или `null`, если годится.
+ *
+ * 🔴 Зачем причина, а не да/нет (30.10.2026, разбор «почему pin уезжает внутри сессии»):
+ * пока функция отвечала только `false`, переселение сессии было НЕМЫМ — в журнале оставался
+ * `source: quota`, и по нему нельзя было отличить «окно кончилось» от «пропуск отозвали» или
+ * «строку замера потеряли». Фаундер спрашивал именно это, и отвечать приходилось раскопками.
+ *
+ * Коды речи: `no-org` (нет в реестре), `not-console` (вход не по подписке), `no-credential`,
+ * `no-quota-row` (замера нет), `status:<…>`, `exhausted:<окно>=<доля>` (стена),
+ * `util5h-unknown` (доля пятичасового окна не сообщена — тогда судить нельзя, но и выдавать
+ * вслепую нельзя).
+ */
+export function orgUnusableReason(
+  orgs: GoOrg[],
+  quotas: OrgQuotaView[],
+  hasCredential: (name: string) => boolean,
+  name: string,
+): string | null {
   const org = orgs.find((o) => o.name === name)
-  if (!org || org.auth !== 'console') return false
-  if (!hasCredential(org.name)) return false
+  if (!org) return 'no-org'
+  if (org.auth !== 'console') return 'not-console'
+  if (!hasCredential(org.name)) return 'no-credential'
   const q = quotas.find((row) => row.name === name)
-  if (!q) return false
+  if (!q) return 'no-quota-row'
   const status = (q.status ?? 'active').toLowerCase()
-  if (status === 'restricted' || status === 'retired') return false
-  if (exhausted(q)) return false
-  return headroom(q.util5h) !== null
+  if (status === 'restricted' || status === 'retired') return `status:${status}`
+  for (const [win, v] of [['5h', q.util5h], ['7d', q.util7d], ['month', q.utilMonth]] as const) {
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 1) return `exhausted:${win}=${v}`
+  }
+  return headroom(q.util5h) !== null ? null : 'util5h-unknown'
 }
 
 /** FNV-1a: стабильный тай-брейк, чтобы равные организации не перекидывались между сессиями. */

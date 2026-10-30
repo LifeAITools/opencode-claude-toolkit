@@ -84,18 +84,37 @@ const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFi
 
 /**
  * usage диалекта chat/completions (DeepSeek и др. у Go): prompt_tokens / completion_tokens,
- * кэш — prompt_tokens_details.cached_tokens. Записи в кэш у Go нет → null.
+ * кэш — prompt_tokens_details.cached_tokens.
+ *
+ * 🔴 ЗАПИСЬ В КЭШ У GO ЕСТЬ, И Я ЗРЯ ПИСАЛ `null` (поправка фаундера 30.10.2026).
+ * Прежний комментарий здесь утверждал «записи в кэш у Go нет» — это было НЕВЕРНО, и
+ * неверность дорогая: на ней стояло «цену записи мы знаем только по своей оценке».
+ * Поставщик отдаёт её ДВУМЯ способами:
+ *   1) явные поля биллинг-конверта `usage.opencode.tokens.cache_write_5m` / `cache_write_1h`
+ *      (на этом маршруте они наблюдаются нулями, но поле существует и при смене маршрута
+ *      может ожить — поэтому берём его ПЕРВЫМ, а не догадку);
+ *   2) арифметикой ответа: `prompt_tokens = input + cached`, проверено на 60 094 записях
+ *      ДВЕРи — расхождений ноль. Значит СВЕЖАЯ часть (`prompt_tokens - cached`) и есть
+ *      запись: ровно её оплачиваем, когда кэш не попал. Замер: при `cached = 0` медиана
+ *      записи 1 511 токенов, максимум 693 672 — это настоящие числа провайдера, а не оценка.
  */
 export function extractUsageChat(usage: unknown): UsageNorm {
   const u = (usage ?? {}) as Record<string, any>
   if (!usage || typeof usage !== 'object') return { ...EMPTY_USAGE }
+  const prompt = num(u.prompt_tokens)
+  const cached = num(u.prompt_tokens_details?.cached_tokens)
+  const t = (u.opencode?.tokens ?? {}) as Record<string, any>
+  const explicit5m = num(t.cache_write_5m)
+  const explicit1h = num(t.cache_write_1h)
+  const derived = prompt !== null && cached !== null && prompt >= cached ? prompt - cached : null
   return {
-    input: num(u.prompt_tokens),
+    input: prompt,
     output: num(u.completion_tokens),
     reasoning: num(u.completion_tokens_details?.reasoning_tokens),
-    cache_read: num(u.prompt_tokens_details?.cached_tokens),
-    cache_write: null,
-    cache_write_1h: null,
+    cache_read: cached,
+    // Явное поле поставщика ПЕРВЫМ; догадка по арифметике — только когда поля нет.
+    cache_write: explicit5m ?? derived,
+    cache_write_1h: explicit1h,
   }
 }
 
@@ -143,7 +162,7 @@ export function newRecord(partial: Partial<DumpRecord> & Pick<DumpRecord, 'door'
     v: DUMP_SCHEMA_VERSION,
     ts: new Date().toISOString(),
     host: process.env.PROVIDER_DUMP_HOST ?? 'local',
-    org_id: null, provider_org_ref: null, org_source: null, model: null, session_id: null, lineage: null, actor: null,
+    org_id: null, provider_org_ref: null, org_source: null, model: null, session_id: null, lineage: null, actor: null, caller: null,
     request: { method: 'POST', url: '', headers: {}, body_sha256: null, body_bytes: null, body_ref: null },
     response: { status: null, headers: {}, body: null, chunks: null },
     usage_raw: null, usage_norm: { ...EMPTY_USAGE }, quota_seen: {},

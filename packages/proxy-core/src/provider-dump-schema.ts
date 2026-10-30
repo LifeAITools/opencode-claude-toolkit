@@ -57,6 +57,16 @@ export interface DumpRecord {
   lineage: string | null
   call_kind: CallKind
   actor: string | null
+  /**
+   * КТО ЗВАЛ — входящие признаки, а НЕ исходящие к поставщику (30.10.2026).
+   *
+   * `request.headers` — это то, что МЫ шлём наверх, и `user-agent` там всегда наш собственный
+   * (`kiberos-chat/1.0`); принять его за «звал чат» — ошибка, на которой уже построили неверный
+   * вывод о происхождении трафика. Здесь пишется входящее: каким заголовком зовущий назвал
+   * сессию и какой у него собственный user-agent. Без этих двух полей «кто это был» по
+   * журналу не решается.
+   */
+  caller?: { session_header: string | null; user_agent: string | null } | null
   request: {
     method: string
     url: string

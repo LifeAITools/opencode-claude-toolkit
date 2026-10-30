@@ -952,6 +952,19 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   const identity = resolveSessionIdentity({ headerValue: caller.sessionId })
   const sessionId = identity.sessionId
   const actor = hashActor(req.headers.get(ACTOR_HEADER))
+  /**
+   * 🔴 КТО ЗВАЛ — ОТДЕЛЬНО ОТ ТОГО, ЧТО МЫ ШЛЁМ НАВЕРХ (нашёл 30.10.2026, поправляя себя).
+   *
+   * `rec.request.headers` — это ИСХОДЯЩИЕ заголовки к поставщику, и `user-agent` там всегда
+   * наш собственный (`kiberos-chat/1.0`). Я прочёл его как «звал чат» и на этом построил
+   * вывод о происхождении трафика — вывод был неверным: так выглядит ЛЮБОЙ зовущий.
+   * Поэтому здесь пишется ВХОДЯЩЕЕ: имя заголовка, которым зовущий назвал сессию, и его
+   * собственный user-agent. Без этих двух полей вопрос «кто это был» по журналу не решается.
+   */
+  const callerInfo = {
+    session_header: caller.header,
+    user_agent: (req.headers.get('user-agent') ?? '').slice(0, 120) || null,
+  }
   const path = dialect === 'chat' ? '/chat/completions' : '/responses'
 
   const raw = new Uint8Array(await req.arrayBuffer())
@@ -980,6 +993,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   rec.model = model
   rec.session_id = sessionId
   rec.actor = actor
+  rec.caller = callerInfo
   rec.request.body_bytes = raw.byteLength
   rec.request.body_sha256 = sha256(raw)
 

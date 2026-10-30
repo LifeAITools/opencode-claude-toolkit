@@ -102,9 +102,22 @@ describe('withGoCredential', () => {
 })
 
 describe('usage extractors', () => {
-  test('chat: кэш из prompt_tokens_details, записи в кэш нет → null', () => {
+  // 🔴 ПОПРАВКА 30.10.2026 (слово фаундера): запись в кэш у Go ЕСТЬ. Прежний тест утверждал
+  // обратное («записи нет → null») — и на этом стояло «цену записи знаем только по своей
+  // оценке». Поставщик отдаёт её арифметикой ответа: prompt_tokens = input + cached, проверено
+  // на 60 094 записях двери без единого расхождения. Значит свежая часть и есть запись.
+  test('chat: кэш из prompt_tokens_details, запись = свежая часть ответа', () => {
     const u = extractUsageChat({ prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 90 } })
-    expect(u).toMatchObject({ input: 100, output: 5, cache_read: 90, cache_write: null })
+    expect(u).toMatchObject({ input: 100, output: 5, cache_read: 90, cache_write: 10 })
+  })
+  test('chat: явное поле поставщика главнее арифметики', () => {
+    const u = extractUsageChat({
+      prompt_tokens: 100, completion_tokens: 5,
+      prompt_tokens_details: { cached_tokens: 90 },
+      opencode: { tokens: { cache_write_5m: 7, cache_write_1h: 3 } },
+    })
+    expect(u.cache_write).toBe(7)
+    expect(u.cache_write_1h).toBe(3)
   })
   test('responses: input_tokens_details.cached_tokens', () => {
     expect(extractUsageResponses({ input_tokens: 10, output_tokens: 2, input_tokens_details: { cached_tokens: 8 } }).cache_read).toBe(8)
@@ -188,7 +201,7 @@ describe('go-door end to end (шлюз подменён)', () => {
     expect(r.org_id).toBe('org-b')
     expect(r.session_id).toBe('conv-1')
     expect(r.call_kind).toBe('real')
-    expect(r.usage_norm).toMatchObject({ input: 50, output: 3, cache_read: 40, cache_write: null })
+    expect(r.usage_norm).toMatchObject({ input: 50, output: 3, cache_read: 40, cache_write: 10 })
     expect(r.quota_seen['x-ratelimit-remaining']).toBe('77')
   })
 

@@ -615,6 +615,22 @@ function systemLaneKey(sessionId: string, body: any): string {
   return `${sessionId}|${sha256(JSON.stringify(body?.system ?? null)).slice(0, 12)}`
 }
 
+/**
+ * Кого сторож не трогает — по `user-agent` зовущего (подстрока, без регистра).
+ *
+ * Пустой список = сторож для всех, как раньше. Заведено под живой случай 30.10: разговор в
+ * чат-сервисе после 7 часов простоя получал отказы, а у человека нет «новой сессии» — только
+ * этот разговор. Решение «платим ли это для чата» — слово фаундера, поэтому по умолчанию пусто.
+ */
+export function guardExemption(userAgent: string | null | undefined, exemptUas: readonly string[]): string | null {
+  const ua = (userAgent ?? '').toLowerCase()
+  if (!ua) return null
+  return exemptUas.find((u) => {
+    const needle = u.trim().toLowerCase()
+    return needle.length > 0 && ua.includes(needle)
+  }) ?? null
+}
+
 /** Есть ли у этой сессии ДРУГАЯ полоса — чтобы смена system была видна, а не выглядела первым ходом. */
 function hasOtherLane(sessionId: string, lane: string): boolean {
   const prefix = `${sessionId}|`
@@ -1027,7 +1043,15 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   // 🔴 ДВА КЛЮЧА — ДВА СЛУЧАЯ, И ОНИ НЕ СКЛАДЫВАЮТСЯ В ОДИН (нашёл на испытании 24.10):
   // `enabled: main || cold` включал бы ТЁПЛУЮ блокировку вместе с холодным ключом, хотя основной
   // сторож выключен. Каждый случай входит только своим ключом.
-  if (shouldBlockRewrite({
+  // 🔴 ИСКЛЮЧЕНИЕ ПО ЗОВУЩЕМУ: список пуст по умолчанию, поведение не меняется ни для кого.
+  // Нужен, чтобы «чат не трогаем» было ОДНОЙ СТРОКОЙ в настройке, а не выкаткой кода, и чтобы
+  // исключение было видно в журнале (причина отказа названа, а не подразумевается).
+  const guardExemptBy = guardExemption(
+    req.headers.get('user-agent'),
+    cfg.goRewriteGuardExemptUas,
+  )
+  const guardExempt = Boolean(guardExemptBy)
+  if (!guardExempt && shouldBlockRewrite({
     enabled: cfg.goRewriteGuardEnabled,
     coldEnabled: coldGuardOn,
     coldRewrite,
@@ -1114,6 +1138,15 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
         message,
       },
     }), { status: 400, headers: { 'content-type': 'application/json' } })
+  }
+  // Исключение СРАБОТАЛО — называем это вслух: иначе «сторож молчит» неотличимо от
+  // «сторожа нет», а именно на этой разнице мы уже обожглись.
+  if (guardExempt && (coldRewrite || analysis.avoidableRewrite === true || analysis.cacheExpired === true)) {
+    ctx.emit({
+      level: 'info', kind: EVENT.GO_GUARD_EXEMPT, sessionId, model,
+      msg: `дверь Go: сторож НЕ применён — зовущий в списке исключений (${guardExemptBy}); `
+        + `ход запишет ~${predictedTokens} токенов (простой ${Math.round((analysis.idleMs ?? 0) / 60_000)} мин)`,
+    })
   }
   // Голову ПРЕДЫДУЩЕЙ истории снимаем ДО сдвига состояния: после `commitPrefix` в памяти
   // лежит уже новое, и снимок сравнивал бы новое с новым — то есть молчал бы всегда.

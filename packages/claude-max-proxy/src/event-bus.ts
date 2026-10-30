@@ -120,6 +120,12 @@ export type EventKind =
   | 'GO_GUARD_EXEMPT'
   /** Сессия переселена на другую организацию внутри жизни (причина названа). */
   | 'GO_ORG_MOVED'
+  /** Выдача на стене ОСТАВЛЕНА (не переселяем) — ход пойдёт и, возможно, упрётся в 429. */
+  | 'GO_ORG_PIN_HELD'
+  /** Названная организация за стеной и сессии нет — взята годная (имя оспорено узко). */
+  | 'GO_ORG_NAME_OVERRIDDEN'
+  /** 429 на выданной организации — выдача снята, следующий ход возьмёт свежую. */
+  | 'GO_ORG_PIN_DROPPED'
   /** Перепись при ЖИВОМ кэше остановлена: ход вернул 400, состояние префикса не сдвинуто. */
   | 'GO_PREFIX_REWRITE_BLOCKED'
   | 'GO_COLD_GUARD_AUTOREVERT'
@@ -204,6 +210,9 @@ export const EVENT = {
   GO_PREFIX_NEW_LANE: 'GO_PREFIX_NEW_LANE',
   GO_GUARD_EXEMPT: 'GO_GUARD_EXEMPT',
   GO_ORG_MOVED: 'GO_ORG_MOVED',
+  GO_ORG_PIN_HELD: 'GO_ORG_PIN_HELD',
+  GO_ORG_NAME_OVERRIDDEN: 'GO_ORG_NAME_OVERRIDDEN',
+  GO_ORG_PIN_DROPPED: 'GO_ORG_PIN_DROPPED',
   GO_PREFIX_REWRITE_BLOCKED: 'GO_PREFIX_REWRITE_BLOCKED',
   GO_COLD_GUARD_AUTOREVERT: 'GO_COLD_GUARD_AUTOREVERT',
   GO_DOOR_UNCONFIGURED: 'GO_DOOR_UNCONFIGURED',

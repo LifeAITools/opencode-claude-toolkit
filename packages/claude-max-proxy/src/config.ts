@@ -148,6 +148,18 @@ export interface ProxyConfig {
    * только на перечисленные значения. Список ПУСТ по умолчанию: поведение не меняется ни для
    * кого, пока фаундер не скажет, платим ли мы такие записи (это про месячное окно).
    */
+  /**
+   * 🔴 ДЕРЖАТЬ ВЫДАЧУ ОРГАНИЗАЦИИ НА СТЕНЕ, А НЕ ПЕРЕСЕЛЯТЬ (слово фаундера 30.10.2026:
+   * «пускай он упрётся в 429… при перезагрузке агента прокси должен выдать ему свежую»).
+   *
+   * `true` (по умолчанию с 1.1.99): сессия остаётся на выданной организации, даже когда у неё
+   * выработано окно, и получает 429. Выдача при этом СБРАСЫВАЕТСЯ на первом настоящем 429 —
+   * значит после перезапуска (или следующего хода) агент получит свежую организацию. Так мы не
+   * платим холодную запись на живом разговоре и не теряем сессию навсегда.
+   *
+   * `false` — прежнее поведение: переселять сразу, как только выданная стала негодной.
+   */
+  goOrgPinHoldOnUnusable: boolean
   goRewriteGuardCallerHeader: string
   goRewriteGuardExemptCallers: string[]
   goRewriteGuardColdAfterSecExplicit: boolean
@@ -298,6 +310,7 @@ export function loadConfig(envPath: string = DEFAULT_ENV_PATH): ProxyConfig {
       || Object.prototype.hasOwnProperty.call(fileEnv, 'GO_REWRITE_GUARD_MIN_TOKENS'),
     goRewriteGuardAutoRevertSec: readInt('GO_REWRITE_GUARD_AUTOREVERT_SEC', 120, fileEnv),
     goRewriteGuardColdAfterSec: readInt('GO_REWRITE_GUARD_COLD_AFTER_SEC', 1200, fileEnv),
+    goOrgPinHoldOnUnusable: readBool('GO_ORG_PIN_HOLD_ON_UNUSABLE', true, fileEnv),
     goRewriteGuardCallerHeader: read('GO_REWRITE_GUARD_CALLER_HEADER', 'x-kiberos-caller', fileEnv).toLowerCase(),
     goRewriteGuardExemptCallers: read('GO_REWRITE_GUARD_EXEMPT_CALLERS', '', fileEnv)
       .split(',')

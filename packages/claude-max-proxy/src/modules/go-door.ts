@@ -65,9 +65,23 @@ function selectOrg(
   wanted: string | null,
   cfg: any,
   stickyKey: string | null = null,
-): { org: ReturnType<typeof pickOrg>; source: OrgSource; movedFrom?: string; movedReason?: string } {
+  /**
+   * Есть ли у запроса НАСТОЯЩИЙ номер сессии (не отпечаток агента). Нужен ровно одному
+   * решению: оспаривать ли НАЗВАННУЮ организацию, если она за стеной. Живая сессия — не
+   * оспариваем никогда; запрос без номера — оспариваем (см. ниже).
+   */
+  realSession = true,
+): {
+  org: ReturnType<typeof pickOrg>
+  source: OrgSource
+  movedFrom?: string
+  movedReason?: string
+  heldUnusable?: string
+  nameOverridden?: string
+  nameOverrideReason?: string
+} {
   const w = (wanted ?? '').trim()
-  if (w) return { org: pickOrg(reg, w), source: 'named' }
+  if (w && !cfg.goTokensPath) return { org: pickOrg(reg, w), source: 'named' }
   if (cfg.goTokensPath) {
     // 🔴 ОТЧЁТ КВОТЫ ЖИВЁТ РЯДОМ С РЕЕСТРОМ И ВХОДАМИ, А НЕ В `~/.claude-local`: на сервере его
     // привозит доставка в тот же смонтированный каталог (`/go/quota-status-opencode-go.json`).
@@ -86,6 +100,26 @@ function selectOrg(
     const haveToken = readStoreOrgNames(cfg.goTokensPath)
     const has = (n: string) => haveToken.has(n)
     const key = (stickyKey ?? '').trim()
+    if (w) {
+      // 🔴 ИМЯ, КОТОРОЕ УПЁРЛОСЬ В СТЕНУ, И НЕКОМУ ЕГО ЗАЩИЩАТЬ (30.10.2026, живой случай).
+      // Замер: 522 запроса за полчаса, ВСЕ `named` на hello@myfamily.quest при 7д=1.00 и мес=1.00,
+      // и все без имени сессии (`session_id: null`). Правило «названную организацию не оспариваем»
+      // защищает ЖИВУЮ сессию от холодной перезаписи — а здесь сессии нет: за номером идти нечему.
+      // Плата за слепое подчинение — 16 гарантированных 429 в минуту, полчаса подряд.
+      //
+      // Узкое исключение: имя названо, организация ДОКАЗАННО за стеной, сессии нет → берём годную
+      // и НАЗЫВАЕМ это событием. Живая сессия (есть номер → есть пин) сюда не попадает никогда.
+      if (!realSession && !pinLookup(key || '')) {
+        const why = orgUnusableReason(reg.orgs, quotas, has, w)
+        if (why !== null) {
+          const picked = pickOrgByTimeToWall(reg.orgs, quotas, has, { sessionKey: null })
+          if (picked.org) {
+            return { org: picked.org, source: 'quota', nameOverridden: w, nameOverrideReason: why }
+          }
+        }
+      }
+      return { org: pickOrg(reg, w), source: 'named' }
+    }
     // «Сессию знаем — организация уже выдана»: переиспользуем выданную, пока она годна.
     if (key) {
       const pinned = pinLookup(key)
@@ -115,7 +149,16 @@ function selectOrg(
             pinStore(key, org.name)
             return { org, source: 'pin' }
           }
+        } else if (cfg.goOrgPinHoldOnUnusable !== false) {
+          // 🔴 ДЕРЖИМ, А НЕ ПЕРЕСЕЛЯЕМ (слово фаундера 30.10.2026: «пускай он упрётся в 429»).
+          // Живой разговор не переезжает: организация выдана один раз, и до перезапуска агента
+          // она не меняется. Стоимость названа им же — ход упрётся в 429, хук это перехватит,
+          // перезапуск даст свежую организацию. Выдача сбрасывается на ПЕРВОМ настоящем 429
+          // (см. finish), а не по предсказанию — тогда следующий ход уже возьмёт свежую.
+          const org = reg.orgs.find((o) => o.name === pinned)
+          if (org) return { org, source: 'pin', heldUnusable: why }
         } else {
+          // Прежнее поведение (GO_ORG_PIN_HOLD_ON_UNUSABLE=false): переселить сразу.
           // Причина отвергнутой выдачи уезжает наружу вместе с выбором — не через модульную
           // переменную: иначе обработчик не может ручаться, что читает значение ЭТОГО вызова.
           return {
@@ -331,6 +374,11 @@ function pinLookup(key: string): string | null {
     return null
   }
   return hit.org
+}
+
+function pinDelete(key: string): boolean {
+  loadPins()
+  return orgPins.delete(key)
 }
 
 function pinStore(key: string, org: string): void {
@@ -1282,16 +1330,31 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     if (payload) spoolWrite(process.env.GO_SPOOL_DIR ?? `${homedir()}/.claude-local/go-body-spool`, orgKey, payload)
   }
   try {
-    const selected = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, orgKey)
+    const selected = selectOrg(registry(), req.headers.get(ORG_HEADER), cfg, orgKey, Boolean(sessionId))
     org = selected.org
     orgSource = selected.source
     // Переселение ВНУТРИ сессии: была выдача, она отвергнута, выбрана другая. Называем это
     // событием с причиной — иначе виден только `source: quota`, и «почему уехало» не решается.
+    if (selected.nameOverridden) {
+      ctx.emit({
+        level: 'info', kind: EVENT.GO_ORG_NAME_OVERRIDDEN, sessionId, model,
+        msg: `дверь Go: названная ${selected.nameOverridden} ЗА СТЕНОЙ (${selected.nameOverrideReason}), `
+          + `а сессии за запросом нет — взята годная ${org.name}; имя не оспаривается у живой сессии`,
+      })
+    }
+    if (selected.heldUnusable) {
+      ctx.emit({
+        level: 'info', kind: EVENT.GO_ORG_PIN_HELD, sessionId, model,
+        msg: `дверь Go: выдача ${org.name} НЕ переселяется (${selected.heldUnusable}) — `
+          + `ход пойдёт на неё и, если она за стеной, упрётся в 429; выдача сбросится на первом 429`,
+      })
+    }
     if (selected.movedFrom && selected.movedFrom !== org.name) {
       ctx.emit({
         level: 'info', kind: EVENT.GO_ORG_MOVED, sessionId, model,
         msg: `дверь Go: сессия переселена ${selected.movedFrom} → ${org.name}; причина — `
-          + `${selected.movedReason}. Переселение внутри сессии = холодная перезапись префикса.`,
+          + `${selected.movedReason}. Замер 30.10 на пяти переездах: сам переезд кэш НЕ теряет `
+          + `(три случая с коротким простоем дали 99.9% попадания сразу после), теряет время простоя.`,
       })
     }
     rec.org_id = org.name
@@ -1404,6 +1467,18 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
       try { rec.response.body = JSON.parse(text) } catch { rec.response.body = text.slice(0, 2000) }
     }
     writeDump(rec)
+    // 🔴 СТЕНА ДОКАЗАНА ОТВЕТОМ, А НЕ ПРЕДСКАЗАНИЕМ — ТОЛЬКО ТЕПЕРЬ СНИМАЕМ ВЫДАЧУ.
+    // До этого момента живая сессия держится за свою организацию (слово фаундера 30.10:
+    // «не менять на лету»). 429 — это и есть та стена: снимаем выдачу, чтобы СЛЕДУЮЩИЙ ход
+    // (обычно после перезапуска агента хуком) взял свежую организацию.
+    if (upstream.status === 429 && orgSource === 'pin' && orgKey) {
+      if (pinDelete(orgKey)) {
+        ctx.emit({
+          level: 'error', kind: EVENT.GO_ORG_PIN_DROPPED, sessionId, org: org.name, model,
+          msg: `дверь Go: 429 на выданной ${org.name} — выдача снята; следующий ход возьмёт свежую организацию`,
+        })
+      }
+    }
     ctx.emit({
       level: upstream.ok ? 'info' : 'error',
       kind: upstream.ok ? EVENT.GO_COMPLETE : EVENT.GO_ERROR,

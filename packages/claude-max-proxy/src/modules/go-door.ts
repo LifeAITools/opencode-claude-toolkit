@@ -175,6 +175,14 @@ function selectOrg(
     const picked = pickOrgByTimeToWall(reg.orgs, quotas, has, { sessionKey: key || null })
     if (picked.org) {
       if (key) pinStore(key, picked.org.name)
+      const dropped = key ? pinDropped.get(key) : undefined
+      if (dropped && key) {
+        pinDropped.delete(key)
+        return {
+          org: picked.org, source: 'quota',
+          movedFrom: dropped.org, movedReason: 'after-429',
+        }
+      }
       return { org: picked.org, source: 'quota' }
     }
     // 🔴 ГРОМКО, А НЕ ТИХО: «замера нет» на сервере означает, что файл квоты не привезён.
@@ -363,6 +371,18 @@ export function restorePinsForTest(entries: Array<[string, { org: string; at: nu
  */
 let pinExpired: { org: string; at: number } | null = null
 
+/**
+ * 🔴 ВЫДАЧА, СНЯТАЯ НА 429 — СЛЕДУЮЩИЙ ВЫБОР ТОЖЕ ПЕРЕЕЗД (30.10.2026).
+ *
+ * По слову фаундера сессия на стене не переселяется: она упирается в 429, и только тогда
+ * выдача снимается — «при перезапуске прокси выдаёт свежую». Но следующий ход выбирает
+ * организацию заново, и без этой памяти он выглядел бы как ПЕРВАЯ выдача: переезд есть, а
+ * счётчик его не видит. Здесь на час запоминается, откуда ушли, чтобы переезд назвался
+ * причиной `after-429` — той самой, которой он и является.
+ */
+const pinDropped = new Map<string, { org: string; at: number }>()
+const PIN_DROPPED_TTL_MS = 60 * 60 * 1000
+
 function pinLookup(key: string): string | null {
   loadPins()
   pinExpired = null
@@ -378,7 +398,14 @@ function pinLookup(key: string): string | null {
 
 function pinDelete(key: string): boolean {
   loadPins()
-  return orgPins.delete(key)
+  const before = orgPins.get(key)
+  const removed = orgPins.delete(key)
+  if (removed && before) {
+    const now = Date.now()
+    for (const [k, v] of pinDropped) if (now - v.at > PIN_DROPPED_TTL_MS) pinDropped.delete(k)
+    pinDropped.set(key, { org: before.org, at: now })
+  }
+  return removed
 }
 
 function pinStore(key: string, org: string): void {
@@ -1335,6 +1362,12 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     orgSource = selected.source
     // Переселение ВНУТРИ сессии: была выдача, она отвергнута, выбрана другая. Называем это
     // событием с причиной — иначе виден только `source: quota`, и «почему уехало» не решается.
+    // Переезд — В СТРУКТУРЕ ЗАПИСИ, а не только строкой в журнале: соседям нужен счётчик,
+    // и разбирать для этого текст — второй дом того же факта.
+    if (selected.movedFrom && selected.movedFrom !== org.name) {
+      rec.org_moved_from = selected.movedFrom
+      rec.org_moved_reason = selected.movedReason ?? null
+    }
     if (selected.nameOverridden) {
       ctx.emit({
         level: 'info', kind: EVENT.GO_ORG_NAME_OVERRIDDEN, sessionId, model,

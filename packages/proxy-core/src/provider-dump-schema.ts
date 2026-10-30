@@ -67,6 +67,18 @@ export interface DumpRecord {
    * журналу не решается.
    */
   caller?: { session_header: string | null; user_agent: string | null } | null
+  /**
+   * ПЕРЕЕЗД ВНУТРИ СЕССИИ — структурно, а не строкой в журнале (30.10.2026).
+   *
+   * `org_moved_from` заполняется ТОЛЬКО когда у сессии была выдача и она была отвергнута,
+   * а выбрана другая. Первая выдача сюда не попадает никогда — это не переезд.
+   * `org_moved_reason` — код причины (`exhausted:7d=1`, `pin-ttl-12h`, `no-credential`,
+   * `no-quota-row`, `status:…`, `no-org`, `not-console`, `util5h-unknown`).
+   * Читателю, который считает переезды, достаточно фильтра «поле не null» — без разбора
+   * текста журнала и без второй копии правила.
+   */
+  org_moved_from?: string | null
+  org_moved_reason?: string | null
   request: {
     method: string
     url: string

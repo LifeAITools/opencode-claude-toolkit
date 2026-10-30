@@ -166,7 +166,7 @@ export function newRecord(partial: Partial<DumpRecord> & Pick<DumpRecord, 'door'
     v: DUMP_SCHEMA_VERSION,
     ts: new Date().toISOString(),
     host: process.env.PROVIDER_DUMP_HOST ?? 'local',
-    org_id: null, provider_org_ref: null, org_source: null, model: null, session_id: null, lineage: null, actor: null, caller: null,
+    org_id: null, provider_org_ref: null, org_source: null, model: null, session_id: null, lineage: null, actor: null, caller: null, org_moved_from: null, org_moved_reason: null,
     request: { method: 'POST', url: '', headers: {}, body_sha256: null, body_bytes: null, body_ref: null },
     response: { status: null, headers: {}, body: null, chunks: null },
     usage_raw: null, usage_norm: { ...EMPTY_USAGE }, quota_seen: {},

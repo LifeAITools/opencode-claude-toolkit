@@ -321,6 +321,57 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     rewriteMinTokens: 50_000,
     coldRewriteAfterSec: 1_500,
   },
+
+  // ── Go: ДОБАВЛЕНО 31.10.2026 по вопросу фаундера «что нового вышло» ────────────────────
+  // Все четыре проверены живьём через дверь /go (ответ 200) и через посредник :4000 с
+  // агентским ключом. Цены — из каталога двери на 31.10.2026, для УЧЁТА (подписка Go плоская).
+  // `cacheTtlSec`/`rewriteMinTokens`/`coldRewriteAfterSec` НАМЕРЕННО не заданы: срок жизни
+  // кэша у этих моделей не измерен, а подставлять число deepseek значило бы выдумать замер.
+  // Пока их нет — действует глобальная настройка сторожа.
+  'kimi-k3.1-pro-go': {
+    name: 'Kimi K3.1 Pro (OpenCode Go)',
+    context: 1_048_576,
+    defaultOutput: 32_000,
+    maxOutput: 131_072,
+    adaptiveThinking: false,
+    // Каталог говорит `temperature: false` — параметры сэмплирования не отправлять.
+    samplingParams: false,
+    provider: 'opencode-go',
+    cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2 },
+  },
+  'minimax-m3.1-flash-go': {
+    name: 'MiniMax M3.1 Flash (OpenCode Go)',
+    context: 1_000_000,
+    defaultOutput: 32_000,
+    maxOutput: 512_000,
+    adaptiveThinking: false,
+    samplingParams: true,
+    provider: 'opencode-go',
+    cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
+  },
+  'gemini-4-argon-go': {
+    name: 'Gemini 4 Argon (OpenCode Go)',
+    context: 1_048_576,
+    defaultOutput: 32_000,
+    maxOutput: 65_536,
+    adaptiveThinking: false,
+    samplingParams: false,
+    provider: 'opencode-go',
+    // Скидка 50% до 30.11.2026; после — 4 / 20.
+    cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+  },
+  'beam-free-go': {
+    name: 'Beam Free (OpenCode Go)',
+    context: 1_048_576,
+    defaultOutput: 32_000,
+    maxOutput: 131_072,
+    adaptiveThinking: false,
+    samplingParams: true,
+    provider: 'opencode-go',
+    // Бесплатна и НЕ тратит подписной лимит (замер 31.10: cost 0, allowance 0).
+    // Открытые веса, обучение на данных не ведётся, хранение 30 дней.
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
 }
 
 /** Fallback for unknown/unlisted models — mirrors native CLI's else-branch in wa() */

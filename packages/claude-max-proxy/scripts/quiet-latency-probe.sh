@@ -59,7 +59,24 @@ echo "прогон: $(date -u +%FT%TZ) loadavg=$(cat /proc/loadavg)" | tee -a "$
 # версию двери, иначе «стало быстрее» невозможно ни подтвердить, ни опровергнуть.
 MEDIATOR=$(docker inspect kiberos-litellm --format '{{.Config.Image}}' 2>/dev/null || echo '?')
 DOOR=$(curl -s -m 5 http://127.0.0.1:5050/version 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
-echo "engine: $(hostname) · mediator: ${MEDIATOR:-?} · door: ${DOOR:-?} · cores: $(nproc)" | tee -a "$SUM"
+# ТРИ ОБЩИХ ПОЛЯ С ВЛАДЕЛЬЦЕМ signal-wire (договорено 01.11): сборка, возраст, нагрузка.
+# Без них два числа из разных прогонов несравнимы, а «стало быстрее» нельзя ни подтвердить,
+# ни опровергнуть.
+SHA=$(git -C "$(dirname "${BASH_SOURCE[0]}")/../../.." rev-parse --short HEAD 2>/dev/null || echo '?')
+MSTART=$(docker inspect kiberos-litellm --format '{{.State.StartedAt}}' 2>/dev/null)
+MUP='?'
+if [ -n "$MSTART" ]; then
+  MUP=$(python3 - "$MSTART" <<'PY' 2>/dev/null || echo '?'
+import sys, datetime
+s = sys.argv[1].split('.')[0].rstrip('Z')
+t = datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=datetime.timezone.utc)
+print(int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() // 60))
+PY
+)
+fi
+DUP=$(curl -s -m 5 http://127.0.0.1:5050/health 2>/dev/null | sed -n 's/.*"uptime":\([0-9]*\).*/\1/p')
+DUP=$(( ${DUP:-0} / 60 ))
+echo "engine: $(hostname) · git_sha: ${SHA:-?} · mediator: ${MEDIATOR:-?} · up ${MUP}m · door: ${DOOR:-?} up ${DUP}m · cores: $(nproc)" | tee -a "$SUM"
 DIRTY=0
 for m in $MODELS; do
   for i in $(seq 1 "$SAMPLES"); do

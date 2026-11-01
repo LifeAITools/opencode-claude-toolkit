@@ -75,7 +75,14 @@ probe_version(){ sshx "docker exec $PROBE python3 -c \"import urllib.request,jso
 probe_health(){ sshx "docker exec $PROBE python3 -c \"import urllib.request,json;d=json.load(urllib.request.urlopen('http://$SERVICE:5050/health',timeout=8));print(json.dumps(d))\"" 2>/dev/null | tr -d '\r' | tail -1; }
 compose_tag(){ sshx "grep -m1 -E '^[[:space:]]*image:[[:space:]]*$REPO:' $COMPOSE | sed 's/.*$REPO://'" 2>/dev/null | tr -d '\r' | tail -1; }
 set_compose_tag(){ sshx "sed -i.bak-deploy-$STAMP -E 's#^([[:space:]]*image:[[:space:]]*$REPO):.*#\\1:$1#' $COMPOSE" ; }
-recreate(){ sshx "cd $(dirname "$COMPOSE") && docker compose -f $COMPOSE up -d --no-deps $SERVICE" >/dev/null; }
+# Имя проекта compose НЕ выводится из каталога: контейнер на сервере создан в проекте
+# kiberos-claude-proxy (так его поднимает бандл kibctl), а `docker compose` из /opt/kiberos-app
+# вывел бы «kiberos-app» и попытался создать ВТОРОЙ контейнер — падало на конфликте имени,
+# при этом тег в compose уже был переписан, то есть файл расходился с боем. Берём проект из
+# живого контейнера: он и есть правда о том, кто им владеет.
+compose_project(){ sshx "docker inspect $SERVICE --format '{{index .Config.Labels \"com.docker.compose.project\"}}'" 2>/dev/null | tr -d '\r' | tail -1; }
+recreate(){ [ -n "${PROJECT:-}" ] || die "не знаю имя compose-проекта контейнера $SERVICE — пересоздание отменено"
+  sshx "cd $(dirname "$COMPOSE") && COMPOSE_PROJECT_NAME=$PROJECT docker compose -f $COMPOSE up -d --no-deps $SERVICE" >/dev/null; }
 
 log "хост $HOST, сервис $SERVICE, образ $REPO, версия $VERSION"
 
@@ -86,7 +93,8 @@ if [ "$MODE" = rollback ]; then
   fi
   [ -n "$ROLLBACK_TAG" ] || die "на сервере нет ни одного откатного тега"
   CUR=$(compose_tag)
-  log "откат: $CUR → $ROLLBACK_TAG"
+  PROJECT=$(compose_project)
+  log "откат: $CUR → $ROLLBACK_TAG (проект compose $PROJECT)"
   if [ "$DRY" = 1 ]; then log "DRY-RUN — ничего не меняю"; exit 0; fi
   set_compose_tag "$ROLLBACK_TAG"
   recreate
@@ -103,8 +111,10 @@ docker image inspect "$REPO:$VERSION" >/dev/null 2>&1 \
 sshx true 2>/dev/null || die "нет SSH до $HOST"
 RUNTAG=$(sshx "docker inspect $SERVICE --format '{{.Config.Image}}'" 2>/dev/null | sed "s#.*$REPO:##" | tr -d '\r' | tail -1)
 [ -n "$RUNTAG" ] || die "не смог прочитать текущий образ контейнера $SERVICE"
+PROJECT=$(compose_project)
+[ -n "$PROJECT" ] || die "не смог прочитать compose-проект контейнера $SERVICE — без него пересоздание создаст второй контейнер"
 LIVE_BEFORE=$(probe_version)
-log "на сервере сейчас: тег контейнера $RUNTAG, отвечает версией ${LIVE_BEFORE:-<нет ответа>}"
+log "на сервере сейчас: тег контейнера $RUNTAG (проект compose $PROJECT), отвечает версией ${LIVE_BEFORE:-<нет ответа>}"
 
 if [ "$RUNTAG" = "$VERSION" ] && [ "$LIVE_BEFORE" = "$VERSION" ]; then
   log "версия уже в бою — делать нечего (идемпотентно)"; exit 0
@@ -130,7 +140,12 @@ log "образ на сервере: $(sshx "docker images $REPO:$VERSION --form
 
 # ── 3. ТЕГ В COMPOSE И ПЕРЕСОЗДАНИЕ ────────────────────────────────────────────────────
 set_compose_tag "$VERSION"
-recreate
+if ! recreate; then
+  # Контейнер не тронут — возвращаем compose к тому, что реально в бою, иначе файл врёт.
+  log "пересоздание контейнера упало — возвращаю тег $RUNTAG в compose (контейнер жив на нём же)"
+  set_compose_tag "$RUNTAG"
+  die "выкатка отменена: compose возвращён на $RUNTAG"
+fi
 
 # ── 4. ПРОВЕРКИ ЖИВЬЁМ (без них выкатка не считается сделанной) ───────────────────────
 FAIL=""

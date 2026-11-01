@@ -25,6 +25,7 @@ THRESHOLD=${THRESHOLD:-4}
 SAMPLES=${SAMPLES:-10}
 MAX_WAIT_SEC=${MAX_WAIT_SEC:-28800}
 MODELS=${MODELS:-"mimo-v2.6-flash qwen3.8-flash deepseek-v4.1-flash-go"}
+SHAPES=${SHAPES:-"trivial workload"}
 OUT_DIR=${OUT_DIR:-$HOME/.claude-local}
 STAMP=$(date -u +%Y%m%d-%H%M)
 OUT="$OUT_DIR/quiet-latency-$STAMP.jsonl"
@@ -78,29 +79,59 @@ DUP=$(curl -s -m 5 http://127.0.0.1:5050/health 2>/dev/null | sed -n 's/.*"uptim
 DUP=$(( ${DUP:-0} / 60 ))
 echo "engine: $(hostname) · git_sha: ${SHA:-?} · mediator: ${MEDIATOR:-?} · up ${MUP}m · door: ${DOOR:-?} up ${DUP}m · cores: $(nproc)" | tee -a "$SUM"
 DIRTY=0
-for m in $MODELS; do
-  for i in $(seq 1 "$SAMPLES"); do
-    before=$(load1)
-    ms=$(curl -s -o /dev/null -w '%{time_total}' -m 90 "$URL" \
-      -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-      -d "{\"model\":\"$m\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}")
-    ms=$(awk -v s="$ms" 'BEGIN{printf "%d", s*1000}')
-    after=$(load1)
-    printf '{"ts":"%s","model":"%s","ms":%s,"load_before":%s,"load_after":%s}\n' \
-      "$(date -u +%FT%TZ)" "$m" "$ms" "$before" "$after" >> "$OUT"
-    awk -v a="$after" -v b="$THRESHOLD" 'BEGIN{exit !(a>=b)}' && DIRTY=1
-    sleep 2
+# 🔴 ДВЕ ФОРМЫ НАГРУЗКИ, А НЕ ОДНА. «ping» меряет короткий ответ, а переформулировка памяти
+# шлёт МНОГОТОКЕННЫЙ контекст и просит структурированный ответ — это другой профиль, и
+# порядок ступеней по короткой форме может не совпадать с боевым. Поэтому меряем обе.
+# Текст в workload ФИКСИРОВАН и одинаков для всех моделей, иначе сравниваем не модели,
+# а разное содержимое.
+mk_payload(){ # $1 = shape → печатает путь к JSON с заглушкой __MODEL__
+  local shape="$1" f
+  f=$(mktemp /tmp/probe-payload.XXXXXX.json)
+  if [ "$shape" = "workload" ]; then
+    python3 - "$f" <<'PY2'
+import json, sys
+filler = ("Пользователь обсуждает учёт расхода и кэш. " * 220)[:16000]
+content = filler + "\n\nОтветь строго JSON: {\"ok\":true}"
+json.dump({"model": "__MODEL__", "messages": [{"role": "user", "content": content}],
+           "max_tokens": 64}, open(sys.argv[1], "w"), ensure_ascii=False)
+PY2
+  else
+    printf '%s' '{"model":"__MODEL__","messages":[{"role":"user","content":"ping"}],"max_tokens":1}' > "$f"
+  fi
+  echo "$f"
+}
+
+for shape in $SHAPES; do
+  BASE=$(mk_payload "$shape")
+  for m in $MODELS; do
+    PAY=$(mktemp /tmp/probe-call.XXXXXX.json)
+    sed "s/__MODEL__/$m/" "$BASE" > "$PAY"
+    for i in $(seq 1 "$SAMPLES"); do
+      before=$(load1)
+      ms=$(curl -s -o /dev/null -w '%{time_total}' -m 120 "$URL" \
+        -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d @"$PAY")
+      ms=$(awk -v s="$ms" 'BEGIN{printf "%d", s*1000}')
+      after=$(load1)
+      printf '{"ts":"%s","shape":"%s","model":"%s","ms":%s,"load_before":%s,"load_after":%s}\n' \
+        "$(date -u +%FT%TZ)" "$shape" "$m" "$ms" "$before" "$after" >> "$OUT"
+      awk -v a="$after" -v b="$THRESHOLD" 'BEGIN{exit !(a>=b)}' && DIRTY=1
+      sleep 2
+    done
+    rm -f "$PAY"
   done
+  rm -f "$BASE"
 done
 
 echo "" | tee -a "$SUM"
+for shape in $SHAPES; do
 for m in $MODELS; do
-  vals=$(grep "\"model\":\"$m\"" "$OUT" | grep -o '"ms":[0-9]*' | cut -d: -f2 | sort -n)
+  vals=$(grep "\"shape\":\"$shape\"" "$OUT" | grep "\"model\":\"$m\"" | grep -o '"ms":[0-9]*' | cut -d: -f2 | sort -n)
   n=$(printf '%s\n' "$vals" | grep -c .)
   [ "$n" -gt 0 ] || { printf '%-28s нет проб\n' "$m" | tee -a "$SUM"; continue; }
-  awk -v m="$m" -v n="$n" '{a[NR]=$1} END{
-    printf "%-28s n=%d p50=%d мс p90=%d мс max=%d мс\n", m, n, a[int((n+1)*0.5)], a[int((n+1)*0.9)], a[n]
+  awk -v m="$m" -v sh="$shape" -v n="$n" '{a[NR]=$1} END{
+    printf "%-12s %-28s n=%d p50=%d мс p90=%d мс max=%d мс\n", sh, m, n, a[int((n+1)*0.5)], a[int((n+1)*0.9)], a[n]
   }' <<< "$vals" | tee -a "$SUM"
+done
 done
 [ "$DIRTY" = 1 ] && echo "🔴 ГРЯЗНЫЙ прогон: во время проб loadavg перевалил $THRESHOLD — цифры есть, вывод по ним нет" | tee -a "$SUM"
 echo "строки: $OUT" | tee -a "$SUM"

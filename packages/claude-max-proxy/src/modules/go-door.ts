@@ -34,6 +34,7 @@ import {
   extractUsageChat, extractUsageResponses, usageFromSseText, type CallKind,
 } from '../provider-dump.js'
 import { resolveSessionIdentity, readCallerSession, CALLER_SESSION_HEADERS } from '../session-identity.js'
+import { appendGoSpendRecord, extractDoorMoney, responseIdFromSseText } from '../go-spend-ledger.js'
 import { consumeConsent, getModelMetadata } from '@life-ai-tools/claude-code-sdk'
 import type { ProxyConfig } from '../config.js'
 
@@ -1500,6 +1501,33 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
       try { rec.response.body = JSON.parse(text) } catch { rec.response.body = text.slice(0, 2000) }
     }
     writeDump(rec)
+    // 🔴 ДЕНЬГИ ПИШЕТ ТОТ, КТО ИХ ЗНАЕТ, И ТОЛЬКО ОН. Посредник на стримящем пути пишет
+    // `spend=0`, и подложить туда готовое значение некуда — строка собирается раньше хуков
+    // (замер 01.11.2026, задача 9e04cea5). Дверь же отдаёт `usage.opencode.list_cost` всегда,
+    // поэтому наш журнал — единственный источник для расчёта, а SpendLogs остаётся для
+    // ключа и человека по `responseId` (= `request_id`).
+    if (upstream.ok) {
+      let responseId: string | null = null
+      if (streamed) responseId = responseIdFromSseText(text)
+      else {
+        try { const j = JSON.parse(text); responseId = typeof j?.id === 'string' ? j.id : null } catch { responseId = null }
+      }
+      const money = extractDoorMoney(usage)
+      appendGoSpendRecord({
+        ts: new Date().toISOString(),
+        responseId,
+        sessionId: sessionId ?? null,
+        org: org.name,
+        model,
+        input: rec.usage_norm.input,
+        output: rec.usage_norm.output,
+        cacheRead: rec.usage_norm.cache_read,
+        cacheWrite: rec.usage_norm.cache_write,
+        listCost: money.listCost,
+        allowance: money.allowance,
+        callKind: kind,
+      })
+    }
     // 🔴 СТЕНА ДОКАЗАНА ОТВЕТОМ, А НЕ ПРЕДСКАЗАНИЕМ — ТОЛЬКО ТЕПЕРЬ СНИМАЕМ ВЫДАЧУ.
     // До этого момента живая сессия держится за свою организацию (слово фаундера 30.10:
     // «не менять на лету»). 429 — это и есть та стена: снимаем выдачу, чтобы СЛЕДУЮЩИЙ ход

@@ -25,6 +25,8 @@
 #   bash deploy-to-prod.sh                  # выкатить версию из package.json
 #   VERSION=1.2.4 bash deploy-to-prod.sh    # выкатить названную версию
 #   bash deploy-to-prod.sh --smoke          # + один настоящий вызов модели после проверок
+#   bash deploy-to-prod.sh --sync-compose   # привезти compose из репозитория (и поставить в нём тег)
+#                                           # перед этим — ВСЛУХ скажет, чем файл на сервере расходится
 #   bash deploy-to-prod.sh --rollback       # вернуть последний откатный тег
 #   bash deploy-to-prod.sh --rollback rollback-20261101-1045
 #
@@ -42,13 +44,18 @@ PROBE=${PROBE:-kiberos-litellm}
 KEEP_ROLLBACK=${KEEP_ROLLBACK:-2}
 DRY=0
 SMOKE=0
+SYNC_COMPOSE=0
 MODE=deploy
 ROLLBACK_TAG=""
+# Файл compose живёт в репозитории kiberos-app, а на сервере — его копия. Ручная правка
+# серверной копии расходится с репозиторием молча, поэтому источник — репозиторий.
+REPO_COMPOSE=${REPO_COMPOSE:-/home/relishev/projects/vibe/kiberos-app/deploy/server/claude-proxy.compose.yml}
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
     --smoke) SMOKE=1 ;;
+    --sync-compose) SYNC_COMPOSE=1 ;;
     --rollback)
       MODE=rollback
       shift
@@ -139,6 +146,30 @@ sshx "docker tag $REPO:$VERSION $REPO:latest" >/dev/null 2>&1 || true
 log "образ на сервере: $(sshx "docker images $REPO:$VERSION --format '{{.ID}} {{.Size}}'" | tr -d '\r')"
 
 # ── 3. ТЕГ В COMPOSE И ПЕРЕСОЗДАНИЕ ────────────────────────────────────────────────────
+# 🔴 ПЕРЕД ПЕРЕСОЗДАНИЕМ: РАСХОЖДЕНИЕ ФАЙЛА С РЕПОЗИТОРИЕМ (замер 01.11.2026).
+# Чтобы привезти на прод новую строку окружения, файл синхронизировали целиком — и вместе
+# с ней приехал СТАРЫЙ тег из репозитория: `up -d` пошёл тянуть уже снятый образ, упал на
+# «pull access denied», а контейнер остался жив на прежней версии (файл при этом врал).
+# Поэтому: расхождение — вслух; перенос файла — только явным `--sync-compose`, и всегда
+# ДО установки тега, иначе перенос затрёт его обратно.
+if [ -f "$REPO_COMPOSE" ]; then
+  REMOTE_COMPOSE=$(sshx "cat $COMPOSE" 2>/dev/null | tr -d '\r')
+  if [ -n "$REMOTE_COMPOSE" ]; then
+    DRIFT=$(diff <(printf '%s\n' "$REMOTE_COMPOSE" | grep -vE '^[[:space:]]*image:[[:space:]]*') \
+                 <(grep -vE '^[[:space:]]*image:[[:space:]]*' "$REPO_COMPOSE") | head -20)
+    if [ -n "$DRIFT" ]; then
+      if [ "$SYNC_COMPOSE" = 1 ]; then
+        rsync -q "$REPO_COMPOSE" "$HOST:$COMPOSE" || die "не смог привезти $REPO_COMPOSE на $HOST"
+        log "compose синхронизирован из репозитория (--sync-compose)"
+      else
+        log "🔴 ВНИМАНИЕ: $COMPOSE на сервере расходится с репозиторием (кроме строки image):"
+        printf '%s\n' "$DRIFT" | sed 's/^/         /'
+        log "         пересоздание возьмёт СЕРВЕРНУЮ копию; чтобы привезти репозиторную — --sync-compose"
+      fi
+    fi
+  fi
+fi
+
 set_compose_tag "$VERSION"
 if ! recreate; then
   # Контейнер не тронут — возвращаем compose к тому, что реально в бою, иначе файл врёт.

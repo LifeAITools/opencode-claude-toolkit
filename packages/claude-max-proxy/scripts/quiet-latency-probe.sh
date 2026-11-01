@@ -112,15 +112,22 @@ PY2
   echo "$f"
 }
 
+# 🔴 МОДЕЛИ ЧЕРЕДУЮТСЯ, А НЕ ИДУТ БЛОКАМИ. Замер по блокам («десять раз A, потом десять
+# раз B») сравнивает модели из РАЗНЫХ моментов окна: нагрузка за прогон уезжает, и разница
+# между моделями смешивается с разницей во времени. Чередование разносит дрейф по всем
+# одинаково — это то же правило, что «позиция фиксирована», только для времени, а не порядка.
 for shape in $SHAPES; do
   BASE=$(mk_payload "$shape")
+  declare -A PAYS=()
   for m in $MODELS; do
-    PAY=$(mktemp /tmp/probe-call.XXXXXX.json)
-    sed "s/__MODEL__/$m/" "$BASE" > "$PAY"
-    for i in $(seq 1 "$SAMPLES"); do
+    PAYS[$m]=$(mktemp /tmp/probe-call.XXXXXX.json)
+    sed "s/__MODEL__/$m/" "$BASE" > "${PAYS[$m]}"
+  done
+  for i in $(seq 1 "$SAMPLES"); do
+    for m in $MODELS; do
       before=$(load1)
       ms=$(curl -s -o /dev/null -w '%{time_total}' -m 120 "$URL" \
-        -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d @"$PAY")
+        -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d @"${PAYS[$m]}")
       ms=$(awk -v s="$ms" 'BEGIN{printf "%d", s*1000}')
       after=$(load1)
       printf '{"ts":"%s","shape":"%s","model":"%s","ms":%s,"load_before":%s,"load_after":%s}\n' \
@@ -128,8 +135,9 @@ for shape in $SHAPES; do
       awk -v a="$after" -v b="$THRESHOLD" 'BEGIN{exit !(a>=b)}' && DIRTY=1
       sleep 2
     done
-    rm -f "$PAY"
   done
+  for m in $MODELS; do rm -f "${PAYS[$m]}"; done
+  unset PAYS
   rm -f "$BASE"
 done
 

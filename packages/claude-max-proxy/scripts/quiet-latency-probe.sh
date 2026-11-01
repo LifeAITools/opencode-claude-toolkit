@@ -25,7 +25,7 @@ THRESHOLD=${THRESHOLD:-4}
 SAMPLES=${SAMPLES:-10}
 MAX_WAIT_SEC=${MAX_WAIT_SEC:-28800}
 MODELS=${MODELS:-"mimo-v2.6-flash qwen3.8-flash deepseek-v4.1-flash-go"}
-SHAPES=${SHAPES:-"trivial workload"}
+SHAPES=${SHAPES:-"trivial workload reform"}
 OUT_DIR=${OUT_DIR:-$HOME/.claude-local}
 STAMP=$(date -u +%Y%m%d-%H%M)
 OUT="$OUT_DIR/quiet-latency-$STAMP.jsonl"
@@ -87,10 +87,21 @@ DIRTY=0
 mk_payload(){ # $1 = shape → печатает путь к JSON с заглушкой __MODEL__
   local shape="$1" f
   f=$(mktemp /tmp/probe-payload.XXXXXX.json)
-  if [ "$shape" = "workload" ]; then
+  if [ "$shape" = "reform" ]; then
+    # Форма «как у переформулировки памяти»: вход ~4к токенов, выход — структурированный
+    # и длинный (замер владельца signal-wire: до 2 000 токенов). Короткая форма его скорость
+    # завышает, поэтому замер по ней дал бы неверный порядок ступеней.
+    python3 - "$f" <<'PY3'
+import json, sys
+filler = ("Пользователь обсуждает учёт расхода и кэш. " * 320)[:23000]
+content = filler + "\n\nВерни JSON-массив из 20 объектов: у каждого поля id (число) и summary (2–3 предложения по существу)."
+json.dump({"model": "__MODEL__", "messages": [{"role": "user", "content": content}],
+           "max_tokens": 1024}, open(sys.argv[1], "w"), ensure_ascii=False)
+PY3
+  elif [ "$shape" = "workload" ]; then
     python3 - "$f" <<'PY2'
 import json, sys
-filler = ("Пользователь обсуждает учёт расхода и кэш. " * 220)[:16000]
+filler = ("Пользователь обсуждает учёт расхода и кэш. " * 320)[:23000]
 content = filler + "\n\nОтветь строго JSON: {\"ok\":true}"
 json.dump({"model": "__MODEL__", "messages": [{"role": "user", "content": content}],
            "max_tokens": 64}, open(sys.argv[1], "w"), ensure_ascii=False)

@@ -54,6 +54,12 @@ if [ "$NOW" = 0 ]; then
 fi
 
 echo "прогон: $(date -u +%FT%TZ) loadavg=$(cat /proc/loadavg)" | tee -a "$SUM"
+# 🔴 ШАПКА «ГДЕ И НА ЧЁМ»: без неё два числа из разных вселенных не сравниваются.
+# Тот же урок, что у владельца движка: прогон обязан назвать машину, образ посредника и
+# версию двери, иначе «стало быстрее» невозможно ни подтвердить, ни опровергнуть.
+MEDIATOR=$(docker inspect kiberos-litellm --format '{{.Config.Image}}' 2>/dev/null || echo '?')
+DOOR=$(curl -s -m 5 http://127.0.0.1:5050/version 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+echo "engine: $(hostname) · mediator: ${MEDIATOR:-?} · door: ${DOOR:-?} · cores: $(nproc)" | tee -a "$SUM"
 DIRTY=0
 for m in $MODELS; do
   for i in $(seq 1 "$SAMPLES"); do

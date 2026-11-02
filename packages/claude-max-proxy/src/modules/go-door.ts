@@ -35,6 +35,7 @@ import {
 } from '../provider-dump.js'
 import { resolveSessionIdentity, readCallerSession, CALLER_SESSION_HEADERS } from '../session-identity.js'
 import { appendGoSpendRecord, extractDoorMoney, responseIdFromSseText } from '../go-spend-ledger.js'
+import { withCostInBody, withCostInSse } from '../go-usage-cost.js'
 import { consumeConsent, getModelMetadata } from '@life-ai-tools/claude-code-sdk'
 import type { ProxyConfig } from '../config.js'
 
@@ -1582,19 +1583,33 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   if (!wantStream || !upstream.body) {
     const text = await upstream.text().catch(() => '')
     finish(text, false)
-    return new Response(text, { status: upstream.status, headers: passHeaders })
+    // 🔴 ЦЕНА НАРУЖУ, А НЕ ТОЛЬКО В ЖУРНАЛ (02.11.2026). Поставщик за дверью присылает
+    // `usage.cost: 0`, и LiteLLM берёт ноль как готовую стоимость (`if usage.cost is not None`)
+    // — из-за этого у всего Go-трафика был `spend=0` и НЕ РОСЛИ лимиты ступеней.
+    // Дверь цену знает — объявляет её; нет цены — ключ убираем, но не оставляем ноль.
+    return new Response(withCostInBody(text), { status: upstream.status, headers: passHeaders })
   }
 
   // Поток: отдаём клиенту как идёт, копию (до предела) держим для usage и дампа.
   let kept = ''
   let keptBytes = 0
+  let pending = ''
   const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
   const tee = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      controller.enqueue(chunk)
-      if (keptBytes < STREAM_CAP_BYTES) { kept += decoder.decode(chunk, { stream: true }); keptBytes += chunk.byteLength }
+      const decoded = decoder.decode(chunk, { stream: true })
+      if (keptBytes < STREAM_CAP_BYTES) { kept += decoded; keptBytes += chunk.byteLength }
+      // Строки с usage правим по одной: остальное уходит байт в байт, поток не тормозит.
+      pending += decoded
+      const { out, rest } = withCostInSse(pending)
+      pending = rest
+      if (out) controller.enqueue(encoder.encode(out))
     },
-    flush() { finish(kept, true) },
+    flush(controller) {
+      if (pending) { controller.enqueue(encoder.encode(withCostInBody(pending))); pending = '' }
+      finish(kept, true)
+    },
     // Обрыв читателя: запись всё равно уходит (отказ сети и обрыв — тоже вызов).
   })
   return new Response(upstream.body.pipeThrough(tee), { status: upstream.status, headers: passHeaders })

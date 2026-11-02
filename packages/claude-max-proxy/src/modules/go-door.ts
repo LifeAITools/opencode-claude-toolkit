@@ -61,7 +61,7 @@ type OrgSource = 'named' | 'pin' | 'quota' | 'active'
  * читается сразу после него в обработчике — чтобы событие назвало и прежнюю организацию, и
  * причину. Живёт вне функции, потому что `selectOrg` остаётся чистой по сигнатуре.
  */
-function selectOrg(
+export function selectOrg(
   reg: GoRegistry,
   wanted: string | null,
   cfg: any,

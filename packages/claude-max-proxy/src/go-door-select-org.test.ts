@@ -1,0 +1,113 @@
+/**
+ * Регрессия инцидента 02.11.2026: цепочка памяти полчаса отдавала 429, потому что клиент
+ * НАЗЫВАЛ исчерпанную организацию, а дверь защищала названное имя от «переезда» — хотя
+ * переезжать было нечему: у запроса не было ВЫДАЧИ (пина).
+ *
+ * Три полюса, и третий не менее важен двух первых: без него правило можно «улучшить» до
+ * оспаривания ЛЮБОЙ названной организации, то есть до того же класса, что мы чинили.
+ */
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { selectOrg, restorePinsForTest } from './modules/go-door.js'
+import type { GoRegistry } from './go-registry.js'
+import type { GoOrg } from './go-registry.js'
+
+const NOW = Date.now()
+const H = 3_600_000
+
+const org = (name: string): GoOrg => ({
+  name,
+  workspace: `w_${name}`,
+  auth: 'console',
+  baseUrl: 'https://g.invalid',
+  accountUrl: 'https://c.invalid',
+  synqtaskOrgUid: null,
+  env: null,
+  priority: 1,
+})
+
+/** За стеной = любое окно исчерпано (месяц, как в инциденте). */
+const walled = (name: string) => ({
+  name,
+  util5h: 0.1,
+  util7d: 0.2,
+  utilMonth: 1,
+  status: 'active',
+  level: 'critical',
+  windows: [
+    { window: '5h', util: 0.1, resetAt: NOW + 4 * H },
+    { window: 'week', util: 0.2, resetAt: NOW + 100 * H },
+    { window: 'month', util: 1, resetAt: NOW + 400 * H },
+  ],
+})
+const healthy = (name: string) => ({
+  name,
+  util5h: 0.02,
+  util7d: 0.05,
+  utilMonth: 0.3,
+  status: 'active',
+  level: 'ok',
+  windows: [
+    { window: '5h', util: 0.02, resetAt: NOW + 4 * H },
+    { window: 'week', util: 0.05, resetAt: NOW + 150 * H },
+    { window: 'month', util: 0.3, resetAt: NOW + 600 * H },
+  ],
+})
+
+const dir = mkdtempSync(join(tmpdir(), 'select-org-'))
+const quotaPath = join(dir, 'quota.json')
+const tokensPath = join(dir, 'tokens.json')
+const prevQuota = process.env.GO_QUOTA_PATH
+
+const reg: GoRegistry = {
+  active: 'hello@good',
+  usageUrl: null,
+  orgs: [org('hello@walled'), org('hello@good')],
+}
+const cfg = { goTokensPath: tokensPath, goOrgPinHoldOnUnusable: true } as any
+
+writeFileSync(quotaPath, JSON.stringify({ orgs: [walled('hello@walled'), healthy('hello@good')] }))
+writeFileSync(tokensPath, JSON.stringify({
+  orgs: {
+    'hello@walled': { access_token: 'a' },
+    'hello@good': { access_token: 'b' },
+  },
+}))
+process.env.GO_QUOTA_PATH = quotaPath
+
+afterAll(() => {
+  if (prevQuota === undefined) delete process.env.GO_QUOTA_PATH
+  else process.env.GO_QUOTA_PATH = prevQuota
+})
+
+beforeEach(() => restorePinsForTest([]))
+
+describe('названная организация за стеной', () => {
+  test('ПОЛЮС 2: сессия есть, пина нет → имя оспаривается, берётся годная (инцидент 02.11)', () => {
+    const r = selectOrg(reg, 'hello@walled', cfg, 'ses_new', true)
+    expect(r.source).toBe('quota')
+    expect(r.nameOverridden).toBe('hello@walled')
+    expect(r.nameOverrideReason).toContain('exhausted')
+    expect(r.org.name).toBe('hello@good')
+  })
+
+  test('ПОЛЮС 1: сессия С ВЫДАЧЕЙ не переезжает — держим до первого 429', () => {
+    restorePinsForTest([['ses_pinned', { org: 'hello@walled', at: NOW }]])
+    const r = selectOrg(reg, 'hello@walled', cfg, 'ses_pinned', true)
+    // У ЯВНО названной организации источник остаётся `named` и при пине: имя уважается,
+    // а `pin` в источнике появляется только на пути БЕЗ заголовка. Проверяем главное —
+    // что выдача не потеряна и организация НЕ подменена.
+    expect(r.org.name).toBe('hello@walled')
+    expect(r.nameOverridden).toBeUndefined()
+    expect(r.source).toBe('named')
+  })
+
+  test('ПОЛЮС 3: названа ЗДОРОВАЯ — имя уважаем, не оспариваем', () => {
+    const r = selectOrg(reg, 'hello@good', cfg, 'ses_other', true)
+    expect(r.source).toBe('named')
+    expect(r.org.name).toBe('hello@good')
+    expect(r.nameOverridden).toBeUndefined()
+  })
+})

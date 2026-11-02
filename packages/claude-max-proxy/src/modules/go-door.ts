@@ -61,6 +61,21 @@ type OrgSource = 'named' | 'pin' | 'quota' | 'active'
  * читается сразу после него в обработчике — чтобы событие назвало и прежнюю организацию, и
  * причину. Живёт вне функции, потому что `selectOrg` остаётся чистой по сигнатуре.
  */
+/**
+ * Снимать ли выдачу организации после отказа.
+ *
+ * Правило: ЛЮБОЙ 429 на вызове с ключом освобождает выдачу — неважно, названа организация
+ * явно (`named`) или выдана самим дверью (`pin`). До 02.11.2026 условие требовало
+ * `source === 'pin'`, и у явно названной организации выдача не снималась НИКОГДА: сессия
+ * каждый ход снова упиралась в ту же стену (инцидент 1 444 × 429, доезжаемость 0%).
+ *
+ * Вынесено в чистую функцию ради испытаний: `finish()` требует живого upstream, и без
+ * этого решения путь проверялся только руками.
+ */
+export function shouldDropPinOnFailure(status: number, orgKey: string | null): boolean {
+  return status === 429 && typeof orgKey === 'string' && orgKey.length > 0
+}
+
 export function selectOrg(
   reg: GoRegistry,
   wanted: string | null,
@@ -1547,7 +1562,7 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     // следующий ход снова упирался в ту же стену. Внешне это выглядело как «переигрывание
     // по квоте работает на мелких запросах и не работает на больших»: у мелких запроса
     // выдачи просто не было.
-    if (upstream.status === 429 && orgKey) {
+    if (shouldDropPinOnFailure(upstream.status, orgKey)) {
       if (pinDelete(orgKey)) {
         ctx.emit({
           level: 'error', kind: EVENT.GO_ORG_PIN_DROPPED, sessionId, org: org.name, model,

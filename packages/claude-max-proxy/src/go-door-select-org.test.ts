@@ -111,3 +111,27 @@ describe('названная организация за стеной', () => {
     expect(r.nameOverridden).toBeUndefined()
   })
 })
+
+describe('снятие выдачи при отказе (вторая половина инцидента 02.11)', () => {
+  test('429 с ключом → снимаем (и при named, и при pin — источник не участвует)', async () => {
+    const { shouldDropPinOnFailure } = await import('./modules/go-door.js')
+    expect(shouldDropPinOnFailure(429, 'ses_x')).toBe(true)
+    expect(shouldDropPinOnFailure(429, 'hard-16-hex-anchor')).toBe(true)
+  })
+
+  test('429 без ключа → снимать нечего, и это не падение', async () => {
+    const { shouldDropPinOnFailure } = await import('./modules/go-door.js')
+    expect(shouldDropPinOnFailure(429, null)).toBe(false)
+    expect(shouldDropPinOnFailure(429, '')).toBe(false)
+  })
+
+  test('200 выдачу НЕ трогает — иначе живая сессия поедет на ровном месте', async () => {
+    const { shouldDropPinOnFailure } = await import('./modules/go-door.js')
+    expect(shouldDropPinOnFailure(200, 'ses_x')).toBe(false)
+  })
+
+  test('прочие отказы выдачу не снимают: 400/403/500 — не стена', async () => {
+    const { shouldDropPinOnFailure } = await import('./modules/go-door.js')
+    for (const st of [400, 401, 403, 500, 502, 503, 529]) expect(shouldDropPinOnFailure(st, 'ses_x')).toBe(false)
+  })
+})

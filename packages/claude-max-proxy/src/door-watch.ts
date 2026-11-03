@@ -54,6 +54,8 @@ function classOf(status: number | null): FailureClass {
 interface DoorState {
   spec: DoorSpec
   starts: number[]
+  /** Клиент оборвал чтение — исход, который НЕ является отказом двери (03.11.2026). */
+  aborted: number[]
   ok: number[]
   bad: Array<{ at: number; cls: FailureClass; status: number | null; msg: string | null }>
   lastAlertAt: number
@@ -72,6 +74,8 @@ export interface DoorWindow {
   requests: number
   succeeded: number
   failed: number
+  /** Оборвано клиентом: исход есть, но это не отказ двери. */
+  aborted: number
   /** Почему не проходит — по большинству отказов за окно. null, когда отказов не было. */
   dominant: FailureClass | null
   windowMin: number
@@ -86,6 +90,7 @@ function prune(d: DoorState, now: number): void {
   const cutoff = now - WINDOW_MS
   while (d.starts.length && d.starts[0]! < cutoff) d.starts.shift()
   while (d.ok.length && d.ok[0]! < cutoff) d.ok.shift()
+  while (d.aborted.length && d.aborted[0]! < cutoff) d.aborted.shift()
   while (d.bad.length && d.bad[0]!.at < cutoff) d.bad.shift()
 }
 
@@ -116,6 +121,7 @@ export function doorWindows(): DoorWindow[] | null {
       requests: d.starts.length,
       succeeded: d.ok.length,
       failed: d.bad.length,
+      aborted: d.aborted.length,
       dominant: dominantOf(d),
       windowMin: Math.round(WINDOW_MS / 60000),
     }
@@ -136,13 +142,16 @@ export function startDoorWatch(cfg: ProxyConfig): () => void {
   goConfigured = goDoorReadiness(cfg).configured
   doors.length = 0
   doors.push(
-    { spec: { name: 'anthropic', start: 'REAL_REQUEST_START', complete: 'REAL_REQUEST_COMPLETE', error: 'REAL_REQUEST_ERROR' }, starts: [], ok: [], bad: [], lastAlertAt: 0 },
-    { spec: { name: 'go-door', start: 'GO_REQUEST', complete: 'GO_COMPLETE', error: 'GO_ERROR' }, starts: [], ok: [], bad: [], lastAlertAt: 0 },
+    { spec: { name: 'anthropic', start: 'REAL_REQUEST_START', complete: 'REAL_REQUEST_COMPLETE', error: 'REAL_REQUEST_ERROR' }, starts: [], aborted: [], ok: [], bad: [], lastAlertAt: 0 },
+    { spec: { name: 'go-door', start: 'GO_REQUEST', complete: 'GO_COMPLETE', error: 'GO_ERROR' }, starts: [], aborted: [], ok: [], bad: [], lastAlertAt: 0 },
   )
 
   const offs = doors.map(d => [
     bus.onKind(d.spec.start as never, () => { const now = Date.now(); d.starts.push(now); prune(d, now) }),
     bus.onKind(d.spec.complete as never, () => { const now = Date.now(); d.ok.push(now); prune(d, now) }),
+    // Оборванный клиентом поток: исход учтён, но дверь не виновата — отдельный счётчик,
+    // иначе `requests` не сходится с `succeeded + failed` (замер 03.11: 619 против 502+0).
+    bus.onKind('GO_ABORTED' as never, () => { const now = Date.now(); d.aborted.push(now); prune(d, now) }),
     bus.onKind(d.spec.error as never, (e: any) => {
       const now = Date.now()
       const status = typeof e?.status === 'number' ? e.status : null

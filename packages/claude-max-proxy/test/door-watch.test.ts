@@ -141,3 +141,32 @@ describe('окно наблюдения для строки здоровья', (
     expect(_doorState().map(d => d.name).sort()).toEqual(['anthropic', 'go-door'])
   })
 })
+
+describe('оборванный клиентом поток — отдельный исход, а не отказ двери', () => {
+  test('requests = succeeded + failed + aborted (замер 03.11: 619 против 502+0)', () => {
+    arm(CONFIGURED)
+    // 3 запроса: один успешный, один с отказом, один оборван клиентом.
+    emit({ kind: 'GO_REQUEST' as never, level: 'info', model: 'm' } as any)
+    emit({ kind: 'GO_COMPLETE' as never, level: 'info', model: 'm' } as any)
+    emit({ kind: 'GO_REQUEST' as never, level: 'info', model: 'm' } as any)
+    emit({ kind: 'GO_ERROR' as never, level: 'error', status: 500, model: 'm' } as any)
+    emit({ kind: 'GO_REQUEST' as never, level: 'info', model: 'm' } as any)
+    emit({ kind: 'GO_ABORTED' as never, level: 'info', model: 'm' } as any)
+
+    const w = doorWindows(CONFIGURED).find((x) => x.name === 'go-door')!
+    expect(w.requests).toBe(3)
+    expect(w.succeeded).toBe(1)
+    expect(w.failed).toBe(1)
+    expect(w.aborted).toBe(1)
+    expect(w.requests).toBe(w.succeeded + w.failed + w.aborted)
+  })
+
+  test('обрыв НЕ поднимает тревогу двери — она пропускала', () => {
+    arm(CONFIGURED)
+    for (let i = 0; i < 30; i++) {
+      emit({ kind: 'GO_REQUEST' as never, level: 'info', model: 'm' } as any)
+      emit({ kind: 'GO_ABORTED' as never, level: 'info', model: 'm' } as any)
+    }
+    expect(seen.length).toBe(0)
+  })
+})

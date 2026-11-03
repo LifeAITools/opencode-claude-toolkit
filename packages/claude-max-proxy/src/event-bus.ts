@@ -110,6 +110,7 @@ export type EventKind =
   | 'GO_REQUEST'
   | 'GO_COMPLETE'
   | 'GO_ERROR'
+  | 'GO_ABORTED'
   /** Запрос к двери Go без имени сессии — обслужен, но прогрев на нём не вооружается. */
   | 'GO_REQUEST_UNIDENTIFIED'
   /** Префикс запроса НЕ продолжает предыдущий: история переписана, кэш промахнётся. */
@@ -205,6 +206,7 @@ export const EVENT = {
   GO_REQUEST: 'GO_REQUEST',
   GO_COMPLETE: 'GO_COMPLETE',
   GO_ERROR: 'GO_ERROR',
+  GO_ABORTED: 'GO_ABORTED',
   GO_REQUEST_UNIDENTIFIED: 'GO_REQUEST_UNIDENTIFIED',
   GO_PREFIX_REWRITE: 'GO_PREFIX_REWRITE',
   GO_PREFIX_NEW_LANE: 'GO_PREFIX_NEW_LANE',

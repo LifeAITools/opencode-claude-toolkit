@@ -1511,7 +1511,10 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   if (orgKey) passHeaders.set('x-kiberos-org-key', orgKey)
   passHeaders.set('x-kiberos-org-source', orgSource)
 
-  const finish = (text: string, streamed: boolean) => {
+  let finished = false
+  const finish = (text: string, streamed: boolean, aborted = false) => {
+    if (finished) return
+    finished = true
     rec.timing.total_ms = Date.now() - t0
     let usage: unknown | null = null
     if (streamed) usage = usageFromSseText(text)
@@ -1571,6 +1574,21 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
         })
       }
     }
+    // 🔴 ОБРЫВ КЛИЕНТОМ — ЭТО ТОЖЕ ФИНАЛ (03.11.2026). До этого поток, который читатель
+    // бросил посреди ответа, не давал НИ ОДНОГО финального события: `flush` не вызывается,
+    // и запрос навсегда оставался «начатым». В `/health` это выглядело как
+    // `requests 619 / succeeded 502 / failed 0` — сумма не сходилась на 117, и доля успеха
+    // занижалась обрывами. Считаем его отдельным исходом, а не отказом двери.
+    if (aborted) {
+      ctx.emit({
+        level: 'info', kind: EVENT.GO_ABORTED,
+        sessionId, org: org.name, model, stream: streamed, status: upstream.status,
+        durationMs: rec.timing.total_ms, inTokens: rec.usage_norm.input, outTokens: rec.usage_norm.output,
+        cachedTokens: rec.usage_norm.cache_read, callKind: kind,
+        msg: 'дверь Go: клиент оборвал чтение ответа — исход отдельный, не отказ двери',
+      })
+      return
+    }
     ctx.emit({
       level: upstream.ok ? 'info' : 'error',
       kind: upstream.ok ? EVENT.GO_COMPLETE : EVENT.GO_ERROR,
@@ -1596,23 +1614,38 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   let pending = ''
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
-  const tee = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      const decoded = decoder.decode(chunk, { stream: true })
-      if (keptBytes < STREAM_CAP_BYTES) { kept += decoded; keptBytes += chunk.byteLength }
-      // Строки с usage правим по одной: остальное уходит байт в байт, поток не тормозит.
-      pending += decoded
-      const { out, rest } = withCostInSse(pending)
-      pending = rest
-      if (out) controller.enqueue(encoder.encode(out))
+  // 🔴 СВОЙ ПОТОК, А НЕ pipeThrough: у `TransformStream` НЕТ хука отмены, и обрыв читателя
+  // проходил мимо учёта — запрос оставался «начатым» навсегда (см. `finished` и GO_ABORTED).
+  const reader = upstream.body.getReader()
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read()
+        if (done) {
+          if (pending) { controller.enqueue(encoder.encode(withCostInBody(pending))); pending = '' }
+          finish(kept, true)
+          controller.close()
+          return
+        }
+        const decoded = decoder.decode(value, { stream: true })
+        if (keptBytes < STREAM_CAP_BYTES) { kept += decoded; keptBytes += value.byteLength }
+        // Строки с usage правим по одной: остальное уходит байт в байт.
+        pending += decoded
+        const { out, rest } = withCostInSse(pending)
+        pending = rest
+        if (out) controller.enqueue(encoder.encode(out))
+      } catch (err) {
+        // Обрыв на стороне апстрима после начала ответа — тоже финал, но это отказ двери.
+        finish(kept, true)
+        controller.error(err)
+      }
     },
-    flush(controller) {
-      if (pending) { controller.enqueue(encoder.encode(withCostInBody(pending))); pending = '' }
-      finish(kept, true)
+    cancel() {
+      finish(kept, true, true)
+      reader.cancel().catch(() => {})
     },
-    // Обрыв читателя: запись всё равно уходит (отказ сети и обрыв — тоже вызов).
   })
-  return new Response(upstream.body.pipeThrough(tee), { status: upstream.status, headers: passHeaders })
+  return new Response(stream, { status: upstream.status, headers: passHeaders })
 }
 
 export function createGoDoorModule(): ProxyModule {

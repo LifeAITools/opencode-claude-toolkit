@@ -143,6 +143,9 @@ export function createHealthModule(moduleOpts: HealthModuleOpts): ProxyModule {
                 requests: w.requests,
                 succeeded: w.succeeded,
                 failed: w.failed,
+                // Оборвано клиентом: исход есть, но дверь не виновата. Без этого поля
+                // `requests` не сходится с `succeeded + failed` (замер 03.11: 619 vs 502+0).
+                aborted: w.aborted,
                 ...(w.dominant ? { dominant: w.dominant } : {}),
                 windowMin: w.windowMin,
               },

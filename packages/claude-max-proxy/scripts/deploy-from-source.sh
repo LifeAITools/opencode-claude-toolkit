@@ -295,6 +295,36 @@ Unit=claude-max-open-design-quota.service
 WantedBy=timers.target
 UNIT
 
+# Placement samples (2026-11-05) — ряд (время, организация, окна) для ТЕКУЩЕЙ скорости.
+# Без ряда анализатор размещения видит только среднюю с начала окна и сглаживает разгон.
+cat > "$UNIT_DIR/claude-max-placement-sample.service" <<UNIT
+[Unit]
+Description=claude-max-placement-sample — quota samples for placement dynamics
+Documentation=file://$REPO/packages/claude-max-proxy/scripts/placement-sample.ts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$BUN $REPO/packages/claude-max-proxy/scripts/placement-sample.ts --provider opencode-go
+ExecStart=$BUN $REPO/packages/claude-max-proxy/scripts/placement-sample.ts --provider open-design
+StandardOutput=append:$HOME/.claude/claude-max-placement-sample.log
+StandardError=append:$HOME/.claude/claude-max-placement-sample.log
+UNIT
+
+cat > "$UNIT_DIR/claude-max-placement-sample.timer" <<UNIT
+[Unit]
+Description=Sample quota for placement dynamics every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=claude-max-placement-sample.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 # Unified quota (2026-11-05) — folds every provider file into ONE schema at
 # ~/.claude-local/quota-status.json (and the proxy serves the same shape at GET /quota).
 # Consumers stop adapting per provider: one contract, absent numbers stay null, every
@@ -330,6 +360,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now claude-max-alibaba-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-alibaba-quota.timer"
 systemctl --user enable --now claude-max-open-design-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-open-design-quota.timer"
 systemctl --user enable --now claude-max-quota-unified.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-quota-unified.timer"
+systemctl --user enable --now claude-max-placement-sample.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-placement-sample.timer"
 log "systemd units regenerated (binary ExecStart + OnFailure alert + alibaba/open-design quota timers)"
 
 # 4c. Hourly dump/backup rotation backstop — installed from source, never hand-edited

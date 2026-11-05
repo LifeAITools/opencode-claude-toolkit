@@ -35,6 +35,21 @@ describe('оценка организации: запас + динамика + �
     expect(crowded.score).toBeLessThan(solo.score)
   })
 
+  test('ВСПЛЕСК учитывается: текущая скорость перебивает среднюю', () => {
+    // 5ч: прошло 1ч, занято 0.5 → средняя 0.5/ч, до стены 1ч.
+    const calm = assessOrg(org('x', [win('5h', 0.5, 4)], 0), NOW)
+    const burst = assessOrg({ ...org('x', [win('5h', 0.5, 4)], 0), recentRates: { '5h': 2 } }, NOW)
+    expect(calm.score).toBeCloseTo(1, 1)
+    expect(burst.score).toBeCloseTo(0.25, 2)
+    expect(burst.reason).toContain('по текущей скорости')
+  })
+
+  test('спокойный ряд НЕ улучшает оценку — меньшая скорость не берётся', () => {
+    const calm = assessOrg(org('x', [win('5h', 0.5, 4)], 0), NOW)
+    const slow = assessOrg({ ...org('x', [win('5h', 0.5, 4)], 0), recentRates: { '5h': 0.01 } }, NOW)
+    expect(slow.score).toBeCloseTo(calm.score, 5)
+  })
+
   test('исчерпанное окно — стена, организация не кандидат', () => {
     const a = assessOrg(org('x', [win('month', 1, 100)]), NOW)
     expect(a.verdict).toBe('walled')

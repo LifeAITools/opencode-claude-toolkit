@@ -46,6 +46,11 @@ export interface PlacementOrg {
   activeAgents: number
   /** Организация запрещена/исчерпана/без входа — не кандидат (причина в `blockedReason`). */
   blockedReason?: string | null
+  /**
+   * ТЕКУЩАЯ скорость по окнам (доля/час), если есть ряд замеров. Перебивает среднюю,
+   * только когда она БОЛЬШЕ: «сейчас жжём быстрее среднего» — это то, ради чего ряд и копится.
+   */
+  recentRates?: Record<string, number> | null
 }
 
 export interface PlacementAssessment {
@@ -64,7 +69,15 @@ export interface PlacementAssessment {
   measuredCount: number
   activeAgents: number
   /** Какое окно связывает (имя) и сколько ему ещё жить до сброса. */
-  binding: Array<{ window: string; ttwHours: number; resetsInHours: number; usedFraction: number }>
+  binding: Array<{
+    window: string
+    ttwHours: number
+    resetsInHours: number
+    usedFraction: number
+    /** Заполняется, когда расчёт шёл по текущей скорости, а не по средней. */
+    recentRatePerHour?: number
+    avgRatePerHour?: number
+  }>
   /**
    * `place` — измерено и стена далеко; `unknown` — не измерено ни одно окно (это НЕ «хорошо»);
    * `avoid` — измерено, но до стены меньше NEAR_WALL_HOURS; `walled` — упёрлась/запрещена.
@@ -153,7 +166,12 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     const elapsed = len - remainingH
     if (elapsed < MIN_ELAPSED_HOURS) continue
 
-    const baseRate = util / elapsed
+    const avgRate = util / elapsed
+    const recent = org.recentRates?.[w.name]
+    // 🔴 ВСПЛЕСК ВАЖНЕЕ СРЕДНЕЙ. Средняя с начала окна сглаживает разгон: если последние
+    // 20 минут горит вдвое быстрее, средняя этого не покажет, и посадка пойдёт туда, где
+    // уже горит. Берём БОЛЬШУЮ из двух — но только когда ряд действительно есть.
+    const baseRate = finite(recent) && recent > avgRate ? recent : avgRate
     const rateAfter = agents > 0 ? baseRate * (agents + 1) / agents : baseRate
     const ttwBefore = baseRate <= 1e-9 ? Infinity : Math.max(0, (1 - util) / baseRate)
     const ttwAfter = rateAfter <= 1e-9 ? Infinity : Math.max(0, (1 - util) / rateAfter)
@@ -161,7 +179,10 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     if (bestBefore === null || ttwBefore < bestBefore) bestBefore = ttwBefore
     // Связывает только если стена наступит РАНЬШЕ сброса — иначе окно успеет обнулиться.
     if (ttwAfter < remainingH) {
-      binding.push({ window: w.name, ttwHours: ttwAfter, resetsInHours: remainingH, usedFraction: util })
+      binding.push({
+        window: w.name, ttwHours: ttwAfter, resetsInHours: remainingH, usedFraction: util,
+        ...(finite(recent) && recent > avgRate ? { recentRatePerHour: recent, avgRatePerHour: avgRate } : {}),
+      })
       if (bestAfter === null || ttwAfter < bestAfter) bestAfter = ttwAfter
     }
   }
@@ -169,7 +190,7 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
   const score = bestAfter === null ? Infinity : bestAfter
   const scoreBefore = bestBefore === null ? Infinity : bestBefore
   const bindingText = binding.length
-    ? `связывает ${binding.map(b => `${b.window} (${fmt(b.ttwHours)} после посадки, сброс через ${fmt(b.resetsInHours)})`).join(', ')}`
+    ? `связывает ${binding.map(b => `${b.window} (${fmt(b.ttwHours)} после посадки, сброс через ${fmt(b.resetsInHours)}${b.recentRatePerHour !== undefined ? ', по текущей скорости' : ''})`).join(', ')}`
     : 'ни одно окно не связывает — успеет сброситься'
   const verdict: PlacementAssessment['verdict'] = score === Infinity ? 'place' : score < NEAR_WALL_HOURS ? 'avoid' : 'place'
   const headText = worstHeadroom === null ? 'не измерен' : `${(100 * worstHeadroom).toFixed(0)}%`

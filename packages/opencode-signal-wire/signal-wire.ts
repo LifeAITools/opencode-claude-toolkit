@@ -39,7 +39,7 @@ import type { WakeEvent } from './wake-types'
 import type { SessionSpend } from './session-spend'
 import type { ProviderQuota } from './provider-quota'
 import { readGoActiveAccountOrg, readGoQuotaPool, readGoQuotaStatusWindows } from './provider-go-usage'
-import { readOpenDesignQuota, pickOpenDesignAccount } from './provider-open-design-usage'
+import { readUnifiedQuota } from './provider-unified-quota'
 
 /**
  * Model context window SSOT (mirrors @life-ai-tools/claude-code-sdk/src/models.ts).
@@ -761,117 +761,43 @@ export class SignalWire {
     const agentName = process.env.SYNQTASK_AGENT_ID?.trim()
     if (agentName) meta.agentName = agentName
     if (this.lastQuotaUtil5h != null) meta.quotaUtil5h = this.lastQuotaUtil5h
-    if (this.lastQuotaUtil7d != null) meta.quotaUtil7d = this.lastQuotaUtil7d
-    // 🔴 ПЛОСКИЕ ПОЛЯ ИЗ СЧЁТЧИКА, КОТОРЫЙ ОБСЛУЖИВАЕТ ЭТУ СЕССИЮ (договор ядра, коммит
-    // 6133884). Заголовки rate-limit приходят только от двери Anthropic — у сессии на Go их не
-    // бывает, поэтому выше два поля остаются пустыми навсегда, хотя окна Go ЕСТЬ в
-    // `providerQuota`. Ядро НЕ может спроецировать их само: по `provider`/`runtime.provider`
-    // нельзя вывести, какой счётчик чей, и любая его эвристика дала бы правдоподобное число не
-    // про тот счёт. Адаптер знает точно: сессия на Go-оси названа `KIBEROS_GO_ORG`, а её окна —
-    // единственная запись `provider: 'go'` (после 22.10 их ровно одна).
-    //
-    // НЕ заполняем намеренно: `quotaPool*` (пул — про несколько счетов; копия своего числа
-    // заставила бы агента «сверить два источника», которых один) и `quotaStale` (без
-    // доказанной старости отсутствие честнее ярлыка).
-    {
-      const goOrg = process.env.KIBEROS_GO_ORG?.trim()
-      // 🔴 ДЛЯ ПРЯМОГО ПРОВАЙДЕРА ЯРЛЫК РОЖДЕНИЯ — НЕ ПОДПИСЬ, А ЧУЖОЙ ПРЕДМЕТ (замер 24.10.2026:
-      // подвал печатал `hello@sealform.dev` с недельным 100% и `critical`, хотя сессия работала и
-      // не отказывала ни разу). Прямой `opencode-go/…` идёт в opencode СО СВОИМ входом, и вход
-      // этот — не привязка лаунчера: она пишется один раз при рождении и с тех пор протухает.
-      // Берём ИЗМЕРЕННЫЙ вход из отчёта (`activeSources.accountState`) и ОКНА ТОГО ЖЕ входа —
-      // имя и числа обязаны быть про один предмет, иначе это ровно то число без предмета, которое
-      // мы ловим весь месяц. У посредника (`kiberos-go`) привязка — настоящая: там она и есть
-      // маршрут, поэтому его не трогаем.
-      // Два независимых признака прямого маршрута: имя провайдера и префикс модели. Одного мало —
-      // написание провайдера у нас не зафиксировано контрактом, а модель приходит как
-      // `opencode-go/<модель>`. Ошибка здесь стоит дорого с двух сторон, поэтому лучше требовать
-      // согласия двух свидетельств, чем угадывать по одному.
-      const direct = this.lastProvider === 'opencode-go' || this.lastModel?.startsWith('opencode-go/') === true
-      const accountOrg = direct ? readGoActiveAccountOrg(undefined)?.org : undefined
-      const subjectOrg = accountOrg ?? goOrg
-      const fromReport = accountOrg && accountOrg !== goOrg
-        ? readGoQuotaStatusWindows(undefined, { org: accountOrg })
-        : null
-      const go = fromReport
-        ? { source: 'subscription' as const, measuredAt: fromReport.measuredAt, windows: fromReport.windows }
-        : (subjectOrg ? this.lastProviderQuota?.find((q) => q.provider === 'go') : undefined)
-      // 🔴 ТОЛЬКО ИЗМЕРЕНИЕ, НЕ ОЦЕНКА. `spend-estimate` — наша арифметика по расходу, у неё
-      // `measuredAt = now`, то есть она ВСЕГДА выглядит свежей, и она не имеет права вести агента
-      // к стене. Замер 22.10.2026: оценка выдала util5h=1 при живом окне (реестр 0.01), правило
-      // `quota-pause-point-5h` позвало агента на сдачу смены — ложная сдача по правдоподобному
-      // числу не про то. Оценку в плоские поля НЕ кладём: пусть будет «неизвестно».
-      const isMeasurement = go?.source !== 'spend-estimate'
-      const w5h = isMeasurement ? go?.windows.find((w) => w.kind === '5h') : undefined
-      const w7d = isMeasurement ? go?.windows.find((w) => w.kind === '7d') : undefined
-      if (go && isMeasurement && (w5h || w7d)) {
-        if (w5h) {
-          meta.quotaUtil5h = w5h.util
-          // Сброс окна — детерминированный признак протухания: окно со сбросом в прошлом
-          // недействительно, что бы ни лежало в измерении.
-          if (w5h.resetAt) meta.quotaResetAt = w5h.resetAt
-        }
-        if (w7d) meta.quotaUtil7d = w7d.util
-        meta.quotaAccountHint = subjectOrg
-        if (go.source) meta.quotaSource = go.source
-        // 🔴 ПУЛ И УРОВЕНЬ — ИЗ РЕЕСТРА, А НЕ ПУСТЫЕ (слово фаундера 24.10: «в подвале не
-        // показывается статистика по организации; если цикл замкнут, всё должно браться из
-        // реестра и показываться»). `quotaPool*` раньше не заполнялись намеренно — в
-        // `providerQuota` лежала ОДНА запись go, и «пул» из неё был бы моим же числом под чужим
-        // именем. Теперь отчёт несёт ВСЕ организации, поэтому минимум по ним — настоящая величина:
-        // это и есть запас флота, по которому видно, есть ли куда переезжать. Отсутствие остаётся
-        // отсутствием: нет ни одного числа — поля нет, а не ноль.
-        const pool = readGoQuotaPool(undefined, { org: subjectOrg })
-        if (pool) {
-          if (pool.pool5h !== null) meta.quotaPoolUtil5h = pool.pool5h
-          if (pool.pool7d !== null) meta.quotaPoolUtil7d = pool.pool7d
-          meta.quotaPoolAccounts = pool.accounts
-          if (pool.level) meta.quotaLevel = pool.level
-        }
-        const at = Date.parse(go.measuredAt)
-        if (Number.isFinite(at)) {
-          meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
-        }
-      }
-    }
-    // 🔴 OPENDESIGN — ДРУГОЙ ПРОВАЙДЕР, ЗНАЧИТ ДРУГОЙ ПРЕДМЕТ (замер 05.11.2026).
-    // У агента на `-od` в окружении всё ещё лежит KIBEROS_GO_ORG, поэтому блок Go выше уже
-    // мог положить в подвал окна Go. Это ровно «число без своего предмета»: человек читает
-    // «осталось 17%», а модель ходит в другую подписку, где осталось 5%. Поэтому перекрываем,
-    // а не смешиваем: имя — workspace провайдера, числа — ЕГО окна, пул Go снимаем целиком.
+    // 🔴 ОДИН ПЕРВОИСТОЧНИК, ОДИН ПУТЬ (слово фаундера 05.11.2026: «данные должны идти
+    // только через первоисточник, иначе начинаются фолбэки и непонятные ошибки»).
+    // Было ДВА прямых чтения (файл Go и файл OpenDesign) плюс привязка из окружения — и у агента
+    // на `-od` в подвал попадали окна Go: число без своего предмета.
+    // Теперь: провайдер берётся из МОДЕЛИ, которая работает; числа — только из единого файла;
+    // привязка пускателя (`KIBEROS_GO_ORG`) — лишь подсказка, КОГО спросить внутри Go.
     {
       const onOpenDesign = this.lastModel?.includes('flash-od') === true || this.lastProvider === 'open-design'
-      if (onOpenDesign) {
-        const od = readOpenDesignQuota()
-        const acc = pickOpenDesignAccount(od)
-        if (acc && !acc.absent) {
-          if (acc.util5h !== null) meta.quotaUtil5h = acc.util5h
-          if (acc.util7d !== null) meta.quotaUtil7d = acc.util7d
-          if (acc.reset5hAt) meta.quotaResetAt = acc.reset5hAt
-          // 🔴 Подпись — имя workspace, как решил фаундер 05.11.2026: org-id провайдера
-          // («xzw7wj10g…») человеку ничего не говорит. Провайдер не даёт org-uid SynqTask,
-          // поэтому связывать нечем и выдумывать нельзя.
-          const label = acc.org ?? acc.workspaceId
-          if (label) meta.quotaAccountHint = label
-          meta.quotaSource = 'subscription'
-          // Пул и уровень — величины ПРО НЕСКОЛЬКО счетов; у OpenDesign в подписи один
-          // workspace, поэтому копия своего числа под чужим именем не нужна.
+      const provider = onOpenDesign ? 'open-design' : 'opencode-go'
+      const askedOrg = onOpenDesign ? undefined : process.env.KIBEROS_GO_ORG?.trim()
+      const q = readUnifiedQuota(provider, { account: askedOrg })
+      if (q && q.status !== 'unreadable') {
+        const w5 = q.windows.find((w) => w.kind === '5h')
+        const w7 = q.windows.find((w) => w.kind === '7d')
+        if (w5) {
+          meta.quotaUtil5h = w5.util
+          if (w5.resetAt) meta.quotaResetAt = w5.resetAt
+        }
+        if (w7) meta.quotaUtil7d = w7.util
+        if (q.account) meta.quotaAccountHint = q.account
+        else delete (meta as any).quotaAccountHint
+        meta.quotaSource = 'subscription'
+        // Пул — минимум по ЖИВЫМ аккаунтам провайдера: это запас флота, по которому видно,
+        // есть ли куда переезжать. У OpenDesign в подписи один workspace — пул не показываем.
+        if (q.pool && !onOpenDesign) {
+          if (q.pool.util5h !== null) meta.quotaPoolUtil5h = q.pool.util5h
+          if (q.pool.util7d !== null) meta.quotaPoolUtil7d = q.pool.util7d
+          meta.quotaPoolAccounts = q.pool.accounts
+          if (q.pool.level) meta.quotaLevel = q.pool.level
+        } else {
           delete (meta as any).quotaPoolUtil5h
           delete (meta as any).quotaPoolUtil7d
           delete (meta as any).quotaPoolAccounts
           delete (meta as any).quotaLevel
-          const at = Date.parse(od!.measuredAt ?? '')
-          if (Number.isFinite(at)) meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
-        } else {
-          // Либо подписки нет (причина названа провайдером), либо файла ещё нет. В обоих
-          // случаях числа Go сюда попадать не имеют права: агент ходит в ДРУГУЮ подписку,
-          // и «осталось 17%» про неё было бы ложью.
-          if (acc && (acc.org ?? acc.workspaceId)) meta.quotaAccountHint = (acc.org ?? acc.workspaceId)!
-          else delete (meta as any).quotaAccountHint
-          delete (meta as any).quotaUtil5h
-          delete (meta as any).quotaUtil7d
-          delete (meta as any).quotaResetAt
         }
+        const at = Date.parse(q.measuredAt ?? '')
+        if (Number.isFinite(at)) meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
       }
     }
     // Расход сессии из базы opencode — для правил и как половина договора spend.

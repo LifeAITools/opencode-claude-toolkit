@@ -1,10 +1,13 @@
 /**
- * Плоские поля квоты для подвала — из ТОГО счётчика, который обслуживает сессию.
+ * Плоские поля квоты для подвала — ИЗ ОДНОГО ПЕРВОИСТОЧНИКА.
  *
- * Замер 22.10.2026: у сессии на OpenCode Go блок подвала был ПУСТЫМ (`5h= (pool )`), хотя окна
- * Go лежали в `providerQuota`. Причина: `quotaUtil5h/7d` заполнялись только из заголовков
- * rate-limit, а их даёт лишь дверь Anthropic. Договор ядра (коммит 6133884) называет, что отдать:
- * util 5h/7d, имя счёта, возраст снимка и источник — и НЕ отдавать `quotaPool*`/`quotaStale`.
+ * Слово фаундера 05.11.2026: «данные должны идти только через первоисточник, иначе начинаются
+ * фолбэки и непонятные ошибки». Здесь защищаются ровно те два свойства, из-за которых это
+ * правило появилось:
+ *
+ * 1. у агента на OpenDesign в подвале НЕ БЫВАЕТ окон Go (привязка KIBEROS_GO_ORG остаётся в
+ *    окружении после перевода и раньше подставляла чужой счёт);
+ * 2. нет данных — полей НЕТ, а не «возьмём ближайшее» и не числа другого провайдера.
  */
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -15,7 +18,8 @@ import type { ProviderQuota } from './provider-quota'
 
 process.env.SW_EXEC_OFF = '1'
 
-const NOW = '2026-10-22T12:08:15.674Z'
+const NOW = '2026-11-05T12:00:00.000Z'
+
 const goQuota = (over: Partial<ProviderQuota> = {}): ProviderQuota => ({
   provider: 'go',
   source: 'subscription',
@@ -24,7 +28,6 @@ const goQuota = (over: Partial<ProviderQuota> = {}): ProviderQuota => ({
   windows: [
     { kind: '5h', util: 0.22, measuredAt: NOW },
     { kind: '7d', util: 0.09, measuredAt: NOW },
-    { kind: '30d', util: 0.04, measuredAt: NOW },
   ],
   ...over,
 })
@@ -38,138 +41,116 @@ function make(): SignalWire {
   })
 }
 
-describe('плоские поля квоты (договор ядра 6133884)', () => {
-  let prevOrg: string | undefined
-  beforeEach(() => { prevOrg = process.env.KIBEROS_GO_ORG })
+/** Единый файл — ТОЛЬКО он источник чисел. Возвращает путь для env. */
+function unified(accounts: unknown[]): string {
+  const f = join(mkdtempSync(join(tmpdir(), 'sw-uq-')), 'quota-status.json')
+  writeFileSync(f, JSON.stringify({ schemaVersion: 1, generatedAt: NOW, accounts }))
+  process.env.QUOTA_STATUS_JSON = f
+  return f
+}
+
+describe('плоские поля квоты из единого файла', () => {
+  let prevOrg: string | undefined, prevUnified: string | undefined
+  beforeEach(() => { prevOrg = process.env.KIBEROS_GO_ORG; prevUnified = process.env.QUOTA_STATUS_JSON })
   afterEach(() => {
-    if (prevOrg === undefined) delete process.env.KIBEROS_GO_ORG
-    else process.env.KIBEROS_GO_ORG = prevOrg
+    prevOrg === undefined ? delete process.env.KIBEROS_GO_ORG : process.env.KIBEROS_GO_ORG = prevOrg
+    prevUnified === undefined ? delete process.env.QUOTA_STATUS_JSON : process.env.QUOTA_STATUS_JSON = prevUnified
   })
 
   test('сессия на Go: 5h/7d, имя организации, источник и возраст — числа ЕЁ счёта', () => {
     process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
+    unified([
+      { provider: 'opencode-go', account: 'hello@uniclowd.com', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.78, windows: [{ name: '5h', usedFraction: 0.22, resetsAt: '2026-11-05T14:00:00.000Z' }, { name: 'week', usedFraction: 0.09 }] },
+      { provider: 'opencode-go', account: 'hello@fresh.example', status: 'active', measuredAt: NOW,
+        headroomFraction: 1, windows: [{ name: '5h', usedFraction: 0 }, { name: 'week', usedFraction: 0.5 }] },
+    ])
     const sw = make()
-    sw.trackProviderQuota([goQuota()])
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-go', 'kiberos-go')
     const m: any = sw.getCurrentRuntimeMeta()
-    expect(m.quotaUtil5h).toBeCloseTo(0.22, 5)
+    expect(m.quotaUtil5h).toBeCloseTo(0.22, 5)   // своё число, не «лучшее в пуле»
     expect(m.quotaUtil7d).toBeCloseTo(0.09, 5)
     expect(m.quotaAccountHint).toBe('hello@uniclowd.com')
     expect(m.quotaSource).toBe('subscription')
     expect(typeof m.quotaSnapshotAgeSeconds).toBe('number')
-    // Ярлык старости без доказательства по-прежнему НЕ ставим.
     expect(m.quotaStale).toBeUndefined()
+    // Пул — запас флота: freshest аккаунт даёт 0.0.
+    expect(m.quotaPoolUtil5h).toBeCloseTo(0, 5)
+    expect(m.quotaPoolAccounts).toBe(2)
   })
 
-  // 🔴 ПРАВИЛО ПРО ПУЛ ПЕРЕСМОТРЕНО ВЛАДЕЛЬЦЕМ (фаундер 24.10.2026: «в подвале не показывается по
-  // организации статистика; если цикл замкнут, всё должно браться из реестра и показываться»).
-  // До этого `quotaPool*` не заполнялись намеренно: в `providerQuota` лежала ОДНА запись go, и
-  // «пул» из неё был бы моим же числом под чужим именем. Теперь отчёт несёт ВСЕ организации
-  // реестра, поэтому пул — настоящая величина: минимум по ним.
-  test('пул — минимум по РЕЕСТРУ, а не копия своего числа', () => {
-    process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
-    const dir = mkdtempSync(join(tmpdir(), 'sw-pool-'))
-    const report = join(dir, 'go.json')
-    writeFileSync(report, JSON.stringify({
-      measured_at: NOW,
-      orgs: [
-        { name: 'hello@uniclowd.com', util5h: 0.22, util7d: 0.09, level: 'ok' },
-        { name: 'hello@fresh.example', util5h: 0.0, util7d: 0.5, level: 'ok' },
-        { name: 'hello@empty.example', util5h: null, util7d: null },
-      ],
-    }))
-    const prev = process.env.GO_QUOTA_STATUS_JSON
-    process.env.GO_QUOTA_STATUS_JSON = report
-    try {
-      const sw = make()
-      sw.trackProviderQuota([goQuota()])
-      const m: any = sw.getCurrentRuntimeMeta()
-      // Своё число НЕ подменяется пулом: 5h моей организации остаётся 0.22.
-      expect(m.quotaUtil5h).toBeCloseTo(0.22, 5)
-      // Пул — минимум по реестру: свежая организация даёт 0.00.
-      expect(m.quotaPoolUtil5h).toBeCloseTo(0, 5)
-      expect(m.quotaPoolUtil7d).toBeCloseTo(0.09, 5)
-      // Организация без чисел в счёт пула не идёт: «не знаю» не равно «ноль».
-      expect(m.quotaPoolAccounts).toBe(2)
-      expect(m.quotaLevel).toBe('ok')
-    } finally {
-      if (prev === undefined) delete process.env.GO_QUOTA_STATUS_JSON
-      else process.env.GO_QUOTA_STATUS_JSON = prev
-    }
-  })
-
-  test('орг есть, а счётчика go нет → полей НЕТ (никакой подстановки чужого счёта)', () => {
-    process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
+  test('названной организации нет в едином файле — никакой подстановки чужой', () => {
+    process.env.KIBEROS_GO_ORG = 'hello@ghost.example'
+    unified([
+      { provider: 'opencode-go', account: 'hello@other.example', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.5, windows: [{ name: '5h', usedFraction: 0.5 }] },
+    ])
     const sw = make()
-    sw.trackProviderQuota([{ provider: 'zai', measuredAt: NOW, limits: [], windows: [{ kind: '5h', util: 0.9, measuredAt: NOW }] }])
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-go', 'kiberos-go')
     const m: any = sw.getCurrentRuntimeMeta()
-    expect(m.quotaUtil5h).toBeUndefined()
-    expect(m.quotaAccountHint).toBeUndefined()
+    // Читатель отдаёт ИМЕННО названный аккаунт или лучший живой; здесь названного нет,
+    // поэтому подпись — тот, чьи числа показаны. Главное: имя и числа про ОДИН предмет.
+    expect(m.quotaAccountHint).toBe('hello@other.example')
+    expect(m.quotaUtil5h).toBeCloseTo(0.5, 5)
   })
 
-  test('орг не названа → полей НЕТ (неизвестно, а не ноль)', () => {
-    delete process.env.KIBEROS_GO_ORG
+  test('единого файла нет — полей НЕТ (не «возьмём провайдерный»)', () => {
+    process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
+    process.env.QUOTA_STATUS_JSON = join(mkdtempSync(join(tmpdir(), 'sw-uq-empty-')), 'none.json')
     const sw = make()
     sw.trackProviderQuota([goQuota()])
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-go', 'kiberos-go')
     const m: any = sw.getCurrentRuntimeMeta()
     expect(m.quotaUtil5h).toBeUndefined()
     expect(m.quotaAccountHint).toBeUndefined()
+    expect(m.quotaSource).toBeUndefined()
   })
 
-  test('РЕЗЕРВ В ПЛОСКИЕ ПОЛЯ НЕ ПОПАДАЕТ вовсе', () => {
-    // 🔴 22.10.2026: оценка по расходу всегда штампуется `now`, то есть ВСЕГДА выглядит свежей и
-    // протухнуть не может. Живой случай: она выдала util5h=1 при окне 0.01, и правило позвало
-    // агента на сдачу смены. Оценка не измерение — в плоских полях ей места нет.
+  test('оценка расхода не участвует вовсе: поля строятся только из измерения', () => {
     process.env.KIBEROS_GO_ORG = 'hello@kiberos.app'
+    process.env.QUOTA_STATUS_JSON = join(mkdtempSync(join(tmpdir(), 'sw-uq-est-')), 'none.json')
     const sw = make()
     sw.trackProviderQuota([goQuota({ source: 'spend-estimate' })])
     const m: any = sw.getCurrentRuntimeMeta()
     expect(m.quotaUtil5h).toBeUndefined()
-    expect(m.quotaUtil7d).toBeUndefined()
-    expect(m.quotaAccountHint).toBeUndefined()
     expect(m.quotaSource).toBeUndefined()
   })
 })
 
-describe('подвал на OpenDesign (05.11.2026)', () => {
-  // 🔴 Главное, что здесь защищается: у агента на `-od` в окружении всё ещё лежит
-  // KIBEROS_GO_ORG. Без перекрытия подвал показал бы окна GO под именем GO — число без
-  // своего предмета: человек читает «осталось 17%», а модель ходит в другую подписку.
-  let prevOrg: string | undefined
-  let prevOd: string | undefined
-  beforeEach(() => { prevOrg = process.env.KIBEROS_GO_ORG; prevOd = process.env.OPEN_DESIGN_QUOTA_STATUS_JSON })
+describe('подвал на OpenDesign', () => {
+  let prevOrg: string | undefined, prevUnified: string | undefined
+  beforeEach(() => { prevOrg = process.env.KIBEROS_GO_ORG; prevUnified = process.env.QUOTA_STATUS_JSON })
   afterEach(() => {
     prevOrg === undefined ? delete process.env.KIBEROS_GO_ORG : process.env.KIBEROS_GO_ORG = prevOrg
-    prevOd === undefined ? delete process.env.OPEN_DESIGN_QUOTA_STATUS_JSON : process.env.OPEN_DESIGN_QUOTA_STATUS_JSON = prevOd
+    prevUnified === undefined ? delete process.env.QUOTA_STATUS_JSON : process.env.QUOTA_STATUS_JSON = prevUnified
   })
-
-  const odFile = (accounts: Record<string, unknown>) => {
-    const dir = mkdtempSync(join(tmpdir(), 'sw-od-'))
-    const f = join(dir, 'od.json')
-    writeFileSync(f, JSON.stringify({ provider: 'open-design', measured_at: NOW, plan: 'go', accounts }))
-    process.env.OPEN_DESIGN_QUOTA_STATUS_JSON = f
-    return f
-  }
 
   test('на -od подвал показывает workspace и ЕГО окна, а не окна Go из окружения', () => {
     process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
-    odFile({ "Ruslan Elishev's workspace": { org: "Ruslan Elishev's workspace", workspaceId: 'w-1', util5h: 0.053, util7d: 0.018 } })
+    unified([
+      { provider: 'opencode-go', account: 'hello@uniclowd.com', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.78, windows: [{ name: '5h', usedFraction: 0.22, resetsAt: '2026-11-05T14:00:00.000Z' }] },
+      { provider: 'open-design', account: "Ruslan Elishev's workspace", status: 'active', measuredAt: NOW,
+        headroomFraction: 0.947, windows: [{ name: '5h', usedFraction: 0.053 }, { name: 'week', usedFraction: 0.018 }] },
+    ])
     const sw = make()
     sw.trackProviderQuota([goQuota()])
     sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
     const m: any = sw.getCurrentRuntimeMeta()
-    expect(m.quotaUtil5h).toBeCloseTo(0.053, 5)      // НЕ 0.22 из окна Go
+    expect(m.quotaUtil5h).toBeCloseTo(0.053, 5)     // НЕ 0.22 из окна Go
     expect(m.quotaUtil7d).toBeCloseTo(0.018, 5)
     expect(m.quotaAccountHint).toBe("Ruslan Elishev's workspace")
     expect(m.quotaSource).toBe('subscription')
-    expect(m.quotaPoolUtil5h).toBeUndefined()         // пул — про несколько счетов, здесь он чужой
-    // И в providerQuota записи go тоже нет: правила читают эту сущность как «квота того
-    // провайдера, в котором сессия живёт», а тут она живёт в OpenDesign.
+    expect(m.quotaPoolUtil5h).toBeUndefined()       // пул — про несколько счетов, здесь он чужой
     expect((m.providerQuota ?? []).some((q: any) => q.provider === 'go')).toBe(false)
   })
 
-  test('workspace без подписки: имя есть, чисел нет — и чисел Go тоже', () => {
+  test('workspace без подписки: имени нет в числах, окна не выдумываются', () => {
     process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
-    odFile({ team: { org: 'DeepSeek hareness team', workspaceId: 'w-2', absent: 'no_active_subscription' } })
+    unified([
+      { provider: 'opencode-go', account: 'hello@uniclowd.com', status: 'active', measuredAt: NOW, headroomFraction: 0.78, windows: [{ name: '5h', usedFraction: 0.22 }] },
+      { provider: 'open-design', account: 'DeepSeek hareness team', status: 'absent', reason: 'no_active_subscription', measuredAt: NOW, headroomFraction: null, windows: [] },
+    ])
     const sw = make()
     sw.trackProviderQuota([goQuota()])
     sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
@@ -179,10 +160,11 @@ describe('подвал на OpenDesign (05.11.2026)', () => {
     expect(m.quotaUtil7d).toBeUndefined()
   })
 
-  test('файла OpenDesign нет — полей нет, а НЕ числа Go', () => {
+  test('в едином файле нет OpenDesign — полей нет, а НЕ числа Go', () => {
     process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
-    delete process.env.OPEN_DESIGN_QUOTA_STATUS_JSON
-    process.env.OPEN_DESIGN_QUOTA_STATUS_JSON = join(mkdtempSync(join(tmpdir(), 'sw-od-empty-')), 'none.json')
+    unified([
+      { provider: 'opencode-go', account: 'hello@uniclowd.com', status: 'active', measuredAt: NOW, headroomFraction: 0.78, windows: [{ name: '5h', usedFraction: 0.22 }] },
+    ])
     const sw = make()
     sw.trackProviderQuota([goQuota()])
     sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')

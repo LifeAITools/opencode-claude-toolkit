@@ -47,7 +47,8 @@ import { createModelWindowResolver, modelFromMessageEvent, usageFromMessageEvent
 import { answeredFromPermissionReplied, askedFromPermissionUpdated, appendAgentProse, createPermissionKindMemory, createSessionStartTracker, endFromSessionDeleted, errorFromSessionError, extractSessionId, failureFromPartUpdated, messageEndFromMessageUpdated, peekAgentProse, retryFromSessionStatus, streamDeltaFromPartUpdated, takeAgentProse, textDeltaFromPartDelta, textPartFromPartUpdated } from './session-lifecycle'
 import { StreamTracer } from '@kiberos/signal-wire-core'
 import { defaultOpencodeDbPath, readModelWindowSpend, readSessionSpend } from './session-spend'
-import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD, readGoQuotaStatusWindows } from './provider-go-usage'
+import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usage'
+import { readUnifiedQuota } from './provider-unified-quota'
 import { stampSessionLaunch } from './session-stamp'
 import { describeProviderQuota, PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
 
@@ -149,7 +150,22 @@ async function refreshProviderQuota(signalWire: { trackProviderQuota: (q: Provid
     // Поэтому подписка (первоисточник — её отдаёт дверь провайдера) вытесняет оценку, а оценка
     // остаётся РЕЗЕРВОМ на случай, когда файла нет или он старее ценза. В один проход идёт ровно
     // один из двух, никогда оба.
-    const goStatus = readGoQuotaStatusWindows(undefined, { org: process.env.KIBEROS_GO_ORG?.trim() || undefined })
+    // 🔴 ТОТ ЖЕ ПЕРВОИСТОЧНИК, ЧТО И У ПОДВАЛА: единый файл, а не провайдерный.
+    // Два пути чтения одного факта — это ровно то, из-за чего появились фолбэки.
+    const uq = readUnifiedQuota('opencode-go', { account: process.env.KIBEROS_GO_ORG?.trim() || undefined })
+    const goStatus = uq && uq.windows.length
+      ? {
+          measuredAt: uq.measuredAt ?? new Date().toISOString(),
+          basis: 'org' as const,
+          expired: [] as string[],
+          windows: uq.windows.map((w) => ({
+            kind: w.kind,
+            util: w.util,
+            ...(w.resetAt ? { resetAt: w.resetAt } : {}),
+            measuredAt: uq.measuredAt ?? new Date().toISOString(),
+          })),
+        }
+      : null
     // 🔴 ИСТЁКШИЕ ОКНА НАЗВАНЫ, а не вычтены тихо: иначе снаружи не отличить «окно сброшено» от
     // «данных нет» — и первый случай читается как второй, то есть как поломка сборщика.
     if (goStatus?.expired?.length) {

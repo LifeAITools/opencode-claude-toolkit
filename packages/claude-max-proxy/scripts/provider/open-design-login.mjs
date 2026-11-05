@@ -16,6 +16,11 @@
  *
  *   node open-design-login.mjs            # начать и ждать (печатает ссылку сразу)
  *   node open-design-login.mjs --print-only
+ *   node open-design-login.mjs --out ~/.secrets/open-design-control-2.json
+ *
+ * 🔴 `--out` НУЖЕН ДЛЯ ВТОРОГО АККАУНТА (05.11.2026): у нас две организации OpenDesign
+ * под РАЗНЫМИ входами, и квоту каждой видно только своим Control Key. Один файл на аккаунт;
+ * сборщик читает все файлы по маске `open-design-control*.json`.
  *
  * Результат кладётся в ~/.secrets/open-design-control.json (0600):
  *   { controlKey, runtimeKey, email, accountId, at }
@@ -26,7 +31,12 @@ import { join } from 'node:path'
 
 const CONTROL = 'https://amr-api.open-design.ai'
 const UA = 'kiberos-claude-max-proxy-login/1.0'
-const OUT = join(homedir(), '.secrets', 'open-design-control.json')
+const argOut = (() => {
+  const i = process.argv.indexOf('--out')
+  if (i >= 0 && process.argv[i + 1]) return process.argv[i + 1].replace(/^~(?=\/)/, homedir())
+  return null
+})()
+const OUT = argOut ?? join(homedir(), '.secrets', 'open-design-control.json')
 
 async function api(path, { key, body, method = 'GET' } = {}) {
   const headers = { accept: 'application/json', 'user-agent': UA }

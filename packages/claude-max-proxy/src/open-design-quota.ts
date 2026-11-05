@@ -27,11 +27,29 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { join, dirname } from 'path'
+import { readdirSync } from 'fs'
 import { CLAUDE_LOCAL, classifyLevel } from './quota-paths.js'
 
 export const QUOTA_STATUS_OPEN_DESIGN_JSON = join(CLAUDE_LOCAL, 'quota-status-open-design.json')
 export const CONTROL_CREDENTIALS_JSON =
   process.env.OPEN_DESIGN_CREDENTIALS ?? join(homedir(), '.secrets', 'open-design-control.json')
+
+/**
+ * 🔴 ВТОРОЙ АККАУНТ — ОТДЕЛЬНЫЙ ФАЙЛ ВХОДА (05.11.2026).
+ * У нас две организации OpenDesign под РАЗНЫМИ входами; квоту каждой видит только её
+ * собственный Control Key. Поэтому сборщик читает ВСЕ файлы по маске: один вход = один файл
+ * (`open-design-control.json`, `open-design-control-2.json`, …). Явная переменная окружения
+ * `OPEN_DESIGN_CREDENTIALS` перебивает маску — один файл, как раньше.
+ */
+export function credentialFiles(): string[] {
+  if (process.env.OPEN_DESIGN_CREDENTIALS) return [process.env.OPEN_DESIGN_CREDENTIALS]
+  const dir = dirname(CONTROL_CREDENTIALS_JSON)
+  try {
+    const found = readdirSync(dir).filter(f => /^open-design-control.*\.json$/.test(f)).map(f => join(dir, f)).sort()
+    if (found.length) return found
+  } catch { /* каталога нет — падаем на явный путь */ }
+  return [CONTROL_CREDENTIALS_JSON]
+}
 
 const CONTROL = 'https://amr-api.open-design.ai'
 const UA = 'kiberos-claude-max-proxy/1.0'
@@ -166,14 +184,16 @@ export interface WorkspaceRef { id: string; name: string | null; type: string | 
  * Отсутствие подписки у организации — это `absent` с причиной, а НЕ «0% использовано»:
  * иначе балансировщик считал бы её годной и отправлял туда ходы.
  */
-export function snapshotFromWorkspaces(preflights: Array<{ workspace: WorkspaceRef; preflight: Preflight }>, email: string | null, now = new Date()): OpenDesignSnapshot {
+export function snapshotFromWorkspaces(preflights: Array<{ workspace: WorkspaceRef; preflight: Preflight; email?: string | null }>, email: string | null, now = new Date()): OpenDesignSnapshot {
   const iso = now.toISOString()
   const accounts: OpenDesignSnapshot['accounts'] = {}
   const orgs: OpenDesignSnapshot['orgs'] = []
   let plan: string | null = null
   let balance: string | null = null
-  for (const { workspace, preflight } of preflights) {
-    const acc = accountFrom(preflight, workspace, email, now)
+  for (const { workspace, preflight, email: accountEmail } of preflights) {
+    // Подпись аккаунта — у КАЖДОЙ организации своя: у нас два входа, и «subject» числа
+    // обязан называть свой, иначе окна одного аккаунта приедут под именем другого.
+    const acc = accountFrom(preflight, workspace, accountEmail ?? email, now)
     const key = workspace.name ?? workspace.id
     accounts[key] = acc
     orgs.push({
@@ -213,11 +233,27 @@ async function api(path: string, key: string): Promise<any> {
 }
 
 export async function collect(credentialsPath = CONTROL_CREDENTIALS_JSON): Promise<OpenDesignSnapshot> {
-  const creds = JSON.parse(readFileSync(credentialsPath, 'utf8')) as { controlKey?: string; email?: string | null }
-  const key = creds.controlKey
-  if (!key || !key.startsWith('vela_ctrl_')) {
-    throw new Error(`${credentialsPath}: нет Control Key (vela_ctrl_…) — войдите через open-design-login.mjs`)
+  const files = credentialFiles()
+  const seen = new Set<string>()
+  const collected: Array<{ workspace: WorkspaceRef; preflight: Preflight; email: string | null }> = []
+  const failures: string[] = []
+  for (const file of files) {
+    let creds: { controlKey?: string; email?: string | null }
+    try { creds = JSON.parse(readFileSync(file, 'utf8')) } catch (e: any) { failures.push(`${file}: ${e?.message ?? e}`); continue }
+    const key = creds.controlKey
+    if (!key || !key.startsWith('vela_ctrl_')) { failures.push(`${file}: нет Control Key (vela_ctrl_…)`); continue }
+    for (const entry of await collectAccount(key, creds.email ?? null)) {
+      if (seen.has(entry.workspace.id)) continue
+      seen.add(entry.workspace.id)
+      collected.push(entry)
+    }
   }
+  if (!collected.length) throw new Error(`ни один вход не отдал организаций: ${failures.join('; ') || 'файлов входа нет'}`)
+  return snapshotFromWorkspaces(collected, null, new Date())
+}
+
+/** Один вход → все его организации с preflight. Ошибка одной организации не рушит остальные. */
+async function collectAccount(key: string, email: string | null): Promise<Array<{ workspace: WorkspaceRef; preflight: Preflight; email: string | null }>> {
   // Список организаций аккаунта. Не читается — работаем по одной текущей (прежнее поведение).
   let workspaces: WorkspaceRef[] = []
   try {
@@ -233,17 +269,17 @@ export async function collect(credentialsPath = CONTROL_CREDENTIALS_JSON): Promi
     if (!id) throw new Error('workspaces/current не назвал workspaceId')
     workspaces = [{ id: String(id), name: cur?.workspaceName ?? null, type: cur?.workspaceType ?? null, isDefault: true }]
   }
-  const preflights: Array<{ workspace: WorkspaceRef; preflight: Preflight }> = []
+  const out: Array<{ workspace: WorkspaceRef; preflight: Preflight; email: string | null }> = []
   for (const workspace of workspaces) {
     try {
       const preflight = (await api(`/api/v1/workspaces/${encodeURIComponent(workspace.id)}/billing/preflight`, key)) as Preflight
-      preflights.push({ workspace, preflight })
-    } catch (err: any) {
+      out.push({ workspace, preflight, email })
+    } catch {
       // Одна организация не читается — остальные всё равно попадают в отчёт.
-      preflights.push({ workspace, preflight: { codingPlan: { eligible: false } } as Preflight })
+      out.push({ workspace, preflight: { codingPlan: { eligible: false } } as Preflight, email })
     }
   }
-  return snapshotFromWorkspaces(preflights, creds.email ?? null)
+  return out
 }
 
 export function writeSnapshot(snap: OpenDesignSnapshot, path = QUOTA_STATUS_OPEN_DESIGN_JSON): string {

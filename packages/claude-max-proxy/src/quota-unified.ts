@@ -187,12 +187,22 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
     const headroomFraction = binding ? Math.max(0, 1 - (binding.usedFraction as number)) : null
     const bindsUntil = binding?.resetsAt ?? null
     const hit = windows.find(w => w.exhausted) ?? null
-    const status = absent ? 'absent' as const : hit ? 'exhausted' as const : 'active' as const
+    // 🔴 НЕТ НИ ОДНОГО ИЗМЕРЕННОГО ОКНА — ЭТО `unreadable`, А НЕ `active` (замер 05.11.2026).
+    // `active` с пустым `windows[]` читался как «можно ходить», хотя числа не существует:
+    // ровно тот класс, от которого предостерегал читатель подвала — ярлык говорит «да»,
+    // а измерить не удалось (сломан вход, поставщик молчит). Три состояния, а не два:
+    // измерено / упёрлось / измерить не удалось.
+    const unmeasured = !absent && !hit && measured.length === 0
+    const status = absent
+      ? 'absent' as const
+      : hit
+        ? 'exhausted' as const
+        : unmeasured ? 'unreadable' as const : 'active' as const
     const reason = absent
       ? absent
       : hit
         ? `${hit.name}_exhausted${hit.resetsAt ? `_until_${hit.resetsAt}` : ''}`
-        : undefined
+        : unmeasured ? 'no_windows_measured' : undefined
     return {
       provider,
       account: a?.org ?? a?.accountHint ?? name ?? null,
@@ -228,11 +238,14 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
     accounts.push(...list)
     // Худшее состояние называет провайдера честно: одна упёршаяся организация важнее
     // десяти живых, потому что в подвале зелёный цвет — это «можно ходить».
-    // Порядок строгости: unreadable > exhausted > absent > active.
-    const worst: UnifiedAccount['status'] = list.some(a => a.status === 'unreadable')
-      ? 'unreadable'
-      : list.some(a => a.status === 'exhausted')
-        ? 'exhausted'
+    // 🔴 ПОРЯДОК СТРОГОСТИ: exhausted > unreadable > absent > active. `unreadable` стоит
+    // ПОСЛЕ `exhausted` нарочно: с 05.11.2026 аккаунт без измеренных окон помечается
+    // `unreadable`, и если поставить его первым, провайдер с тремя живыми и двумя
+    // нечитаемыми читался бы как «сломан целиком» — то есть тот же обман, только навыворот.
+    const worst: UnifiedAccount['status'] = list.some(a => a.status === 'exhausted')
+      ? 'exhausted'
+      : list.some(a => a.status === 'unreadable')
+        ? 'unreadable'
         : list.every(a => a.status === 'absent') ? 'absent' : 'active'
     // Причина берётся у той записи, которая и определила худшее состояние, — иначе
     // провайдер «active» тащил бы на себе чужую причину (замер 05.11.2026: у open-design

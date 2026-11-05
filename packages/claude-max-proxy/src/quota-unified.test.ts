@@ -230,4 +230,28 @@ describe('запас числом, а не ярлыком (поправка home
     expect(acc.headroomFraction).toBeNull()
     expect(acc.bindsUntil).toBeNull()
   })
+
+  test('аккаунт без единого окна — unreadable, а НЕ active (05.11.2026)', () => {
+    // Замер: два аккаунта Go с истёкшим входом несли `status: active`, пустой `windows[]`
+    // и `headroom: null`. Для читателя подвала это «можно ходить» — хотя числа нет.
+    const [acc] = unifyProviderFile('opencode-go', { measured_at: '2026-11-05T09:59:00.000Z', accounts: { a: { org: 'a' } } }, NOW)
+    expect(acc.status).toBe('unreadable')
+    expect(acc.reason).toBe('no_windows_measured')
+    expect(acc.headroomFraction).toBeNull()
+  })
+
+  test('провайдер: упёршаяся организация важнее нечитаемой', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'quota-mixed-'))
+    try {
+      writeFileSync(join(dir, 'quota-status-z.json'), JSON.stringify({
+        measured_at: '2026-11-05T09:59:00.000Z',
+        accounts: {
+          dead: { org: 'dead', util7d: 1, reset7dAt: '2026-11-11T00:00:00.000Z' },
+          blind: { org: 'blind' },
+        },
+      }))
+      const snap = unifyAll(dir, NOW)
+      expect(snap.providers.z.status).toBe('exhausted')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
 })

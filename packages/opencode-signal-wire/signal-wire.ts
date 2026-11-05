@@ -695,6 +695,28 @@ export class SignalWire {
    */
   private lastProviderQuota: ProviderQuota[] | null = null
 
+  /**
+   * Счёт, который РЕАЛЬНО обслужил эту сессию — ответ нашей службы `/admin/served-org`.
+   * null = не сообщено (служба не ответила или ещё не обслуживала эту сессию).
+   *
+   * 🔴 Зачем отдельное поле (05.11.2026): у OpenDesign ДВА живых счёта, и закрепление идёт
+   * ПО СЕССИИ. Без этого подвал выбирал «самый свободный» и показывал чужой счёт (замер:
+   * hello@kiberos.app для сессии, проверенной на relishev@gmail.com). Источник — тот же
+   * контракт, что читает реестр присутствия; здесь он лишь используется как подсказка.
+   */
+  private servedAccount: string | null = null
+
+  setServedAccount(account: string | null): void {
+    const next = (account ?? '').trim() || null
+    if (next === this.servedAccount) return
+    this.servedAccount = next
+    swLog(`SERVED_ACCOUNT session=${this.sessionId || '?'} account=${next ?? 'unknown'}`)
+  }
+
+  getServedAccount(): string | null {
+    return this.servedAccount
+  }
+
   trackProviderQuota(q: ProviderQuota[] | null): void {
     this.lastProviderQuota = q
   }
@@ -770,7 +792,9 @@ export class SignalWire {
     {
       const onOpenDesign = this.lastModel?.includes('flash-od') === true || this.lastProvider === 'open-design'
       const provider = onOpenDesign ? 'open-design' : 'opencode-go'
-      const askedOrg = onOpenDesign ? undefined : process.env.KIBEROS_GO_ORG?.trim()
+      const askedOrg = onOpenDesign
+        ? (this.servedAccount ?? undefined)
+        : process.env.KIBEROS_GO_ORG?.trim()
       // 🔴 На OpenDesign счёт НЕ угадываем: у провайдера два живых счёта, закрепление идёт
       // по сессии, и «лучший по запасу» к обслужившему отношения не имеет (замер 05.11.2026:
       // так в подвал попадал hello@kiberos.app для сессии, проверенной на relishev@gmail.com).
@@ -1159,5 +1183,43 @@ export class SignalWire {
       ruleId: picked[0].ruleId,
       hint: picked.map(h => h.hintText as string).join('\n\n'),
     }
+  }
+}
+
+/**
+ * Спросить у НАШЕЙ службы, какой счёт обслужил эту сессию, и запомнить ответ.
+ *
+ * Контракт — `/admin/served-org?session=<id>` → `{found, session, org?, source?, at?, ageSec?}`.
+ * Тот же самый, что читает реестр присутствия: один контракт, два потребителя.
+ *
+ * 🔴 Почему не «взять самый свободный»: у OpenDesign закрепление идёт ПО СЕССИИ, и самый
+ * свободный счёт — не тот, кто обслужил (замер 05.11.2026: подвал показывал hello@kiberos.app
+ * для сессии, проверенной на relishev@gmail.com).
+ *
+ * Fail-open и дёшево: локальный вызов с таймаутом 400 мс, ошибка = «не сообщено», подвал
+ * остаётся без счёта (лучше молчать, чем назвать не того). Пока OD не идёт через службу,
+ * ответ будет `found:false` — и это правильное состояние, а не поломка.
+ */
+export async function refreshServedAccount(
+  sw: Pick<SignalWire, 'setServedAccount'>,
+  sessionId: string,
+  doorUrl?: string,
+): Promise<void> {
+  if (!sessionId) return
+  const base = (doorUrl ?? process.env.CLAUDE_MAX_PROXY_URL ?? 'http://127.0.0.1:5050').replace(/\/+$/, '')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 400)
+  try {
+    const res = await fetch(`${base}/admin/served-org?session=${encodeURIComponent(sessionId)}`, {
+      signal: ctrl.signal,
+    })
+    if (!res.ok) return
+    const body = (await res.json()) as { found?: boolean; org?: string | null; name?: string | null }
+    const name = body?.found ? (body.org ?? body.name ?? null) : null
+    sw.setServedAccount(typeof name === 'string' && name.trim() ? name.trim() : null)
+  } catch {
+    /* служба недоступна — молчим, это «не сообщено», а не «счёт пуст» */
+  } finally {
+    clearTimeout(timer)
   }
 }

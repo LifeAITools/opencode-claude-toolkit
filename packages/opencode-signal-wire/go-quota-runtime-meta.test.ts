@@ -13,7 +13,7 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SignalWire } from './signal-wire'
+import { SignalWire, refreshServedAccount } from './signal-wire'
 import type { ProviderQuota } from './provider-quota'
 
 process.env.SW_EXEC_OFF = '1'
@@ -196,5 +196,50 @@ describe('подвал на OpenDesign', () => {
     const m: any = sw.getCurrentRuntimeMeta()
     expect(m.quotaUtil5h).toBeUndefined()
     expect(m.quotaAccountHint).toBeUndefined()
+  })
+})
+
+describe('счёт, который ОБСЛУЖИЛ сессию (контракт /admin/served-org)', () => {
+  const realFetch = globalThis.fetch
+  beforeEach(() => { delete process.env.CLAUDE_MAX_PROXY_URL })
+  afterEach(() => { globalThis.fetch = realFetch })
+
+  function stubFetch(body: unknown): void {
+    globalThis.fetch = (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch
+  }
+
+  test('служба назвала счёт — подвал берёт ЕГО, а не «самый свободный»', async () => {
+    unified([
+      { provider: 'open-design', account: 'relishev@gmail.com', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.05, windows: [{ name: '5h', usedFraction: 0.95 }] },
+      { provider: 'open-design', account: 'hello@kiberos.app', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.90, windows: [{ name: '5h', usedFraction: 0.10 }] },
+    ])
+    stubFetch({ found: true, session: 'ses_x', org: 'relishev@gmail.com', source: 'pin', ageSec: 3 })
+    const sw = make()
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
+    await refreshServedAccount(sw, 'ses_x')
+    const m: any = sw.getCurrentRuntimeMeta()
+    // Угадывание взяло бы hello@kiberos.app (больше запаса). Ответ службы говорит: relishev.
+    expect(m.quotaAccountHint).toBe('relishev@gmail.com')
+    expect(m.quotaUtil5h).toBeCloseTo(0.95, 5)
+    expect(m.quotaReason).toBeUndefined()
+  })
+
+  test('служба не обслуживала сессию — счёт не называется, подвал молчит о нём', async () => {
+    unified([
+      { provider: 'open-design', account: 'relishev@gmail.com', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.95, windows: [{ name: '5h', usedFraction: 0.05 }] },
+      { provider: 'open-design', account: 'hello@kiberos.app', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.60, windows: [{ name: '5h', usedFraction: 0.40 }] },
+    ])
+    stubFetch({ found: false, session: 'ses_x' })
+    const sw = make()
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
+    await refreshServedAccount(sw, 'ses_x')
+    const m: any = sw.getCurrentRuntimeMeta()
+    expect(sw.getServedAccount()).toBeNull()
+    expect(m.quotaAccountHint).toBeUndefined()
+    expect(m.quotaReason).toBe('several_accounts_unresolved')
   })
 })

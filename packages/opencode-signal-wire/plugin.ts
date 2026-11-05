@@ -10,7 +10,7 @@ import { appendFileSync, existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { spawn } from 'child_process'
-import { SignalWire } from './signal-wire'
+import { SignalWire, refreshServedAccount } from './signal-wire'
 import { execSuppressionReason } from '@kiberos/signal-wire-core'
 import {
   // Note: legacy local spawn-check helpers (checkSpawnAllowed, getAgentIdentity,
@@ -1281,6 +1281,11 @@ export default {
           // surfaced the session, then user typed before retries landed).
           if (event.sessionId && signalWire) {
             try { signalWire.setSessionId(event.sessionId) } catch { /* */ }
+            // Кто ОБСЛУЖИЛ эту сессию — спросить у нашей службы (единый контракт
+            // `/admin/served-org`). Не блокирует ход: ответ нужен подвалу на следующем
+            // событии. Пока OpenDesign не идёт через службу, ответ `found:false` — и подвал
+            // честно не называет счёт. Когда трафик пойдёт через неё, здесь ничего менять не надо.
+            void refreshServedAccount(signalWire, event.sessionId)
           }
           // Memory-recall thought side-channel (Phase 1.5) — MUST land BEFORE
           // evaluateHook: the memory-recall rule's detached searcher exec runs

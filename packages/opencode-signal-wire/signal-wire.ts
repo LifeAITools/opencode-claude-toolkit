@@ -877,7 +877,15 @@ export class SignalWire {
     // Расход сессии из базы opencode — для правил и как половина договора spend.
     if (this.lastSpend) meta.spend = { ...this.lastSpend }
     // Лимиты поставщиков — для правил; виды окон толкует потребитель.
-    if (this.lastProviderQuota) meta.providerQuota = this.lastProviderQuota.map((q) => ({ ...q }))
+    // 🔴 ТО ЖЕ ПРАВИЛО ПРО ПРЕДМЕТ, ЧТО И У ПЛОСКИХ ПОЛЕЙ: на OpenDesign запись `go`
+    // в providerQuota — это число ДРУГОГО счёта. Правила и подвал читают эту сущность
+    // как «квота провайдера, в котором сессия живёт», и чужой записи там быть не должно.
+    if (this.lastProviderQuota) {
+      const onOpenDesign = this.lastModel?.includes('flash-od') === true || this.lastProvider === 'open-design'
+      meta.providerQuota = this.lastProviderQuota
+        .filter((q) => !(onOpenDesign && q.provider === 'go'))
+        .map((q) => ({ ...q }))
+    }
     // Плоский ключ окон для конвейера ядра (heartbeat.windows читает его, как у хука):
     // тот же массив окон всех поставщиков одним списком.
     if (this.lastProviderQuota) {

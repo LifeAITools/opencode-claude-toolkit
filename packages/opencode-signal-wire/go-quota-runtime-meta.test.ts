@@ -162,6 +162,9 @@ describe('подвал на OpenDesign (05.11.2026)', () => {
     expect(m.quotaAccountHint).toBe("Ruslan Elishev's workspace")
     expect(m.quotaSource).toBe('subscription')
     expect(m.quotaPoolUtil5h).toBeUndefined()         // пул — про несколько счетов, здесь он чужой
+    // И в providerQuota записи go тоже нет: правила читают эту сущность как «квота того
+    // провайдера, в котором сессия живёт», а тут она живёт в OpenDesign.
+    expect((m.providerQuota ?? []).some((q: any) => q.provider === 'go')).toBe(false)
   })
 
   test('workspace без подписки: имя есть, чисел нет — и чисел Go тоже', () => {

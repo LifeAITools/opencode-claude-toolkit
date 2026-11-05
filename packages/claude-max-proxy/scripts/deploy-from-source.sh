@@ -306,7 +306,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$REPO/packages/claude-max-proxy/scripts/provider/ship-go-state-muid.sh
+ExecStart=$SRC_REPO/packages/claude-max-proxy/scripts/provider/ship-go-state-muid.sh
 StandardOutput=append:$HOME/.claude/claude-max-go-state-ship-muid.log
 StandardError=append:$HOME/.claude/claude-max-go-state-ship-muid.log
 UNIT
@@ -335,7 +335,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$REPO/packages/claude-max-proxy/scripts/provider/ship-quota-muid.sh
+ExecStart=$SRC_REPO/packages/claude-max-proxy/scripts/provider/ship-quota-muid.sh
 StandardOutput=append:$HOME/.claude/claude-max-quota-ship-muid.log
 StandardError=append:$HOME/.claude/claude-max-quota-ship-muid.log
 UNIT
@@ -358,14 +358,14 @@ UNIT
 cat > "$UNIT_DIR/claude-max-placement-sample.service" <<UNIT
 [Unit]
 Description=claude-max-placement-sample — quota samples for placement dynamics
-Documentation=file://$REPO/packages/claude-max-proxy/scripts/placement-sample.ts
+Documentation=file://$SRC_REPO/packages/claude-max-proxy/scripts/placement-sample.ts
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$BUN $REPO/packages/claude-max-proxy/scripts/placement-sample.ts --provider opencode-go
-ExecStart=$BUN $REPO/packages/claude-max-proxy/scripts/placement-sample.ts --provider open-design
+ExecStart=$BUN $SRC_REPO/packages/claude-max-proxy/scripts/placement-sample.ts --provider opencode-go
+ExecStart=$BUN $SRC_REPO/packages/claude-max-proxy/scripts/placement-sample.ts --provider open-design
 StandardOutput=append:$HOME/.claude/claude-max-placement-sample.log
 StandardError=append:$HOME/.claude/claude-max-placement-sample.log
 UNIT

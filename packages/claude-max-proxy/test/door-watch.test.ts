@@ -136,9 +136,10 @@ describe('окно наблюдения для строки здоровья', (
     expect(g?.dominant).toBe('provider')
   })
 
-  test('состояние для диагностики знает обе двери', () => {
+  test('состояние для диагностики знает все двери', () => {
     arm(CONFIGURED)
-    expect(_doorState().map(d => d.name).sort()).toEqual(['anthropic', 'go-door'])
+    // С 05.11.2026 дверей три: у OpenDesign свой счётчик, а не общие GO_* события.
+    expect(_doorState().map(d => d.name).sort()).toEqual(['anthropic', 'go-door', 'open-design-door'])
   })
 })
 

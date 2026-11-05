@@ -144,6 +144,9 @@ export function startDoorWatch(cfg: ProxyConfig): () => void {
   doors.push(
     { spec: { name: 'anthropic', start: 'REAL_REQUEST_START', complete: 'REAL_REQUEST_COMPLETE', error: 'REAL_REQUEST_ERROR' }, starts: [], aborted: [], ok: [], bad: [], lastAlertAt: 0 },
     { spec: { name: 'go-door', start: 'GO_REQUEST', complete: 'GO_COMPLETE', error: 'GO_ERROR' }, starts: [], aborted: [], ok: [], bad: [], lastAlertAt: 0 },
+    // 🔴 СВОЙ СЧЁТЧИК У КАЖДОЙ ДВЕРИ. Общие GO_* на две двери — это числа под чужим
+    // именем: «запросы Go» перестают сходиться со своими отказами.
+    { spec: { name: 'open-design-door', start: 'OD_REQUEST', complete: 'OD_COMPLETE', error: 'OD_ERROR' }, starts: [], aborted: [], ok: [], bad: [], lastAlertAt: 0 },
   )
 
   const offs = doors.map(d => [
@@ -151,7 +154,7 @@ export function startDoorWatch(cfg: ProxyConfig): () => void {
     bus.onKind(d.spec.complete as never, () => { const now = Date.now(); d.ok.push(now); prune(d, now) }),
     // Оборванный клиентом поток: исход учтён, но дверь не виновата — отдельный счётчик,
     // иначе `requests` не сходится с `succeeded + failed` (замер 03.11: 619 против 502+0).
-    bus.onKind('GO_ABORTED' as never, () => { const now = Date.now(); d.aborted.push(now); prune(d, now) }),
+    bus.onKind((d.spec.error === 'OD_ERROR' ? 'OD_ABORTED' : 'GO_ABORTED') as never, () => { const now = Date.now(); d.aborted.push(now); prune(d, now) }),
     bus.onKind(d.spec.error as never, (e: any) => {
       const now = Date.now()
       const status = typeof e?.status === 'number' ? e.status : null

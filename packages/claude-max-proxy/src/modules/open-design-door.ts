@@ -167,7 +167,7 @@ async function serve(req: Request): Promise<Response> {
     chosen = pickOpenDesignAccount(accountsFromQuota(), keyByEmail)
     if (!chosen) {
       ctx.emit({
-        level: 'error', kind: EVENT.GO_ERROR, sessionId, model,
+        level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
         msg: `дверь OpenDesign: нет ни одного годного аккаунта с ключом (квота: ${UNIFIED_QUOTA_JSON})`,
       })
       return errorResponse(503, 'no usable OpenDesign account: none active with a declared key env', 'configuration_error')
@@ -178,7 +178,7 @@ async function serve(req: Request): Promise<Response> {
   const key = keyOf(chosen.keyEnv)
   if (!key) {
     ctx.emit({
-      level: 'error', kind: EVENT.GO_ERROR, sessionId, model,
+      level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
       msg: `дверь OpenDesign: у аккаунта ${chosen.email} не задана ${chosen.keyEnv}`,
     })
     return errorResponse(503, `key env ${chosen.keyEnv} for ${chosen.email} is not set`, 'configuration_error')
@@ -193,7 +193,7 @@ async function serve(req: Request): Promise<Response> {
   }
 
   ctx.emit({
-    level: 'info', kind: EVENT.GO_REQUEST, sessionId, model,
+    level: 'info', kind: EVENT.OD_REQUEST, sessionId, model,
     msg: `дверь OpenDesign: аккаунт ${chosen.email} (${pinned ? 'pin' : chosen.why}), вверх ${body.model}`,
   })
 
@@ -202,7 +202,7 @@ async function serve(req: Request): Promise<Response> {
     upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
   } catch (err: any) {
     ctx.emit({
-      level: 'error', kind: EVENT.GO_ERROR, sessionId, model,
+      level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
       msg: `дверь OpenDesign: апстрим недоступен — ${String(err?.message ?? err).slice(0, 200)}`,
     })
     return errorResponse(502, `OpenDesign upstream unreachable: ${String(err?.message ?? err).slice(0, 200)}`, 'upstream_error')
@@ -252,7 +252,7 @@ async function serve(req: Request): Promise<Response> {
         controller.enqueue(value)
       } catch (err) {
         ctx.emit({
-          level: 'error', kind: EVENT.GO_ABORTED, sessionId, model, status: upstream.status,
+          level: 'error', kind: EVENT.OD_ABORTED, sessionId, model, status: upstream.status,
           durationMs: Date.now() - t0,
           msg: `дверь OpenDesign: поток оборвался — ${String((err as any)?.message ?? err).slice(0, 160)}`,
         })
@@ -263,7 +263,7 @@ async function serve(req: Request): Promise<Response> {
       aborted = true
       reader.cancel().catch(() => {})
       ctx.emit({
-        level: 'info', kind: EVENT.GO_ABORTED, sessionId, model, status: upstream.status,
+        level: 'info', kind: EVENT.OD_ABORTED, sessionId, model, status: upstream.status,
         durationMs: Date.now() - t0,
         msg: 'дверь OpenDesign: клиент оборвал чтение — исход отдельный, не отказ двери',
       })

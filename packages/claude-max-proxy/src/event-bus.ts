@@ -106,6 +106,13 @@ export type EventKind =
   | 'SPARK_COMPLETE'
   | 'SPARK_ERROR'
 
+  // OpenDesign door (/od/*) — СВОИ имена, а не GO_*: иначе счётчики двери Go считали бы
+  // и трафик OpenDesign, и «запросы Go» перестали бы сходиться со своими отказами.
+  | 'OD_REQUEST'
+  | 'OD_COMPLETE'
+  | 'OD_ERROR'
+  | 'OD_ABORTED'
+
   // Go door (OpenCode Go orgs — provider layer, /go/*)
   | 'GO_REQUEST'
   | 'GO_COMPLETE'
@@ -205,6 +212,10 @@ export const EVENT = {
   SPARK_REQUEST: 'SPARK_REQUEST',
   SPARK_COMPLETE: 'SPARK_COMPLETE',
   SPARK_ERROR: 'SPARK_ERROR',
+  OD_REQUEST: 'OD_REQUEST',
+  OD_COMPLETE: 'OD_COMPLETE',
+  OD_ERROR: 'OD_ERROR',
+  OD_ABORTED: 'OD_ABORTED',
   GO_REQUEST: 'GO_REQUEST',
   GO_COMPLETE: 'GO_COMPLETE',
   GO_ERROR: 'GO_ERROR',

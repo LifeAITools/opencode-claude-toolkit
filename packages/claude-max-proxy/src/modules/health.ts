@@ -7,6 +7,7 @@ import { identityWindow } from '../identity-watch.js'
 import { doorWindows } from '../door-watch.js'
 import { goDoorReadiness } from './go-door.js'
 import { loadKeepaliveConfig } from '@life-ai-tools/claude-code-sdk'
+import { unifyAll } from '../quota-unified.js'
 
 export interface HealthModuleOpts {
   mode: 'global' | 'embedded'
@@ -229,6 +230,17 @@ export function createHealthModule(moduleOpts: HealthModuleOpts): ProxyModule {
         + `найти ваш случай в журнале. Владелец: vibe-claude-code-sdk-owner.\n`,
         { headers: { 'content-type': 'text/plain; charset=utf-8' } },
       ),
+    },
+    {
+      // 🔴 ЕДИНЫЙ ФОРМАТ КВОТЫ ДЛЯ ВСЕХ ПРОВАЙДЕРОВ (слово фаундера 05.11.2026).
+      // Снаружи спрашивают эту дверь и не знают, кто из провайдеров как считает окна:
+      // harness'ы (OpenCode Go, DeepSeek) получают один контракт без адаптации под каждого.
+      // Считается НА ЖИВУЮ из файлов сборщиков, поэтому ответ не отстаёт от них ещё на тик.
+      // Отсутствующее число — null, а не 0; у каждого есть measuredAt/ageSec/source;
+      // сломавшийся провайдер виден со status:'unreadable' и причиной, а не исчезает.
+      method: 'GET',
+      path: '/quota',
+      handler: async () => Response.json(unifyAll()),
     },
     {
       method: 'GET',

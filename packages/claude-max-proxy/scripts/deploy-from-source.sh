@@ -295,9 +295,41 @@ Unit=claude-max-open-design-quota.service
 WantedBy=timers.target
 UNIT
 
+# Unified quota (2026-11-05) — folds every provider file into ONE schema at
+# ~/.claude-local/quota-status.json (and the proxy serves the same shape at GET /quota).
+# Consumers stop adapting per provider: one contract, absent numbers stay null, every
+# number carries measuredAt + source, a broken provider shows up as 'unreadable'.
+cat > "$UNIT_DIR/claude-max-quota-unified.service" <<UNIT
+[Unit]
+Description=claude-max-quota-unified — all providers -> one quota-status.json
+Documentation=file://$INSTALLED/src/quota-unified.ts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$BUN $INSTALLED/src/quota-unified.ts
+StandardOutput=append:$HOME/.claude/claude-max-quota-unified.log
+StandardError=append:$HOME/.claude/claude-max-quota-unified.log
+UNIT
+
+cat > "$UNIT_DIR/claude-max-quota-unified.timer" <<UNIT
+[Unit]
+Description=Refresh unified quota every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=claude-max-quota-unified.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl --user daemon-reload
 systemctl --user enable --now claude-max-alibaba-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-alibaba-quota.timer"
 systemctl --user enable --now claude-max-open-design-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-open-design-quota.timer"
+systemctl --user enable --now claude-max-quota-unified.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-quota-unified.timer"
 log "systemd units regenerated (binary ExecStart + OnFailure alert + alibaba/open-design quota timers)"
 
 # 4c. Hourly dump/backup rotation backstop — installed from source, never hand-edited

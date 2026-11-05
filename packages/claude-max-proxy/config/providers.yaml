@@ -1,0 +1,83 @@
+# Реестр провайдеров — провайдер, его аккаунты и предпочтения по моделям.
+#
+# 🔴 ЗАЧЕМ (слово фаундера 05.11.2026): «бывает провайдер такой, бывает такой, бывает
+# модель такая, бывает сякая — всё это держать, и балансировщик мог с этим работать».
+# Сейчас знание размазано: организации Go живут в go-orgs.yaml, OpenDesign — в одном
+# ключе окружения, а предпочтение «эту модель лучше туда» не записано нигде вовсе.
+#
+# 🔴 ПРАВИЛО ПРЕДПОЧТЕНИЯ — НЕ ВКУСОВЩИНА, А ЗАМЕР. `deepseek-v4.1-flash` на OpenCode Go
+# работает очень плохо по качеству и скорости (слово фаундера 05.11.2026), хотя квота там
+# есть. Поэтому у модели есть ЯВНЫЙ порядок провайдеров: первый — тот, куда идём, остальные
+# — только если он недоступен И это разрешено. Запрет важнее удобства: молчаливый откат
+# на медленного провайдера выглядит для человека как «модель тормозит», а не как «мы
+# переехали», и искать причину он будет не там.
+#
+# ФОРМАТ (стадия 1 — объявление и разрешение; дверь переезжает сюда на переносе 07.11):
+#
+#   providers[]:
+#     id            — имя провайдера, оно же префикс в /quota и в файлах квоты
+#     kind          — oauth-cli | static-key  (как получаем и продлеваем доступ)
+#     quota         — откуда берутся окна: adapter + параметры (или none)
+#     accounts[]    — аккаунты/организации ЭТОГО провайдера (у Go их 18, у OpenDesign пока 1)
+#     models[]      — какие модели провайдер обслуживает
+#
+#   model_preferences[]:
+#     match         — логическое имя модели (то, что называет агент)
+#     order[]       — провайдеры по предпочтению, ПЕРВЫЙ = куда идём
+#     on_unavailable — fail | next  (fail = отказ вслух; next = следующий провайдер)
+#     why           — основание. Без него предпочтение через месяц выглядит вкусовщиной.
+
+version: 1
+
+providers:
+  - id: opencode-go
+    kind: oauth-cli
+    # Организации и входы живут в go-orgs.yaml (kiberos-app) до переноса 07.11 — здесь
+    # только ссылка, чтобы не заводить второго писателя одного факта.
+    accounts_from: /home/relishev/projects/vibe/kiberos-app/litellm/.go-tokens.json
+    registry_from: /home/relishev/projects/vibe/kiberos-app/litellm/go-orgs.yaml
+    quota:
+      adapter: opencode-go-refresher
+      status_file: ~/.claude-local/quota-status-opencode-go.json
+    models:
+      - deepseek-v4.1-flash-go
+      - qwen3.8-flash
+      - mimo-v2.6-flash
+      - kimi-k3.1-pro-go
+      - minimax-m3.1-flash-go
+      - gemini-4-argon-go
+      - glm-5.3
+      - glm-5.3-flash
+      - muse-spark-1.3-contributor
+
+  - id: open-design
+    kind: static-key
+    # Ключ модельной двери — OPEN_DESIGN_API_KEY (litellm/.env); Control Key для квоты —
+    # ~/.secrets/open-design-control.json (добывается open-design-login.mjs).
+    quota:
+      adapter: open-design-preflight
+      credentials: ~/.secrets/open-design-control.json
+      status_file: ~/.claude-local/quota-status-open-design.json
+    accounts:
+      - relishev@gmail.com
+    models:
+      - deepseek-v4.1-flash-od
+
+model_preferences:
+  # 🔴 ГЛАВНОЕ ПРАВИЛО ЭТОГО ФАЙЛА. DeepSeek V4.1 Flash на OpenCode Go есть по квоте, но
+  # по качеству и скорости непригоден (слово фаундера). Идём в OpenDesign; если он
+  # недоступен — честный отказ, а НЕ молчаливый откат на Go: иначе «тормозит» будет
+  # выглядеть как свойство модели, и никто не поймёт, что мы переехали.
+  - match: deepseek-v4.1-flash
+    prefer_logical: kiberos-go/deepseek-v4.1-flash-od
+    order: [open-design, opencode-go]
+    on_unavailable: fail
+    why: >-
+      Замер и слово фаундера 05.11.2026: на OpenCode Go эта модель работает очень плохо
+      (медленно), хотя квота есть. Пока OpenDesign доступен — DeepSeek идёт только туда.
+
+  # Остальные модели Go остаются на Go: там их качество не оспорено, а квота уже оплачена.
+  - match: qwen3.8-flash
+    order: [opencode-go]
+    on_unavailable: fail
+    why: качество на Go не оспорено, второй провайдер её не обслуживает.

@@ -121,3 +121,65 @@ describe('unifyAll + writeUnified', () => {
     }
   })
 })
+
+describe('годность по всем окнам (замер 05.11.2026)', () => {
+  // Фаундер/home-general: 10 организаций с МЕСЯЦЕМ 100% показывались зелёными, потому что
+  // срок пропуска живой. «Есть квота» и «можно работать» — разные вещи, и подвал не имеет
+  // права их путать: балансировщик поведёт флот на мёртвую организацию.
+  test('месяц 100% — это exhausted с названным окном и датой, а не active', () => {
+    const doc = { measured_at: '2026-11-05T09:59:00.000Z', accounts: { 'a@b': {
+      org: 'a@b', util5h: 0, util7d: 0.4, utilMonth: 1, resetMonthAt: '2026-11-11T09:00:00.000Z',
+    } } }
+    const [acc] = unifyProviderFile('opencode-go', doc, NOW)
+    expect(acc.status).toBe('exhausted')
+    expect(acc.exhaustedWindow?.name).toBe('month')
+    expect(acc.exhaustedWindow?.resetsAt).toBe('2026-11-11T09:00:00.000Z')
+    expect(acc.reason).toContain('month_exhausted')
+  })
+
+  test('явный признак поставщика rate-limited тоже даёт exhausted', () => {
+    const doc = { measured_at: '2026-11-05T09:59:00.000Z', accounts: { a: {
+      org: 'a', windows: [{ window: 'week', util: 0.99, status: 'rate-limited', resetIso: '2026-11-09T00:00:00.000Z' }],
+    } } }
+    const [acc] = unifyProviderFile('p', doc, NOW)
+    expect(acc.status).toBe('exhausted')
+    expect(acc.exhaustedWindow?.name).toBe('week')
+  })
+
+  test('все окна ниже предела — active', () => {
+    const doc = { measured_at: '2026-11-05T09:59:00.000Z', accounts: { a: { org: 'a', util5h: 0.5, util7d: 0.99, utilMonth: 0.8 } } }
+    expect(unifyProviderFile('p', doc, NOW)[0].status).toBe('active')
+  })
+
+  test('провайдер: одна упёршаяся организация важнее десяти живых', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'quota-exh-'))
+    try {
+      writeFileSync(join(dir, 'quota-status-x.json'), JSON.stringify({
+        measured_at: '2026-11-05T09:59:00.000Z',
+        accounts: {
+          alive: { org: 'alive', util5h: 0.1, util7d: 0.1, utilMonth: 0.1 },
+          dead: { org: 'dead', util5h: 0, util7d: 0, utilMonth: 1, resetMonthAt: '2026-11-11T00:00:00.000Z' },
+        },
+      }))
+      const snap = unifyAll(dir, NOW)
+      expect(snap.providers.x.status).toBe('exhausted')
+      expect(snap.providers.x.reason).toContain('month_exhausted')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  test('active не тащит на себе чужую причину отсутствия', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'quota-reason-'))
+    try {
+      writeFileSync(join(dir, 'quota-status-y.json'), JSON.stringify({
+        measured_at: '2026-11-05T09:59:00.000Z',
+        accounts: {
+          empty: { org: 'empty', absent: 'no_active_subscription' },
+          live: { org: 'live', util5h: 0.1, util7d: 0.1 },
+        },
+      }))
+      const snap = unifyAll(dir, NOW)
+      expect(snap.providers.y.status).toBe('active')
+      expect(snap.providers.y.reason).toBeUndefined()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})

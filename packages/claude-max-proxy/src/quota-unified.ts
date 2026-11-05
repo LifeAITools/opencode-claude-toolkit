@@ -34,6 +34,8 @@ export interface UnifiedWindow {
   usedFraction: number | null
   resetsAt: string | null
   source: 'provider-api' | 'own-accounting'
+  /** Окно выбрано до предела. Явный признак, а не «догадка по 1.0». */
+  exhausted: boolean
 }
 
 export interface UnifiedAccount {
@@ -41,7 +43,7 @@ export interface UnifiedAccount {
   account: string | null
   plan: string | null
   walletUsd: string | null
-  status: 'active' | 'absent' | 'unreadable'
+  status: 'active' | 'absent' | 'exhausted' | 'unreadable'
   level: 'ok' | 'warning' | 'critical' | null
   measuredAt: string | null
   ageSec: number | null
@@ -49,6 +51,12 @@ export interface UnifiedAccount {
   windows: UnifiedWindow[]
   /** Почему нет чисел. Для `status !== 'active'` — обязательное объяснение. */
   reason?: string
+  /**
+   * Какое окно упёрлось и до какого числа. Заполняется, когда `status === 'exhausted'`.
+   * 🔴 Без этого «есть квота» и «можно работать» выглядят одинаково (замер 05.11.2026:
+   * 10 организаций с МЕСЯЦЕМ 100% показывались зелёными, потому что срок пропуска живой).
+   */
+  exhaustedWindow?: { name: WindowName; resetsAt: string | null }
 }
 
 export interface UnifiedSnapshot {
@@ -56,7 +64,7 @@ export interface UnifiedSnapshot {
   generatedAt: string
   unit: { used: 'fraction'; range: '0..1' }
   accounts: UnifiedAccount[]
-  providers: Record<string, { file: string | null; status: 'active' | 'absent' | 'unreadable'; reason?: string }>
+  providers: Record<string, { file: string | null; status: 'active' | 'absent' | 'exhausted' | 'unreadable'; reason?: string }>
 }
 
 const num = (v: unknown): number | null => {
@@ -118,7 +126,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       const u = num(used)
       const r = iso(resets)
       if (u === null && r === null) return
-      windows.push({ name: w, usedFraction: u, resetsAt: r, source: 'provider-api' })
+      windows.push({ name: w, usedFraction: u, resetsAt: r, source: 'provider-api', exhausted: u !== null && u >= 1 })
     }
     if (Array.isArray(a?.windows) && a.windows.length) {
       for (const w of a.windows) {
@@ -126,11 +134,14 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
         const nm: WindowName | null =
           label === '5h' ? '5h' : label === 'week' || label === '7d' ? 'week' : label === 'month' ? 'month' : null
         if (!nm) continue
+        const used = num(w?.util)
+        const rateLimited = String(w?.status ?? '').toLowerCase() === 'rate-limited'
         windows.push({
           name: nm,
-          usedFraction: num(w?.util),
+          usedFraction: used,
           resetsAt: iso(w?.resetIso) ?? (num(w?.resetAt) !== null ? new Date(num(w!.resetAt)!).toISOString() : null),
           source: 'provider-api',
+          exhausted: rateLimited || (used !== null && used >= 1),
         })
       }
     } else {
@@ -140,18 +151,29 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
     }
     const five = windows.find(w => w.name === '5h')?.usedFraction ?? null
     const absent = typeof a?.absent === 'string' ? a.absent : undefined
+    // 🔴 ГОДНОСТЬ — ПО ВСЕМ ОКНАМ СРАЗУ, а не по одному. Организация с МЕСЯЦЕМ 100%
+    // не «работает»: она упрётся в отказ на первом же вызове, хотя срок пропуска живой.
+    // Порядок окон здесь — порядок строгости: 5ч кончается раньше всех, месяц — позже.
+    const hit = windows.find(w => w.exhausted) ?? null
+    const status = absent ? 'absent' as const : hit ? 'exhausted' as const : 'active' as const
+    const reason = absent
+      ? absent
+      : hit
+        ? `${hit.name}_exhausted${hit.resetsAt ? `_until_${hit.resetsAt}` : ''}`
+        : undefined
     return {
       provider,
       account: a?.org ?? a?.accountHint ?? name ?? null,
       plan: a?.plan ?? doc.plan ?? null,
       walletUsd: a?.balanceUsd ?? null,
-      status: absent ? 'absent' as const : 'active' as const,
+      status,
       level: levelOf(five),
       measuredAt,
       ageSec,
       stale,
       windows,
-      ...(absent ? { reason: absent } : {}),
+      ...(reason ? { reason } : {}),
+      ...(hit ? { exhaustedWindow: { name: hit.name, resetsAt: hit.resetsAt } } : {}),
     } satisfies UnifiedAccount
   })
 }
@@ -170,12 +192,22 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
     try { doc = JSON.parse(readFileSync(join(dir, file), 'utf8')) } catch { doc = null }
     const list = unifyProviderFile(provider, doc, now)
     accounts.push(...list)
+    // Худшее состояние называет провайдера честно: одна упёршаяся организация важнее
+    // десяти живых, потому что в подвале зелёный цвет — это «можно ходить».
+    // Порядок строгости: unreadable > exhausted > absent > active.
     const worst: UnifiedAccount['status'] = list.some(a => a.status === 'unreadable')
-      ? 'unreadable' : list.every(a => a.status === 'absent') ? 'absent' : 'active'
+      ? 'unreadable'
+      : list.some(a => a.status === 'exhausted')
+        ? 'exhausted'
+        : list.every(a => a.status === 'absent') ? 'absent' : 'active'
+    // Причина берётся у той записи, которая и определила худшее состояние, — иначе
+    // провайдер «active» тащил бы на себе чужую причину (замер 05.11.2026: у open-design
+    // в причине стояло no_active_subscription от второй, пустой организации).
+    const worstEntry = list.find(a => a.status === worst && a.reason)
     providers[provider] = {
       file: existsSync(join(dir, file)) ? file : null,
       status: worst,
-      ...(list[0]?.reason ? { reason: list[0].reason } : {}),
+      ...(worst !== 'active' && worstEntry?.reason ? { reason: worstEntry.reason } : {}),
     }
   }
   return {

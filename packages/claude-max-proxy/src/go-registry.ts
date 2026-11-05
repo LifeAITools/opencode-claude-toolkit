@@ -84,3 +84,32 @@ export function pickOrg(reg: GoRegistry, wanted: string | null | undefined): GoO
   if (!hit) throw new GoOrgError(`организации «${w}» в реестре нет (есть: ${reg.orgs.map(o => o.name).join(', ')})`)
   return hit
 }
+
+/**
+ * Организации ОДНОГО провайдера. Дверь обслуживает несколько провайдеров теперь и обязана
+ * не смешивать их: организация Go, выбранная для маршрута OpenDesign, — тот же класс ошибки,
+ * что 02.11 дал 1444 отказа (чужая дверь, чужой ключ, отказ, похожий на «неверный токен»).
+ */
+export function orgsOfProvider(reg: GoRegistry, provider: string): GoOrg[] {
+  return reg.orgs.filter(o => (o.provider ?? 'opencode-go') === provider)
+}
+
+/**
+ * Выбор организации внутри провайдера. `active:` в реестре один на файл, поэтому рабочая
+ * организация ищется СРЕДИ СВОИХ: если `active` принадлежит другому провайдеру, берётся
+ * первая по priority (и это не ошибка конфигурации — файл общий на несколько провайдеров).
+ * Названная и не найденная — отказ, без подмены соседом: та же рельса, что у pickOrg.
+ */
+export function pickOrgForProvider(reg: GoRegistry, provider: string, wanted?: string | null): GoOrg {
+  const own = orgsOfProvider(reg, provider)
+  if (!own.length) throw new GoRegistryError(`у провайдера «${provider}» нет ни одной организации в реестре`)
+  const w = (wanted ?? '').trim()
+  if (w) {
+    const hit = own.find(o => o.synqtaskOrgUid === w) ?? own.find(o => o.name === w)
+    if (!hit) throw new GoOrgError(`организации «${w}» у провайдера «${provider}» нет (есть: ${own.map(o => o.name).join(', ')})`)
+    return hit
+  }
+  const active = own.find(o => o.name === reg.active)
+  if (active) return active
+  return [...own].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0) || a.name.localeCompare(b.name))[0]
+}

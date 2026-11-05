@@ -295,6 +295,35 @@ Unit=claude-max-open-design-quota.service
 WantedBy=timers.target
 UNIT
 
+# Ship the Go quota report to muid (2026-11-05) — the server copy of the door picks
+# an organization by headroom ONLY when this file sits next to the token store.
+# Without it the choice silently degrades to the registry's `active:`.
+cat > "$UNIT_DIR/claude-max-quota-ship-muid.service" <<UNIT
+[Unit]
+Description=claude-max-quota-ship-muid — Go quota report to the server door copy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$REPO/packages/claude-max-proxy/scripts/provider/ship-quota-muid.sh
+StandardOutput=append:$HOME/.claude/claude-max-quota-ship-muid.log
+StandardError=append:$HOME/.claude/claude-max-quota-ship-muid.log
+UNIT
+
+cat > "$UNIT_DIR/claude-max-quota-ship-muid.timer" <<UNIT
+[Unit]
+Description=Ship Go quota report to muid every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Unit=claude-max-quota-ship-muid.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 # Placement samples (2026-11-05) — ряд (время, организация, окна) для ТЕКУЩЕЙ скорости.
 # Без ряда анализатор размещения видит только среднюю с начала окна и сглаживает разгон.
 cat > "$UNIT_DIR/claude-max-placement-sample.service" <<UNIT
@@ -361,6 +390,7 @@ systemctl --user enable --now claude-max-alibaba-quota.timer >/dev/null 2>&1 || 
 systemctl --user enable --now claude-max-open-design-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-open-design-quota.timer"
 systemctl --user enable --now claude-max-quota-unified.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-quota-unified.timer"
 systemctl --user enable --now claude-max-placement-sample.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-placement-sample.timer"
+systemctl --user enable --now claude-max-quota-ship-muid.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-quota-ship-muid.timer"
 log "systemd units regenerated (binary ExecStart + OnFailure alert + alibaba/open-design quota timers)"
 
 # 4c. Hourly dump/backup rotation backstop — installed from source, never hand-edited

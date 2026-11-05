@@ -51,6 +51,7 @@ if [ "$DRY" = 1 ]; then log "DRY-RUN — no changes"; exit 0; fi
 BK="$BACKUP_ROOT/deploy-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BK"
 cp -a "$INSTALLED/src" "$BK/src"
+[ -d "$INSTALLED/config" ] && cp -a "$INSTALLED/config" "$BK/config"
 cp -a "$INSTALLED/package.json" "$BK/package.json"
 [ -d "$SDK_DST/dist" ] && cp -a "$SDK_DST/dist" "$BK/sdk-dist"
 [ -d "$INSTALLED/bin" ] && cp -a "$INSTALLED/bin" "$BK/bin"
@@ -73,6 +74,17 @@ done < <(ls -1 "$BACKUP_ROOT" | grep -E '^deploy-[0-9]{8}-[0-9]{6}$' | sort -r |
 #    above for manual review instead of being auto-nuked.
 rsync -a --exclude='.claude' --exclude='*.bak*' --exclude='*.broken' "$PROXY_SRC/" "$INSTALLED/src/"
 cp "$PROXY_PKG" "$INSTALLED/package.json"
+# config/ is RUNTIME for the timer scripts, not just source: quota-unified.ts reads
+# `config/providers.yaml` (via import.meta.dir/../config) to name a provider's models
+# when the provider does not return them itself. Until 2026-11-05 this directory was
+# never synced, so on the installed copy the registry was absent and `models` came out
+# empty for every provider — the presence reader then could not map model -> provider
+# and every OpenDesign/Go row degraded to `quota_absent: no_choice_yet`.
+if [ -d "$PROXY_PKG_DIR/config" ]; then
+  mkdir -p "$INSTALLED/config"
+  rsync -a --exclude='*.bak*' --exclude='*.broken' "$PROXY_PKG_DIR/config/" "$INSTALLED/config/"
+  log "config synced (provider registry for quota-unified)"
+fi
 log "src synced (TUI/debug/fallback only — service runs the binary)"
 
 # 3a. Install registry deps with the FULL transitive closure (TUI deps).

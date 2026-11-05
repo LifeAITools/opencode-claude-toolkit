@@ -73,7 +73,7 @@ function readDoc(path: string): { accounts: RawAccount[]; generatedAt: string | 
  */
 export function readUnifiedQuota(
   provider: UnifiedProviderId,
-  opts: { account?: string | null; path?: string } = {},
+  opts: { account?: string | null; path?: string; refuseAmbiguous?: boolean } = {},
 ): UnifiedQuotaReading | null {
   const doc = readDoc(opts.path ?? unifiedQuotaPath())
   if (!doc) return null
@@ -83,6 +83,32 @@ export function readUnifiedQuota(
   const wanted = (opts.account ?? '').trim()
   const byName = wanted ? own.find(a => (a.account ?? '') === wanted) : undefined
   const alive = own.filter(a => a.status === 'active')
+
+  // 🔴 НЕ УГАДЫВАТЬ СЧЁТ (замер 05.11.2026). У OpenDesign ДВА живых счёта в одном
+  // провайдере, и закрепление идёт по сессии — то есть «лучший по запасу» не имеет
+  // отношения к тому, кто обслужил ЭТОТ запрос. Вызов `readUnifiedQuota('open-design')`
+  // без подсказки возвращал hello@kiberos.app, тогда как проверенная по развёртываниям
+  // сессия сидела на relishev@gmail.com: число с чужим предметом в подвале.
+  // Здесь честный отказ: счёта не называем, чужие окна не показываем, пул — можно.
+  if (opts.refuseAmbiguous && !byName && alive.length > 1) {
+    const ha = alive.map(a => a.headroomFraction).filter((v): v is number => typeof v === 'number')
+    return {
+      provider,
+      account: null,
+      measuredAt: doc.generatedAt,
+      windows: [],
+      headroomFraction: null,
+      bindsUntil: null,
+      status: 'unreadable',
+      reason: 'several_accounts_unresolved',
+      pool: {
+        util5h: ha.length ? 1 - Math.max(...ha) : null,
+        util7d: null,
+        accounts: alive.length,
+        level: null,
+      },
+    }
+  }
   const best = alive.sort((x, y) => (y.headroomFraction ?? -1) - (x.headroomFraction ?? -1))[0]
   const chosen = byName ?? best ?? own[0]
 

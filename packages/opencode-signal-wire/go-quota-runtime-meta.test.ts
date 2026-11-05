@@ -141,8 +141,33 @@ describe('подвал на OpenDesign', () => {
     expect(m.quotaUtil7d).toBeCloseTo(0.018, 5)
     expect(m.quotaAccountHint).toBe("Ruslan Elishev's workspace")
     expect(m.quotaSource).toBe('subscription')
-    expect(m.quotaPoolUtil5h).toBeUndefined()       // пул — про несколько счетов, здесь он чужой
+    // Пул у OpenDesign теперь ПОКАЗЫВАЕТСЯ: с 05.11 у провайдера два живых счёта
+    // (relishev@gmail.com и hello@kiberos.app), и «куда переезжать» — осмысленный вопрос.
+    // До этого стояло `toBeUndefined()` по допущению «один workspace», которое перестало быть верным.
+    expect(m.quotaPoolAccounts).toBe(1)
+    expect(m.quotaPoolUtil5h).toBeCloseTo(0.053, 5)
     expect((m.providerQuota ?? []).some((q: any) => q.provider === 'go')).toBe(false)
+  })
+
+  test('два живых счёта OpenDesign: счёт НЕ угадывается, а пул показывается', () => {
+    unified([
+      { provider: 'open-design', account: 'relishev@gmail.com', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.95, windows: [{ name: '5h', usedFraction: 0.05 }] },
+      { provider: 'open-design', account: 'hello@kiberos.app', status: 'active', measuredAt: NOW,
+        headroomFraction: 0.60, windows: [{ name: '5h', usedFraction: 0.40 }] },
+    ])
+    const sw = make()
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
+    const m: any = sw.getCurrentRuntimeMeta()
+    // Закрепление у OpenDesign идёт ПО СЕССИИ: какой из двух счетов обслужил — неизвестно,
+    // и «лучший по запасу» к этому отношения не имеет. Поэтому счёт не называем и чужие
+    // окна не показываем (замер 05.11.2026: подвал показывал hello@kiberos.app для сессии,
+    // проверенной на relishev@gmail.com).
+    expect(m.quotaAccountHint).toBeUndefined()
+    expect(m.quotaUtil5h).toBeUndefined()
+    expect(m.quotaReason).toBe('several_accounts_unresolved')
+    expect(m.quotaPoolAccounts).toBe(2)
+    expect(m.quotaPoolUtil5h).toBeCloseTo(0.05, 5)   // минимум по живым счетам провайдера
   })
 
   test('workspace без подписки: имени нет в числах, окна не выдумываются', () => {

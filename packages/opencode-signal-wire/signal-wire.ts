@@ -771,7 +771,10 @@ export class SignalWire {
       const onOpenDesign = this.lastModel?.includes('flash-od') === true || this.lastProvider === 'open-design'
       const provider = onOpenDesign ? 'open-design' : 'opencode-go'
       const askedOrg = onOpenDesign ? undefined : process.env.KIBEROS_GO_ORG?.trim()
-      const q = readUnifiedQuota(provider, { account: askedOrg })
+      // 🔴 На OpenDesign счёт НЕ угадываем: у провайдера два живых счёта, закрепление идёт
+      // по сессии, и «лучший по запасу» к обслужившему отношения не имеет (замер 05.11.2026:
+      // так в подвал попадал hello@kiberos.app для сессии, проверенной на relishev@gmail.com).
+      const q = readUnifiedQuota(provider, { account: askedOrg, refuseAmbiguous: onOpenDesign })
       if (q && q.status !== 'unreadable') {
         const w5 = q.windows.find((w) => w.kind === '5h')
         const w7 = q.windows.find((w) => w.kind === '7d')
@@ -785,7 +788,7 @@ export class SignalWire {
         meta.quotaSource = 'subscription'
         // Пул — минимум по ЖИВЫМ аккаунтам провайдера: это запас флота, по которому видно,
         // есть ли куда переезжать. У OpenDesign в подписи один workspace — пул не показываем.
-        if (q.pool && !onOpenDesign) {
+        if (q.pool) {
           if (q.pool.util5h !== null) meta.quotaPoolUtil5h = q.pool.util5h
           if (q.pool.util7d !== null) meta.quotaPoolUtil7d = q.pool.util7d
           meta.quotaPoolAccounts = q.pool.accounts
@@ -798,6 +801,21 @@ export class SignalWire {
         }
         const at = Date.parse(q.measuredAt ?? '')
         if (Number.isFinite(at)) meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
+      } else if (q) {
+        // Счёт не назван (несколько живых у провайдера) — это НЕ «нет квоты»: провайдер и его
+        // пул известны, а личный счёт сессии — нет. Поэтому убираем чужие плоские числа и
+        // называем причину; пул остаётся, потому что он честно про весь провайдер.
+        delete (meta as any).quotaUtil5h
+        delete (meta as any).quotaUtil7d
+        delete (meta as any).quotaResetAt
+        delete (meta as any).quotaAccountHint
+        meta.quotaSource = 'subscription'
+        meta.quotaReason = q.reason ?? 'unreadable'
+        if (q.pool) {
+          if (q.pool.util5h !== null) meta.quotaPoolUtil5h = q.pool.util5h
+          if (q.pool.util7d !== null) meta.quotaPoolUtil7d = q.pool.util7d
+          meta.quotaPoolAccounts = q.pool.accounts
+        }
       }
     }
     // Расход сессии из базы opencode — для правил и как половина договора spend.

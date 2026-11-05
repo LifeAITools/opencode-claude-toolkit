@@ -27,6 +27,8 @@ export interface ProviderDecl {
   accounts?: string[]
   accountsFrom?: string
   registryFrom?: string
+  /** Где лежат ключи аккаунтов: email → ИМЯ переменной окружения (не сам секрет). */
+  accountKeys?: Array<{ email: string; keyEnv: string }>
   quota?: { adapter: string } & Record<string, unknown>
 }
 
@@ -79,6 +81,11 @@ export function parseProviderRegistry(text: string): ProviderRegistry {
       accounts: Array.isArray(p.accounts) ? p.accounts.map(str).filter(Boolean) : undefined,
       accountsFrom: p.accounts_from ? str(p.accounts_from) : undefined,
       registryFrom: p.registry_from ? str(p.registry_from) : undefined,
+      accountKeys: Array.isArray(p.account_keys)
+        ? p.account_keys
+            .map((k: any) => ({ email: str(k?.email), keyEnv: str(k?.key_env) }))
+            .filter((k: { email: string; keyEnv: string }) => k.email && k.keyEnv)
+        : undefined,
       quota: p.quota && typeof p.quota === 'object' ? { adapter: str(p.quota.adapter), ...p.quota } : undefined,
     })
   }
@@ -158,6 +165,16 @@ export function resolveModel(reg: ProviderRegistry, model: string): ResolvedPref
     preferredModel,
     why: pref.why,
   }
+}
+
+/**
+ * Переменная окружения с ключом конкретного аккаунта. `null` — аккаунт объявлен в квоте,
+ * но ключа для него нет, и идти его именем нельзя: отказ, а не догадка о ключе соседа.
+ */
+export function keyEnvFor(reg: ProviderRegistry, provider: string, email: string | null): string | null {
+  if (!email) return null
+  const p = reg.providers.find(x => x.id === provider)
+  return p?.accountKeys?.find(k => k.email.toLowerCase() === email.toLowerCase())?.keyEnv ?? null
 }
 
 /** Все модели провайдера — для проверки «а эту модель он вообще обслуживает». */

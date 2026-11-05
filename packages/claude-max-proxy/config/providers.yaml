@@ -64,6 +64,15 @@ providers:
     # (eligible:false, окон нет). Новая организация под тем же аккаунтом подхватывается
     # без правки этого файла; отдельный вход нужен только под ДРУГУЮ почту.
     accounts_from: control-key
+    # 🔴 ГДЕ ЛЕЖИТ КЛЮЧ КАЖДОГО АККАУНТА (05.11.2026). Аккаунтов ДВА, они под РАЗНЫМИ
+    # входами: `relishev@gmail.com` и `hello@kiberos.app`. Секретов здесь нет — только
+    # ИМЯ переменной окружения, значение живёт в litellm/.env. Дверь выбирает аккаунт по
+    # запасу и берёт ключ отсюда; без этой таблицы она не знает, чьим ключом идти.
+    account_keys:
+      - email: relishev@gmail.com
+        key_env: OPEN_DESIGN_API_KEY
+      - email: hello@kiberos.app
+        key_env: OPEN_DESIGN_API_KEY_2
     models:
       - deepseek-v4.1-flash-od
 

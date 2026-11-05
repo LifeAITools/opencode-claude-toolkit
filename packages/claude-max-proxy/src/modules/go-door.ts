@@ -205,7 +205,7 @@ export function selectOrg(
     // Организацию, только что ответившую 429, на ближайшем ходу не берём (см. poolAfter429).
     const dropped = key ? pinDropped.get(key) : undefined
     const pool = key
-      ? poolAfter429(reg.orgs, dropped?.org ?? null, dropped?.at ?? null, Date.now())
+      ? poolAfter429(reg.orgs, dropped?.org ?? null, dropped?.at ?? null, Date.now(), dropped?.strikes ?? 1)
       : reg.orgs
     const picked = pickOrgByTimeToWall(pool, quotas, has, { sessionKey: key || null })
     if (picked.org) {
@@ -375,12 +375,20 @@ function loadPins(): void {
   if (pinsLoaded) return
   pinsLoaded = true
   try {
-    const doc = JSON.parse(readFileSync(orgPinsPath(), 'utf8')) as { pins?: Record<string, { org?: unknown; at?: unknown }> }
+    const doc = JSON.parse(readFileSync(orgPinsPath(), 'utf8')) as {
+      pins?: Record<string, { org?: unknown; at?: unknown }>
+      dropped?: Record<string, { org?: unknown; at?: unknown; strikes?: unknown }>
+    }
     const now = Date.now()
     for (const [k, v] of Object.entries(doc.pins ?? {})) {
       if (!v || typeof v.org !== 'string' || typeof v.at !== 'number') continue
       if (now - v.at > ORG_PIN_MEMORY_MS) continue
       orgPins.set(k, { org: v.org, at: v.at })
+    }
+    for (const [k, v] of Object.entries(doc.dropped ?? {})) {
+      if (!v || typeof v.org !== 'string' || typeof v.at !== 'number') continue
+      if (now - v.at > PIN_DROPPED_TTL_MS) continue
+      pinDropped.set(k, { org: v.org, at: v.at, strikes: typeof v.strikes === 'number' ? v.strikes : 1 })
     }
   } catch { /* файла нет или он битый — начинаем с пустого */ }
 }
@@ -390,9 +398,11 @@ export function savePins(path = orgPinsPath()): void {
     const now = Date.now()
     const pins: Record<string, { org: string; at: number }> = {}
     for (const [k, v] of orgPins) if (now - v.at <= ORG_PIN_MEMORY_MS) pins[k] = v
+    const dropped: Record<string, { org: string; at: number; strikes: number }> = {}
+    for (const [k, v] of pinDropped) if (now - v.at <= PIN_DROPPED_TTL_MS) dropped[k] = v
     mkdirSync(dirname(path), { recursive: true })
     const tmp = `${path}.tmp`
-    writeFileSync(tmp, JSON.stringify({ version: 1, pins }))
+    writeFileSync(tmp, JSON.stringify({ version: 2, pins, dropped }))
     renameSync(tmp, path)
   } catch { /* запись не смеет ломать вызов */ }
 }
@@ -423,7 +433,7 @@ let pinExpired: { org: string; at: number } | null = null
  * счётчик его не видит. Здесь на час запоминается, откуда ушли, чтобы переезд назвался
  * причиной `after-429` — той самой, которой он и является.
  */
-const pinDropped = new Map<string, { org: string; at: number }>()
+const pinDropped = new Map<string, { org: string; at: number; strikes: number }>()
 const PIN_DROPPED_TTL_MS = 60 * 60 * 1000
 
 /**
@@ -438,17 +448,37 @@ const PIN_DROPPED_TTL_MS = 60 * 60 * 1000
  */
 export const ORG_429_COOLDOWN_MS = 120_000
 
+/** Потолок отдыха: дольше держать организацию вне выбора бессмысленно — она может ожить. */
+export const ORG_429_COOLDOWN_MAX_MS = 30 * 60 * 1000
+
+/**
+ * Сколько отдыхать после N-го подряд отказа этой организации.
+ *
+ * 🔴 429 НЕ ОБЕЩАЕТ, ЧТО ЧЕРЕЗ ДВЕ МИНУТЫ ПРОЙДЁТ (вопрос фаундера 05.11.2026). `429` — это
+ * общий код на три разные причины: частота запросов (проходит за секунды), исчерпанная квота
+ * (до сброса окна, часы) и перегрузка сервиса (`overloaded`, срок неизвестен). Наш случай —
+ * третий. Поэтому первый отдых короткий (2 мин) и служит одной дешёвой попыткой уйти, а
+ * каждый следующий отказ ТОЙ ЖЕ организации удваивает отдых до получаса: если апстрим лежит
+ * долго, мы перестаём долбить его каждые две минуты.
+ */
+export function cooldownFor429(strikes: number): number {
+  const n = Math.max(1, Math.min(strikes, 8))
+  return Math.min(ORG_429_COOLDOWN_MS * 2 ** (n - 1), ORG_429_COOLDOWN_MAX_MS)
+}
+
 /**
  * Пул организаций для выбора после 429: убираем ту, что только что отказала, — но только
  * если есть кем её заменить. Осталась одна — берём её: пустой выбор хуже перегруженной.
  */
 export function poolAfter429<T extends { name: string }>(
-  orgs: readonly T[],
+  orgs: T[],
   droppedOrg: string | null,
   droppedAt: number | null,
   now: number,
-): readonly T[] {
-  if (!droppedOrg || droppedAt === null || now - droppedAt >= ORG_429_COOLDOWN_MS) return orgs
+  strikes = 1,
+): T[] {
+  if (!droppedOrg || droppedAt === null) return orgs
+  if (now - droppedAt >= cooldownFor429(strikes)) return orgs
   const rest = orgs.filter((o) => o.name !== droppedOrg)
   return rest.length > 0 ? rest : orgs
 }
@@ -473,7 +503,13 @@ function pinDelete(key: string): boolean {
   if (removed && before) {
     const now = Date.now()
     for (const [k, v] of pinDropped) if (now - v.at > PIN_DROPPED_TTL_MS) pinDropped.delete(k)
-    pinDropped.set(key, { org: before.org, at: now })
+    // Подряд идущие отказы ОДНОЙ организации удлиняют отдых (см. cooldownFor429).
+    const prev = pinDropped.get(key)
+    const strikes = prev && prev.org === before.org ? (prev.strikes ?? 1) + 1 : 1
+    pinDropped.set(key, { org: before.org, at: now, strikes })
+    // 🔴 НА ДИСК: перезапуск службы (а он бывает на каждом деплое) не должен возвращать сессию
+    // на только что отказавшую организацию. Пин переживает рестарт — значит и отдых обязан.
+    savePins()
   }
   return removed
 }

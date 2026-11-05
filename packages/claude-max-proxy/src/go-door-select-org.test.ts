@@ -10,7 +10,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { selectOrg, restorePinsForTest, poolAfter429, ORG_429_COOLDOWN_MS } from './modules/go-door.js'
+import { selectOrg, restorePinsForTest, poolAfter429, cooldownFor429, ORG_429_COOLDOWN_MS, ORG_429_COOLDOWN_MAX_MS } from './modules/go-door.js'
 import type { GoRegistry } from './go-registry.js'
 import type { GoOrg } from './go-registry.js'
 
@@ -152,6 +152,22 @@ describe('отдых организации после 429 (05.11.2026)', () => 
   test('осталась одна — берём её: пустой выбор хуже перегруженной', () => {
     const out = poolAfter429([{ name: 'a' }], 'a', Date.now() - 1_000, Date.now())
     expect(out.map((o) => o.name)).toEqual(['a'])
+  })
+
+
+  test('каждый следующий отказ удлиняет отдых, и есть потолок', () => {
+    expect(cooldownFor429(1)).toBe(ORG_429_COOLDOWN_MS)
+    expect(cooldownFor429(2)).toBe(ORG_429_COOLDOWN_MS * 2)
+    expect(cooldownFor429(3)).toBe(ORG_429_COOLDOWN_MS * 4)
+    expect(cooldownFor429(99)).toBe(ORG_429_COOLDOWN_MAX_MS)
+  })
+
+  test('отдых учитывает число отказов, а не только время', () => {
+    const now = Date.now()
+    // 3 отказа → отдых 8 минут: через 3 минуты организация всё ещё вне пула.
+    expect(poolAfter429([{ name: 'a' }, { name: 'b' }], 'a', now - 180_000, now, 3).map(o => o.name)).toEqual(['b'])
+    // а при одном отказе те же 3 минуты — уже свободна.
+    expect(poolAfter429([{ name: 'a' }, { name: 'b' }], 'a', now - 180_000, now, 1).map(o => o.name)).toEqual(['a', 'b'])
   })
 
   test('отдыха не было — пул не трогаем', () => {

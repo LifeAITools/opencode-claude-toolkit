@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { parseRegistry, pickOrg, GoOrgError, GoRegistryError } from '../src/go-registry.js'
 import { withGoCredential, GoCredentialError } from '../src/go-credentials.js'
 import { extractUsageChat, extractUsageResponses, usageFromSseText, classifyError } from '../src/provider-dump.js'
-import { createGoDoorModule, goDoorReadiness } from '../src/modules/go-door.js'
+import { createGoDoorModule, goDoorReadiness, selectOrg, restorePinsForTest } from '../src/modules/go-door.js'
 
 const REG = `
 active: org-b
@@ -254,6 +254,25 @@ describe('go-door end to end (шлюз подменён)', () => {
     const res = await post({ 'x-litellm-session-id': 'conv-x', 'x-original-user-agent': 'opencode/9.9.9', 'x-kiberos-go-org': 'org-a' })
     expect(res.status).toBe(429)
     expect(seen.slice(before).length).toBe(1)
+  })
+
+  // Слово фаундера 03.11.2026: истёкшая выдача НЕ пересчитывается — сессия получает ТУ ЖЕ
+  // организацию (или упрётся в 429), иначе молчаливая смена аккаунта переписывает кэш.
+  test('истёкший пин не переселяет: та же организация, переезд не назван', () => {
+    const pinsFile = join(dir, 'pins.json')
+    process.env.GO_ORG_PINS_PATH = pinsFile
+    try {
+      restorePinsForTest([['conv-old', { org: 'org-a', at: Date.now() - 13 * 3_600_000 }]])
+      const reg = parseRegistry(REG.replaceAll('GATEWAY', 'http://127.0.0.1:1'))
+      const sel = selectOrg(reg, null, { goTokensPath: join(dir, 'tokens.json'), goProviderSession: 'fixed-session' } as any, 'conv-old')
+      expect(sel.org.name).toBe('org-a')
+      expect(sel.restoredExpiredPin).toBe(true)
+      expect(sel.movedReason).toBeUndefined()
+      expect(sel.movedFrom).toBeUndefined()
+    } finally {
+      delete process.env.GO_ORG_PINS_PATH
+      restorePinsForTest([])
+    }
   })
 
   test('в дамп не попадает ни пропуск, ни тело людей', async () => {

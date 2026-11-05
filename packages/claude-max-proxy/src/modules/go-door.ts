@@ -94,6 +94,8 @@ export function selectOrg(
   movedFrom?: string
   movedReason?: string
   heldUnusable?: string
+  /** Истёкший пин восстановлен той же организацией — переезда нет (слово фаундера 03.11). */
+  restoredExpiredPin?: boolean
   nameOverridden?: string
   nameOverrideReason?: string
 } {
@@ -149,16 +151,19 @@ export function selectOrg(
     if (key) {
       const pinned = pinLookup(key)
       if (!pinned && pinExpired) {
-        // Память выдачи истекла — это переезд, а не первая выдача.
-        const picked = pickOrgByTimeToWall(reg.orgs, quotas, has, { sessionKey: key })
-        if (picked.org) {
-          pinStore(key, picked.org.name)
-          return {
-            org: picked.org,
-            source: 'quota',
-            movedFrom: pinExpired.org,
-            movedReason: `pin-ttl-${Math.round(ORG_PIN_TTL_MS / 3_600_000)}h`,
-          }
+        // 🔴 ИСТЁКШИЙ ПИН НЕ ПЕРЕСЧИТЫВАЕМ — ДЕРЖИМ ТУ ЖЕ ОРГАНИЗАЦИЮ.
+        // Слово фаундера 03.11.2026 (принёс vibe-translator-owner): «почему спустя 12 часов
+        // сессия должна получить новую организацию? Она сожжёт кучу токенов. Либо она получает
+        // ту же, либо полный отказ». Молчаливый переезд по TTL — это смена аккаунта, а её
+        // меняет только человек (рельс no-live-account-migration). Исчерпается — упрётся в 429,
+        // и выдача снимется на ПЕРВОМ настоящем 429 (см. finish), а не по предсказанию.
+        const org = reg.orgs.find((o) => o.name === pinExpired!.org)
+        if (org) {
+          pinStore(key, org.name)
+          const why = orgUnusableReason(reg.orgs, quotas, has, org.name)
+          return why === null
+            ? { org, source: 'pin', restoredExpiredPin: true }
+            : { org, source: 'pin', heldUnusable: why, restoredExpiredPin: true }
         }
       }
       if (pinned) {
@@ -336,6 +341,15 @@ export function agentKey(parsed: any): string | null {
  */
 const ORG_PIN_MAX = 500
 const ORG_PIN_TTL_MS = 12 * 60 * 60 * 1000
+/**
+ * 🔴 ИСТЁКШУЮ ВЫДАЧУ ПОМНИМ ДОЛЬШЕ СРОКА ЕЁ ГОДНОСТИ (слово фаундера 03.11.2026).
+ * Иначе картина такая: пин живёт 12 ч, а файл отбрасывал истёкшие записи при загрузке —
+ * после перезапуска дверь не знала, что организация БЫЛА выдана, и выбирала новую как
+ * «первую выдачу». То есть правило «не переселяй молча» обходилось самим перезапуском.
+ * Неделя — чтобы сессия, вернувшаяся после долгой паузы, получила ТУ ЖЕ организацию
+ * (или отказ), а не холодную запись в чужую.
+ */
+const ORG_PIN_MEMORY_MS = 7 * 24 * 60 * 60 * 1000
 const orgPins = new Map<string, { org: string; at: number }>()
 
 /**
@@ -361,7 +375,7 @@ function loadPins(): void {
     const now = Date.now()
     for (const [k, v] of Object.entries(doc.pins ?? {})) {
       if (!v || typeof v.org !== 'string' || typeof v.at !== 'number') continue
-      if (now - v.at > ORG_PIN_TTL_MS) continue
+      if (now - v.at > ORG_PIN_MEMORY_MS) continue
       orgPins.set(k, { org: v.org, at: v.at })
     }
   } catch { /* файла нет или он битый — начинаем с пустого */ }
@@ -371,7 +385,7 @@ export function savePins(path = orgPinsPath()): void {
   try {
     const now = Date.now()
     const pins: Record<string, { org: string; at: number }> = {}
-    for (const [k, v] of orgPins) if (now - v.at <= ORG_PIN_TTL_MS) pins[k] = v
+    for (const [k, v] of orgPins) if (now - v.at <= ORG_PIN_MEMORY_MS) pins[k] = v
     mkdirSync(dirname(path), { recursive: true })
     const tmp = `${path}.tmp`
     writeFileSync(tmp, JSON.stringify({ version: 1, pins }))

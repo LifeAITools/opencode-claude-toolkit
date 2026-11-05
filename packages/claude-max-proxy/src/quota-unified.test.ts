@@ -297,3 +297,18 @@ describe('ключи соединения и модели (просьба packag
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('billingMode: организации разные, а счёт может быть один (05.11.2026)', () => {
+  test('shared переносится как есть; отсутствие поля — null, а не «separate»', () => {
+    const doc = {
+      measured_at: '2026-11-05T09:59:00.000Z',
+      accounts: {
+        'a@x': { org: 'a@x', workspaceId: 'w1', billingMode: 'shared', util5h: 0.2 },
+        'b@x': { org: 'b@x', workspaceId: 'w2', util5h: 0.1 },
+      },
+    }
+    const list = unifyProviderFile('open-design', doc, NOW)
+    expect(list.find(a => a.account === 'a@x')!.billingMode).toBe('shared')
+    expect(list.find(a => a.account === 'b@x')!.billingMode).toBeNull()
+  })
+})

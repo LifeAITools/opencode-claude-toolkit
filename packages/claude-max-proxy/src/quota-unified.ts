@@ -71,6 +71,14 @@ export interface UnifiedAccount {
    * open-design, и в opencode-go). `null` — провайдер такого поля не даёт (это НЕ «нет аккаунта»).
    */
   orgUid: string | null
+  /**
+   * 🔴 КАК ОРГАНИЗАЦИИ ПРОВАЙДЕРА СВЯЗАНЫ ПО ДЕНЬГАМ. `shared` = организации РАЗНЫЕ,
+   * а счёт ОДИН (общий пул). Замер 05.11.2026: два workspace OpenDesign, у каждого свой
+   * workspaceId и свой ключ, но `billingMode: shared` — поэтому один счётчик двигается
+   * от обоих, и без этого поля картина читается как «одна организация».
+   * `null` — провайдер такого поля не даёт.
+   */
+  billingMode: string | null
   /** Почему нет чисел. Для `status !== 'active'` — обязательное объяснение. */
   reason?: string
   /**
@@ -133,7 +141,7 @@ function levelOf(fiveHour: number | null): 'ok' | 'warning' | 'critical' | null 
 /** Один провайдерный файл → нормализованные аккаунты. Чистая функция: тестируется без диска. */
 export function unifyProviderFile(provider: string, doc: any, now: Date): UnifiedAccount[] {
   if (!doc || typeof doc !== 'object') {
-    return [{ provider, account: null, orgUid: null, plan: null, walletUsd: null, status: 'unreadable', level: null,
+    return [{ provider, account: null, orgUid: null, billingMode: null, plan: null, walletUsd: null, status: 'unreadable', level: null,
       measuredAt: null, ageSec: null, stale: true, headroomFraction: null, bindsUntil: null, windows: [], reason: 'file_unreadable' }]
   }
   const measuredAt = iso(doc.measured_at) ?? iso(doc.updatedAt)
@@ -145,7 +153,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
     const reason = typeof doc.quotaAbsent === 'string'
       ? doc.quotaAbsent
       : String(doc.quotaAbsent?.reason ?? doc.error ?? 'quota_absent')
-    return [{ provider, account: iso(doc.org) ?? doc.org ?? null, orgUid: null, plan: doc.plan ?? null,
+    return [{ provider, account: iso(doc.org) ?? doc.org ?? null, orgUid: null, billingMode: null, plan: doc.plan ?? null,
       walletUsd: doc.balanceUsd ?? null, status: 'absent', level: null, measuredAt, ageSec, stale,
       headroomFraction: null, bindsUntil: null, windows: [], reason }]
   }
@@ -166,7 +174,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
   }
   const entries = [...merged.entries()]
   if (entries.length === 0) {
-    return [{ provider, account: doc.org ?? null, orgUid: null, plan: doc.plan ?? null, walletUsd: doc.balanceUsd ?? null,
+    return [{ provider, account: doc.org ?? null, orgUid: null, billingMode: null, plan: doc.plan ?? null, walletUsd: doc.balanceUsd ?? null,
       status: 'unreadable', level: null, measuredAt, ageSec, stale, headroomFraction: null, bindsUntil: null, windows: [],
       reason: typeof doc.error === 'string' ? doc.error : 'no_accounts' }]
   }
@@ -239,6 +247,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       provider,
       account: a?.org ?? a?.accountHint ?? name ?? null,
       orgUid,
+      billingMode: typeof a?.billingMode === 'string' && a.billingMode.trim() ? a.billingMode.trim() : null,
       plan: a?.plan ?? doc.plan ?? null,
       walletUsd: a?.balanceUsd ?? null,
       status,

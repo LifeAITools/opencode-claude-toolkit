@@ -65,12 +65,26 @@ export interface OpenDesignSnapshot {
     reset7dAt: string | null
     windows: OpenDesignWindow[]
     absent?: string
+    /**
+     * 🔴 КАК СВЯЗАНЫ ОРГАНИЗАЦИИ ПО ДЕНЬГАМ (замер 05.11.2026, вопрос фаундера).
+     * `shared` означает: организации РАЗНЫЕ (свой workspaceId, свой ключ), но счёт ОДИН —
+     * расход обеих идёт из одного пула. Без этого поля картина читается как «одна организация»,
+     * хотя их две, и фаундер справедливо не понимал, почему счётчик двигается от обоих ключей.
+     */
+    billingMode?: string | null
+    /** Чем покрыт вызов: `coding_plan` (подписка) или `gateway` (кошелёк). */
+    funding?: string | null
+    /** Годен ли этот источник: `available` | `insufficient`. */
+    fundingCheck?: string | null
   }>
-  orgs: Array<{ name: string | null; util5h: number | null; util7d: number | null; level: 'ok' | 'warning' | 'critical' | null; status: string; windows: OpenDesignWindow[]; absent?: string }>
+  orgs: Array<{ name: string | null; util5h: number | null; util7d: number | null; level: 'ok' | 'warning' | 'critical' | null; status: string; windows: OpenDesignWindow[]; absent?: string; billingMode?: string | null; funding?: string | null; fundingCheck?: string | null }>
 }
 
 interface Preflight {
   workspaceId?: string
+  billingMode?: string
+  funding?: string
+  fundingCheck?: string
   balanceUsd?: string
   codingPlan?: {
     eligible?: boolean
@@ -132,6 +146,9 @@ export function accountFrom(preflight: Preflight, workspace: { id: string; name:
     reset5hAt: w5?.resetIso ?? null,
     reset7dAt: w7?.resetIso ?? null,
     windows,
+    billingMode: preflight?.billingMode ?? null,
+    funding: preflight?.funding ?? null,
+    fundingCheck: preflight?.fundingCheck ?? null,
     ...(absent ? { absent } : {}),
   }
 }
@@ -163,6 +180,9 @@ export function snapshotFromWorkspaces(preflights: Array<{ workspace: WorkspaceR
       name: acc.org, util5h: acc.util5h, util7d: acc.util7d,
       level: classifyLevel(acc.util5h ?? null, acc.util7d ?? null),
       status: acc.absent ? 'absent' : 'active', windows: acc.windows,
+      billingMode: acc.billingMode ?? null,
+      funding: acc.funding ?? null,
+      fundingCheck: acc.fundingCheck ?? null,
       ...(acc.absent ? { absent: acc.absent } : {}),
     } as any)
     // Для сводки берём ПЕРВУЮ ГОДНУЮ организацию: у неё есть план и кошелёк.

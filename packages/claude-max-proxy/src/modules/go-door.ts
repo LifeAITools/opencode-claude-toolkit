@@ -1677,21 +1677,36 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
   const reader = upstream.body.getReader()
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
+      // 🔴 ЧИТАЕМ, ПОКА ЕСТЬ ЧТО ОТДАТЬ (замер 05.11.2026). Прежний `pull` делал ОДНО
+      // чтение и, если полной строки ещё не набралось, ничего не отдавал. Поток
+      // останавливался: клиент не получал ни байта, пока не доедет вся строка (у
+      // рассуждающих моделей в строке сотни килобайт `encrypted_content`), а сам
+      // `pull` больше не вызывался. Живой симптом: ответ muse шёл 120 с и обрывался,
+      // хотя тот же текст не-стримом приходил за 4 с. Теперь один вызов `pull`
+      // продолжается, пока не появится что отдать — прогресс гарантирован.
       try {
-        const { done, value } = await reader.read()
-        if (done) {
-          if (pending) { controller.enqueue(encoder.encode(withCostInBody(pending))); pending = '' }
-          finish(kept, true)
-          controller.close()
-          return
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) {
+            if (pending) { controller.enqueue(encoder.encode(withCostInBody(pending))); pending = '' }
+            finish(kept, true)
+            controller.close()
+            return
+          }
+          const decoded = decoder.decode(value, { stream: true })
+          if (keptBytes < STREAM_CAP_BYTES) { kept += decoded; keptBytes += value.byteLength }
+          pending += decoded
+          const { out, rest } = withCostInSse(pending)
+          // Крупный хвост не держим: строка `usage` — это сотни байт, а `encrypted_content`
+          // рассуждения — сотни килобайт, и ждать её перевода строки нельзя.
+          if (rest.length > 8192) {
+            pending = ''
+            controller.enqueue(encoder.encode(out + rest))
+            return
+          }
+          pending = rest
+          if (out) { controller.enqueue(encoder.encode(out)); return }
         }
-        const decoded = decoder.decode(value, { stream: true })
-        if (keptBytes < STREAM_CAP_BYTES) { kept += decoded; keptBytes += value.byteLength }
-        // Строки с usage правим по одной: остальное уходит байт в байт.
-        pending += decoded
-        const { out, rest } = withCostInSse(pending)
-        pending = rest
-        if (out) controller.enqueue(encoder.encode(out))
       } catch (err) {
         // Обрыв на стороне апстрима после начала ответа — тоже финал, но это отказ двери.
         finish(kept, true)

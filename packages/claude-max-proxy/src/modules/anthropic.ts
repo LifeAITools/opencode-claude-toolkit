@@ -14,6 +14,7 @@ import { isSparkModel } from '../spark-translate.js'
 import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
 import { captureBody } from '../body-capture.js'
 import { resolvePidFromPort as resolvePidFromPeerPort } from '../session-tracker.js'
+import { parkedReason } from '../parked-models.js'
 
 /**
  * Единственная форма усилия, которую движок может понизить. Всё остальное
@@ -78,6 +79,25 @@ export function createAnthropicModule(): ProxyModule {
         // двухмегабайтных тел ради одного поля — см. комментарий ниже): нет spark —
         // обычный путь без изменений.
         const sparkModel = /"model"\s*:\s*"([^"]+)"/.exec(rawBodyStr)?.[1] ?? ''
+
+        // ── ПАРКОВКА (слово фаундера 05.11.2026) ────────────────────────────────────
+        // Модель, помеченная «пока не используем», отвечает НАЗВАННЫМ отказом, а не
+        // ошибкой поставщика: человек и агент должны видеть «припаркована, причина,
+        // с какого числа», а не искать дефект у нас. Флаг живёт в файле, а не в коде.
+        const parked = parkedReason(sparkModel)
+        if (parked) {
+          return new Response(JSON.stringify({
+            type: 'error',
+            error: {
+              type: 'permission_error',
+              message:
+                `Model parked: ${sparkModel} is not in use right now (${parked.reason}` +
+                `${parked.since ? `, since ${parked.since}` : ''}).` +
+                `${parked.why ? ` ${parked.why}` : ''}` +
+                ` Это намеренно, а не сбой: снимите флаг в ~/.claude-local/parked-models.json.`,
+            },
+          }), { status: 503, headers: { 'content-type': 'application/json' } })
+        }
         if (isSparkModel(sparkModel)) {
           let sparkBody: any
           try { sparkBody = JSON.parse(rawBodyStr) }

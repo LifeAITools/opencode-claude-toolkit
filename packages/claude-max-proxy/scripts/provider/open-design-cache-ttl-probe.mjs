@@ -26,6 +26,12 @@ const URL = 'https://amr-link.open-design.ai/v1/chat/completions'
 
 /** Паузы в минутах от ПЕРВОГО вызова. 0 — холодная запись, дальше — проверки. */
 const GAPS_MIN = (process.env.OD_CACHE_TTL_GAPS ?? '0,15,25,35,45,60,75,90,120').split(',').map(Number)
+/**
+ * Размер тела. ЗАМЕР 05.11.2026: кэш работает уже на префиксе ~1 100 токенов (первый вызов 0,
+ * второй 896 из 1088), поэтому жечь 25–30 тысяч на пробу незачем — фаундер просил минимально
+ * необходимое. 40 строк ≈ 1 200 токенов.
+ */
+const LINES = Number(process.env.OD_CACHE_TTL_LINES ?? 40)
 
 // Один nonce на весь прогон: префикс обязан совпасть байт в байт, иначе мерим не кэш.
 const NONCE = process.env.OD_CACHE_TTL_NONCE ?? `ttl-${Date.now()}`
@@ -33,7 +39,7 @@ const BODY = {
   model: 'deepseek-v4.1-flash',
   max_tokens: 4,
   messages: [
-    { role: 'system', content: Array.from({ length: 700 }, (_, i) =>
+    { role: 'system', content: Array.from({ length: LINES }, (_, i) =>
         `[${NONCE}] Правило ${i}: проверяй поле ${i} ровно один раз, не меняй порядок остальных и не переставляй блоки.`).join('\n') },
     { role: 'user', content: 'Reply OK' },
   ],

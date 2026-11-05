@@ -20,7 +20,7 @@ import { readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
-export const UNIFIED_QUOTA_JSON = join(homedir(), '.claude-local', 'quota-status.json')
+export const UNIFIED_QUOTA_JSON = join(homedir(), '.claude-local', 'quota-status-unified.json')
 
 export function unifiedQuotaPath(): string {
   return process.env.QUOTA_STATUS_JSON?.trim() || UNIFIED_QUOTA_JSON

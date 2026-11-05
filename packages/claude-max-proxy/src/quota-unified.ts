@@ -22,7 +22,11 @@ import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync, mkdir
 import { dirname, join } from 'path'
 import { CLAUDE_LOCAL } from './quota-paths.js'
 
-export const UNIFIED_QUOTA_JSON = join(CLAUDE_LOCAL, 'quota-status.json')
+// 🔴 ИМЯ ФАЙЛА НЕ ДОЛЖНО СОВПАДАТЬ С ФАЙЛОМ КВОТЫ ANTHROPIC (замер 05.11.2026).
+// `quota-status.json` уже занят: его пишет сама дверь для подвала Claude (поля
+// version/accounts/pids/sessions/orgs/traffic). Мой единый файл сначала назывался так же —
+// два писателя топили друг друга: то пропадал `providers`, то окна Go.
+export const UNIFIED_QUOTA_JSON = join(CLAUDE_LOCAL, 'quota-status-unified.json')
 /** Свежесть: сборщики ходят раз в 5 минут. Три пропуска — это уже «не про сейчас». */
 export const STALE_AFTER_SEC = 1200
 
@@ -214,7 +218,7 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
   const providers: UnifiedSnapshot['providers'] = {}
   let files: string[] = []
   try {
-    files = readdirSync(dir).filter(f => /^quota-status-[a-z0-9-]+\.json$/.test(f) && f !== 'quota-status.json')
+    files = readdirSync(dir).filter(f => /^quota-status-[a-z0-9-]+\.json$/.test(f) && f !== 'quota-status.json' && f !== 'quota-status-unified.json')
   } catch { files = [] }
   for (const file of files.sort()) {
     const provider = file.replace(/^quota-status-/, '').replace(/\.json$/, '')

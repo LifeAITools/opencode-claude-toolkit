@@ -183,3 +183,23 @@ describe('годность по всем окнам (замер 05.11.2026)', ()
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('orgs[] не теряется (замер 05.11.2026)', () => {
+  // Сборщик Go кладёт в `accounts` ТОЛЬКО активную организацию, все 18 — в `orgs[]`.
+  // Пока единый формат читал только `accounts`, семнадцать организаций исчезали, и
+  // организация с МЕСЯЦЕМ 100% не показывалась вообще.
+  test('читаются оба источника: orgs[] + accounts поверх', () => {
+    const doc = {
+      measured_at: '2026-11-05T09:59:00.000Z',
+      accounts: { 'a@b': { org: 'a@b', util5h: 0.1, util7d: 0.1, utilMonth: 0.1 } },
+      orgs: [
+        { name: 'a@b', util5h: 0.1, util7d: 0.1, utilMonth: 0.1 },
+        { name: 'c@d', util5h: 0, util7d: 0, utilMonth: 1, resetMonthAt: '2026-11-11T00:00:00.000Z' },
+      ],
+    }
+    const list = unifyProviderFile('opencode-go', doc, NOW)
+    expect(list.map(a => a.account).sort()).toEqual(['a@b', 'c@d'])
+    expect(list.find(a => a.account === 'c@d')!.status).toBe('exhausted')
+    expect(list.find(a => a.account === 'c@d')!.exhaustedWindow?.name).toBe('month')
+  })
+})

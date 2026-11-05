@@ -112,8 +112,21 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       windows: [], reason }]
   }
 
-  const rawAccounts = doc.accounts && typeof doc.accounts === 'object' ? doc.accounts : {}
-  const entries = Object.entries(rawAccounts as Record<string, any>)
+  // 🔴 ДВА ИСТОЧНИКА ОДНОГО ФАКТА, И ВТОРОЙ НЕЛЬЗЯ ТЕРЯТЬ (замер 05.11.2026).
+  // Сборщик Go кладёт в `accounts` ТОЛЬКО активную организацию, а все 18 — в `orgs[]`.
+  // Пока читали только `accounts`, семнадцать организаций исчезали из единого формата,
+  // и организация с МЕСЯЦЕМ 100% не показывалась вовсе. Поэтому: сначала `orgs[]`
+  // (полный список), поверх него — `accounts` (там больше полей). Ключ — имя.
+  const merged = new Map<string, any>()
+  for (const o of Array.isArray(doc.orgs) ? doc.orgs : []) {
+    const key = String(o?.name ?? o?.org ?? '').trim()
+    if (key) merged.set(key, { ...o })
+  }
+  for (const [name, a] of Object.entries((doc.accounts && typeof doc.accounts === 'object' ? doc.accounts : {}) as Record<string, any>)) {
+    const prev = merged.get(name)
+    merged.set(name, prev ? { ...prev, ...a } : a)
+  }
+  const entries = [...merged.entries()]
   if (entries.length === 0) {
     return [{ provider, account: doc.org ?? null, plan: doc.plan ?? null, walletUsd: doc.balanceUsd ?? null,
       status: 'unreadable', level: null, measuredAt, ageSec, stale, windows: [],

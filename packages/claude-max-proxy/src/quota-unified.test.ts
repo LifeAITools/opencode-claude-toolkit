@@ -203,3 +203,31 @@ describe('orgs[] не теряется (замер 05.11.2026)', () => {
     expect(list.find(a => a.account === 'c@d')!.exhaustedWindow?.name).toBe('month')
   })
 })
+
+describe('запас числом, а не ярлыком (поправка home-relishev-general 05.11.2026)', () => {
+  test('неделя 99% даёт запас 0.01 и дату связывающего окна', () => {
+    const doc = { measured_at: '2026-11-05T09:59:00.000Z', accounts: { a: {
+      org: 'a', util5h: 0.1, reset5hAt: '2026-11-05T14:00:00.000Z',
+      util7d: 0.99, reset7dAt: '2026-11-09T00:00:00.000Z',
+    } } }
+    const [acc] = unifyProviderFile('opencode-go', doc, NOW)
+    expect(acc.status).toBe('active')          // ярлык остаётся: он нужен
+    expect(acc.headroomFraction).toBeCloseTo(0.01)
+    expect(acc.bindsUntil).toBe('2026-11-09T00:00:00.000Z')
+  })
+
+  test('запас берётся по САМОМУ занятому окну, а не по первому', () => {
+    const doc = { measured_at: '2026-11-05T09:59:00.000Z', accounts: { a: {
+      org: 'a', util5h: 0.05, util7d: 0.17, utilMonth: 0.83, resetMonthAt: '2026-11-23T07:20:12.000Z',
+    } } }
+    const [acc] = unifyProviderFile('opencode-go', doc, NOW)
+    expect(acc.headroomFraction).toBeCloseTo(0.17)
+    expect(acc.bindsUntil).toBe('2026-11-23T07:20:12.000Z')
+  })
+
+  test('не измерено — null, а не «полный запас»', () => {
+    const [acc] = unifyProviderFile('p', { measured_at: '2026-11-05T09:59:00.000Z', accounts: { a: { org: 'a' } } }, NOW)
+    expect(acc.headroomFraction).toBeNull()
+    expect(acc.bindsUntil).toBeNull()
+  })
+})

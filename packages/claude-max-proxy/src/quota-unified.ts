@@ -49,6 +49,15 @@ export interface UnifiedAccount {
   ageSec: number | null
   stale: boolean
   windows: UnifiedWindow[]
+  /**
+   * Запас до ближайшей стены: 1 − наибольшая занятость среди окон. `null` — не измерено.
+   * 🔴 Зачем числом, а не ярлыком (поправка home-relishev-general 05.11.2026): `active`
+   * при неделе 99% и `active` при неделе 17% — одно слово и два разных решения. Ярлык
+   * говорит «можно», а число — «на сколько ходов».
+   */
+  headroomFraction: number | null
+  /** До какого числа держится окно, которое и ограничивает запас. */
+  bindsUntil: string | null
   /** Почему нет чисел. Для `status !== 'active'` — обязательное объяснение. */
   reason?: string
   /**
@@ -96,7 +105,7 @@ function levelOf(fiveHour: number | null): 'ok' | 'warning' | 'critical' | null 
 export function unifyProviderFile(provider: string, doc: any, now: Date): UnifiedAccount[] {
   if (!doc || typeof doc !== 'object') {
     return [{ provider, account: null, plan: null, walletUsd: null, status: 'unreadable', level: null,
-      measuredAt: null, ageSec: null, stale: true, windows: [], reason: 'file_unreadable' }]
+      measuredAt: null, ageSec: null, stale: true, headroomFraction: null, bindsUntil: null, windows: [], reason: 'file_unreadable' }]
   }
   const measuredAt = iso(doc.measured_at) ?? iso(doc.updatedAt)
   const ageSec = ageOf(measuredAt, now)
@@ -109,7 +118,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       : String(doc.quotaAbsent?.reason ?? doc.error ?? 'quota_absent')
     return [{ provider, account: iso(doc.org) ?? doc.org ?? null, plan: doc.plan ?? null,
       walletUsd: doc.balanceUsd ?? null, status: 'absent', level: null, measuredAt, ageSec, stale,
-      windows: [], reason }]
+      headroomFraction: null, bindsUntil: null, windows: [], reason }]
   }
 
   // 🔴 ДВА ИСТОЧНИКА ОДНОГО ФАКТА, И ВТОРОЙ НЕЛЬЗЯ ТЕРЯТЬ (замер 05.11.2026).
@@ -129,7 +138,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
   const entries = [...merged.entries()]
   if (entries.length === 0) {
     return [{ provider, account: doc.org ?? null, plan: doc.plan ?? null, walletUsd: doc.balanceUsd ?? null,
-      status: 'unreadable', level: null, measuredAt, ageSec, stale, windows: [],
+      status: 'unreadable', level: null, measuredAt, ageSec, stale, headroomFraction: null, bindsUntil: null, windows: [],
       reason: typeof doc.error === 'string' ? doc.error : 'no_accounts' }]
   }
 
@@ -167,6 +176,12 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
     // 🔴 ГОДНОСТЬ — ПО ВСЕМ ОКНАМ СРАЗУ, а не по одному. Организация с МЕСЯЦЕМ 100%
     // не «работает»: она упрётся в отказ на первом же вызове, хотя срок пропуска живой.
     // Порядок окон здесь — порядок строгости: 5ч кончается раньше всех, месяц — позже.
+    const measured = windows.filter(w => w.usedFraction !== null)
+    const binding = measured.length
+      ? measured.reduce((a, b) => ((b.usedFraction as number) > (a.usedFraction as number) ? b : a))
+      : null
+    const headroomFraction = binding ? Math.max(0, 1 - (binding.usedFraction as number)) : null
+    const bindsUntil = binding?.resetsAt ?? null
     const hit = windows.find(w => w.exhausted) ?? null
     const status = absent ? 'absent' as const : hit ? 'exhausted' as const : 'active' as const
     const reason = absent
@@ -184,6 +199,8 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       measuredAt,
       ageSec,
       stale,
+      headroomFraction,
+      bindsUntil,
       windows,
       ...(reason ? { reason } : {}),
       ...(hit ? { exhaustedWindow: { name: hit.name, resetsAt: hit.resetsAt } } : {}),

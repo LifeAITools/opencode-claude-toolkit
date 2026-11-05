@@ -14,6 +14,13 @@ import { readFileSync } from 'node:fs'
 
 export interface GoOrg {
   name: string
+  /**
+   * Какому провайдеру принадлежит запись. По умолчанию `opencode-go` — прежний реестр
+   * читается без правок. Нужно, чтобы ОДНА дверь могла обслуживать несколько провайдеров
+   * (стадия 2: OpenDesign через дверь), и выбор организации не смешивал их: организация
+   * Go никогда не должна быть выбрана для маршрута OpenDesign и наоборот.
+   */
+  provider?: string
   workspace: string
   auth: 'console' | 'api_key'
   baseUrl: string
@@ -49,6 +56,7 @@ export function parseRegistry(text: string): GoRegistry {
     const auth = e.auth === 'api_key' ? 'api_key' : 'console'
     orgs.push({
       name: String(e.name),
+      provider: String(e.provider ?? 'opencode-go'),
       workspace: String(e.workspace ?? ''),
       auth,
       baseUrl: String(e.base_url ?? ''),

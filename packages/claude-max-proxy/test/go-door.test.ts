@@ -155,6 +155,10 @@ describe('go-door end to end (шлюз подменён)', () => {
         if (h['x-opencode-org-id'] === 'wrk_A') {
           return new Response(JSON.stringify({ error: { message: 'weekly limit' } }), { status: 429, headers: { 'retry-after': '60', 'content-type': 'application/json' } })
         }
+        // Замер 05.11.2026: Cloudflare на апстриме банит подпись питон-клиента.
+        if (h['user-agent'] === 'Python-urllib/3.12') {
+          return new Response('error code: 1010', { status: 403, headers: { 'content-type': 'text/plain' } })
+        }
         return new Response(JSON.stringify({ id: 'x', usage: { prompt_tokens: 50, completion_tokens: 3, prompt_tokens_details: { cached_tokens: 40 } } }),
           { headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '77' } })
       },
@@ -227,6 +231,29 @@ describe('go-door end to end (шлюз подменён)', () => {
     expect(s.headers['user-agent']).toBe('ua/1')
     expect(s.headers['x-opencode-session']).toBe('conv-3')
     expect(s.headers['x-opencode-client']).toBeUndefined()
+  })
+
+  // Замер 05.11.2026 (живой): `User-Agent: Python-urllib/3.12` → 403 «error code: 1010»
+  // от Cloudflare апстрима, тот же запрос с curl/opencode → 200. Сквозной UA нужен для
+  // атрибуции, поэтому дверь НЕ отменяет его, а делает ОДИН повтор без него.
+  test('Cloudflare 1010 на проброшенном UA: один повтор без него, вызов не умирает', async () => {
+    const before = seen.length
+    const res = await post({ 'x-litellm-session-id': 'conv-ua', 'x-original-user-agent': 'Python-urllib/3.12' })
+    expect(res.status).toBe(200)
+    const attempts = seen.slice(before)
+    expect(attempts.length).toBe(2)
+    expect(attempts[0].headers['user-agent']).toBe('Python-urllib/3.12')
+    expect(attempts[1].headers['user-agent']).toBe('ua/1')
+    expect(attempts[1].headers['x-opencode-session']).toBe('conv-ua')
+    await flush()
+    expect(emitted.some(e => e.kind === 'GO_UA_RETRY')).toBe(true)
+  })
+
+  test('403 не про 1010 не повторяется', async () => {
+    const before = seen.length
+    const res = await post({ 'x-litellm-session-id': 'conv-x', 'x-original-user-agent': 'opencode/9.9.9', 'x-kiberos-go-org': 'org-a' })
+    expect(res.status).toBe(429)
+    expect(seen.slice(before).length).toBe(1)
   })
 
   test('в дамп не попадает ни пропуск, ни тело людей', async () => {

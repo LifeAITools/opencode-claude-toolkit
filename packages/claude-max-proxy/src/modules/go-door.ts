@@ -1494,6 +1494,34 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
     rec.request.headers = redactHeaders({ ...baseHeaders, authorization: `Bearer ${cred.secret}` })
   }
 
+  // 🔴 Cloudflare на апстриме банит не браузерную подпись: `User-Agent: Python-urllib/3.12`
+  // получает «403 error code: 1010», тот же запрос с curl/opencode — 200 (замер 05.11.2026).
+  // Сквозной UA нужен для атрибуции, поэтому не отменяем его, а отступаем: ОДИН повтор без
+  // него и след в журнале — иначе рабочий вызов умирает из-за UA вызывающего.
+  if (upstream && upstream.status === 403 && passthrough['user-agent']) {
+    const peek = await upstream.clone().text().catch(() => '')
+    if (peek.includes('1010')) {
+      ctx.emit({
+        level: 'info', kind: EVENT.GO_UA_RETRY, sessionId, org: org.name,
+        msg: 'дверь Go: апстрим ответил Cloudflare 1010 на UA клиента — повтор с нашим UA',
+        ua: passthrough['user-agent'].slice(0, 120),
+      })
+      // Возвращаем НАШ UA, а не удаляем поле: проброшенный лежал поверх него в том же объекте.
+      const noUA: Record<string, string> = { ...baseHeaders }
+      const ownUA = cred.headers['user-agent'] ?? cfg.goUserAgent
+      if (ownUA) noUA['user-agent'] = ownUA
+      else delete noUA['user-agent']
+      try {
+        const retry = await fetch(url, {
+          method: 'POST',
+          headers: { ...noUA, authorization: `Bearer ${cred.secret}` },
+          body: raw, signal: req.signal,
+        })
+        upstream = retry
+      } catch { /* остаётся исходный 403 — он и уйдёт клиенту */ }
+    }
+  }
+
   if (!upstream) {
     const err = networkErr
     const msg = err?.name === 'AbortError' ? 'client aborted' : `gateway unreachable: ${err?.message}`

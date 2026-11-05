@@ -132,6 +132,8 @@ export type EventKind =
   | 'GO_COLD_GUARD_AUTOREVERT'
   /** Дверь Go загружена, но не настроена: пути реестра/пропусков не заданы, дверь ответит 503. */
   | 'GO_DOOR_UNCONFIGURED'
+  /** Апстрим вернул Cloudflare 1010 на проброшенном UA клиента — сделан один повтор без него. */
+  | 'GO_UA_RETRY'
   /** За окно почти ни один вызов двери не прошёл: дверь стоит и не пропускает (любая причина). */
   | 'DOOR_PASSES_NOTHING'
   /** Человек поставил режим на сессию (FR-7): auto / away-until / off. */
@@ -218,6 +220,7 @@ export const EVENT = {
   GO_PREFIX_REWRITE_BLOCKED: 'GO_PREFIX_REWRITE_BLOCKED',
   GO_COLD_GUARD_AUTOREVERT: 'GO_COLD_GUARD_AUTOREVERT',
   GO_DOOR_UNCONFIGURED: 'GO_DOOR_UNCONFIGURED',
+  GO_UA_RETRY: 'GO_UA_RETRY',
   DOOR_PASSES_NOTHING: 'DOOR_PASSES_NOTHING',
   HUMAN_MODE_SET: 'HUMAN_MODE_SET',
   // Generic

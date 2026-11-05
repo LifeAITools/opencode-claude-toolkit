@@ -255,3 +255,45 @@ describe('запас числом, а не ярлыком (поправка home
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('ключи соединения и модели (просьба packages-lat-context-owner 05.11.2026)', () => {
+  test('orgUid берётся из uid организации (Go)', () => {
+    const doc = {
+      measured_at: '2026-11-05T09:59:00.000Z',
+      orgs: [{ name: 'a@b', uid: '036e6c97-9679-4bd6-a0a1-2768faefd239', util5h: 0.1, util7d: 0.1 }],
+    }
+    const [acc] = unifyProviderFile('opencode-go', doc, NOW)
+    expect(acc.orgUid).toBe('036e6c97-9679-4bd6-a0a1-2768faefd239')
+  })
+
+  test('orgUid берётся из workspaceId (OpenDesign), иначе null — а не пустая строка', () => {
+    const doc = {
+      measured_at: '2026-11-05T09:59:00.000Z',
+      accounts: {
+        'od@x': { org: 'od@x', workspaceId: 'xzw7wj10gh2ksbd9dx2wbp9g', util5h: 0.3 },
+        'no-id@x': { org: 'no-id@x', util5h: 0.2 },
+      },
+    }
+    const list = unifyProviderFile('open-design', doc, NOW)
+    expect(list.find(a => a.account === 'od@x')!.orgUid).toBe('xzw7wj10gh2ksbd9dx2wbp9g')
+    expect(list.find(a => a.account === 'no-id@x')!.orgUid).toBeNull()
+  })
+
+  test('models провайдера — из его же файла; пустой список не выдумывается', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'quota-models-'))
+    try {
+      writeFileSync(join(dir, 'quota-status-x.json'), JSON.stringify({
+        measured_at: '2026-11-05T09:59:00.000Z',
+        models: ['m-one', 'm-two'],
+        accounts: { a: { org: 'a', util5h: 0.1 } },
+      }))
+      writeFileSync(join(dir, 'quota-status-y.json'), JSON.stringify({
+        measured_at: '2026-11-05T09:59:00.000Z',
+        accounts: { b: { org: 'b', util5h: 0.1 } },
+      }))
+      const snap = unifyAll(dir, NOW)
+      expect(snap.providers.x.models).toEqual(['m-one', 'm-two'])
+      expect(snap.providers.y.models).toEqual([])
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})

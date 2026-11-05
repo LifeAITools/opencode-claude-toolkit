@@ -21,6 +21,7 @@
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync, mkdirSync } from 'fs'
 import { dirname, join } from 'path'
 import { CLAUDE_LOCAL } from './quota-paths.js'
+import { loadProviderRegistry } from './provider-registry.js'
 
 // 🔴 ИМЯ ФАЙЛА НЕ ДОЛЖНО СОВПАДАТЬ С ФАЙЛОМ КВОТЫ ANTHROPIC (замер 05.11.2026).
 // `quota-status.json` уже занят: его пишет сама дверь для подвала Claude (поля
@@ -62,6 +63,14 @@ export interface UnifiedAccount {
   headroomFraction: number | null
   /** До какого числа держится окно, которое и ограничивает запас. */
   bindsUntil: string | null
+  /**
+   * Стабильный идентификатор аккаунта У ПРОВАЙДЕРА: у Go — `uid` организации, у OpenDesign —
+   * `workspaceId`. Почему не только email (просьба packages-lat-context-owner 05.11.2026):
+   * email — слабый ключ соединения с агентом, его переименование или алиас молча рвут связь,
+   * а один и тот же email встречается у ДВУХ провайдеров (`relishev@gmail.com` есть и в
+   * open-design, и в opencode-go). `null` — провайдер такого поля не даёт (это НЕ «нет аккаунта»).
+   */
+  orgUid: string | null
   /** Почему нет чисел. Для `status !== 'active'` — обязательное объяснение. */
   reason?: string
   /**
@@ -77,7 +86,23 @@ export interface UnifiedSnapshot {
   generatedAt: string
   unit: { used: 'fraction'; range: '0..1' }
   accounts: UnifiedAccount[]
-  providers: Record<string, { file: string | null; status: 'active' | 'absent' | 'exhausted' | 'unreadable'; reason?: string }>
+  providers: Record<string, {
+    file: string | null
+    status: 'active' | 'absent' | 'exhausted' | 'unreadable'
+    reason?: string
+    /**
+     * Модели провайдера — из его же файла (`models`), как их называет посредник.
+     * 🔴 Зачем (просьба packages-lat-context-owner 05.11.2026): читатель выбирает файл по
+     * ТОЧНОМУ имени модели. Без списка остаётся путь «по организации», а он молчит ровно
+     * там, где организация встречается у двух провайдеров. Пустой массив — провайдер
+     * моделей не объявил; это НЕ «моделей нет».
+     */
+    models: string[]
+    /** Откуда список: `provider-file` (живой ответ поставщика), `registry` (объявление
+     *  в `config/providers.yaml`), `none` (ни там, ни там). Без этого пустой список
+     *  читался бы как «моделей нет» — а это третье состояние, «не объявлено». */
+    modelsSource: 'provider-file' | 'registry' | 'none'
+  }>
 }
 
 const num = (v: unknown): number | null => {
@@ -108,7 +133,7 @@ function levelOf(fiveHour: number | null): 'ok' | 'warning' | 'critical' | null 
 /** Один провайдерный файл → нормализованные аккаунты. Чистая функция: тестируется без диска. */
 export function unifyProviderFile(provider: string, doc: any, now: Date): UnifiedAccount[] {
   if (!doc || typeof doc !== 'object') {
-    return [{ provider, account: null, plan: null, walletUsd: null, status: 'unreadable', level: null,
+    return [{ provider, account: null, orgUid: null, plan: null, walletUsd: null, status: 'unreadable', level: null,
       measuredAt: null, ageSec: null, stale: true, headroomFraction: null, bindsUntil: null, windows: [], reason: 'file_unreadable' }]
   }
   const measuredAt = iso(doc.measured_at) ?? iso(doc.updatedAt)
@@ -120,7 +145,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
     const reason = typeof doc.quotaAbsent === 'string'
       ? doc.quotaAbsent
       : String(doc.quotaAbsent?.reason ?? doc.error ?? 'quota_absent')
-    return [{ provider, account: iso(doc.org) ?? doc.org ?? null, plan: doc.plan ?? null,
+    return [{ provider, account: iso(doc.org) ?? doc.org ?? null, orgUid: null, plan: doc.plan ?? null,
       walletUsd: doc.balanceUsd ?? null, status: 'absent', level: null, measuredAt, ageSec, stale,
       headroomFraction: null, bindsUntil: null, windows: [], reason }]
   }
@@ -141,7 +166,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
   }
   const entries = [...merged.entries()]
   if (entries.length === 0) {
-    return [{ provider, account: doc.org ?? null, plan: doc.plan ?? null, walletUsd: doc.balanceUsd ?? null,
+    return [{ provider, account: doc.org ?? null, orgUid: null, plan: doc.plan ?? null, walletUsd: doc.balanceUsd ?? null,
       status: 'unreadable', level: null, measuredAt, ageSec, stale, headroomFraction: null, bindsUntil: null, windows: [],
       reason: typeof doc.error === 'string' ? doc.error : 'no_accounts' }]
   }
@@ -203,9 +228,17 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       : hit
         ? `${hit.name}_exhausted${hit.resetsAt ? `_until_${hit.resetsAt}` : ''}`
         : unmeasured ? 'no_windows_measured' : undefined
+    // 🔴 КЛЮЧ СОЕДИНЕНИЯ — uuid, А НЕ EMAIL (просьба packages-lat-context-owner 05.11.2026).
+    // Go отдаёт `uid` на организацию, OpenDesign — `workspaceId`. Берём первый доступный.
+    const orgUid = (typeof a?.uid === 'string' && a.uid.trim())
+      || (typeof a?.orgUid === 'string' && a.orgUid.trim())
+      || (typeof a?.workspaceId === 'string' && a.workspaceId.trim())
+      || (typeof a?.zitadelOrgId === 'string' && a.zitadelOrgId.trim())
+      || null
     return {
       provider,
       account: a?.org ?? a?.accountHint ?? name ?? null,
+      orgUid,
       plan: a?.plan ?? doc.plan ?? null,
       walletUsd: a?.balanceUsd ?? null,
       status,
@@ -220,6 +253,23 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       ...(hit ? { exhaustedWindow: { name: hit.name, resetsAt: hit.resetsAt } } : {}),
     } satisfies UnifiedAccount
   })
+}
+
+/**
+ * Модели из ОБЪЯВЛЕНИЯ (`config/providers.yaml`), когда поставщик их не отдал.
+ * 🔴 Замер 05.11.2026: у Go живой запрос `GET /models` отвечает 401, и файл писал
+ * `models: []`. Читателю подвала список нужен, чтобы выбрать провайдера по ТОЧНОМУ
+ * имени модели; пустой список оставлял его на слабом пути «по организации». Объявление
+ * в реестре — наш собственный SSOT, поэтому оно годится как запасной источник, но
+ * ОБЯЗАНО называться (`modelsSource: 'registry'`), а не выдавать себя за живой ответ.
+ */
+function registryModels(provider: string): string[] {
+  try {
+    const path = join(import.meta.dir, '..', 'config', 'providers.yaml')
+    if (!existsSync(path)) return []
+    const reg = loadProviderRegistry(path)
+    return reg.providers.find(p => p.id === provider)?.models ?? []
+  } catch { return [] }
 }
 
 /** Все файлы каталога `quota-status-*.json` → один снимок. */
@@ -250,10 +300,18 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
     // Причина берётся у той записи, которая и определила худшее состояние, — иначе
     // провайдер «active» тащил бы на себе чужую причину (замер 05.11.2026: у open-design
     // в причине стояло no_active_subscription от второй, пустой организации).
+    const liveModels: string[] = Array.isArray(doc?.models)
+      ? (doc.models as unknown[]).filter((m): m is string => typeof m === 'string' && m.length > 0)
+      : []
+    const declaredModels = liveModels.length ? [] : registryModels(provider)
     const worstEntry = list.find(a => a.status === worst && a.reason)
     providers[provider] = {
       file: existsSync(join(dir, file)) ? file : null,
       status: worst,
+      // Сначала живой ответ поставщика, затем наше собственное объявление.
+      // Каждый источник НАЗВАН — «пусто» и «не объявлено» не должны выглядеть одинаково.
+      models: liveModels.length ? liveModels : declaredModels,
+      modelsSource: liveModels.length ? 'provider-file' : declaredModels.length ? 'registry' : 'none',
       ...(worst !== 'active' && worstEntry?.reason ? { reason: worstEntry.reason } : {}),
     }
   }

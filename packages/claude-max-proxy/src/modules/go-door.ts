@@ -1432,11 +1432,27 @@ async function serve(req: Request, dialect: 'chat' | 'responses'): Promise<Respo
 
   const url = org.baseUrl.replace(/\/$/, '') + path
   rec.request.url = url
+  // Сквозные пометки клиента — если посредник их донёс, иначе как было.
+  // :4000 пересылает только x-* (свой UA LiteLLM ставит сам), поэтому оригинал
+  // едет в x-original-user-agent, который кладёт хук посредника (пока его нет —
+  // пусто и всё остаётся как было). x-opencode-client едет сам, если клиент
+  // его назвал.
+  const passthrough: Record<string, string> = {}
+  const origUA = (req.headers.get('x-original-user-agent') ?? '').trim()
+  if (origUA) passthrough['user-agent'] = origUA
+  const cliMark = (req.headers.get('x-opencode-client') ?? '').trim()
+  if (cliMark) passthrough['x-opencode-client'] = cliMark
   const baseHeaders: Record<string, string> = {
     ...cred.headers,
     'content-type': 'application/json',
-    // Постоянный на всех: шлюз скоупит кэш этим заголовком (архитектура R6 — не менять до замера 5.4).
-    'x-opencode-session': cfg.goProviderSession,
+    ...passthrough,
+    // Настоящий номер зовущего, если назвался, иначе общий постоянный.
+    // Шлюз скоупит кэш этим заголовком (архитектура R6): общий номер на всех
+    // давал одну корзину на разные разговоры (замер 03.11: 12 208 вызовов,
+    // 0 попаданий) — свой номер у каждой сессии даёт свою корзину.
+    // Слово фаундера 04.11.2026: включать; возврат — вернуть константу.
+    // Замер эффекта: доля cache_read в SpendLogs до/после (неделя на новом).
+    'x-opencode-session': sessionId ?? cfg.goProviderSession,
   }
   const send = (secret: string) => fetch(url, {
     method: 'POST',

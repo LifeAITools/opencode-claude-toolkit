@@ -187,13 +187,13 @@ describe('go-door end to end (шлюз подменён)', () => {
   }
   const flush = () => new Promise(r => setTimeout(r, 50))
 
-  test('рабочая организация: пропуск, заголовок организации, постоянный x-opencode-session', async () => {
+  test('рабочая организация: пропуск, заголовок организации, настоящий x-opencode-session', async () => {
     const res = await post({ 'x-litellm-session-id': 'conv-1' })
     expect(res.status).toBe(200)
     const s = seen.at(-1)!
     expect(s.headers.authorization).toBe('Bearer TOK-B-SECRET')
     expect(s.headers['x-opencode-org-id']).toBe('wrk_B')
-    expect(s.headers['x-opencode-session']).toBe('fixed-session')
+    expect(s.headers['x-opencode-session']).toBe('conv-1')
     expect(s.url).toBe('/openai/v1/chat/completions')
     await flush()
     const r = records().at(-1)
@@ -203,6 +203,30 @@ describe('go-door end to end (шлюз подменён)', () => {
     expect(r.call_kind).toBe('real')
     expect(r.usage_norm).toMatchObject({ input: 50, output: 3, cache_read: 40, cache_write: 10 })
     expect(r.quota_seen['x-ratelimit-remaining']).toBe('77')
+  })
+
+  test('без номера зовущего: наверх идёт общий постоянный x-opencode-session', async () => {
+    const res = await post()
+    expect(res.status).toBe(200)
+    expect(seen.at(-1)!.headers['x-opencode-session']).toBe('fixed-session')
+  })
+
+  test('сквозные пометки клиента: настоящий UA и пометка cli уходят наверх', async () => {
+    const res = await post({ 'x-litellm-session-id': 'conv-2', 'x-original-user-agent': 'opencode/9.9.9', 'x-opencode-client': 'cli' })
+    expect(res.status).toBe(200)
+    const s = seen.at(-1)!
+    expect(s.headers['user-agent']).toBe('opencode/9.9.9')
+    expect(s.headers['x-opencode-client']).toBe('cli')
+    expect(s.headers['x-opencode-session']).toBe('conv-2')
+  })
+
+  test('без сквозных пометок: UA и сессия как раньше', async () => {
+    const res = await post({ 'x-litellm-session-id': 'conv-3' })
+    expect(res.status).toBe(200)
+    const s = seen.at(-1)!
+    expect(s.headers['user-agent']).toBe('ua/1')
+    expect(s.headers['x-opencode-session']).toBe('conv-3')
+    expect(s.headers['x-opencode-client']).toBeUndefined()
   })
 
   test('в дамп не попадает ни пропуск, ни тело людей', async () => {

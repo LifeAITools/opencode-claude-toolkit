@@ -39,6 +39,7 @@ import type { WakeEvent } from './wake-types'
 import type { SessionSpend } from './session-spend'
 import type { ProviderQuota } from './provider-quota'
 import { readGoActiveAccountOrg, readGoQuotaPool, readGoQuotaStatusWindows } from './provider-go-usage'
+import { readOpenDesignQuota, pickOpenDesignAccount } from './provider-open-design-usage'
 
 /**
  * Model context window SSOT (mirrors @life-ai-tools/claude-code-sdk/src/models.ts).
@@ -830,6 +831,46 @@ export class SignalWire {
         const at = Date.parse(go.measuredAt)
         if (Number.isFinite(at)) {
           meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
+        }
+      }
+    }
+    // 🔴 OPENDESIGN — ДРУГОЙ ПРОВАЙДЕР, ЗНАЧИТ ДРУГОЙ ПРЕДМЕТ (замер 05.11.2026).
+    // У агента на `-od` в окружении всё ещё лежит KIBEROS_GO_ORG, поэтому блок Go выше уже
+    // мог положить в подвал окна Go. Это ровно «число без своего предмета»: человек читает
+    // «осталось 17%», а модель ходит в другую подписку, где осталось 5%. Поэтому перекрываем,
+    // а не смешиваем: имя — workspace провайдера, числа — ЕГО окна, пул Go снимаем целиком.
+    {
+      const onOpenDesign = this.lastModel?.includes('flash-od') === true || this.lastProvider === 'open-design'
+      if (onOpenDesign) {
+        const od = readOpenDesignQuota()
+        const acc = pickOpenDesignAccount(od)
+        if (acc && !acc.absent) {
+          if (acc.util5h !== null) meta.quotaUtil5h = acc.util5h
+          if (acc.util7d !== null) meta.quotaUtil7d = acc.util7d
+          if (acc.reset5hAt) meta.quotaResetAt = acc.reset5hAt
+          // 🔴 Подпись — имя workspace, как решил фаундер 05.11.2026: org-id провайдера
+          // («xzw7wj10g…») человеку ничего не говорит. Провайдер не даёт org-uid SynqTask,
+          // поэтому связывать нечем и выдумывать нельзя.
+          const label = acc.org ?? acc.workspaceId
+          if (label) meta.quotaAccountHint = label
+          meta.quotaSource = 'subscription'
+          // Пул и уровень — величины ПРО НЕСКОЛЬКО счетов; у OpenDesign в подписи один
+          // workspace, поэтому копия своего числа под чужим именем не нужна.
+          delete (meta as any).quotaPoolUtil5h
+          delete (meta as any).quotaPoolUtil7d
+          delete (meta as any).quotaPoolAccounts
+          delete (meta as any).quotaLevel
+          const at = Date.parse(od!.measuredAt ?? '')
+          if (Number.isFinite(at)) meta.quotaSnapshotAgeSeconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
+        } else {
+          // Либо подписки нет (причина названа провайдером), либо файла ещё нет. В обоих
+          // случаях числа Go сюда попадать не имеют права: агент ходит в ДРУГУЮ подписку,
+          // и «осталось 17%» про неё было бы ложью.
+          if (acc && (acc.org ?? acc.workspaceId)) meta.quotaAccountHint = (acc.org ?? acc.workspaceId)!
+          else delete (meta as any).quotaAccountHint
+          delete (meta as any).quotaUtil5h
+          delete (meta as any).quotaUtil7d
+          delete (meta as any).quotaResetAt
         }
       }
     }

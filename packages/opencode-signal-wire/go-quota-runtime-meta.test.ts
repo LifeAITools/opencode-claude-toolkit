@@ -129,3 +129,62 @@ describe('плоские поля квоты (договор ядра 6133884)',
     expect(m.quotaSource).toBeUndefined()
   })
 })
+
+describe('подвал на OpenDesign (05.11.2026)', () => {
+  // 🔴 Главное, что здесь защищается: у агента на `-od` в окружении всё ещё лежит
+  // KIBEROS_GO_ORG. Без перекрытия подвал показал бы окна GO под именем GO — число без
+  // своего предмета: человек читает «осталось 17%», а модель ходит в другую подписку.
+  let prevOrg: string | undefined
+  let prevOd: string | undefined
+  beforeEach(() => { prevOrg = process.env.KIBEROS_GO_ORG; prevOd = process.env.OPEN_DESIGN_QUOTA_STATUS_JSON })
+  afterEach(() => {
+    prevOrg === undefined ? delete process.env.KIBEROS_GO_ORG : process.env.KIBEROS_GO_ORG = prevOrg
+    prevOd === undefined ? delete process.env.OPEN_DESIGN_QUOTA_STATUS_JSON : process.env.OPEN_DESIGN_QUOTA_STATUS_JSON = prevOd
+  })
+
+  const odFile = (accounts: Record<string, unknown>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sw-od-'))
+    const f = join(dir, 'od.json')
+    writeFileSync(f, JSON.stringify({ provider: 'open-design', measured_at: NOW, plan: 'go', accounts }))
+    process.env.OPEN_DESIGN_QUOTA_STATUS_JSON = f
+    return f
+  }
+
+  test('на -od подвал показывает workspace и ЕГО окна, а не окна Go из окружения', () => {
+    process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
+    odFile({ "Ruslan Elishev's workspace": { org: "Ruslan Elishev's workspace", workspaceId: 'w-1', util5h: 0.053, util7d: 0.018 } })
+    const sw = make()
+    sw.trackProviderQuota([goQuota()])
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
+    const m: any = sw.getCurrentRuntimeMeta()
+    expect(m.quotaUtil5h).toBeCloseTo(0.053, 5)      // НЕ 0.22 из окна Go
+    expect(m.quotaUtil7d).toBeCloseTo(0.018, 5)
+    expect(m.quotaAccountHint).toBe("Ruslan Elishev's workspace")
+    expect(m.quotaSource).toBe('subscription')
+    expect(m.quotaPoolUtil5h).toBeUndefined()         // пул — про несколько счетов, здесь он чужой
+  })
+
+  test('workspace без подписки: имя есть, чисел нет — и чисел Go тоже', () => {
+    process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
+    odFile({ team: { org: 'DeepSeek hareness team', workspaceId: 'w-2', absent: 'no_active_subscription' } })
+    const sw = make()
+    sw.trackProviderQuota([goQuota()])
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
+    const m: any = sw.getCurrentRuntimeMeta()
+    expect(m.quotaAccountHint).toBe('DeepSeek hareness team')
+    expect(m.quotaUtil5h).toBeUndefined()
+    expect(m.quotaUtil7d).toBeUndefined()
+  })
+
+  test('файла OpenDesign нет — полей нет, а НЕ числа Go', () => {
+    process.env.KIBEROS_GO_ORG = 'hello@uniclowd.com'
+    delete process.env.OPEN_DESIGN_QUOTA_STATUS_JSON
+    process.env.OPEN_DESIGN_QUOTA_STATUS_JSON = join(mkdtempSync(join(tmpdir(), 'sw-od-empty-')), 'none.json')
+    const sw = make()
+    sw.trackProviderQuota([goQuota()])
+    sw.trackModel('kiberos-go/deepseek-v4.1-flash-od', 'kiberos-go')
+    const m: any = sw.getCurrentRuntimeMeta()
+    expect(m.quotaUtil5h).toBeUndefined()
+    expect(m.quotaAccountHint).toBeUndefined()
+  })
+})

@@ -27,6 +27,7 @@ import { EVENT } from '../event-bus.js'
 import { readCallerSession, resolveSessionIdentity } from '../session-identity.js'
 import { loadProviderRegistry, keyEnvFor, type ProviderRegistry } from '../provider-registry.js'
 import { UNIFIED_QUOTA_JSON } from '../quota-unified.js'
+import { planPlacement, type PlacementOrg } from '../placement.js'
 
 const PROVIDER = 'open-design'
 const DEFAULT_UPSTREAM = 'https://amr-link.open-design.ai/v1'
@@ -40,49 +41,60 @@ export interface OdAccountView {
   windows: Array<{ name: string; usedFraction: number | null; resetsAt: string | null }>
 }
 
+/**
+ * Отчёт квоты → вход анализатора размещения.
+ *
+ * 🔴 ЗДЕСЬ РЕШАЕТ `planPlacement`, А НЕ ГОЛЫЙ ЗАПАС (слово фаундера 05.11.2026).
+ * Простой «у кого больше запас» сгоняет всех на одну организацию, они разгоняют её и
+ * упираются в стену. Анализатор считает темп окна, время до стены и то, сколько агентов
+ * уже посажено (маргинальная нагрузка посадки ещё одного).
+ *
+ * Аккаунт без измеренных окон даёт вердикт `unknown` и НЕ выходит вперёд измеренных.
+ */
+export function odPlacementInputs(
+  accounts: OdAccountView[],
+  activeAgentsByEmail: Map<string, number> = new Map(),
+): PlacementOrg[] {
+  return accounts.map(a => {
+    const status = String(a.status ?? 'unreadable').toLowerCase()
+    const blockedReason = status === 'exhausted' ? 'организация исчерпана'
+      : status === 'absent' ? 'организация без подписки'
+        : status === 'unreadable' ? 'квоту измерить не удалось'
+          : null
+    return {
+      name: String(a.account ?? ''),
+      windows: (a.windows ?? []).map(w => ({
+        name: w.name,
+        util: typeof w.usedFraction === 'number' ? w.usedFraction : null,
+        resetAt: w.resetsAt ? Date.parse(w.resetsAt) : null,
+      })),
+      activeAgents: activeAgentsByEmail.get(String(a.account ?? '')) ?? 0,
+      blockedReason,
+    }
+  })
+}
+
 export interface OdPick {
   email: string
   keyEnv: string
-  headroomFraction: number | null
   why: string
 }
 
-/**
- * Выбор аккаунта — ЧИСТАЯ функция, чтобы её можно было проверить без сети.
- *
- * Правила:
- *  • только `status: 'active'` — `absent`/`exhausted`/`unreadable` не кандидаты;
- *  • аккаунт без объявленного ключа не кандидат (иначе пришлось бы гадать ключом соседа);
- *  • порядок — по запасу: больше `headroomFraction` выше; `null` (не измерено) идёт
- *    ПОСЛЕ измеренных, но не отбрасывается: незнание не равно «нет запаса»;
- *  • ничья — по email, чтобы порядок не прыгал между вызовами.
- */
+/** Выбор аккаунта для НОВОГО разговора — через анализатор размещения. */
 export function pickOpenDesignAccount(
   accounts: OdAccountView[],
   keyByEmail: (email: string | null) => string | null,
+  opts: { nowMs?: number; activeAgentsByEmail?: Map<string, number>; seed?: string } = {},
 ): OdPick | null {
-  const candidates: OdPick[] = []
-  for (const a of accounts) {
-    if (a.status !== 'active') continue
-    const keyEnv = keyByEmail(a.account)
-    if (!keyEnv) continue
-    candidates.push({
-      email: String(a.account),
-      keyEnv,
-      headroomFraction: a.headroomFraction,
-      why: a.headroomFraction === null ? 'headroom_unmeasured' : 'headroom',
-    })
-  }
-  if (!candidates.length) return null
-  candidates.sort((x, y) => {
-    const hx = x.headroomFraction
-    const hy = y.headroomFraction
-    if (hx === null && hy !== null) return 1
-    if (hy === null && hx !== null) return -1
-    if (hx !== null && hy !== null && hx !== hy) return hy - hx
-    return x.email.localeCompare(y.email)
-  })
-  return candidates[0]
+  const now = opts.nowMs ?? Date.now()
+  // Аккаунт без объявленного ключа — НЕ кандидат, и отсекается ДО анализатора: иначе он
+  // выиграл бы по запасу и превратил бы выбор в отказ, хотя рядом есть годный.
+  const usable = accounts.filter(a => keyByEmail(a.account))
+  const plan = planPlacement(odPlacementInputs(usable, opts.activeAgentsByEmail), now, opts.seed ?? '')
+  if (!plan.org) return null
+  const keyEnv = keyByEmail(plan.org.name)
+  if (!keyEnv) return null
+  return { email: plan.org.name, keyEnv, why: plan.reason }
 }
 
 /** `deepseek-v4.1-flash-od` → `deepseek-v4.1-flash` (суффикс — наш, у поставщика его нет). */
@@ -160,11 +172,14 @@ async function serve(req: Request): Promise<Response> {
     const p = pins.get(sessionId)
     if (p && Date.now() - p.at < PIN_TTL_MS) {
       const envName = keyByEmail(p.email)
-      if (envName) { chosen = { email: p.email, keyEnv: envName, headroomFraction: null, why: 'pin' }; pinned = true }
+      if (envName) { chosen = { email: p.email, keyEnv: envName, why: 'pin' }; pinned = true }
     }
   }
   if (!chosen) {
-    chosen = pickOpenDesignAccount(accountsFromQuota(), keyByEmail)
+    // Сколько агентов уже посажено на каждый аккаунт — по пинам этой же двери.
+    const counts = new Map<string, number>()
+    for (const p of pins.values()) counts.set(p.email, (counts.get(p.email) ?? 0) + 1)
+    chosen = pickOpenDesignAccount(accountsFromQuota(), keyByEmail, { activeAgentsByEmail: counts, seed: sessionId ?? '' })
     if (!chosen) {
       ctx.emit({
         level: 'error', kind: EVENT.OD_ERROR, sessionId, model,

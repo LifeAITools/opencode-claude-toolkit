@@ -111,7 +111,8 @@ export function windowOf(raw: NonNullable<NonNullable<Preflight['codingPlan']>['
   }
 }
 
-export function snapshotFrom(preflight: Preflight, email: string | null, now = new Date()): OpenDesignSnapshot {
+/** Один workspace (организация) → одна запись аккаунта. Несколько — столько же записей. */
+export function accountFrom(preflight: Preflight, workspace: { id: string; name: string | null; type: string | null }, email: string | null, now: Date) {
   const plan = preflight?.codingPlan
   const rawWindows = Array.isArray(plan?.windows) ? plan!.windows! : []
   const windows = rawWindows.map(windowOf).filter((w): w is OpenDesignWindow => w !== null)
@@ -119,12 +120,11 @@ export function snapshotFrom(preflight: Preflight, email: string | null, now = n
   const w7 = windows.find(w => w.window === 'week') ?? null
   const eligible = plan?.eligible !== false
   const absent = !eligible ? 'no_active_subscription' : windows.length === 0 ? 'provider_reported_no_windows' : undefined
-  const status = absent ? 'absent' : 'active'
-  const level = classifyLevel(w5?.util ?? null, w7?.util ?? null)
-  const iso = now.toISOString()
-  const account = {
+  return {
     accountHint: email,
-    org: email,
+    org: workspace.name ?? workspace.id,
+    workspaceId: workspace.id,
+    workspaceType: workspace.type,
     plan: plan?.tier ?? null,
     balanceUsd: preflight?.balanceUsd ?? null,
     util5h: w5?.util ?? null,
@@ -134,6 +134,40 @@ export function snapshotFrom(preflight: Preflight, email: string | null, now = n
     windows,
     ...(absent ? { absent } : {}),
   }
+}
+
+export interface WorkspaceRef { id: string; name: string | null; type: string | null; isDefault: boolean }
+
+/**
+ * 🔴 ОДИН ВХОД ОБСЛУЖИВАЕТ ВСЕ ОРГАНИЗАЦИИ АККАУНТА (замер 05.11.2026).
+ * `GET /api/v1/workspaces` с одним Control Key вернул ДВА workspace: личный (eligible, план go,
+ * окна 5ч/нед) и командный (eligible:false, окон нет, кошелёк 0). То есть новая организация,
+ * заведённая под тем же аккаунтом, подхватывается САМА — новый ключ не нужен и файл править
+ * не надо. Отдельный вход нужен только под ДРУГОЙ аккаунт (другая почта) — и он тоже
+ * одной командой, без ручной правки файлов.
+ *
+ * Отсутствие подписки у организации — это `absent` с причиной, а НЕ «0% использовано»:
+ * иначе балансировщик считал бы её годной и отправлял туда ходы.
+ */
+export function snapshotFromWorkspaces(preflights: Array<{ workspace: WorkspaceRef; preflight: Preflight }>, email: string | null, now = new Date()): OpenDesignSnapshot {
+  const iso = now.toISOString()
+  const accounts: OpenDesignSnapshot['accounts'] = {}
+  const orgs: OpenDesignSnapshot['orgs'] = []
+  let plan: string | null = null
+  let balance: string | null = null
+  for (const { workspace, preflight } of preflights) {
+    const acc = accountFrom(preflight, workspace, email, now)
+    const key = workspace.name ?? workspace.id
+    accounts[key] = acc
+    orgs.push({
+      name: acc.org, util5h: acc.util5h, util7d: acc.util7d,
+      level: classifyLevel(acc.util5h ?? null, acc.util7d ?? null),
+      status: acc.absent ? 'absent' : 'active', windows: acc.windows,
+      ...(acc.absent ? { absent: acc.absent } : {}),
+    } as any)
+    // Для сводки берём ПЕРВУЮ ГОДНУЮ организацию: у неё есть план и кошелёк.
+    if (!acc.absent && plan === null) { plan = acc.plan; balance = acc.balanceUsd }
+  }
   return {
     version: 1,
     provider: 'open-design',
@@ -141,10 +175,10 @@ export function snapshotFrom(preflight: Preflight, email: string | null, now = n
     measured_at: iso,
     org: email,
     orgSource: 'control_api',
-    plan: plan?.tier ?? null,
-    balanceUsd: preflight?.balanceUsd ?? null,
-    accounts: { [email ?? 'unknown']: account },
-    orgs: [{ name: email, util5h: account.util5h, util7d: account.util7d, level, status, windows, ...(absent ? { absent } : {}) }],
+    plan,
+    balanceUsd: balance,
+    accounts,
+    orgs,
   }
 }
 
@@ -164,11 +198,32 @@ export async function collect(credentialsPath = CONTROL_CREDENTIALS_JSON): Promi
   if (!key || !key.startsWith('vela_ctrl_')) {
     throw new Error(`${credentialsPath}: нет Control Key (vela_ctrl_…) — войдите через open-design-login.mjs`)
   }
-  const ws = await api('/api/v1/workspaces/current', key)
-  const workspaceId = ws?.workspaceId ?? ws?.id
-  if (!workspaceId) throw new Error('workspaces/current не назвал workspaceId')
-  const preflight = (await api(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/billing/preflight`, key)) as Preflight
-  return snapshotFrom(preflight, creds.email ?? ws?.workspaceName ?? null)
+  // Список организаций аккаунта. Не читается — работаем по одной текущей (прежнее поведение).
+  let workspaces: WorkspaceRef[] = []
+  try {
+    const list = await api('/api/v1/workspaces', key)
+    workspaces = (Array.isArray(list?.items) ? list.items : []).map((w: any) => ({
+      id: String(w.workspaceId), name: w.workspaceName ? String(w.workspaceName) : null,
+      type: w.workspaceType ? String(w.workspaceType) : null, isDefault: !!w.isDefault,
+    })).filter((w: WorkspaceRef) => w.id)
+  } catch { /* ниже — запас по текущей */ }
+  if (!workspaces.length) {
+    const cur = await api('/api/v1/workspaces/current', key)
+    const id = cur?.workspaceId ?? cur?.id
+    if (!id) throw new Error('workspaces/current не назвал workspaceId')
+    workspaces = [{ id: String(id), name: cur?.workspaceName ?? null, type: cur?.workspaceType ?? null, isDefault: true }]
+  }
+  const preflights: Array<{ workspace: WorkspaceRef; preflight: Preflight }> = []
+  for (const workspace of workspaces) {
+    try {
+      const preflight = (await api(`/api/v1/workspaces/${encodeURIComponent(workspace.id)}/billing/preflight`, key)) as Preflight
+      preflights.push({ workspace, preflight })
+    } catch (err: any) {
+      // Одна организация не читается — остальные всё равно попадают в отчёт.
+      preflights.push({ workspace, preflight: { codingPlan: { eligible: false } } as Preflight })
+    }
+  }
+  return snapshotFromWorkspaces(preflights, creds.email ?? null)
 }
 
 export function writeSnapshot(snap: OpenDesignSnapshot, path = QUOTA_STATUS_OPEN_DESIGN_JSON): string {
@@ -184,7 +239,10 @@ if (import.meta.main) {
     const snap = await collect()
     const out = writeSnapshot(snap)
     console.log(`[open-design-quota] записано ${out}`)
-    console.log(`[open-design-quota] план ${snap.plan ?? '?'} · 5ч ${snap.orgs[0]?.util5h ?? '—'} · неделя ${snap.orgs[0]?.util7d ?? '—'}`)
+    const live = snap.orgs.find(o => o.status === 'active') ?? snap.orgs[0]
+    const absent = snap.orgs.filter(o => o.status !== 'active').map(o => `${o.name} (${(o as any).absent ?? 'нет данных'})`)
+    console.log(`[open-design-quota] план ${snap.plan ?? '?'} · ${live?.name ?? '?'} 5ч ${live?.util5h ?? '—'} · неделя ${live?.util7d ?? '—'}`)
+    if (absent.length) console.log(`[open-design-quota] без подписки: ${absent.join(', ')}`)
   } catch (err: any) {
     console.error(`[open-design-quota] ОТКАЗ: ${String(err?.message ?? err).slice(0, 300)}`)
     process.exit(1)

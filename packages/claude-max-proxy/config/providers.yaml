@@ -58,8 +58,12 @@ providers:
       adapter: open-design-preflight
       credentials: ~/.secrets/open-design-control.json
       status_file: ~/.claude-local/quota-status-open-design.json
-    accounts:
-      - relishev@gmail.com
+    # 🔴 АККАУНТЫ ЗДЕСЬ НЕ ПЕРЕЧИСЛЯЮТСЯ РУКАМИ: один Control Key видит ВСЕ организации
+    # аккаунта (`GET /api/v1/workspaces`), и сборщик обходит их сам. Замер 05.11.2026:
+    # у одного входа оказалось два workspace — личный (план go, окна 5ч/нед) и командный
+    # (eligible:false, окон нет). Новая организация под тем же аккаунтом подхватывается
+    # без правки этого файла; отдельный вход нужен только под ДРУГУЮ почту.
+    accounts_from: control-key
     models:
       - deepseek-v4.1-flash-od
 

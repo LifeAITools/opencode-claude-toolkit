@@ -263,9 +263,42 @@ Unit=claude-max-alibaba-quota.service
 WantedBy=timers.target
 UNIT
 
+# OpenDesign Go quota collector (2026-11-05) — writes ~/.claude-local/quota-status-open-design.json.
+# Second provider behind the same footer as OpenCode Go. Quota is read from the CONTROL plane with a
+# Control Key (vela_ctrl_…), never from the inference key: amr-api refuses sk-amr-… by design
+# (nexu-io/open-design#8674). Credentials live in ~/.secrets/open-design-control.json, obtained by
+# scripts/provider/open-design-login.mjs — no desktop app and no Linux build required.
+cat > "$UNIT_DIR/claude-max-open-design-quota.service" <<UNIT
+[Unit]
+Description=claude-max-open-design-quota — OpenDesign Go remaining quota -> quota-status-open-design.json
+Documentation=file://$INSTALLED/src/open-design-quota.ts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$BUN $INSTALLED/src/open-design-quota.ts
+StandardOutput=append:$HOME/.claude/claude-max-open-design-quota.log
+StandardError=append:$HOME/.claude/claude-max-open-design-quota.log
+UNIT
+
+cat > "$UNIT_DIR/claude-max-open-design-quota.timer" <<UNIT
+[Unit]
+Description=Refresh OpenDesign Go quota every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=claude-max-open-design-quota.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl --user daemon-reload
 systemctl --user enable --now claude-max-alibaba-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-alibaba-quota.timer"
-log "systemd units regenerated (binary ExecStart + OnFailure alert + alibaba quota timer)"
+systemctl --user enable --now claude-max-open-design-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-open-design-quota.timer"
+log "systemd units regenerated (binary ExecStart + OnFailure alert + alibaba/open-design quota timers)"
 
 # 4c. Hourly dump/backup rotation backstop — installed from source, never hand-edited
 #     (it lived only in ~/.local/bin until 2026-09-25, invisible to review).

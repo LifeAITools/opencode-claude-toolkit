@@ -61,3 +61,30 @@ describe('open-design-quota', () => {
     expect(Object.keys(snap.accounts).length).toBe(2)
   })
 })
+
+describe('несколько входов = несколько организаций (05.11.2026)', () => {
+  test('явная переменная окружения перебивает маску и даёт ровно один файл', async () => {
+    const { credentialFiles } = await import('./open-design-quota.js')
+    const prev = process.env.OPEN_DESIGN_CREDENTIALS
+    process.env.OPEN_DESIGN_CREDENTIALS = '/tmp/some-explicit-control.json'
+    try {
+      expect(credentialFiles()).toEqual(['/tmp/some-explicit-control.json'])
+    } finally {
+      if (prev === undefined) delete process.env.OPEN_DESIGN_CREDENTIALS
+      else process.env.OPEN_DESIGN_CREDENTIALS = prev
+    }
+  })
+
+  test('без переменной — хотя бы один путь (маска или путь по умолчанию)', async () => {
+    const { credentialFiles } = await import('./open-design-quota.js')
+    const prev = process.env.OPEN_DESIGN_CREDENTIALS
+    delete process.env.OPEN_DESIGN_CREDENTIALS
+    try {
+      const files = credentialFiles()
+      expect(files.length).toBeGreaterThan(0)
+      expect(files.every(f => f.endsWith('.json'))).toBe(true)
+    } finally {
+      if (prev !== undefined) process.env.OPEN_DESIGN_CREDENTIALS = prev
+    }
+  })
+})

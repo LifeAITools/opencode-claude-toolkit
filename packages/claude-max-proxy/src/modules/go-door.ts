@@ -202,10 +202,14 @@ export function selectOrg(
       }
     }
     // Порядок двери: named (выше) → pin (выше) → модель «время до стены» → active (ниже).
-    const picked = pickOrgByTimeToWall(reg.orgs, quotas, has, { sessionKey: key || null })
+    // Организацию, только что ответившую 429, на ближайшем ходу не берём (см. poolAfter429).
+    const dropped = key ? pinDropped.get(key) : undefined
+    const pool = key
+      ? poolAfter429(reg.orgs, dropped?.org ?? null, dropped?.at ?? null, Date.now())
+      : reg.orgs
+    const picked = pickOrgByTimeToWall(pool, quotas, has, { sessionKey: key || null })
     if (picked.org) {
       if (key) pinStore(key, picked.org.name)
-      const dropped = key ? pinDropped.get(key) : undefined
       if (dropped && key) {
         pinDropped.delete(key)
         return {
@@ -421,6 +425,33 @@ let pinExpired: { org: string; at: number } | null = null
  */
 const pinDropped = new Map<string, { org: string; at: number }>()
 const PIN_DROPPED_TTL_MS = 60 * 60 * 1000
+
+/**
+ * СКОЛЬКО НЕ БРАТЬ ОРГАНИЗАЦИЮ, ТОЛЬКО ЧТО ОТВЕТИВШУЮ 429 (05.11.2026).
+ *
+ * Замер: сессия `ses_e522…` за 66 секунд получила пять `429 [overloaded]` подряд на
+ * `hello@synqwire.io`. Выдача снималась после каждого («следующий ход возьмёт свежую»),
+ * но выбор по запасу снова брал ТУ ЖЕ организацию — у неё окна 33%/35%, она честно
+ * выглядела лучшей. В итоге агент стоял на перегруженном апстриме, пока соседние
+ * организации в те же секунды отдавали 200. `overloaded` окна не двигает, поэтому по
+ * квоте такую организацию не отличить — нужен короткий явный отдых.
+ */
+export const ORG_429_COOLDOWN_MS = 120_000
+
+/**
+ * Пул организаций для выбора после 429: убираем ту, что только что отказала, — но только
+ * если есть кем её заменить. Осталась одна — берём её: пустой выбор хуже перегруженной.
+ */
+export function poolAfter429<T extends { name: string }>(
+  orgs: readonly T[],
+  droppedOrg: string | null,
+  droppedAt: number | null,
+  now: number,
+): readonly T[] {
+  if (!droppedOrg || droppedAt === null || now - droppedAt >= ORG_429_COOLDOWN_MS) return orgs
+  const rest = orgs.filter((o) => o.name !== droppedOrg)
+  return rest.length > 0 ? rest : orgs
+}
 
 function pinLookup(key: string): string | null {
   loadPins()

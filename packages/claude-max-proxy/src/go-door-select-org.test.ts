@@ -10,7 +10,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { selectOrg, restorePinsForTest } from './modules/go-door.js'
+import { selectOrg, restorePinsForTest, poolAfter429, ORG_429_COOLDOWN_MS } from './modules/go-door.js'
 import type { GoRegistry } from './go-registry.js'
 import type { GoOrg } from './go-registry.js'
 
@@ -133,5 +133,29 @@ describe('снятие выдачи при отказе (вторая полов
   test('прочие отказы выдачу не снимают: 400/403/500 — не стена', async () => {
     const { shouldDropPinOnFailure } = await import('./modules/go-door.js')
     for (const st of [400, 401, 403, 500, 502, 503, 529]) expect(shouldDropPinOnFailure(st, 'ses_x')).toBe(false)
+  })
+})
+
+describe('отдых организации после 429 (05.11.2026)', () => {
+  const orgs = [{ name: 'a' }, { name: 'b' }]
+
+  test('только что отказавшую убираем, если есть кем заменить', () => {
+    const out = poolAfter429(orgs, 'a', Date.now() - 5_000, Date.now())
+    expect(out.map((o) => o.name)).toEqual(['b'])
+  })
+
+  test('после отдыха она снова в пуле', () => {
+    const out = poolAfter429(orgs, 'a', Date.now() - ORG_429_COOLDOWN_MS - 1, Date.now())
+    expect(out.map((o) => o.name)).toEqual(['a', 'b'])
+  })
+
+  test('осталась одна — берём её: пустой выбор хуже перегруженной', () => {
+    const out = poolAfter429([{ name: 'a' }], 'a', Date.now() - 1_000, Date.now())
+    expect(out.map((o) => o.name)).toEqual(['a'])
+  })
+
+  test('отдыха не было — пул не трогаем', () => {
+    const out = poolAfter429(orgs, null, null, Date.now())
+    expect(out.map((o) => o.name)).toEqual(['a', 'b'])
   })
 })

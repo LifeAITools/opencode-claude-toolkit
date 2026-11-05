@@ -587,6 +587,24 @@ def refresh_over_network(account_url: str, refresh_token: str) -> dict[str, obje
     return body
 
 
+_DEAD_CREDENTIAL_STATUSES: Final = frozenset({400, 401, 403})
+
+
+def is_dead_credential(error: Exception) -> bool:
+    """Сервер входа отверг САМ вход, а не заминка сети или сервера.
+
+    Замер 05.11.2026: удалённый аккаунт отвечает `400 invalid_grant` — повторять это
+    каждую ночь бессмысленно, вход не оживёт. 429 и 5xx сюда НЕ входят: это заминка,
+    её повторит завтрашний прогон, и о ней стоит тревожить.
+
+    Разбор по тексту ошибки, потому что `refresh_over_network` бросает `RuntimeError`
+    с готовой формулировкой «сервер входа ответил <код>». Нет кода в тексте (сеть не
+    ответила вовсе) — значит не мёртвый вход, а заминка.
+    """
+    found: Final = re.search(r"сервер входа ответил\s+(\d{3})", str(error))
+    return bool(found) and int(found.group(1)) in _DEAD_CREDENTIAL_STATUSES
+
+
 def credential_values(org: Org, secret: str) -> dict[str, object]:
     """Всё, чем посредник ходит к организации, — одной записью.
 
@@ -830,6 +848,7 @@ class Journal:
 
     notify_cmd: str | None = None
     failures: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def say(self, message: str) -> None:
         # 🔴 stdout ПРИНАДЛЕЖИТ ДАННЫМ, ЖУРНАЛ ИДЁТ В stderr. Замер 24.10.2026 (нашёл
@@ -839,6 +858,21 @@ class Journal:
         # на пять минут становился слепым ровно в момент, когда ждали подхвата свежей.
         # Правило: при `--json` в stdout не попадает НИ ОДНОЙ человеческой строки.
         print(message, file=sys.stderr if MACHINE_OUTPUT else sys.stdout, flush=True)
+
+    def warn(self, message: str) -> None:
+        """Не отказ, но и не «всё в порядке»: сказано и видно, а прогон не валится.
+
+        Зачем отдельное состояние (05.11.2026): в реестре жил аккаунт, который сервер
+        входа отвергал навсегда (`400 invalid_grant`, аккаунт удалён в OpenCode Go).
+        Каждую ночь продление спотыкалось об него, прогон выходил с кодом 1, и в тему
+        уходила тревога «продление пропуска не удалось» — при том что все остальные
+        продлевались нормально. Ежедневная ложная тревога обесценивает саму тревогу:
+        её перестают читать. Мёртвый вход — это не потерянное продление, это запись,
+        которую надо убрать из реестра.
+        """
+        line: Final = f"ВНИМАНИЕ: {message}"
+        print(line, file=sys.stderr if MACHINE_OUTPUT else sys.stdout, flush=True)
+        self.warnings.append(line)
 
     def fail(self, message: str) -> None:
         line: Final = f"ОТКАЗ: {message}"
@@ -1592,6 +1626,13 @@ def command_refresh(
             response = refresh_call(org.account_url or "", token.refresh_token)
             renewed = apply_rotation(token, response, context.now_ms)
         except Exception as error:  # noqa: BLE001 — любой провал продления громкий и поимённый
+            if is_dead_credential(error) and org.name != context.registry.active:
+                journal.warn(
+                    f"{org.name}: вход мёртв — сервер входа его отверг ({error}). "
+                    "Продление невозможно; запись надо убрать из реестра. "
+                    "Работающей организации это не касается, прогон не валится."
+                )
+                continue
             journal.fail(f"{org.name}: продлить не удалось: {error}")
             continue
         state[org.name] = renewed

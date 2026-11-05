@@ -221,6 +221,46 @@ def test_failed_refresh_is_loud_and_notifies(tmp_path: Path) -> None:
     assert gr.load_state(ctx.state_path)["console-a"].refresh_token == "ref"
 
 
+def test_a_dead_non_working_credential_warns_without_failing_the_run(tmp_path: Path) -> None:
+    """Мёртвый вход нерабочей организации — предупреждение, а не провал прогона.
+
+    Замер 05.11.2026: удалённый аккаунт отвечал `400 invalid_grant`, и продление
+    валило ВЕСЬ прогон каждую ночь (`exit 1` + тревога «продление не удалось»),
+    хотя остальные семнадцать организаций продлевались нормально. Ежедневная ложная
+    тревога обесценивает саму тревогу. Мёртвый вход — не потерянное продление.
+    """
+    ctx = context(tmp_path, {"console-a": gr.ConsoleToken("acc", "ref", NOW_MS + DAY_MS)})
+    # Рабочая — ключевая организация, значит console-a нерабочая.
+    ctx = replace(ctx, registry=replace(ctx.registry, active="apikey-b"))
+    marker = tmp_path / "notified.txt"
+    journal = gr.Journal(notify_cmd=f"cat > {marker}")
+
+    def refresh(account_url: str, refresh_token: str) -> dict[str, object]:
+        raise RuntimeError('сервер входа ответил 400: {"error": "invalid_grant"}')
+
+    gr.command_refresh(ctx, journal, force=False, refresh_call=refresh, push_call=lambda name, token: None)
+
+    assert journal.finish() == 0, "мёртвый вход нерабочей организации не должен валить прогон"
+    assert not marker.exists(), "тревога за это уходить не должна"
+    assert any("вход мёртв" in line for line in journal.warnings)
+    assert gr.load_state(ctx.state_path)["console-a"].refresh_token == "ref"
+
+
+def test_a_transient_auth_failure_still_fails_the_run(tmp_path: Path) -> None:
+    """Заминка сервера — по-прежнему провал: её повторит завтрашний прогон, но знать надо."""
+    ctx = context(tmp_path, {"console-a": gr.ConsoleToken("acc", "ref", NOW_MS + DAY_MS)})
+    ctx = replace(ctx, registry=replace(ctx.registry, active="apikey-b"))
+    journal = gr.Journal()
+
+    def refresh(account_url: str, refresh_token: str) -> dict[str, object]:
+        raise RuntimeError("сервер входа ответил 503: temporarily unavailable")
+
+    gr.command_refresh(ctx, journal, force=False, refresh_call=refresh, push_call=lambda name, token: None)
+
+    assert journal.finish() == 1
+    assert not journal.warnings
+
+
 def test_a_missing_token_is_a_failure_not_a_silent_skip(tmp_path: Path) -> None:
     ctx = context(tmp_path, {})
     journal = gr.Journal()

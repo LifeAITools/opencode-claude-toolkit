@@ -73,6 +73,11 @@ providers:
         key_env: OPEN_DESIGN_API_KEY
       - email: hello@kiberos.app
         key_env: OPEN_DESIGN_API_KEY_2
+      # Третья организация (06.11.2026): новый workspace под почтой hello@lifeaitools.com,
+      # workspaceId hxpfdw8l87v9jzoj1tm5souf. Ключ и Control Key принадлежат ОДНОМУ счёту —
+      # проверено счётчиком квоты: оба ключа двигают один и тот же счётчик (+1/+1).
+      - email: hello@lifeaitools.com
+        key_env: OPEN_DESIGN_API_KEY_3
     models:
       - deepseek-v4.1-flash-od
       - deepseek-v4.1-flash-eco-od

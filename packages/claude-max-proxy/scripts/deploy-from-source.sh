@@ -179,6 +179,23 @@ COMMIT=$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)
 } > "$MANIFEST"
 log "manifest -> $MANIFEST ($(find "$INSTALLED/src" -name '*.ts' ! -name '*bak*' | wc -l) files, commit $COMMIT)"
 
+# 4a. OpenDesign model keys for the door — DERIVED from the vault, never a second copy
+#     someone edits. The door forwards to amr-link itself, so it needs the two model keys
+#     in its own environment; litellm/.env is the other process's file and loading it whole
+#     would drag the mediator's master key and DB password into the proxy.
+#     Absent vault files (e.g. another machine) are fine: the unit reads the file optionally.
+OD_ENV=$HOME/.claude-local/open-design-keys.env
+if [ -f "$HOME/.secrets/open-design.key" ] && [ -f "$HOME/.secrets/open-design-2.key" ]; then
+  ( umask 077
+    printf 'OPEN_DESIGN_API_KEY=%s\n'   "$(tr -d '\n' < "$HOME/.secrets/open-design.key")"   >  "$OD_ENV.tmp"
+    printf 'OPEN_DESIGN_API_KEY_2=%s\n' "$(tr -d '\n' < "$HOME/.secrets/open-design-2.key")" >> "$OD_ENV.tmp"
+    mv "$OD_ENV.tmp" "$OD_ENV" )
+  chmod 600 "$OD_ENV"
+  log "open-design keys -> $OD_ENV (from vault)"
+else
+  log "open-design keys: vault files absent — door will answer 503 for OD until provided"
+fi
+
 # 4b. systemd units — regenerated every deploy so unit drift is impossible.
 #     ExecStart = the compiled binary; OnFailure = alert hook.
 cat > "$UNIT_DIR/claude-max-proxy.service" <<UNIT
@@ -208,6 +225,8 @@ Environment=LOG_FORMAT=both
 # Dump retention = 24h (proxy body-capture + SDK body-dumps).
 Environment=CLAUDE_MAX_PROXY_CAPTURE_TTL_HOURS=24
 Environment=CLAUDE_BODY_DUMP_RETENTION_MS=86400000
+# OpenDesign model keys (derived from ~/.secrets by step 4a; optional file).
+EnvironmentFile=-$HOME/.claude-local/open-design-keys.env
 
 [Install]
 WantedBy=default.target

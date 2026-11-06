@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { odCallKind, odPlacementInputs, pickOpenDesignAccount, upstreamModel, type OdAccountView } from './modules/open-design-door.js'
+import { odAccountSource, odCallKind, odPlacementInputs, pickOpenDesignAccount, upstreamModel, type OdAccountView } from './modules/open-design-door.js'
 
 const H = 3_600_000
 const NOW = Date.parse('2026-11-05T12:00:00.000Z')
@@ -90,5 +90,14 @@ describe('вид вызова — тот же контракт, что у две
     expect(odCallKind('probe')).toBe('probe')
     expect(odCallKind(null)).toBe('real')
     expect(odCallKind('что-то')).toBe('real')
+  })
+})
+
+describe('источник выбора — код, а не фраза', () => {
+  test('в заголовок и журнал едет код; русская причина остаётся в событии', () => {
+    expect(odAccountSource(true)).toBe('pin')
+    expect(odAccountSource(false)).toBe('quota')
+    // Регрессия 06.11: свободный текст причины в header давал TypeError → 500.
+    expect(() => new Response('', { headers: { 'x-open-design-account-source': odAccountSource(false) } })).not.toThrow()
   })
 })

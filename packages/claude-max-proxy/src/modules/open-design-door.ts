@@ -109,6 +109,11 @@ export function upstreamModel(model: string): string {
   return model.endsWith('-od') ? model.slice(0, -3) : model
 }
 
+/** Источник выбора аккаунта — КОД для заголовка и журнала, не человеческая фраза. */
+export function odAccountSource(pinned: boolean): 'pin' | 'quota' {
+  return pinned ? 'pin' : 'quota'
+}
+
 /** Вид вызова — тем же заголовком, что и у двери Go: один контракт на все двери. */
 export function odCallKind(headerValue: string | null): 'real' | 'warm' | 'probe' | 'refresh' | 'title' {
   return headerValue === 'warm' || headerValue === 'probe' || headerValue === 'refresh' || headerValue === 'title'
@@ -187,7 +192,7 @@ async function serve(req: Request): Promise<Response> {
    * Маршрут OpenDesign идёт мимо неё, поэтому такие сессии навсегда оставались
    * `found:false`, и сборщик присутствия не мог назвать ни provider, ни account.
    * Пишем ТОТ ЖЕ вид записи, что и Go: `org_id` — аккаунт (`relishev@gmail.com`), а не
-   * id развёртывания, `org_source` — `pin` или причина выбора.
+   * id развёртывания, `org_source` — КОД (pin|quota), а не человеческая фраза.
    */
   const rec = newRecord({
     door: 'proxy:open-design',
@@ -253,7 +258,11 @@ async function serve(req: Request): Promise<Response> {
   }
 
   rec.org_id = chosen.email
-  rec.org_source = pinned ? 'pin' : chosen.why
+  // 🔴 КОД, а не фраза: `why` — русское предложение, и в заголовке оно недопустимо
+  // (замер 06.11: `new Response` с таким header падал TypeError → 500 уже после ответа
+  // апстрима). Человеческая причина остаётся в журнале и в событии, наружу едет код.
+  const accountSource = odAccountSource(pinned)
+  rec.org_source = accountSource
 
   const key = keyOf(chosen.keyEnv)
   if (!key) {
@@ -306,7 +315,7 @@ async function serve(req: Request): Promise<Response> {
   const passHeaders: Record<string, string> = {
     'content-type': upstream.headers.get('content-type') ?? (parsed?.stream === true ? 'text/event-stream' : 'application/json'),
     'x-open-design-account': chosen.email,
-    'x-open-design-account-source': pinned ? 'pin' : chosen.why,
+    'x-open-design-account-source': accountSource,
     // Тот же след выбора, что у двери Go: потребителю не нужно знать, какая дверь отвечала.
     'x-kiberos-served-org': chosen.email,
   }

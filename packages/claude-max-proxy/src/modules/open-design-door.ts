@@ -28,9 +28,16 @@ import { readCallerSession, resolveSessionIdentity } from '../session-identity.j
 import { loadProviderRegistry, keyEnvFor, type ProviderRegistry } from '../provider-registry.js'
 import { UNIFIED_QUOTA_JSON } from '../quota-unified.js'
 import { planPlacement, type PlacementOrg } from '../placement.js'
+import {
+  newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, classifyError,
+  extractUsageChat, usageFromSseText, bodyField,
+} from '../provider-dump.js'
 
 const PROVIDER = 'open-design'
 const DEFAULT_UPSTREAM = 'https://amr-link.open-design.ai/v1'
+const CALL_KIND_HEADER = 'x-kiberos-call-kind'
+/** Хвост потока, который держим для usage: строка `usage` короткая, остальное не нужно. */
+const STREAM_CAP_BYTES = 1_000_000
 /** Сколько живёт выбор аккаунта за сессией. 12 ч — как у пинов двери Go. */
 const PIN_TTL_MS = 12 * 60 * 60 * 1000
 
@@ -102,6 +109,13 @@ export function upstreamModel(model: string): string {
   return model.endsWith('-od') ? model.slice(0, -3) : model
 }
 
+/** Вид вызова — тем же заголовком, что и у двери Go: один контракт на все двери. */
+export function odCallKind(headerValue: string | null): 'real' | 'warm' | 'probe' | 'refresh' | 'title' {
+  return headerValue === 'warm' || headerValue === 'probe' || headerValue === 'refresh' || headerValue === 'title'
+    ? headerValue
+    : 'real'
+}
+
 let ctx: ModuleContext
 const pins = new Map<string, { email: string; at: number }>()
 
@@ -147,10 +161,11 @@ async function serve(req: Request): Promise<Response> {
   const cfg = ctx.config as any
   const upstreamBase = (cfg.openDesignUpstreamUrl ?? process.env.OPEN_DESIGN_UPSTREAM_URL ?? DEFAULT_UPSTREAM).replace(/\/$/, '')
 
+  const rawText = await req.text()
   let parsed: any
   let model: string | null = null
   try {
-    parsed = JSON.parse(await req.text())
+    parsed = JSON.parse(rawText)
     model = typeof parsed?.model === 'string' ? parsed.model : null
   } catch {
     return errorResponse(400, 'Invalid JSON body', 'invalid_request_error')
@@ -164,6 +179,50 @@ async function serve(req: Request): Promise<Response> {
   const caller = readCallerSession(req.headers)
   const identity = resolveSessionIdentity({ headerValue: caller.sessionId })
   const sessionId = identity.sessionId
+
+  /**
+   * 🔴 СЛЕД О ТОМ, КТО ОБСЛУЖИЛ, — В ЖУРНАЛ ДВЕРИ (06.11.2026).
+   *
+   * `GET /admin/served-org` читает именно этот файл, а `org_id` писала только дверь Go.
+   * Маршрут OpenDesign идёт мимо неё, поэтому такие сессии навсегда оставались
+   * `found:false`, и сборщик присутствия не мог назвать ни provider, ни account.
+   * Пишем ТОТ ЖЕ вид записи, что и Go: `org_id` — аккаунт (`relishev@gmail.com`), а не
+   * id развёртывания, `org_source` — `pin` или причина выбора.
+   */
+  const rec = newRecord({
+    door: 'proxy:open-design',
+    provider: PROVIDER,
+    call_kind: odCallKind(req.headers.get(CALL_KIND_HEADER)),
+  })
+  rec.model = model
+  rec.session_id = sessionId
+  rec.caller = {
+    session_header: caller.header,
+    user_agent: (req.headers.get('user-agent') ?? '').slice(0, 120) || null,
+  }
+  rec.request.body_bytes = new TextEncoder().encode(rawText).byteLength
+  rec.request.body_sha256 = sha256(rawText)
+
+  let finished = false
+  const finish = (text: string | null, streamed = false) => {
+    if (finished) return
+    finished = true
+    rec.timing.total_ms = Date.now() - t0
+    let usage: unknown | null = null
+    if (text) {
+      if (streamed) usage = usageFromSseText(text)
+      else {
+        try {
+          const j = JSON.parse(text)
+          usage = j?.usage ?? null
+          rec.response.body = bodyField(text)
+        } catch { /* не-JSON — отдаём как есть */ }
+      }
+    }
+    rec.usage_raw = usage
+    rec.usage_norm = extractUsageChat(usage)
+    writeDump(rec)
+  }
 
   // 🔴 ВЫБОР ОДИН РАЗ НА СЕССИЮ. Живая сессия не переезжает — даже если сосед стал свободнее.
   let chosen: OdPick | null = null
@@ -185,10 +244,16 @@ async function serve(req: Request): Promise<Response> {
         level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
         msg: `дверь OpenDesign: нет ни одного годного аккаунта с ключом (квота: ${UNIFIED_QUOTA_JSON})`,
       })
+      rec.response.status = 503
+      rec.error = classifyError(503, false)
+      finish(null)
       return errorResponse(503, 'no usable OpenDesign account: none active with a declared key env', 'configuration_error')
     }
     if (sessionId) { pins.set(sessionId, { email: chosen.email, at: Date.now() }); pinned = false }
   }
+
+  rec.org_id = chosen.email
+  rec.org_source = pinned ? 'pin' : chosen.why
 
   const key = keyOf(chosen.keyEnv)
   if (!key) {
@@ -196,6 +261,9 @@ async function serve(req: Request): Promise<Response> {
       level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
       msg: `дверь OpenDesign: у аккаунта ${chosen.email} не задана ${chosen.keyEnv}`,
     })
+    rec.response.status = 503
+    rec.error = { kind: 'auth', provider_type: null }
+    finish(null)
     return errorResponse(503, `key env ${chosen.keyEnv} for ${chosen.email} is not set`, 'configuration_error')
   }
 
@@ -206,6 +274,8 @@ async function serve(req: Request): Promise<Response> {
     authorization: `Bearer ${key}`,
     accept: parsed?.stream === true ? 'text/event-stream' : 'application/json',
   }
+  rec.request.url = url
+  rec.request.headers = redactHeaders(headers)
 
   ctx.emit({
     level: 'info', kind: EVENT.OD_REQUEST, sessionId, model,
@@ -220,13 +290,25 @@ async function serve(req: Request): Promise<Response> {
       level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
       msg: `дверь OpenDesign: апстрим недоступен — ${String(err?.message ?? err).slice(0, 200)}`,
     })
+    rec.response.status = 502
+    rec.error = classifyError(null, true)
+    finish(null)
     return errorResponse(502, `OpenDesign upstream unreachable: ${String(err?.message ?? err).slice(0, 200)}`, 'upstream_error')
   }
+
+  rec.timing.ttfb_ms = Date.now() - t0
+  rec.response.status = upstream.status
+  const respHeaders = redactHeaders(upstream.headers)
+  rec.response.headers = respHeaders
+  rec.quota_seen = pickQuotaSeen(respHeaders)
+  rec.error = classifyError(upstream.status, false)
 
   const passHeaders: Record<string, string> = {
     'content-type': upstream.headers.get('content-type') ?? (parsed?.stream === true ? 'text/event-stream' : 'application/json'),
     'x-open-design-account': chosen.email,
     'x-open-design-account-source': pinned ? 'pin' : chosen.why,
+    // Тот же след выбора, что у двери Go: потребителю не нужно знать, какая дверь отвечала.
+    'x-kiberos-served-org': chosen.email,
   }
 
   if (parsed?.stream !== true || !upstream.body) {
@@ -242,6 +324,7 @@ async function serve(req: Request): Promise<Response> {
       sessionId, model, status: upstream.status, durationMs: Date.now() - t0, outTokens,
       msg: `дверь OpenDesign: ${chosen.email} → ${upstream.status}`,
     })
+    finish(text, false)
     return new Response(text, { status: upstream.status, headers: passHeaders })
   }
 
@@ -249,6 +332,10 @@ async function serve(req: Request): Promise<Response> {
   // Именно на ожидании «полной SSE-строки» дверь Go и вставала (6faa7ac) — здесь это
   // правило соблюдено с рождения.
   const reader = upstream.body.getReader()
+  // Копию держим только для usage в журнале: сам поток не задерживается ни на байт.
+  let kept = ''
+  let keptBytes = 0
+  const decoder = new TextDecoder()
   let aborted = false
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -261,8 +348,13 @@ async function serve(req: Request): Promise<Response> {
             sessionId, model, status: upstream.status, durationMs: Date.now() - t0,
             msg: `дверь OpenDesign: ${chosen!.email} → ${upstream.status} (поток закрыт)`,
           })
+          finish(kept, true)
           controller.close()
           return
+        }
+        if (keptBytes < STREAM_CAP_BYTES) {
+          kept += decoder.decode(value, { stream: true })
+          keptBytes += value.byteLength
         }
         controller.enqueue(value)
       } catch (err) {
@@ -271,11 +363,13 @@ async function serve(req: Request): Promise<Response> {
           durationMs: Date.now() - t0,
           msg: `дверь OpenDesign: поток оборвался — ${String((err as any)?.message ?? err).slice(0, 160)}`,
         })
+        finish(kept, true)
         controller.error(err)
       }
     },
     cancel() {
       aborted = true
+      finish(kept, true)
       reader.cancel().catch(() => {})
       ctx.emit({
         level: 'info', kind: EVENT.OD_ABORTED, sessionId, model, status: upstream.status,

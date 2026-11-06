@@ -33,4 +33,22 @@ describe('обслуженная организация из журнала дв
     writeFileSync(join(dir, `${day()}.jsonl`), '')
     expect(servedOrgOf('ses_none')).toEqual({ found: false, session: 'ses_none' })
   })
+
+  // 06.11.2026: у OpenDesign своей двери Go нет, и `org_id` писала только она — такие
+  // сессии навсегда оставались found:false. Теперь дверь OpenDesign пишет ту же запись,
+  // и контракт отвечает одинаково, не зная, какая дверь обслужила.
+  test('запись двери OpenDesign отвечает тем же контрактом: org_id — аккаунт человека', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'served-'))
+    process.env.PROVIDER_DUMP_DIR = dir
+    writeFileSync(join(dir, `${day()}.jsonl`), JSON.stringify({
+      v: 1, ts: new Date().toISOString(), host: 'local',
+      door: 'proxy:open-design', provider: 'open-design',
+      org_id: 'relishev@gmail.com', org_source: 'pin',
+      model: 'deepseek-v4.1-flash', session_id: 'ses_od',
+    }) + '\n')
+    const r = servedOrgOf('ses_od')
+    expect(r.found).toBe(true)
+    expect(r.org).toBe('relishev@gmail.com')
+    expect(r.source).toBe('pin')
+  })
 })

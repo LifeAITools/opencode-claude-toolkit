@@ -43,7 +43,10 @@ describe('выдачи организации на диске', () => {
     restorePinsForTest([['ses_a', { org: 'hello@kiberos.app', at: now }]])
     savePins(path)
     const doc = JSON.parse(readFileSync(path, 'utf8'))
-    expect(doc.version).toBe(1)
+    // v2 с 06.11.2026 (b07b270): к выдачам добавился `dropped` — отдых отказавшей
+    // организации, который обязан переживать перезапуск двери.
+    expect(doc.version).toBe(2)
     expect(doc.pins.ses_a).toEqual({ org: 'hello@kiberos.app', at: now })
+    expect(doc.dropped).toEqual({})
   })
 })

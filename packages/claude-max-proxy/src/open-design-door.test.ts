@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { odPlacementInputs, pickOpenDesignAccount, upstreamModel, type OdAccountView } from './modules/open-design-door.js'
+import { odCallKind, odPlacementInputs, pickOpenDesignAccount, upstreamModel, type OdAccountView } from './modules/open-design-door.js'
 
 const H = 3_600_000
 const NOW = Date.parse('2026-11-05T12:00:00.000Z')
@@ -81,5 +81,14 @@ describe('имя модели наверх', () => {
   test('прочие имена не трогаем', () => {
     expect(upstreamModel('deepseek-v4.1-flash')).toBe('deepseek-v4.1-flash')
     expect(upstreamModel('qwen3.8-flash')).toBe('qwen3.8-flash')
+  })
+})
+
+describe('вид вызова — тот же контракт, что у двери Go', () => {
+  test('названный вид проходит, неизвестный и пустой — real', () => {
+    expect(odCallKind('warm')).toBe('warm')
+    expect(odCallKind('probe')).toBe('probe')
+    expect(odCallKind(null)).toBe('real')
+    expect(odCallKind('что-то')).toBe('real')
   })
 })

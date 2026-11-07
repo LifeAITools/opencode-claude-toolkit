@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { unifyProviderFile, unifyAll, writeUnified, STALE_AFTER_SEC } from './quota-unified.js'
+import { unifyProviderFile, unifyAll, writeUnified, normalizeSpend, STALE_AFTER_SEC } from './quota-unified.js'
 
 const NOW = new Date('2026-11-05T10:00:00.000Z')
 
@@ -310,5 +310,56 @@ describe('billingMode: организации разные, а счёт може
     const list = unifyProviderFile('open-design', doc, NOW)
     expect(list.find(a => a.account === 'a@x')!.billingMode).toBe('shared')
     expect(list.find(a => a.account === 'b@x')!.billingMode).toBeNull()
+  })
+})
+
+
+describe('деньги — отдельным блоком, у каждой суммы есть ПРЕДМЕТ и ПЕРИОД', () => {
+  const good = {
+    currency: 'usd', total: 12.5, basis: 'key', subject: 'sk-abc',
+    since: '2026-11-01T00:00:00Z', measuredAt: '2026-11-07T00:00:00Z', source: 'litellm_spend_logs',
+  }
+
+  test('нормализация: принимает один объект и массив, поднимает валюту', () => {
+    const out = normalizeSpend(good)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ currency: 'USD', total: 12.5, basis: 'key', subject: 'sk-abc' })
+  })
+
+  test('сумма БЕЗ предмета, периода, источника или с нечислом — выбрасывается, а не чинится догадкой', () => {
+    for (const broken of [
+      { ...good, subject: '' },
+      { ...good, since: '' },
+      { ...good, source: '' },
+      { ...good, basis: 'whatever' },
+      { ...good, total: 'много' },
+      { ...good, total: Number.POSITIVE_INFINITY },
+      { ...good, measuredAt: 'не дата' },
+    ]) {
+      expect(normalizeSpend(broken)).toHaveLength(0)
+    }
+  })
+
+  test('отдельный файл spend-<провайдер>.json попадает в своего провайдера', () => {
+    const d = mkdtempSync(join(tmpdir(), 'spend-'))
+    try {
+      writeFileSync(join(d, 'quota-status-ocp.json'), JSON.stringify({ accounts: { 'a@b': { util5h: 0.1, util7d: 0.2 } } }))
+      writeFileSync(join(d, 'spend-ocp.json'), JSON.stringify({ provider: 'ocp', spend: [good] }))
+      const snap = unifyAll(d, new Date('2026-11-07T00:05:00Z'))
+      expect(snap.providers.ocp.spend?.[0]).toMatchObject({ currency: 'USD', subject: 'sk-abc', basis: 'key' })
+      // и НЕ уезжает чужому провайдеру
+      expect(snap.providers.ocp.spend).toHaveLength(1)
+    } finally { rmSync(d, { recursive: true, force: true }) }
+  })
+
+  test('битый файл денег не рушит сборку квоты', () => {
+    const d = mkdtempSync(join(tmpdir(), 'spend-'))
+    try {
+      writeFileSync(join(d, 'quota-status-ocp.json'), JSON.stringify({ accounts: { 'a@b': { util5h: 0.1 } } }))
+      writeFileSync(join(d, 'spend-ocp.json'), '{ это не json')
+      const snap = unifyAll(d, new Date('2026-11-07T00:05:00Z'))
+      expect(snap.providers.ocp.spend).toBeUndefined()
+      expect(snap.accounts.length).toBeGreaterThan(0)
+    } finally { rmSync(d, { recursive: true, force: true }) }
   })
 })

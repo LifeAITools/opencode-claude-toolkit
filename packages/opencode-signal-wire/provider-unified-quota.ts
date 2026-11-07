@@ -42,6 +42,28 @@ export interface UnifiedQuotaReading {
   reason?: string
   /** Пул по ВСЕМ аккаунтам провайдера — то, куда можно переехать. */
   pool: { util5h: number | null; util7d: number | null; accounts: number; level: string | null } | null
+  /**
+   * ДЕНЬГИ ПРОВАЙДЕРА — отдельным полем, а НЕ на аккаунте чтения (07.11.2026).
+   * 🔴 Аккаунт здесь выбран (или не выбран) по запасу, а сумма принадлежит СВОЕМУ предмету:
+   * ключу, организации или ответу. Приклеить её к `account` значило бы повторить класс
+   * «число с чужим предметом». Каждая сумма несёт `subject`, `source`, `since`, `measuredAt`.
+   * Пусто/нет поля — денег никто не мерил (это НЕ ноль).
+   */
+  providerSpend?: SpendReading[]
+}
+
+/** Та же форма, что в едином файле: `UnifiedSnapshot.providers[].spend`. */
+export type SpendBasis = 'per-request' | 'key' | 'account' | 'org'
+export interface SpendReading {
+  currency: string
+  total: number
+  basis: SpendBasis
+  subject: string
+  since: string
+  measuredAt: string
+  source: string
+  limit?: number | null
+  periodResetAt?: string | null
 }
 
 interface RawAccount {
@@ -57,11 +79,15 @@ interface RawAccount {
 
 const KINDS: Record<string, UnifiedWindowKind> = { '5h': '5h', week: '7d', '7d': '7d', month: '30d', '30d': '30d' }
 
-function readDoc(path: string): { accounts: RawAccount[]; generatedAt: string | null } | null {
+function readDoc(path: string): { accounts: RawAccount[]; generatedAt: string | null; providers: Record<string, { spend?: SpendReading[] }> } | null {
   try {
     const d = JSON.parse(readFileSync(path, 'utf8'))
     if (!d || typeof d !== 'object' || !Array.isArray(d.accounts)) return null
-    return { accounts: d.accounts as RawAccount[], generatedAt: typeof d.generatedAt === 'string' ? d.generatedAt : null }
+    return {
+      accounts: d.accounts as RawAccount[],
+      generatedAt: typeof d.generatedAt === 'string' ? d.generatedAt : null,
+      providers: d.providers && typeof d.providers === 'object' ? d.providers : {},
+    }
   } catch { return null }
 }
 
@@ -77,6 +103,8 @@ export function readUnifiedQuota(
 ): UnifiedQuotaReading | null {
   const doc = readDoc(opts.path ?? unifiedQuotaPath())
   if (!doc) return null
+  const spendOf: SpendReading[] = Array.isArray(doc.providers?.[provider]?.spend)
+    ? doc.providers[provider]!.spend! : []
   const own = doc.accounts.filter(a => (a.provider ?? '') === provider)
   if (!own.length) return null
 
@@ -101,6 +129,7 @@ export function readUnifiedQuota(
       bindsUntil: null,
       status: 'unreadable',
       reason: 'several_accounts_unresolved',
+      ...(spendOf.length ? { providerSpend: spendOf } : {}),
       pool: {
         util5h: ha.length ? 1 - Math.max(...ha) : null,
         util7d: null,
@@ -142,6 +171,7 @@ export function readUnifiedQuota(
     bindsUntil: chosen.bindsUntil ?? null,
     status: (chosen.status as UnifiedQuotaReading['status']) ?? 'unreadable',
     ...(chosen.reason ? { reason: chosen.reason } : {}),
+    ...(spendOf.length ? { providerSpend: spendOf } : {}),
     pool,
   }
 }

@@ -70,3 +70,31 @@ describe('единый читатель квоты', () => {
 })
 
 test('cleanup', () => rmSync(dir, { recursive: true, force: true }))
+
+
+describe('деньги провайдера не приклеиваются к выбранному аккаунту', () => {
+  test('providerSpend приходит с ОБЪЕКТОМ и не подменяет аккаунт', () => {
+    // СВОЙ каталог: общий `dir` этого файла удаляет тест 'cleanup' ниже по объявлению,
+    // и он выполняется раньше — на общем каталоге проверка падала не по существу.
+    const own = mkdtempSync(join(tmpdir(), 'unified-spend-'))
+    const f = join(own, 'unified-spend.json')
+    writeFileSync(f, JSON.stringify({
+      generatedAt: '2026-11-07T00:00:00Z',
+      unit: { used: 'fraction', range: '0..1' },
+      accounts: [
+        { provider: 'ocp', account: 'a@b', status: 'active', measuredAt: '2026-11-07T00:00:00Z',
+          headroomFraction: 0.5, windows: [{ name: 'week', usedFraction: 0.5, resetsAt: '2026-11-10T00:00:00Z' }] },
+        { provider: 'ocp', account: 'c@d', status: 'active', measuredAt: '2026-11-07T00:00:00Z',
+          headroomFraction: 0.7, windows: [{ name: 'week', usedFraction: 0.3 }] },
+      ],
+      providers: { ocp: { spend: [
+        { currency: 'USD', total: 3.25, basis: 'key', subject: 'sk-x', since: '2026-11-01T00:00:00Z',
+          measuredAt: '2026-11-07T00:00:00Z', source: 'x-litellm-response-cost' },
+      ] } },
+    }))
+    const r = readUnifiedQuota('ocp', { path: f, refuseAmbiguous: true })!
+    expect(r.account).toBeNull()            // счёт по-прежнему не угадан
+    expect(r.providerSpend?.[0]).toMatchObject({ subject: 'sk-x', basis: 'key', total: 3.25 })
+    rmSync(own, { recursive: true, force: true })
+  })
+})

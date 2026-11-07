@@ -87,6 +87,42 @@ export interface UnifiedAccount {
   exhaustedWindow?: { name: WindowName; resetsAt: string | null }
 }
 
+/**
+ * ДЕНЬГИ — ОТДЕЛЬНЫМ БЛОКОМ, А НЕ ОКНОМ (решение 07.11.2026, вопрос vibe-deepseek-harness-owner).
+ *
+ * 🔴 Почему не `windows[].kind='budget'`: окно измеряется ДОЛЕЙ и имеет предел; деньги —
+ * НАКОПЛЕНИЕ с необязательным периодом. Смешать единицы в одном массиве значит заставить
+ * каждого потребителя разбирать, в чём измерено именно это окно, — и рано или поздно
+ * кто-то сложит проценты с рублями.
+ *
+ * 🔴 Почему МАССИВ, а не один блок: у суммы обязан быть ПРЕДМЕТ (`subject`) и ИСТОЧНИК
+ * (`source`). LiteLLM считает по ключу, наш dsh-счётчик — по ответу, провайдер — по
+ * организации. Один блок на провайдера заставил бы их делить место и приписывать число
+ * чужому счёту — ровно тот класс, что стоил нам расхождений 05–07.11.
+ */
+export type SpendBasis = 'per-request' | 'key' | 'account' | 'org'
+
+export interface SpendReading {
+  /** Валюта ISO-4217 ('USD'). Без неё число не сравнимо ни с чем. */
+  currency: string
+  /** Накопленный расход за период `since`: НЕ остаток и НЕ бюджет. */
+  total: number
+  /** Чей это счётчик. Обязателен: сумма без предмета — не факт. */
+  basis: SpendBasis
+  /** Конкретный предмет: id ключа, email аккаунта или имя организации. */
+  subject: string
+  /** С какого момента накопление. Без этого `total` невозможно проверить. */
+  since: string
+  /** Когда число снято (возраст замера, а не период накопления). */
+  measuredAt: string
+  /** Кто именно это измерил: 'litellm_spend_logs' | 'x-litellm-response-cost' | 'provider-api' | … */
+  source: string
+  /** Бюджет, если задан. `null` — бюджета нет; отсутствие поля — не сообщили. */
+  limit?: number | null
+  /** Когда период (и накопление) обнулится. */
+  periodResetAt?: string | null
+}
+
 export interface UnifiedSnapshot {
   schemaVersion: 1
   generatedAt: string
@@ -108,7 +144,43 @@ export interface UnifiedSnapshot {
      *  в `config/providers.yaml`), `none` (ни там, ни там). Без этого пустой список
      *  читался бы как «моделей нет» — а это третье состояние, «не объявлено». */
     modelsSource: 'provider-file' | 'registry' | 'none'
+    /** Денежные счётчики провайдера. Пусто/отсутствует — денег никто не мерил. */
+    spend?: SpendReading[]
   }>
+}
+
+const SPEND_BASES: readonly SpendBasis[] = ['per-request', 'key', 'account', 'org'] as const
+
+/**
+ * Нормализация денежных счётчиков: принимаем массив или один объект, выбрасываем всё,
+ * у чего нет ПРЕДМЕТА, ИСТОЧНИКА или ПЕРИОДА, либо сумма не число.
+ * 🔴 Не «починить догадкой»: строка без `subject`/`since` — это не факт, и подставлять
+ * ей имя провайдера значило бы вернуть класс «число с чужим предметом».
+ */
+export function normalizeSpend(v: unknown): SpendReading[] {
+  const arr = Array.isArray(v) ? v : v && typeof v === 'object' ? [v] : []
+  const out: SpendReading[] = []
+  for (const raw of arr) {
+    if (!raw || typeof raw !== 'object') continue
+    const r = raw as Record<string, unknown>
+    const total = num(r.total)
+    const currency = typeof r.currency === 'string' ? r.currency.trim().toUpperCase() : ''
+    const subject = typeof r.subject === 'string' ? r.subject.trim() : ''
+    const source = typeof r.source === 'string' ? r.source.trim() : ''
+    const since = iso(r.since)
+    const measuredAt = iso(r.measuredAt)
+    const basis = typeof r.basis === 'string' && (SPEND_BASES as readonly string[]).includes(r.basis)
+      ? (r.basis as SpendBasis) : null
+    if (total === null || !currency || !subject || !source || !since || !measuredAt || !basis) continue
+    const limit = num(r.limit)
+    const periodResetAt = iso(r.periodResetAt)
+    out.push({
+      currency, total, basis, subject, since, measuredAt, source,
+      ...(r.limit === null || r.limit === undefined ? {} : { limit }),
+      ...(r.periodResetAt === null || r.periodResetAt === undefined ? {} : { periodResetAt }),
+    })
+  }
+  return out
 }
 
 const num = (v: unknown): number | null => {
@@ -287,6 +359,21 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
   try {
     files = readdirSync(dir).filter(f => /^quota-status-[a-z0-9-]+\.json$/.test(f) && f !== 'quota-status.json' && f !== 'quota-status-unified.json')
   } catch { files = [] }
+  // Деньги живут в СВОИХ файлах (`spend-<provider>.json`), а не в файле квоты: у суммы
+  // свой писатель, и два писателя на один файл — та же беда, что с пропусками Go.
+  const spendByProvider = new Map<string, SpendReading[]>()
+  try {
+    for (const f of readdirSync(dir).filter(f => /^spend-[a-z0-9-]+\.json$/.test(f))) {
+      try {
+        const doc: any = JSON.parse(readFileSync(join(dir, f), 'utf8'))
+        const provider = typeof doc?.provider === 'string' && doc.provider.trim()
+          ? doc.provider.trim() : f.replace(/^spend-/, '').replace(/\.json$/, '')
+        const list = normalizeSpend(doc?.spend ?? doc?.spends ?? doc)
+        if (list.length) spendByProvider.set(provider, [...(spendByProvider.get(provider) ?? []), ...list])
+      } catch { /* битый файл не рушит сборку: деньги — не повод потерять квоту */ }
+    }
+  } catch { /* каталог не читается — денег просто нет */ }
+
   for (const file of files.sort()) {
     const provider = file.replace(/^quota-status-/, '').replace(/\.json$/, '')
     let doc: any = null
@@ -307,6 +394,8 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
     // Причина берётся у той записи, которая и определила худшее состояние, — иначе
     // провайдер «active» тащил бы на себе чужую причину (замер 05.11.2026: у open-design
     // в причине стояло no_active_subscription от второй, пустой организации).
+    // Деньги: свой файл + (если провайдер сам их объявил) его поле `spend`.
+    const spendOf: SpendReading[] = [...(spendByProvider.get(provider) ?? []), ...normalizeSpend(doc?.spend)]
     const liveModels: string[] = Array.isArray(doc?.models)
       ? (doc.models as unknown[]).filter((m): m is string => typeof m === 'string' && m.length > 0)
       : []
@@ -320,6 +409,7 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
       models: liveModels.length ? liveModels : declaredModels,
       modelsSource: liveModels.length ? 'provider-file' : declaredModels.length ? 'registry' : 'none',
       ...(worst !== 'active' && worstEntry?.reason ? { reason: worstEntry.reason } : {}),
+      ...(spendOf.length ? { spend: spendOf } : {}),
     }
   }
   return {

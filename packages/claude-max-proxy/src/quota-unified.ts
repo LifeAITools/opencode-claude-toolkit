@@ -165,10 +165,24 @@ const SPEND_BASIS_ALIASES: Record<string, SpendBasis> = { cumulative: 'instance'
  * ей имя провайдера значило бы вернуть класс «число с чужим предметом».
  */
 export function normalizeSpend(v: unknown): SpendReading[] {
+  return normalizeSpendDetailed(v).accepted
+}
+
+/**
+ * То же, но с ПРИЧИНОЙ отказа по каждой строке (07.11.2026).
+ *
+ * 🔴 Зачем: валидатор молча выбрасывал строку, и писатель не мог узнать, что дальше приёма
+ * она не прошла — так пропали $9 143,84 с `basis: 'cumulative'`. «Тихо» хуже, чем «красно».
+ * Счётчики отказов ещё не в снимке (это находка F13 ревью); пока причина доступна через
+ * `--check <файл>`.
+ */
+export function normalizeSpendDetailed(v: unknown): { accepted: SpendReading[]; rejected: Array<{ index: number; reason: string }> } {
   const arr = Array.isArray(v) ? v : v && typeof v === 'object' ? [v] : []
-  const out: SpendReading[] = []
-  for (const raw of arr) {
-    if (!raw || typeof raw !== 'object') continue
+  const accepted: SpendReading[] = []
+  const rejected: Array<{ index: number; reason: string }> = []
+  for (let i = 0; i < arr.length; i++) {
+    const raw = arr[i]
+    if (!raw || typeof raw !== 'object') { rejected.push({ index: i, reason: 'not_an_object' }); continue }
     const r = raw as Record<string, unknown>
     const total = num(r.total)
     const currency = typeof r.currency === 'string' ? r.currency.trim().toUpperCase() : ''
@@ -180,16 +194,22 @@ export function normalizeSpend(v: unknown): SpendReading[] {
     const basis = (SPEND_BASES as readonly string[]).includes(rawBasis)
       ? (rawBasis as SpendBasis)
       : (SPEND_BASIS_ALIASES[rawBasis] ?? null)
-    if (total === null || !currency || !subject || !source || !since || !measuredAt || !basis) continue
-    const limit = num(r.limit)
-    const periodResetAt = iso(r.periodResetAt)
-    out.push({
-      currency, total, basis, subject, since, measuredAt, source,
-      ...(r.limit === null || r.limit === undefined ? {} : { limit }),
-      ...(r.periodResetAt === null || r.periodResetAt === undefined ? {} : { periodResetAt }),
+    const reason = total === null ? 'total_not_a_number'
+      : !currency ? 'currency_missing'
+        : !subject ? 'subject_missing'
+          : !source ? 'source_missing'
+            : !since ? 'since_invalid'
+              : !measuredAt ? 'measuredAt_invalid'
+                : !basis ? 'basis_unknown' : null
+    if (reason) { rejected.push({ index: i, reason }); continue }
+    accepted.push({
+      currency, total: total as number, basis: basis as SpendBasis, subject, since: since as string,
+      measuredAt: measuredAt as string, source,
+      ...(r.limit === null || r.limit === undefined ? {} : { limit: num(r.limit) }),
+      ...(r.periodResetAt === null || r.periodResetAt === undefined ? {} : { periodResetAt: iso(r.periodResetAt) }),
     })
   }
-  return out
+  return { accepted, rejected }
 }
 
 const num = (v: unknown): number | null => {
@@ -448,6 +468,21 @@ export function writeUnified(snap: UnifiedSnapshot, path = UNIFIED_QUOTA_JSON): 
 }
 
 if (import.meta.main) {
+  // `--check <файл>` — приём одного spend-файла без записи снимка. Писатель зовёт после
+  // записи и видит, ПРОШЛА ли строка и почему нет. Код возврата: 0 всё принято,
+  // 2 есть отказы или пусто. Это и есть «куда положить код возврата».
+  if (process.argv[2] === '--check') {
+    const file = process.argv[3]
+    if (!file) { console.error('usage: quota-unified.ts --check <spend-file.json>'); process.exit(2) }
+    let doc: any = null
+    try { doc = JSON.parse(readFileSync(file, 'utf8')) } catch (e) {
+      console.log(JSON.stringify({ file, ok: false, error: 'unreadable_or_not_json' }))
+      process.exit(2)
+    }
+    const { accepted, rejected } = normalizeSpendDetailed(doc?.spend ?? doc?.spends ?? doc)
+    console.log(JSON.stringify({ file, ok: accepted.length > 0 && rejected.length === 0, accepted: accepted.length, rejected }, null, 2))
+    process.exit(accepted.length > 0 && rejected.length === 0 ? 0 : 2)
+  }
   const snap = unifyAll()
   const out = writeUnified(snap)
   console.log(`[quota-unified] ${out}: ${snap.accounts.length} аккаунт(ов) от ${Object.keys(snap.providers).length} провайдер(ов)`)

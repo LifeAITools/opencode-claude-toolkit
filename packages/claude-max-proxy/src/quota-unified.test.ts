@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { unifyProviderFile, unifyAll, writeUnified, normalizeSpend, STALE_AFTER_SEC } from './quota-unified.js'
+import { unifyProviderFile, unifyAll, writeUnified, normalizeSpend, normalizeSpendDetailed, STALE_AFTER_SEC } from './quota-unified.js'
 
 const NOW = new Date('2026-11-05T10:00:00.000Z')
 
@@ -399,5 +399,21 @@ describe('счётчик всего посредника: basis cumulative не 
       expect(snap.providers.litellm?.spend?.[0]?.subject).toBe('litellm:local')
       expect(snap.providers.litellm?.reason).toBe('no_quota_file')
     } finally { rmSync(d, { recursive: true, force: true }) }
+  })
+})
+
+
+describe('приём с причиной отказа — писатель должен узнать, что не дошло', () => {
+  test('каждая отброшенная строка называет свою причину', () => {
+    const good = { currency: 'USD', total: 1, basis: 'key', subject: 'sk-1', since: '2026-11-01T00:00:00Z', measuredAt: '2026-11-07T00:00:00Z', source: 's' }
+    const r = normalizeSpendDetailed([
+      good,
+      { ...good, subject: '' },
+      { ...good, basis: 'непонятно' },
+      { ...good, total: 'много' },
+      { ...good, since: 'не дата' },
+    ])
+    expect(r.accepted).toHaveLength(1)
+    expect(r.rejected.map(x => x.reason)).toEqual(['subject_missing', 'basis_unknown', 'total_not_a_number', 'since_invalid'])
   })
 })

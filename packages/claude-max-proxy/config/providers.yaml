@@ -78,6 +78,10 @@ providers:
       # проверено счётчиком квоты: оба ключа двигают один и тот же счётчик (+1/+1).
       - email: hello@lifeaitools.com
         key_env: OPEN_DESIGN_API_KEY_3
+      # Четвёртая организация (07.11.2026): hello@kiberos.com, workspace ybzboj07zhtjv1tkqq9bb5xq.
+      # Принадлежность ключа проверена счётчиком на ЧИСТОМ счёте (до/после: 2 → 3).
+      - email: hello@kiberos.com
+        key_env: OPEN_DESIGN_API_KEY_4
     models:
       - deepseek-v4.1-flash-od
       - deepseek-v4.1-flash-eco-od

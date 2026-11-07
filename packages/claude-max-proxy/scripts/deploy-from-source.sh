@@ -192,6 +192,8 @@ if [ -f "$HOME/.secrets/open-design.key" ] && [ -f "$HOME/.secrets/open-design-2
     # Третий аккаунт появляется по мере выдачи ключей: файла нет — строки нет.
     [ -f "$HOME/.secrets/open-design-3.key" ] && \
       printf 'OPEN_DESIGN_API_KEY_3=%s\n' "$(tr -d '\n' < "$HOME/.secrets/open-design-3.key")" >> "$OD_ENV.tmp"
+    [ -f "$HOME/.secrets/open-design-4.key" ] && \
+      printf 'OPEN_DESIGN_API_KEY_4=%s\n' "$(tr -d '\n' < "$HOME/.secrets/open-design-4.key")" >> "$OD_ENV.tmp"
     mv "$OD_ENV.tmp" "$OD_ENV" )
   chmod 600 "$OD_ENV"
   log "open-design keys -> $OD_ENV (from vault)"

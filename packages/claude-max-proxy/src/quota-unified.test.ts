@@ -363,3 +363,22 @@ describe('деньги — отдельным блоком, у каждой су
     } finally { rmSync(d, { recursive: true, force: true }) }
   })
 })
+
+
+describe('деньги не исчезают, если провайдер назван иначе', () => {
+  test('spend-файл без файла квоты виден в снимке, а не пропадает', () => {
+    const d = mkdtempSync(join(tmpdir(), 'spend-'))
+    try {
+      writeFileSync(join(d, 'quota-status-opencode-go.json'), JSON.stringify({ accounts: { 'a@b': { util5h: 0.1 } } }))
+      writeFileSync(join(d, 'spend-kiberos-go-dsh.json'), JSON.stringify({
+        provider: 'kiberos-go',
+        spend: [{ currency: 'USD', total: 0.0165, basis: 'key', subject: 'sk-OIrA',
+          since: '2026-11-07T08:38:50Z', measuredAt: '2026-11-07T08:38:52Z', source: 'x-litellm-response-cost' }],
+      }))
+      const snap = unifyAll(d, new Date('2026-11-07T08:40:00Z'))
+      expect(snap.providers['kiberos-go']?.spend?.[0]?.subject).toBe('sk-OIrA')
+      expect(snap.providers['kiberos-go']?.reason).toBe('no_quota_file')
+      expect(snap.providers['opencode-go']).toBeDefined()
+    } finally { rmSync(d, { recursive: true, force: true }) }
+  })
+})

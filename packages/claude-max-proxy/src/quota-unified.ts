@@ -412,6 +412,15 @@ export function unifyAll(dir = CLAUDE_LOCAL, now = new Date()): UnifiedSnapshot 
       ...(spendOf.length ? { spend: spendOf } : {}),
     }
   }
+  // 🔴 ДЕНЬГИ БЕЗ ФАЙЛА КВОТЫ НЕ ТЕРЯЕМ МОЛЧА (07.11.2026). Если spend-файл называет
+  // провайдера, для которого нет `quota-status-<id>.json`, прежний код просто не создавал
+  // запись — сумма исчезала, и никто бы не узнал. Это не «нет данных», это несовпадение
+  // имени (живой пример: сборщик пишет `kiberos-go`, а наш id — `opencode-go`).
+  // Статус `unreadable` здесь честен: квоту этого провайдера мы не меряем, но сумму видно.
+  for (const [p, list] of spendByProvider) {
+    if (providers[p] || !list.length) continue
+    providers[p] = { file: null, status: 'unreadable', reason: 'no_quota_file', models: [], modelsSource: 'none', spend: list }
+  }
   return {
     schemaVersion: 1,
     generatedAt: now.toISOString(),

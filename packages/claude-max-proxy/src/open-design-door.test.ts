@@ -101,3 +101,34 @@ describe('источник выбора — код, а не фраза', () => {
     expect(() => new Response('', { headers: { 'x-open-design-account-source': odAccountSource(false) } })).not.toThrow()
   })
 })
+
+describe('привязки переживают перезапуск двери', () => {
+  test('файл читается обратно после «перезапуска»', async () => {
+    const { mkdtempSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const m = await import('./modules/open-design-door.js')
+    const dir = mkdtempSync(join(tmpdir(), 'odpins-'))
+    const path = join(dir, 'pins.json')
+    const now = Date.now()
+    m.resetOpenDesignPins()
+    m.restoreOpenDesignPinsForTest([['ses_a', { email: 'hello@kiberos.com', at: now }]])
+    m.saveOpenDesignPins(path)
+    m.resetOpenDesignPins()          // память обнулена, как при выкатке
+    m.loadOpenDesignPins(path)       // дверь перезапустилась
+    expect(m.odPinsSnapshot().ses_a).toEqual({ email: 'hello@kiberos.com', at: now })
+  })
+
+  test('просроченная привязка не читается — срок тот же, что у выдачи', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const m = await import('./modules/open-design-door.js')
+    const dir = mkdtempSync(join(tmpdir(), 'odpins-'))
+    const path = join(dir, 'pins.json')
+    writeFileSync(path, JSON.stringify({ version: 1, pins: { ses_old: { email: 'x@y', at: Date.now() - 13 * 3600 * 1000 } } }))
+    m.resetOpenDesignPins()
+    m.loadOpenDesignPins(path)
+    expect(m.odPinsSnapshot().ses_old).toBeUndefined()
+  })
+})

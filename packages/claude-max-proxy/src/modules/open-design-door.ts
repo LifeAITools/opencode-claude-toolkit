@@ -20,8 +20,9 @@
  * Ключи НЕ в коде и НЕ здесь: `config/providers.yaml` объявляет, какая переменная
  * окружения отвечает за какой аккаунт (`account_keys`), значения живут в litellm/.env.
  */
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, existsSync, writeFileSync, mkdirSync, renameSync } from 'fs'
+import { join, dirname } from 'path'
+import { homedir } from 'os'
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { EVENT } from '../event-bus.js'
 import { readCallerSession, resolveSessionIdentity } from '../session-identity.js'
@@ -124,6 +125,42 @@ export function odCallKind(headerValue: string | null): 'real' | 'warm' | 'probe
 let ctx: ModuleContext
 const pins = new Map<string, { email: string; at: number }>()
 
+/**
+ * 🔴 ПРИВЯЗКИ ПЕРЕЖИВАЮТ ПЕРЕЗАПУСК (07.11.2026). Полюс измерен на живой сессии:
+ * выкатка двери обнуляла память, и первый же ход ЖИВОЙ сессии выбирал счёт заново —
+ * mermaid-ink сам «переехал» на новую организацию, хотя его никто не переселял.
+ * Ровно та же ошибка была у двери Go и исправлена ею 26.10; здесь механизм тот же:
+ * файл на диске, атомарная запись, срок как у выдачи — 12 ч.
+ */
+function pinsPath(): string {
+  return process.env.OD_ORG_PINS_PATH ?? join(homedir(), '.claude-local', 'od-org-pins.json')
+}
+let pinsLoaded = false
+export function loadOpenDesignPins(path = pinsPath()): void {
+  if (pinsLoaded) return
+  pinsLoaded = true
+  try {
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as { pins?: Record<string, { email?: unknown; at?: unknown }> }
+    const now = Date.now()
+    for (const [k, v] of Object.entries(doc.pins ?? {})) {
+      if (typeof v?.email === 'string' && typeof v?.at === 'number' && now - v.at <= PIN_TTL_MS) {
+        pins.set(k, { email: v.email, at: v.at })
+      }
+    }
+  } catch { /* файла нет или он битый — начинаем с пустого */ }
+}
+export function saveOpenDesignPins(path = pinsPath()): void {
+  try {
+    const now = Date.now()
+    const out: Record<string, { email: string; at: number }> = {}
+    for (const [k, v] of pins) if (now - v.at <= PIN_TTL_MS) out[k] = v
+    mkdirSync(dirname(path), { recursive: true })
+    const tmp = `${path}.tmp`
+    writeFileSync(tmp, JSON.stringify({ version: 1, pins: out }), { mode: 0o600 })
+    renameSync(tmp, path)
+  } catch { /* запись не смеет ломать вызов */ }
+}
+
 function registryPath(): string {
   return process.env.PROVIDER_REGISTRY_PATH ?? join(import.meta.dir, '..', '..', 'config', 'providers.yaml')
 }
@@ -163,6 +200,7 @@ function errorResponse(status: number, message: string, type = 'api_error'): Res
 
 async function serve(req: Request): Promise<Response> {
   const t0 = Date.now()
+  loadOpenDesignPins()
   const cfg = ctx.config as any
   const upstreamBase = (cfg.openDesignUpstreamUrl ?? process.env.OPEN_DESIGN_UPSTREAM_URL ?? DEFAULT_UPSTREAM).replace(/\/$/, '')
 
@@ -254,7 +292,7 @@ async function serve(req: Request): Promise<Response> {
       finish(null)
       return errorResponse(503, 'no usable OpenDesign account: none active with a declared key env', 'configuration_error')
     }
-    if (sessionId) { pins.set(sessionId, { email: chosen.email, at: Date.now() }); pinned = false }
+    if (sessionId) { pins.set(sessionId, { email: chosen.email, at: Date.now() }); pinned = false; saveOpenDesignPins() }
   }
 
   rec.org_id = chosen.email
@@ -400,4 +438,13 @@ export function createOpenDesignDoorModule(): ProxyModule {
 }
 
 /** Для испытаний: сброс пинов между проверками. */
-export function resetOpenDesignPins(): void { pins.clear() }
+export function resetOpenDesignPins(): void { pins.clear(); pinsLoaded = false }
+/** Для испытаний: подменить память привязок без файла. */
+export function restoreOpenDesignPinsForTest(entries: Array<[string, { email: string; at: number }]>): void {
+  pins.clear(); pinsLoaded = true
+  for (const [k, v] of entries) pins.set(k, v)
+}
+/** Для испытаний: снимок привязок. */
+export function odPinsSnapshot(): Record<string, { email: string; at: number }> {
+  return Object.fromEntries(pins)
+}

@@ -14,6 +14,7 @@ import { join, dirname } from 'path'
 import {
   Pipeline,
   MemoryBackend,
+  FileBackend,
   EmitterRegistry,
   validateRuleSet,
   getBundledRulesPath,
@@ -387,6 +388,15 @@ export interface SignalWireResult {
   execCmd?: string
 }
 
+/**
+ * Ключ личных правил агента для демона: номер участника SynqTask.
+ * `undefined`, если переменной нет или она пустая — «неизвестный» не превращается в ключ.
+ */
+export function agentKeyFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const v = env.SYNQTASK_AGENT_UUID?.trim()
+  return v ? v : undefined
+}
+
 export interface SignalWireConfig {
   serverUrl: string
   sessionId: string
@@ -501,6 +511,11 @@ export class SignalWire {
           socketPath: this.daemonSocket,
           agentName: () => process.env.SYNQTASK_AGENT_ID?.trim() || undefined,
           agentBinding: () => process.env.KIBEROS_BINDING_ID?.trim() || undefined,
+          // 🔴 КЛЮЧ ЛИЧНЫХ ПРАВИЛ (07.11.2026). Без него сервер не подмешивает правила ЭТОГО
+          // агента: правило, созданное через `signal-wire_rules`, существовало и не вычислялось
+          // никогда (класс «правило есть, вычислитель его не видит»). Ключ — номер участника
+          // SynqTask, ТОТ ЖЕ, что читает identity-bootstrap.ts. Нет его — нет поля (не пустая строка).
+          agentKey: () => agentKeyFromEnv(),
           defaultSessionId: () => (this.sessionId && this.sessionId !== 'unknown' ? this.sessionId : undefined),
           ...(config.projectRoot ? { ownRoot: () => config.projectRoot, cwd: () => config.projectRoot as string } : {}),
           // След жизни — сведение о процессе, пишется на месте; ровно в одном месте, чтобы не двоить.
@@ -511,7 +526,11 @@ export class SignalWire {
     this.pipeline = new Pipeline({
       rules: this.rulesStore.getRules(),
       registry: this.registry,
-      stateBackend: new MemoryBackend(),
+      // 🔴 СОСТОЯНИЕ КУЛДАУНОВ ПЕРЕЖИВАЕТ ПРОЦЕСС (07.11.2026). Было `MemoryBackend`: без демона
+      // «раз в час» превращалось в «раз за жизнь процесса» — тот же корень, что `agentKey`
+      // (адаптер не хостит ядро). Корень — `~/.claude/hooks/state/signal-wire`, ТОТ ЖЕ, что у
+      // демона и хука: переключение между ними не сбрасывает паузы.
+      stateBackend: new FileBackend(),
       sessionId: this.sessionId || 'opencode-claude',
       serverUrl: config.serverUrl,
       lifeTrace: this.daemon ? undefined : lifeTrace,

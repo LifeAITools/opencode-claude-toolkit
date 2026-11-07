@@ -26,6 +26,7 @@ import {
   HARNESS,
   lifeTraceFromEnv,
   DaemonEvaluator,
+  defaultStateDir,
   DaemonUnavailableError,
   rpcSocketPath,
   type LifeTraceConfig,
@@ -526,11 +527,12 @@ export class SignalWire {
     this.pipeline = new Pipeline({
       rules: this.rulesStore.getRules(),
       registry: this.registry,
-      // 🔴 СОСТОЯНИЕ КУЛДАУНОВ ПЕРЕЖИВАЕТ ПРОЦЕСС (07.11.2026). Было `MemoryBackend`: без демона
-      // «раз в час» превращалось в «раз за жизнь процесса» — тот же корень, что `agentKey`
-      // (адаптер не хостит ядро). Корень — `~/.claude/hooks/state/signal-wire`, ТОТ ЖЕ, что у
-      // демона и хука: переключение между ними не сбрасывает паузы.
-      stateBackend: new FileBackend(),
+      // 🔴 СОСТОЯНИЕ КУЛДАУНОВ ПЕРЕЖИВАЕТ ПРОЦЕСС И ЖИВЁТ В ТОМ ЖЕ КОРНЕ, ЧТО У ДЕМОНА (07.11.2026).
+      // Было `MemoryBackend`: без демона «раз в час» превращалось в «раз за жизнь процесса».
+      // 🔴 КОРЕНЬ БЕРЁТСЯ У ЯДРА, а не свой: два корня — две истории пауз, и при подъёме демона
+      // кулдаун сбрасывается (правило сработает сразу после того, как только что сработало).
+      // `defaultStateDir()` учитывает `SW_STATE_DIR` — где переопределение есть, пути сходятся сами.
+      stateBackend: new FileBackend({ root: defaultStateDir() }),
       sessionId: this.sessionId || 'opencode-claude',
       serverUrl: config.serverUrl,
       lifeTrace: this.daemon ? undefined : lifeTrace,

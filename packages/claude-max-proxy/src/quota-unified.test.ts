@@ -382,3 +382,22 @@ describe('деньги не исчезают, если провайдер наз
     } finally { rmSync(d, { recursive: true, force: true }) }
   })
 })
+
+
+describe('счётчик всего посредника: basis cumulative не теряется', () => {
+  test('файл вида spend-litellm-local.json принимается и приводится к instance', () => {
+    const d = mkdtempSync(join(tmpdir(), 'spend-'))
+    try {
+      const row = {
+        provider: 'litellm', instance: 'local', currency: 'USD', total: 9143.84,
+        basis: 'cumulative', subject: 'litellm:local', since: '2026-09-02T20:49:07.784Z',
+        measuredAt: '2026-11-07T09:21:48.561Z', source: 'litellm_list_price',
+      }
+      writeFileSync(join(d, 'spend-litellm-local.json'), JSON.stringify(row))
+      const snap = unifyAll(d, new Date('2026-11-07T09:30:00Z'))
+      expect(snap.providers.litellm?.spend?.[0]?.basis).toBe('instance')
+      expect(snap.providers.litellm?.spend?.[0]?.subject).toBe('litellm:local')
+      expect(snap.providers.litellm?.reason).toBe('no_quota_file')
+    } finally { rmSync(d, { recursive: true, force: true }) }
+  })
+})

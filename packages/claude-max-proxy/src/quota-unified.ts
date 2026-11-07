@@ -100,7 +100,7 @@ export interface UnifiedAccount {
  * организации. Один блок на провайдера заставил бы их делить место и приписывать число
  * чужому счёту — ровно тот класс, что стоил нам расхождений 05–07.11.
  */
-export type SpendBasis = 'per-request' | 'key' | 'account' | 'org'
+export type SpendBasis = 'per-request' | 'key' | 'account' | 'org' | 'instance'
 
 export interface SpendReading {
   /** Валюта ISO-4217 ('USD'). Без неё число не сравнимо ни с чем. */
@@ -149,7 +149,14 @@ export interface UnifiedSnapshot {
   }>
 }
 
-const SPEND_BASES: readonly SpendBasis[] = ['per-request', 'key', 'account', 'org'] as const
+const SPEND_BASES: readonly SpendBasis[] = ['per-request', 'key', 'account', 'org', 'instance'] as const
+/**
+ * `cumulative` — синоним `instance`, а не отдельная семантика (07.11.2026).
+ * Так назвал писатель счётчика всего посредника (`spend-litellm-local.json`), и без этого
+ * алиаса строка ВЫБРАСЫВАЛАСЬ МОЛЧА — живая потеря денег, которую никто бы не заметил.
+ * В схеме остаётся одно значение; синоним принимается на входе и приводится.
+ */
+const SPEND_BASIS_ALIASES: Record<string, SpendBasis> = { cumulative: 'instance' }
 
 /**
  * Нормализация денежных счётчиков: принимаем массив или один объект, выбрасываем всё,
@@ -169,8 +176,10 @@ export function normalizeSpend(v: unknown): SpendReading[] {
     const source = typeof r.source === 'string' ? r.source.trim() : ''
     const since = iso(r.since)
     const measuredAt = iso(r.measuredAt)
-    const basis = typeof r.basis === 'string' && (SPEND_BASES as readonly string[]).includes(r.basis)
-      ? (r.basis as SpendBasis) : null
+    const rawBasis = typeof r.basis === 'string' ? r.basis.trim().toLowerCase() : ''
+    const basis = (SPEND_BASES as readonly string[]).includes(rawBasis)
+      ? (rawBasis as SpendBasis)
+      : (SPEND_BASIS_ALIASES[rawBasis] ?? null)
     if (total === null || !currency || !subject || !source || !since || !measuredAt || !basis) continue
     const limit = num(r.limit)
     const periodResetAt = iso(r.periodResetAt)

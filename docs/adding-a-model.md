@@ -85,3 +85,33 @@ surface has no `MAX_MODELS` entry.
    `kibctl boot --remote prod --only eco2` → probe `/v1/models` inside the
    container.
 4. Commit + push.
+
+---
+
+## Модель НЕ-Антропикового провайдера (OpenDesign / OpenCode Go) — пять мест
+
+Проверено 07.11.2026 на `deepseek-v4.1-flash-eco-od`: путь «добавил в конфиг» и путь
+«модель реально выбирается агентом» — РАЗНЫЕ, и между ними пять дверей. Пропуск любой
+даёт зелёный признак при неработающем предмете.
+
+1. **Маршрут в LiteLLM.** `POST /model/new` (а НЕ только `config.yaml`): при
+   `store_model_in_db=true` строки живут в `LiteLLM_ProxyModelTable` и перекрывают YAML по
+   `model_info.id`. Проверка: `GET /model/info` показывает модель и её `api_base`.
+2. **Ключ агентов.** `deepseek-…` должен быть в `LiteLLM_VerificationToken.models` у
+   `opencode-go-agents`, иначе 403 `key_model_access_denied`. После правки — рестарт
+   посредника (ключи кешируются в памяти).
+3. **Ключ ЧТЕНИЯ каталога.** `catalog-sync-read` (и `-2`) имеет СВОЙ белый список моделей;
+   без новой модели `GET /v1/models` этим ключом вернёт меньше строк, и донесение
+   доступности честно отправит меньше — а выглядит как «модель не объявлена».
+4. **Каталог запуска.** Незнакомая модель остаётся в `optionsFrom.hidden` независимо от
+   доступности: сначала запись в каталоге (владелец SynqTask), донесение лишь говорит
+   «доступна/нет».
+5. **Префикс донесения.** `CATALOG_AVAILABILITY_MODEL_PREFIX` в юните
+   `catalog-availability.service` — список ПРЕФИКСОВ; `…-od` не покрывает `…-eco-od`,
+   нужна отдельная запись. После правки — `daemon-reload` и ручной прогон:
+   `CATALOG_AVAILABILITY sent machine=… models=N status=200`.
+
+Проверка всей цепочки одной командой (нужны заголовки агента):
+`curl -s -H "X-Agent-Id: $SYNQTASK_AGENT_ID" -H "X-Agent-Secret: $SYNQTASK_AGENT_SECRET" \
+ http://127.0.0.1:3747/api/launch/availability` → в `reports[].harnesses[].models[]`
+модель должна стоять с `ok: true`.

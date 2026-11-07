@@ -201,6 +201,15 @@ else
   log "open-design keys: vault files absent — door will answer 503 for OD until provided"
 fi
 
+# 4a-bis. СТАБИЛЬНАЯ ДВЕРЬ ПРОВЕРКИ ДЕНЕГ (07.11.2026). Писатель не должен знать, где лежит
+# исходник внутри установки: путь к src — внутренняя деталь и меняется выпуском. Один адрес,
+# который переживает деплой: bin/quota-unified-check <spend-файл> (exit 0 всё принято / 2 отказ).
+cat > "$INSTALLED/bin/quota-unified-check" <<CHECKSH
+#!/bin/sh
+exec "$BUN" "$INSTALLED/src/quota-unified.ts" --check "\$@"
+CHECKSH
+chmod +x "$INSTALLED/bin/quota-unified-check"
+
 # 4b. systemd units — regenerated every deploy so unit drift is impossible.
 #     ExecStart = the compiled binary; OnFailure = alert hook.
 cat > "$UNIT_DIR/claude-max-proxy.service" <<UNIT

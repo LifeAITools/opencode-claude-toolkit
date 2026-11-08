@@ -137,20 +137,33 @@ describe('latch in the in-process fallback (contract with @kiberos/signal-wire-c
     const script = `
       import { Pipeline } from "@kiberos/signal-wire-core"
       const p = new Pipeline({
-        rules: [{
-          id: "latch-probe",
-          events: ["chat.message"],
-          actions: [{ type: "hint", text: "LATCH_PROBE_HINT" }],
-          latch: { klass: "per-session", window: { cooldown_seconds: 3600 } },
-          enabled: true,
-        }],
+        // 🔴 ДВА ОКНА, ПОТОМУ ЧТО ОСЕЙ ДВЕ (ядро 0.50.33). Из 121 живого правила у 47 лимит
+        // в ТОКЕНАХ, у остальных — в секундах. На копии 0.50.32 правило с cooldown_tokens
+        // отвергалось СХЕМОЙ и уносило с собой весь набор; здесь оба обязаны быть приняты.
+        rules: [
+          {
+            id: "latch-probe-seconds",
+            events: ["chat.message"],
+            actions: [{ type: "hint", text: "LATCH_PROBE_SECONDS" }],
+            latch: { klass: "per-session", window: { cooldown_seconds: 3600 } },
+            enabled: true,
+          },
+          {
+            id: "latch-probe-tokens",
+            events: ["chat.message"],
+            actions: [{ type: "hint", text: "LATCH_PROBE_TOKENS" }],
+            latch: { klass: "per-session", window: { cooldown_tokens: 500 } },
+            enabled: true,
+          },
+        ],
         sessionId: "s1",
       })
       const ev = { type: "chat.message", prompt: "hello", sessionId: "s1" }
       const a = await p.process(ev)
       const b = await p.process(ev)
-      const hits = [...a, ...b].filter(r => r.type === "hint" && r.hintText === "LATCH_PROBE_HINT").length
-      console.log("HITS=" + hits)
+      const count = (text) => [...a, ...b].filter(r => r.type === "hint" && r.hintText === text).length
+      console.log("HITS_SECONDS=" + count("LATCH_PROBE_SECONDS"))
+      console.log("HITS_TOKENS=" + count("LATCH_PROBE_TOKENS"))
     `
     const r = Bun.spawnSync({
       cmd: ['bun', '-e', script],
@@ -158,8 +171,10 @@ describe('latch in the in-process fallback (contract with @kiberos/signal-wire-c
       env: { ...process.env, SIGNAL_WIRE_CORE_LOG_FILE: logFile },
     })
     expect(r.exitCode).toBe(0)
-    // Половина первая: НЕ ГЛОХНЕТ — без хранилища ограничения нет, значит оба вызова сработали.
-    expect(r.stdout.toString()).toContain('HITS=2')
+    // Половина первая: НЕ ГЛОХНЕТ — без хранилища ограничения нет, значит оба вызова сработали
+    // на ОБЕИХ осях (вторая ось ещё и доказывает, что копия ядра новее 0.50.32).
+    expect(r.stdout.toString()).toContain('HITS_SECONDS=2')
+    expect(r.stdout.toString()).toContain('HITS_TOKENS=2')
     // Половина вторая: ГОВОРИТ — «нечем ограничить» названо причиной, а не молчанием.
     const log = readFileSync(logFile, 'utf8')
     expect(log).toContain('LATCH_UNENFORCEABLE')

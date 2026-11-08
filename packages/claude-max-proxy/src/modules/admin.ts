@@ -81,6 +81,81 @@ export function servedOrgOf(session: string): { found: boolean; session: string;
   return { found: false, session }
 }
 
+/** Что дверь знает о сессии в батче. `status` НАЗЫВАЕТ отсутствие, а не прячет его:
+ *  `no_choice_yet` — дверь ещё не обслуживала сессию (выбора организации не было);
+ *  `unknown` — запись есть, но организации в ней нет. */
+export interface ServedOrgBatchEntry {
+  found: boolean
+  session: string
+  org?: string
+  source?: string | null
+  at?: string
+  ageSec?: number
+  status: 'found' | 'no_choice_yet' | 'unknown'
+}
+
+/** Потолок на размер батча: это админ-дверь на loopback, но бесконечный список
+ *  превратил бы её в способ съесть память процесса на разборе каждой строки. */
+export const SERVED_ORG_BATCH_MAX = 500
+
+/**
+ * Батч вместо N отдельных вызовов. 🔴 Зачем: одиночный путь читает и разбирает ВЕСЬ
+ * журнал за раз, а читатель присутствия спрашивает до 105 сессий по одной — это 105
+ * проходов по одному и тому же файлу, и на 3-секундном бюджете успевало ~30 (замер
+ * 08.11: 50–70 мс на вызов, 12 параллельных — строго в очередь). Здесь файл читается
+ * ОДИН раз, а сессии находятся за один проход с конца.
+ *
+ * Контракт ответа: каждый запрошенный id присутствует в `results` (порядок запроса),
+ * всё не найденное названо в `unknown`. Сессия, которую дверь ещё не обслуживала, —
+ * `no_choice_yet`, а не тишина и не задержка всего батча.
+ */
+export function servedOrgBatch(sessions: string[]): { results: ServedOrgBatchEntry[]; unknown: string[] } {
+  const wanted: string[] = []
+  const wantedSet = new Set<string>()
+  for (const raw of sessions) {
+    const s = String(raw ?? '').trim()
+    if (!s || wantedSet.has(s)) continue
+    wanted.push(s)
+    wantedSet.add(s)
+    if (wanted.length >= SERVED_ORG_BATCH_MAX) break
+  }
+
+  const seen = new Map<string, ServedOrgBatchEntry>()
+  const dir = process.env.PROVIDER_DUMP_DIR ?? join(homedir(), '.claude-local', 'provider-dump')
+  const days = [0, 1].map((d) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10))
+  for (const day of days) {
+    if (seen.size >= wanted.length) break
+    let text = ''
+    try { text = readFileSync(join(dir, `${day}.jsonl`), 'utf8') } catch { continue }
+    const lines = text.split('\n')
+    for (let i = lines.length - 1; i >= 0 && seen.size < wanted.length; i--) {
+      const line = lines[i]
+      if (!line) continue
+      let rec: { session_id?: string | null; org_id?: string | null; org_source?: string | null; ts?: string }
+      try { rec = JSON.parse(line) } catch { continue }
+      const id = rec.session_id
+      if (typeof id !== 'string' || !id || seen.has(id) || !wantedSet.has(id)) continue
+      const at = typeof rec.ts === 'string' ? rec.ts : null
+      const ageSec = at ? Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000)) : undefined
+      const org = rec.org_id ?? undefined
+      seen.set(id, {
+        found: Boolean(org),
+        session: id,
+        org,
+        source: rec.org_source ?? null,
+        at: at ?? undefined,
+        ageSec,
+        status: org ? 'found' : 'unknown',
+      })
+    }
+  }
+
+  const results: ServedOrgBatchEntry[] = wanted.map((s) =>
+    seen.get(s) ?? { found: false, session: s, status: 'no_choice_yet' as const })
+  const unknown = results.filter(r => !r.found).map(r => r.session)
+  return { results, unknown }
+}
+
 export function createAdminModule(onShutdown: () => void): ProxyModule {
   shutdownFn = onShutdown
 
@@ -106,9 +181,30 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
       method: 'GET',
       path: '/admin/served-org',
       handler: async (req) => {
-        const session = (new URL(req.url).searchParams.get('session') ?? '').trim()
+        const url = new URL(req.url)
+        const sessionsRaw = url.searchParams.get('sessions')
+        if (sessionsRaw !== null) {
+          const list = sessionsRaw.split(',').map(s => s.trim()).filter(Boolean)
+          if (list.length === 0) return Response.json({ error: 'sessions required' }, { status: 400 })
+          return Response.json(servedOrgBatch(list))
+        }
+        const session = (url.searchParams.get('session') ?? '').trim()
         if (!session) return Response.json({ error: 'session required' }, { status: 400 })
         return Response.json(servedOrgOf(session))
+      },
+    },
+
+    // Батч телом — для читателей, у которых список длинный (до 105 строк отчёта).
+    // Форма та же, что у `?sessions=`; одиночный `?session=` остаётся нетронутым.
+    {
+      method: 'POST',
+      path: '/admin/served-org',
+      handler: async (req) => {
+        let body: { sessions?: unknown } = {}
+        try { body = await req.json() as { sessions?: unknown } } catch { /* разберём ниже */ }
+        const list = Array.isArray(body?.sessions) ? body.sessions.map(s => String(s ?? '')).filter(Boolean) : []
+        if (list.length === 0) return Response.json({ error: 'sessions required' }, { status: 400 })
+        return Response.json(servedOrgBatch(list))
       },
     },
 

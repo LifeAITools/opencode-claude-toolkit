@@ -8,7 +8,9 @@
 import { describe, test, expect } from 'bun:test'
 import { SignalWire } from './signal-wire'
 import { translateLegacyRules, getBundledRulesPath, execSuppressionReason } from '@kiberos/signal-wire-core'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /**
  * 🔴 Mute the rules' `exec` actions BEFORE anything constructs an engine.
@@ -111,6 +113,57 @@ describe('exec-suppression (contract with @kiberos/signal-wire-core)', () => {
     // leaking into a real run would silently disable every exec rule in the
     // fleet, and it would look exactly like a quiet day.
     expect(execSuppressionReason({})).toBeNull()
+  })
+})
+
+/**
+ * СОСТОЯНИЕ, КОТОРОЕ НЕЛЬЗЯ ОСТАВИТЬ СЛУЧАЙНЫМ (08.11.2026, разговор с владельцем ядра).
+ *
+ * На пути `SW_DAEMON_ABSENT`/`SW_DAEMON_UNAVAILABLE` событие считает ВСТРОЕННАЯ копия ядра,
+ * и `latchStores` ей не передаются. Правило с `latch` там срабатывает БЕЗ ограничения — это
+ * нарочный fail-open ядра (пропуск защиты дороже дубля подсказки), и решение принято
+ * осознанно: запасной путь — временный, а второй писатель в каталог защёлок демона дал бы
+ * ровно тот класс «два писателя под одним именем», который мы уже ловили дорого.
+ *
+ * Опасен не пропуск, а его БЕЗЗВУЧНОСТЬ: «сработало без ограничения» и «ограничение
+ * соблюдено» в поведении выглядят одинаково. Поэтому проверяем ОБЕ половины контракта.
+ */
+describe('latch in the in-process fallback (contract with @kiberos/signal-wire-core)', () => {
+  test('a latch rule fires every time in the fallback, and the core says it is unenforced', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sw-latch-'))
+    const logFile = join(dir, 'core.log')
+    // Отдельный процесс: путь журнала ядро читает ПРИ ИМПОРТЕ, поэтому подмена env
+    // внутри этого процесса до ядра уже не доехала бы.
+    const script = `
+      import { Pipeline } from "@kiberos/signal-wire-core"
+      const p = new Pipeline({
+        rules: [{
+          id: "latch-probe",
+          events: ["chat.message"],
+          actions: [{ type: "hint", text: "LATCH_PROBE_HINT" }],
+          latch: { klass: "per-session", window: { cooldown_seconds: 3600 } },
+          enabled: true,
+        }],
+        sessionId: "s1",
+      })
+      const ev = { type: "chat.message", prompt: "hello", sessionId: "s1" }
+      const a = await p.process(ev)
+      const b = await p.process(ev)
+      const hits = [...a, ...b].filter(r => r.type === "hint" && r.hintText === "LATCH_PROBE_HINT").length
+      console.log("HITS=" + hits)
+    `
+    const r = Bun.spawnSync({
+      cmd: ['bun', '-e', script],
+      cwd: import.meta.dir,
+      env: { ...process.env, SIGNAL_WIRE_CORE_LOG_FILE: logFile },
+    })
+    expect(r.exitCode).toBe(0)
+    // Половина первая: НЕ ГЛОХНЕТ — без хранилища ограничения нет, значит оба вызова сработали.
+    expect(r.stdout.toString()).toContain('HITS=2')
+    // Половина вторая: ГОВОРИТ — «нечем ограничить» названо причиной, а не молчанием.
+    const log = readFileSync(logFile, 'utf8')
+    expect(log).toContain('LATCH_UNENFORCEABLE')
+    expect(log).toContain('no-latch-stores')
   })
 })
 

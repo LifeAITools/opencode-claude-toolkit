@@ -2,6 +2,11 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [Unreleased] - 2026-11-08
+
+### Изменено
+- **S7 закрыт: прогрев Go не вводится.** Решение 08.11.2026 (`home-relishev-general`). Основание: у Go бесплатного прогрева не существует — первое обращение это платная холодная запись префикса, а директива фаундера 11.09 запрещает прогреву тратить квоту на запись; плюс предстоящий переезд на DeepSeek Harness. Кода прогрева Go нет и не будет в текущей ветке: флага `warmQuotaShareMax` не существует. Подробности — комментарий в `packages/claude-max-proxy/src/modules/go-door.ts`.
+
 ## [0.20.36] - 2026-08-18 (proxy 1.0.23)
 
 ### Fixed

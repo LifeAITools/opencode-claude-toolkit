@@ -107,17 +107,36 @@ export const SERVED_ORG_BATCH_MAX = 500
  *
  * Контракт ответа: каждый запрошенный id присутствует в `results` (порядок запроса),
  * всё не найденное названо в `unknown`. Сессия, которую дверь ещё не обслуживала, —
- * `no_choice_yet`, а не тишина и не задержка всего батча.
+ * `no_choice_yet`, а не тишина и не задержка всего батча. Сверх потолка — `truncated`,
+ * потому что «не дошло до проверки» обязано отличаться от «проверили, данных нет».
  */
-export function servedOrgBatch(sessions: string[]): { results: ServedOrgBatchEntry[]; unknown: string[] } {
+export function servedOrgBatch(sessions: string[]): {
+  results: ServedOrgBatchEntry[]
+  unknown: string[]
+  /* 🔴 Проверенные id кончились на потолке — и это НАЗВАНО, а не отброшено молча.
+     Ровно тот же принцип, что у отсутствующей сессии: читатель не должен отличать
+     «данных нет» от «до неё не дошло» по пустому месту в ответе.
+     `truncated` — первые N непроверенных id, `truncatedTotal` — сколько их всего. */
+  truncated: string[]
+  truncatedTotal: number
+} {
   const wanted: string[] = []
   const wantedSet = new Set<string>()
+  /** Потолок НА СПИСОК НЕПРОВЕРЕННЫХ: вход неограничен, память процесса — нет. */
+  const TRUNCATED_NAMES_MAX = 2000
+  const truncated: string[] = []
+  let truncatedTotal = 0
   for (const raw of sessions) {
     const s = String(raw ?? '').trim()
     if (!s || wantedSet.has(s)) continue
+    if (wanted.length >= SERVED_ORG_BATCH_MAX) {
+      wantedSet.add(s)
+      truncatedTotal++
+      if (truncated.length < TRUNCATED_NAMES_MAX) truncated.push(s)
+      continue
+    }
     wanted.push(s)
     wantedSet.add(s)
-    if (wanted.length >= SERVED_ORG_BATCH_MAX) break
   }
 
   const seen = new Map<string, ServedOrgBatchEntry>()
@@ -153,7 +172,7 @@ export function servedOrgBatch(sessions: string[]): { results: ServedOrgBatchEnt
   const results: ServedOrgBatchEntry[] = wanted.map((s) =>
     seen.get(s) ?? { found: false, session: s, status: 'no_choice_yet' as const })
   const unknown = results.filter(r => !r.found).map(r => r.session)
-  return { results, unknown }
+  return { results, unknown, truncated, truncatedTotal }
 }
 
 export function createAdminModule(onShutdown: () => void): ProxyModule {

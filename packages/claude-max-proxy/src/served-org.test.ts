@@ -111,5 +111,17 @@ describe('батч: 105 сессий одним проходом, отсутст
     const ids = Array.from({ length: SERVED_ORG_BATCH_MAX + 5 }, (_, i) => `ses_${i}`)
     const r = servedOrgBatch(ids)
     expect(r.results.length).toBe(SERVED_ORG_BATCH_MAX)
+    // Непроверенное НАЗВАНО: иначе читатель не отличит «до неё не дошло» от «данных нет».
+    expect(r.truncated.length).toBe(5)
+    expect(r.truncatedTotal).toBe(5)
+    expect(r.truncated[0]).toBe(`ses_${SERVED_ORG_BATCH_MAX}`)
+  })
+
+  test('в пределах потолка truncated пуст — и это тоже проверяется', () => {
+    const dir = fresh()
+    writeFileSync(join(dir, `${day()}.jsonl`), '')
+    const r = servedOrgBatch(['ses_a', 'ses_b'])
+    expect(r.truncated).toEqual([])
+    expect(r.truncatedTotal).toBe(0)
   })
 })

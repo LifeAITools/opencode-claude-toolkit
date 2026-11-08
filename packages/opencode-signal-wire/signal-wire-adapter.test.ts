@@ -155,6 +155,21 @@ describe('latch in the in-process fallback (contract with @kiberos/signal-wire-c
             latch: { klass: "per-session", window: { cooldown_tokens: 500 } },
             enabled: true,
           },
+          {
+            // 🔴 ТРЕТЬЯ ФОРМА (ядро 0.50.34): ОБЩЕЕ ВЕДРО частоты и сброс отметки по событию.
+            // Без них 8 живых правил не переводились без потери смысла. На 0.50.33 эти поля
+            // отвергались схемой — то есть отказом НАБОРА, и миграция ждала именно 0.50.34.
+            id: "latch-probe-bucket",
+            events: ["chat.message"],
+            actions: [{ type: "hint", text: "LATCH_PROBE_BUCKET" }],
+            latch: {
+              klass: "per-session",
+              bucket: "probe-bucket",
+              window: { cooldown_seconds: 60 },
+              reset_on: ["session.idle"],
+            },
+            enabled: true,
+          },
         ],
         sessionId: "s1",
       })
@@ -164,6 +179,7 @@ describe('latch in the in-process fallback (contract with @kiberos/signal-wire-c
       const count = (text) => [...a, ...b].filter(r => r.type === "hint" && r.hintText === text).length
       console.log("HITS_SECONDS=" + count("LATCH_PROBE_SECONDS"))
       console.log("HITS_TOKENS=" + count("LATCH_PROBE_TOKENS"))
+      console.log("HITS_BUCKET=" + count("LATCH_PROBE_BUCKET"))
     `
     const r = Bun.spawnSync({
       cmd: ['bun', '-e', script],
@@ -175,6 +191,7 @@ describe('latch in the in-process fallback (contract with @kiberos/signal-wire-c
     // на ОБЕИХ осях (вторая ось ещё и доказывает, что копия ядра новее 0.50.32).
     expect(r.stdout.toString()).toContain('HITS_SECONDS=2')
     expect(r.stdout.toString()).toContain('HITS_TOKENS=2')
+    expect(r.stdout.toString()).toContain('HITS_BUCKET=2')
     // Половина вторая: ГОВОРИТ — «нечем ограничить» названо причиной, а не молчанием.
     const log = readFileSync(logFile, 'utf8')
     expect(log).toContain('LATCH_UNENFORCEABLE')

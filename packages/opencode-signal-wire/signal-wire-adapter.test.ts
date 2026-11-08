@@ -129,7 +129,7 @@ describe('exec-suppression (contract with @kiberos/signal-wire-core)', () => {
  * соблюдено» в поведении выглядят одинаково. Поэтому проверяем ОБЕ половины контракта.
  */
 describe('latch in the in-process fallback (contract with @kiberos/signal-wire-core)', () => {
-  test('a latch rule fires every time in the fallback, and the core says it is unenforced', () => {
+  test('без корня состояния — fail-open и громко; с корнем (как у адаптера) — ограничение действует', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sw-latch-'))
     const logFile = join(dir, 'core.log')
     // Отдельный процесс: путь журнала ядро читает ПРИ ИМПОРТЕ, поэтому подмена env
@@ -180,11 +180,33 @@ describe('latch in the in-process fallback (contract with @kiberos/signal-wire-c
       console.log("HITS_SECONDS=" + count("LATCH_PROBE_SECONDS"))
       console.log("HITS_TOKENS=" + count("LATCH_PROBE_TOKENS"))
       console.log("HITS_BUCKET=" + count("LATCH_PROBE_BUCKET"))
+
+      // 🔴 ВТОРОЙ ПОЛЮС (ядро 0.50.35): КОГДА ЕСТЬ FileBackend, ядро выводит хранилища
+      // защёлки из ЕГО ЖЕ КОРНЯ, даже без явного latchStores. Это ровно конфигурация
+      // адаптера (он передаёт stateBackend с корнем defaultStateDir) — то есть в реальном
+      // фолбэке ограничение ДЕЙСТВУЕТ, а не пропадает. Проверяем фактом, не по описанию.
+      import { FileBackend } from "@kiberos/signal-wire-core"
+      const pEnforced = new Pipeline({
+        rules: [{
+          id: "latch-probe-enforced",
+          events: ["chat.message"],
+          actions: [{ type: "hint", text: "LATCH_PROBE_ENFORCED" }],
+          latch: { klass: "per-session", window: { cooldown_seconds: 3600 } },
+          enabled: true,
+        }],
+        stateBackend: new FileBackend({ root: process.env.TDIR }),
+        sessionId: "s1",
+      })
+      const e1 = await pEnforced.process(ev)
+      const e2 = await pEnforced.process(ev)
+      const enforcedHits = [...e1, ...e2].filter(r => r.type === "hint" && r.hintText === "LATCH_PROBE_ENFORCED").length
+      console.log("HITS_ENFORCED=" + enforcedHits)
+      console.log("STORES_DERIVED=" + (pEnforced.latchStores ? "yes" : "no"))
     `
     const r = Bun.spawnSync({
       cmd: ['bun', '-e', script],
       cwd: import.meta.dir,
-      env: { ...process.env, SIGNAL_WIRE_CORE_LOG_FILE: logFile },
+      env: { ...process.env, SIGNAL_WIRE_CORE_LOG_FILE: logFile, TDIR: join(dir, 'state') },
     })
     expect(r.exitCode).toBe(0)
     // Половина первая: НЕ ГЛОХНЕТ — без хранилища ограничения нет, значит оба вызова сработали
@@ -192,6 +214,10 @@ describe('latch in the in-process fallback (contract with @kiberos/signal-wire-c
     expect(r.stdout.toString()).toContain('HITS_SECONDS=2')
     expect(r.stdout.toString()).toContain('HITS_TOKENS=2')
     expect(r.stdout.toString()).toContain('HITS_BUCKET=2')
+    // Второй полюс: в конфигурации адаптера (FileBackend с корнем состояния) ограничение
+    // ДЕЙСТВУЕТ — одна подсказка на два вызова, хранилища выведены из корня.
+    expect(r.stdout.toString()).toContain('HITS_ENFORCED=1')
+    expect(r.stdout.toString()).toContain('STORES_DERIVED=yes')
     // Половина вторая: ГОВОРИТ — «нечем ограничить» названо причиной, а не молчанием.
     const log = readFileSync(logFile, 'utf8')
     expect(log).toContain('LATCH_UNENFORCEABLE')

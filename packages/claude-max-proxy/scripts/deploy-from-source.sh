@@ -185,18 +185,25 @@ log "manifest -> $MANIFEST ($(find "$INSTALLED/src" -name '*.ts' ! -name '*bak*'
 #     would drag the mediator's master key and DB password into the proxy.
 #     Absent vault files (e.g. another machine) are fine: the unit reads the file optionally.
 OD_ENV=$HOME/.claude-local/open-design-keys.env
-if [ -f "$HOME/.secrets/open-design.key" ] && [ -f "$HOME/.secrets/open-design-2.key" ]; then
+# 🔴 ЦИКЛ, А НЕ ПЕРЕЧЕНЬ СТРОК (09.11.2026). Пока аккаунтов было четыре, здесь стояли
+# четыре явных `printf`, и каждый новый ключ требовал правки скрипта — ровно та работа,
+# которую деплой должен делать сам. Теперь имя переменной выводится из номера файла:
+# open-design.key → OPEN_DESIGN_API_KEY, open-design-N.key → OPEN_DESIGN_API_KEY_N.
+# Файла нет — строки нет; появился — поедет следующим деплоем без правки кода.
+if [ -f "$HOME/.secrets/open-design.key" ]; then
   ( umask 077
-    printf 'OPEN_DESIGN_API_KEY=%s\n'   "$(tr -d '\n' < "$HOME/.secrets/open-design.key")"   >  "$OD_ENV.tmp"
-    printf 'OPEN_DESIGN_API_KEY_2=%s\n' "$(tr -d '\n' < "$HOME/.secrets/open-design-2.key")" >> "$OD_ENV.tmp"
-    # Третий аккаунт появляется по мере выдачи ключей: файла нет — строки нет.
-    [ -f "$HOME/.secrets/open-design-3.key" ] && \
-      printf 'OPEN_DESIGN_API_KEY_3=%s\n' "$(tr -d '\n' < "$HOME/.secrets/open-design-3.key")" >> "$OD_ENV.tmp"
-    [ -f "$HOME/.secrets/open-design-4.key" ] && \
-      printf 'OPEN_DESIGN_API_KEY_4=%s\n' "$(tr -d '\n' < "$HOME/.secrets/open-design-4.key")" >> "$OD_ENV.tmp"
+    {
+      printf 'OPEN_DESIGN_API_KEY=%s\n' "$(tr -d '\n' < "$HOME/.secrets/open-design.key")"
+      for n in 2 3 4 5 6 7 8 9; do
+        f="$HOME/.secrets/open-design-$n.key"
+        if [ -f "$f" ]; then
+          printf 'OPEN_DESIGN_API_KEY_%s=%s\n' "$n" "$(tr -d '\n' < "$f")"
+        fi
+      done
+    } > "$OD_ENV.tmp"
     mv "$OD_ENV.tmp" "$OD_ENV" )
   chmod 600 "$OD_ENV"
-  log "open-design keys -> $OD_ENV (from vault)"
+  log "open-design keys -> $OD_ENV ($(grep -c '^OPEN_DESIGN_API_KEY' "$OD_ENV") keys from vault)"
 else
   log "open-design keys: vault files absent — door will answer 503 for OD until provided"
 fi

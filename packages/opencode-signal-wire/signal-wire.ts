@@ -13,7 +13,6 @@ import { homedir } from 'os'
 import { join, dirname } from 'path'
 import {
   Pipeline,
-  MemoryBackend,
   FileBackend,
   EmitterRegistry,
   validateRuleSet,

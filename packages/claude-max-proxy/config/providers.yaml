@@ -91,6 +91,13 @@ providers:
       # Почтa та же, что у организации Go, но провайдер и счёт разные — путать нельзя.
       - email: hello@synqwire.io
         key_env: OPEN_DESIGN_API_KEY_5
+      # Шестая организация (10.11.2026): вход устройством дал аккаунт hello@uniclowd.com
+      # (accountId si5z5m2emywv7wx8vfeb84dt), контрольный ключ —
+      # ~/.secrets/open-design-control-6.json. В производство взят ключ ИЗ САМОГО ВХОДА
+      # (runtimeKey → ~/.secrets/open-design-6.key, владелец доказан выдачей); ключ, который
+      # фаундер прислал отдельно, сохранён рядом как open-design-6-founder.key.
+      - email: hello@uniclowd.com
+        key_env: OPEN_DESIGN_API_KEY_6
     models:
       - deepseek-v4.1-flash-od
       - deepseek-v4.1-flash-eco-od

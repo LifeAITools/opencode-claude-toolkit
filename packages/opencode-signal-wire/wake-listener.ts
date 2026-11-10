@@ -1251,7 +1251,9 @@ async function resolveSessionId(sessionId: string): Promise<string | null> {
       if (!_sdkClient) { dbg('resolveSessionId: no sdkClient'); return null }
       const { data: sessions } = await _sdkClient.session.list()
       if (!Array.isArray(sessions)) return null
-      const matches = sessions.filter((s: any) => s.directory === _agentDirectory)
+      // ДИТЯ под-агента — не кандидат на привязку: у него есть родитель, и голос агента — он.
+      // Без этого фильтра одиночное дитя в том же каталоге могло стать «лицом» процесса.
+      const matches = sessions.filter((s: any) => s.directory === _agentDirectory && !isChildSession(s))
       if (matches.length > 1) {
         dbg(`SESSION_BIND_AMBIGUOUS directory=${_agentDirectory} candidates=${matches.map((s: any) => s.id).join(',')}`)
         return null
@@ -1408,6 +1410,27 @@ export function adoptFromSiblingCards(
     }
   } catch { /* нет каталога / нечитаемо — усваивать нечего */ }
   return out
+}
+
+/**
+ * Сессия — ДИТЯ под-агента (у неё есть родитель), а не голос самого агента.
+ *
+ * 🔴 ЗАЧЕМ (живой случай 10.11.2026, замер packages-lat-context-owner): opencode `Task()`
+ * порождает дочерние сессии, и каждой из них наш адаптер успевал выдать СВОЙ слот
+ * `<pid>-<binding>-ses_<child>.json` (с тем же `agentInstanceId`, что у родителя). Роутер
+ * побудок держит записи по `agentInstanceId` и слиянием `seat-merged` предпочёл `transport: http`
+ * от ДИТЯ — побудки фаундера/SynqTask приехали в под-сессию, а сам агент в панели видел мёртвый
+ * экран. Правило (уже стоит у трёх писателей lat-context и в общем модуле signal-wire-core —
+ * `PresenceInput.parentSessionId`): сессия с родителем — НЕ голос; в слот пишется РОДИТЕЛЬ.
+ *
+ * Три написания нарочно: opencode отдаёт `parentID` в `session.list`, `parent_id` в
+ * `session.get`, а события несут `parentID` (см. `sessionFromEvent`). Пустой родитель — не дитя.
+ */
+export function isChildSession(
+  s: { parentID?: string | null; parent_id?: string | null; parentId?: string | null } | null | undefined,
+): boolean {
+  if (!s) return false
+  return Boolean(s.parentID ?? s.parent_id ?? s.parentId)
 }
 
 export function discoveryFilePath(

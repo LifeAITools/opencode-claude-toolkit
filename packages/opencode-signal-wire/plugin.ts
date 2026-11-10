@@ -695,17 +695,24 @@ export default {
 
     const bindSession = (candidateSessionId: string, reason: string, directory?: string, parentID?: string | null) => {
       if (!candidateSessionId) return false
+      // 🔴 ДИТЯ НЕ СТАНОВИТСЯ ЛИЦОМ ПРОЦЕССА НИКОГДА — и когда привязки ещё нет (10.11.2026).
+      // Прежний отказ стоял ТОЛЬКО в ветке «уже привязан к другой сессии», поэтому при
+      // `boundSessionId = null` (процесс стартовал с 'unknown') первое событие `session.created`
+      // от под-агента привязывало ДИТЯ и открывало ему свою дверь + слот `-ses_<child>.json`.
+      // Замер packages-lat-context-owner: у связки mermaid-ink так появились ДВА слота на
+      // одного члена, роутер слиянием `seat-merged` предпочёл `transport: http` от дитя, и
+      // побудки фаундера/SynqTask приезжали в под-сессию (в панели — мёртвый экран).
+      // Родитель привязывается своим стартом/событием; дитя — никогда.
+      if (parentID) {
+        logStep('SESSION_BIND_SKIPPED', { reason: 'candidate_is_child', existing: boundSessionId, candidate: candidateSessionId, parentID })
+        return false
+      }
       if (boundSessionId && boundSessionId !== candidateSessionId) {
         // 🔴 ПЕРЕПРИВЯЗКА, А НЕ ОТКАЗ (замер 13.10, инцидент открыл packages-signal-wire-core-owner).
         // Процесс opencode ПЕРЕЖИВАЕТ сессию: под ним поднимается НОВАЯ, а прежний bind-once отвергал её
         // — в журнале `SESSION_BIND_SKIPPED already_bound` (8 раз против 1277 привязок за сутки) — и
         // события новой сессии клались на СТАРУЮ. Следствие: реестр видел не больную сессию, и красный
         // у vibe-telegram-mcp-service-owner не зажигался. Теперь следуем ЗА АКТИВНОЙ сессией процесса.
-        // Дитя (parentID) привязку у родителя НЕ ворует — под-агент не должен становиться лицом процесса.
-        if (parentID) {
-          logStep('SESSION_BIND_SKIPPED', { reason: 'candidate_is_child', existing: boundSessionId, candidate: candidateSessionId, parentID })
-          return false
-        }
         logStep('SESSION_REBOUND', { reason, existing: boundSessionId, candidate: candidateSessionId })
       }
       if (!process.env.OPENCODE_AGENT_INSTANCE_ID && agentInstanceId.includes(':unknown:')) {

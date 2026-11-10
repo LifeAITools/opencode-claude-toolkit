@@ -1450,7 +1450,26 @@ export function discoveryFilePath(
   // остаётся с прежним именем и ни один читатель не переучивается.
   const known = Boolean(sessionId) && sessionId !== 'unknown'
   const multi = (opts.sessionsInProcess?.length ?? 0) > 1
-  const byBinding = join(dir, `${pid}-${bindingId.replace(/\//g, '_')}${multi && known ? `-${sessionId}` : ''}.json`)
+  const stem = `${pid}-${bindingId.replace(/\//g, '_')}`
+  // 🔴 ОДИН СЕАНС — ОДИН ФАЙЛ (живой случай 10.11.2026, `vibe_deepseek-harness_owner_02` pid 1259337).
+  // При `multi` второй слот получал суффикс `-ses_<sid>` даже тогда, когда БАЗОВЫЙ слот уже держал
+  // ТОТ ЖЕ `sessionId`: `_processSessions` копит номера прошлых сессий процесса, поэтому `multi`
+  // остаётся истинным и после того, как база переехала на текущую сессию. Роутер видел ДВЕ записи
+  // с одним `agentInstanceId`, `seat-merged` оставлял обе, и побудка уезжала в дверь без агентского
+  // хода. Поэтому: если БАЗОВЫЙ слот НАШ (opencode/http) и его `sessionId` равен текущему —
+  // пишем в него, второй файл не создаём. Другая сессия — по-прежнему свой суффикс.
+  if (multi && known) {
+    try {
+      const base = JSON.parse(readFileSync(join(dir, `${stem}.json`), 'utf-8')) as {
+        harness?: string; transport?: string; sessionId?: string
+      }
+      if (base.harness === 'opencode' && base.transport === 'http' && base.sessionId === sessionId) {
+        dbg(`DISCOVERY_BASE_SAME_SESSION ${join(dir, `${stem}.json`)} — второй слот того же сеанса не создаётся`)
+        return join(dir, `${stem}.json`)
+      }
+    } catch { /* базового нет / нечитаем — обычный путь с суффиксом */ }
+  }
+  const byBinding = join(dir, `${stem}${multi && known ? `-${sessionId}` : ''}.json`)
   try {
     const existing = JSON.parse(readFileSync(byBinding, 'utf-8')) as { harness?: string; transport?: string; sessionId?: string }
     if (existing.harness !== 'opencode' || existing.transport !== 'http') {

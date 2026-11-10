@@ -13,7 +13,7 @@
  *     помнит другую.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { discoveryFilePath } from './wake-listener'
@@ -45,6 +45,36 @@ describe('слот: две сессии одного процесса', () => {
     const d = dir()
     expect(discoveryFilePath(d, 42, undefined, 'ses_a', { sessionsInProcess: ['ses_a', 'ses_b'] }))
       .toBe(join(d, '42-ses_a.json'))
+  })
+
+  test('multi, но базовый слот УЖЕ держит ТОТ ЖЕ сеанс — второго файла нет (10.11)', () => {
+    // `_processSessions` копит номера прошлых сессий, поэтому `multi` истинно и после того,
+    // как базовый слот переехал на текущую. Прежний код плодил `-ses_<тот же sid>` — роутер
+    // видел две записи с одним agentInstanceId и слал побудку в дверь без хода агента.
+    const d = dir()
+    writeFileSync(join(d, '42-agent_01.json'), JSON.stringify({
+      harness: 'opencode', transport: 'http', sessionId: 'ses_a',
+    }))
+    expect(discoveryFilePath(d, 42, 'agent_01', 'ses_a', { sessionsInProcess: ['ses_a', 'ses_old'] }))
+      .toBe(join(d, '42-agent_01.json'))
+  })
+
+  test('multi и базовый держит ДРУГОЙ сеанс — у нового свой суффикс (две реальные сессии)', () => {
+    const d = dir()
+    writeFileSync(join(d, '42-agent_01.json'), JSON.stringify({
+      harness: 'opencode', transport: 'http', sessionId: 'ses_a',
+    }))
+    expect(discoveryFilePath(d, 42, 'agent_01', 'ses_b', { sessionsInProcess: ['ses_a', 'ses_b'] }))
+      .toBe(join(d, '42-agent_01-ses_b.json'))
+  })
+
+  test('базовый слот — НЕ наш (visible_agent) — не перехватываем, даже если sid совпал', () => {
+    const d = dir()
+    writeFileSync(join(d, '42-agent_01.json'), JSON.stringify({
+      harness: 'opencode', transport: 'visible_agent', sessionId: 'ses_a',
+    }))
+    expect(discoveryFilePath(d, 42, 'agent_01', 'ses_a', { sessionsInProcess: ['ses_a', 'ses_b'] }))
+      .toBe(join(d, '42-agent_01-ses_a.json'))
   })
 })
 

@@ -178,6 +178,23 @@ if ! recreate; then
   die "выкатка отменена: compose возвращён на $RUNTAG"
 fi
 
+# ── 3.5. ФАЙЛ ПАРКОВКИ (пересоздание стирает локальные файлы контейнера) ───────────────
+# Замер 10.11.2026: после выкатки 1.3.2 в контейнере НЕ оказалось parked-models.json,
+# и модели Claude снова давали бы СЫРОЙ отказ поставщика вместо названного «припаркована».
+# Файл — данные, не код: кладём его обратно ПОСЛЕ пересоздания, иначе каждый выпуск
+# молча теряет парковку. Путь переопределяется PARKED_FILE.
+PARKED_FILE=${PARKED_FILE:-$HOME/.claude-local/parked-models.json}
+if [ -f "$PARKED_FILE" ]; then
+  if scp -q "$PARKED_FILE" "$HOST:/tmp/parked-models-deploy-$STAMP.json" \
+     && sshx "docker exec $SERVICE mkdir -p /root/.claude-local && docker cp /tmp/parked-models-deploy-$STAMP.json $SERVICE:/root/.claude-local/parked-models.json" >/dev/null 2>&1; then
+    log "файл парковки переложен в контейнер ($PARKED_FILE)"
+  else
+    log "🔴 не смог переложить файл парковки — claude-модели вернут СЫРОЙ отказ, а не названный (файл: $PARKED_FILE)"
+  fi
+else
+  log "файла парковки нет ($PARKED_FILE) — ничего не кладу"
+fi
+
 # ── 4. ПРОВЕРКИ ЖИВЬЁМ (без них выкатка не считается сделанной) ───────────────────────
 FAIL=""
 for i in $(seq 1 20); do

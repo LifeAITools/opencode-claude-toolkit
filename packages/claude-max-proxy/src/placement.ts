@@ -241,8 +241,18 @@ function fmt(h: number): string {
  * Куда посадить нового агента.
  *
  * Порядок: сначала вердикт (`walled` никогда, `avoid` только если сажать больше некуда),
+ * затем ЖИВАЯ НАГРУЗКА (`inFlight` — размазывать по всем доступным, а не выжигать одну),
  * затем оценка ПОСЛЕ посадки (больше — лучше), затем средний запас, затем стабильный хеш.
  * Хеш считается по `seed` (обычно номер сессии), чтобы равные не перекидывались.
+ *
+ * 🔴 ЗАЧЕМ НАГРУЗКА СТОИТ ВЫШЕ ЗАПАСА (слово фаундера 11.11.2026: «мы вместо того, чтобы
+ * распылять нагрузку, начинаем выжигать одну организацию»). Запас у одновременных вызовов
+ * одинаковый, поэтому «кто свободнее по квоте» выбирает ОДНУ И ТУ ЖЕ организацию раз за
+ * разом и заполняет её до потолка, пока соседние стоят. Двенадцать вызовов 11.11 ушли
+ * именно так — все на `hello@uniclowd.com`. Теперь среди равно годных первым идёт тот,
+ * где МЕНЬШЕ живых вызовов; запас решает только между равно загруженными.
+ * Граница: `avoid` (до стены меньше NEAR_WALL_HOURS) всё равно ниже `place`, поэтому «размазать»
+ * не превращается в «сжечь почти исчерпанную».
  */
 export function planPlacement(orgs: PlacementOrg[], nowMs: number, seed = ''): PlacementPlan {
   const ranked = orgs.map(o => assessOrg(o, nowMs)).sort((a, b) => {
@@ -252,6 +262,8 @@ export function planPlacement(orgs: PlacementOrg[], nowMs: number, seed = ''): P
     const rank = (v: PlacementAssessment['verdict']) =>
       v === 'place' ? 0 : v === 'unknown' ? 1 : v === 'avoid' ? 2 : 3
     if (rank(a.verdict) !== rank(b.verdict)) return rank(a.verdict) - rank(b.verdict)
+    // Размазывание: меньше живых вызовов — раньше. Только внутри одного вердикта.
+    if (a.inFlight !== b.inFlight) return a.inFlight - b.inFlight
     if (a.score !== b.score) return a.score > b.score ? -1 : 1
     const ah = a.worstHeadroom ?? -1
     const bh = b.worstHeadroom ?? -1

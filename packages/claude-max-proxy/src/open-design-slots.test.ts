@@ -24,11 +24,13 @@ import {
 
 const KEY = (email: string | null) => (email ? `KEY_${email}` : null)
 
-const acc = (account: string, usedFraction = 0.2): OdAccountView => ({
+const NOW = Date.parse('2026-11-11T12:00:00Z')
+/** Окно ИЗМЕРЕНО (resetAt задан): без него вердикт `unknown`, и запас не считается. */
+const acc = (account: string, usedFraction = 0.2, resetsInH = 4): OdAccountView => ({
   account,
   status: 'active',
   headroomFraction: 1 - usedFraction,
-  windows: [{ name: '5h', usedFraction, resetsAt: null }],
+  windows: [{ name: '5h', usedFraction, resetsAt: new Date(NOW + resetsInH * 3_600_000).toISOString() }],
 })
 
 const realEnv = { ...process.env }
@@ -149,6 +151,45 @@ describe('выбор аккаунта знает про слоты', () => {
       slotCap: 2,
     })
     expect(pick).toBeNull()
+  })
+
+  test('РАЗМАЗЫВАНИЕ: менее загруженный аккаунт идёт раньше, даже при худшем запасе', () => {
+    // Слово фаундера 11.11: нельзя выжигать одну организацию, пока соседняя стоит.
+    // A — лучший запас, но 2 вызова в полёте; B — запас хуже, но свободен → берём B.
+    const pick = pickOpenDesignAccount([acc('a', 0.1), acc('b', 0.2)], KEY, {
+      nowMs: NOW,
+      inFlightByEmail: new Map([['a', 2], ['b', 0]]),
+      slotCap: 8,
+      seed: 's',
+    })
+    expect(pick?.email).toBe('b')
+  })
+
+  test('РАЗМАЗЫВАНИЕ: одинаково свободные — решает запас (прежний порядок)', () => {
+    const pick = pickOpenDesignAccount([acc('a', 0.1), acc('b', 0.2)], KEY, {
+      nowMs: NOW,
+      inFlightByEmail: new Map([['a', 0], ['b', 0]]),
+      slotCap: 8,
+      seed: 's',
+    })
+    expect(pick?.email).toBe('a')
+  })
+
+  test('РАЗМАЗЫВАНИЕ: последовательные вызовы расходятся по аккаунтам, а не копятся на одном', () => {
+    const inflight = new Map<string, number>([['a', 0], ['b', 0]])
+    const picks: string[] = []
+    for (let i = 0; i < 6; i++) {
+      const p = pickOpenDesignAccount([acc('a', 0.1), acc('b', 0.2)], KEY, {
+        nowMs: NOW, inFlightByEmail: inflight, slotCap: 8, seed: `s${i}`,
+      })
+      expect(p).not.toBeNull()
+      const email = p!.email
+      picks.push(email)
+      inflight.set(email, (inflight.get(email) ?? 0) + 1)
+    }
+    // Шесть вызовов — поровну, а не «всё на лучший по запасу» (было: 6/6 на A).
+    expect(picks.filter(e => e === 'a').length).toBe(3)
+    expect(picks.filter(e => e === 'b').length).toBe(3)
   })
 
   test('без slotCap слоты в выборе не учитываются — прежнее поведение не тронуто', () => {

@@ -149,14 +149,17 @@ describe('расход в реальном времени поверх опро�
     resetOdRatesCacheForTest()
     resetOdSpendForTest()
     try {
-      // Опрос: 0.10 доли за 20 минут = 0.30/час.
-      // Наши записи за те же 30 минут: 300k токенов → 600k/час → проставка 0.3/600k = 5e-7.
-      odRecordSpendForTest('a', { input: 150_000, output: 0 }, NOW - 25 * 60_000)
-      odRecordSpendForTest('a', { input: 140_000, output: 10_000 }, NOW - 5 * 60_000)
-      // За последние 10 минут: 150k токенов → 900k/час → 0.45/час, больше опроса.
+      // Опрос: 0.10 доли за ПРОМЕЖУТОК 20 минут (замеры на -30 и -10) = 0.30/час.
+      // Токены считаются РОВНО за этот же промежуток [-30,-10]: 100k на -25 и 100k на -15
+      // → 200k за 20 мин = 600k/час → проставка 0.3/600k = 5e-7.
+      odRecordSpendForTest('a', { input: 100_000, output: 0 }, NOW - 25 * 60_000)
+      odRecordSpendForTest('a', { input: 100_000, output: 0 }, NOW - 15 * 60_000)
+      // За последние 10 минут: ещё 200k → 1.2 млн/час → 0.6/час, больше опроса.
+      odRecordSpendForTest('a', { input: 100_000, output: 0 }, NOW - 9 * 60_000)
+      odRecordSpendForTest('a', { input: 100_000, output: 0 }, NOW - 5 * 60_000)
       const rates = odMergedRates(NOW)
-      expect(rates.get('a')?.['5h']).toBeCloseTo(0.45, 6)
-      expect(odRealSpendSnapshot(NOW).a.tokensIn10m).toBe(150_000)
+      expect(rates.get('a')?.['5h']).toBeCloseTo(0.6, 6)
+      expect(odRealSpendSnapshot(NOW).a.tokensIn10m).toBe(200_000)
     } finally {
       delete process.env.QUOTA_SAMPLES_PATH
       resetOdRatesCacheForTest()

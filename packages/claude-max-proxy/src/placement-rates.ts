@@ -37,9 +37,16 @@ export function parseRateSamples(text: string): RateSample[] {
   return out
 }
 
+export interface RateSpan { fromMs: number; toMs: number }
+
 export interface RecentRatesOptions {
   provider: string
   nowMs: number
+  /**
+   * Куда положить ГРАНИЦЫ промежутка, за который считалась доля — по каждой организации
+   * и окну. Проставка «доля на токен» обязана считать токены РОВНО за этот промежуток.
+   */
+  spansOut?: Map<string, Record<string, RateSpan>>
   /** Насколько глубоко назад смотрим. По умолчанию 30 минут — «последние несколько замеров». */
   windowMs?: number
   /** Короче этого промежутка производную не считаем: два замера в одну секунду — не скорость. */
@@ -93,6 +100,11 @@ export function recentRatesFromSamples(
     const rec = out.get(name) ?? {}
     rec[win] = rate
     out.set(name, rec)
+    if (opts.spansOut) {
+      const sr = opts.spansOut.get(name) ?? {}
+      sr[win] = { fromMs: start.ms, toMs: end.ms }
+      opts.spansOut.set(name, sr)
+    }
   }
   return out
 }

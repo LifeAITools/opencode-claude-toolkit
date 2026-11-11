@@ -32,7 +32,7 @@ import { planPlacement, type PlacementOrg } from '../placement.js'
 import { recentRatesFromSamples } from '../placement-rates.js'
 import {
   compactSpend, fractionPerToken, realtimeFractionPerHour, spendTokensOfUsage,
-  tokensPerHour, type SpendEntry,
+  tokensPerHour, tokensRateInRange, type SpendEntry,
 } from '../spend-ledger.js'
 import {
   newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, classifyError,
@@ -387,21 +387,35 @@ function accountsFromQuota(): OdAccountView[] {
  * читать его на КАЖДЫЙ запрос незачем — производная за минуту не меняется.
  */
 const RATES_TTL_MS = 60_000
-let ratesCache: { at: number; rates: Map<string, Record<string, number>> } | null = null
+interface SampleRates {
+  rates: Map<string, Record<string, number>>
+  /** За какой промежуток считалась доля — по нему же считаются токены для проставки. */
+  spans: Map<string, Record<string, { fromMs: number; toMs: number }>>
+}
+let ratesCache: (SampleRates & { at: number }) | null = null
 
-export function odRatesFromSamples(nowMs: number = Date.now()): Map<string, Record<string, number>> {
-  if (ratesCache && nowMs - ratesCache.at < RATES_TTL_MS) return ratesCache.rates
+function odSampleRates(nowMs: number = Date.now()): SampleRates {
+  if (ratesCache && nowMs - ratesCache.at < RATES_TTL_MS) {
+    return { rates: ratesCache.rates, spans: ratesCache.spans }
+  }
   try {
     const path = process.env.QUOTA_SAMPLES_PATH ?? join(homedir(), '.claude-local', 'quota-samples.jsonl')
-    const rates = recentRatesFromSamples(readFileSync(path, 'utf8'), { provider: PROVIDER, nowMs })
-    ratesCache = { at: nowMs, rates }
-    return rates
+    const spans = new Map<string, Record<string, { fromMs: number; toMs: number }>>()
+    const rates = recentRatesFromSamples(readFileSync(path, 'utf8'), {
+      provider: PROVIDER, nowMs, spansOut: spans,
+    })
+    ratesCache = { at: nowMs, rates, spans }
+    return { rates, spans }
   } catch {
     // Нет ряда — нет производной. Это НЕ ноль и НЕ «расхода нет»: анализатор честно
     // вернётся к средней с начала окна.
-    ratesCache = { at: nowMs, rates: new Map() }
-    return ratesCache.rates
+    ratesCache = { at: nowMs, rates: new Map(), spans: new Map() }
+    return { rates: ratesCache.rates, spans: ratesCache.spans }
   }
+}
+
+export function odRatesFromSamples(nowMs: number = Date.now()): Map<string, Record<string, number>> {
+  return odSampleRates(nowMs).rates
 }
 /** Для испытаний: сбросить кэш производной. */
 export function resetOdRatesCacheForTest(): void { ratesCache = null }
@@ -441,16 +455,19 @@ export function odRealSpendSnapshot(nowMs: number = Date.now()): Record<string, 
  * (30 минут), иначе множить нельзя. Нет проставки — остаётся опрос, без выдумки.
  */
 export function odMergedRates(nowMs: number = Date.now()): Map<string, Record<string, number>> {
-  const sampled = odRatesFromSamples(nowMs)
+  const sample = odSampleRates(nowMs)
   const merged = new Map<string, Record<string, number>>()
-  for (const [email, windows] of sampled) merged.set(email, { ...windows })
+  for (const [email, windows] of sample.rates) merged.set(email, { ...windows })
   for (const [email, entries] of spendByEmail) {
     const kept = compactSpend(entries, nowMs)
     if (kept.length === 0) continue
     const recentTokens = tokensPerHour(kept, nowMs, REALTIME_RATE_WINDOW_MS)
-    const sampledTokens = tokensPerHour(kept, nowMs, CALIBRATION_WINDOW_MS)
-    const sampleWindows = sampled.get(email) ?? {}
-    for (const [win, sampledFrac] of Object.entries(sampleWindows)) {
+    for (const [win, sampledFrac] of Object.entries(sample.rates.get(email) ?? {})) {
+      // 🔴 ТОКЕНЫ СЧИТАЮТСЯ ЗА ТОТ ЖЕ ПРОМЕЖУТОК, за который взята доля: иначе проставка
+      // сравнивает разные интервалы и врёт (замер 11.11 сразу после перезапуска).
+      const span = sample.spans.get(email)?.[win]
+      if (!span) continue
+      const sampledTokens = tokensRateInRange(kept, span.fromMs, span.toMs)
       const ratio = fractionPerToken(sampledFrac, sampledTokens)
       const realtime = realtimeFractionPerHour(recentTokens, ratio)
       if (realtime === null) continue

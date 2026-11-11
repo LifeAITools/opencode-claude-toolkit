@@ -38,10 +38,40 @@ export function tokensInWindow(entries: SpendEntry[], nowMs: number, windowMs: n
   return sum
 }
 
-/** Токены в час за окно. `null` — записей нет (это НЕ «ноль расхода»). */
+/**
+ * Токены в час за явный промежуток [fromMs, toMs] — для проставки.
+ *
+ * 🔴 ПРОСТАВКА ТРЕБУЕТ ОДНОГО И ТОГО ЖЕ ПРОМЕЖУТКА С ОБЕИХ СТОРОН: доля окна берётся из
+ * опроса за конкретный интервал, и токены должны считаться РОВНО за него, а не за
+ * «номинальные 30 минут». Замер 11.11.2026: сразу после перезапуска в окне было 9 минут
+ * записей, а делили на все 30 — проставка завышалась втрое, и мгновенная скорость
+ * показывала всплеск, которого нет. Нет полного промежутка — это «не измерено».
+ */
+export function tokensRateInRange(entries: SpendEntry[], fromMs: number, toMs: number): number | null {
+  if (!(toMs > fromMs)) return null
+  const spanMs = toMs - fromMs
+  if (spanMs < 60_000) return null
+  let sum = 0
+  let any = false
+  for (const e of entries) {
+    if (e.at >= fromMs && e.at <= toMs) { sum += Math.max(0, e.tokens); any = true }
+  }
+  if (!any) return null
+  return sum / (spanMs / 3_600_000)
+}
+
+/**
+ * Токены в час за окно (мгновенная скорость).
+ *
+ * 🔴 ДЕЛИТЕЛЬ НЕ ВРЁТ: `null`, если записей нет ИЛИ ряд покрывает меньше 80% окна.
+ * После перезапуска прокси первые минуты окно не покрыто — честнее сказать «не измерено»,
+ * чем делить частичный ряд на полное окно и занизить скорость.
+ */
 export function tokensPerHour(entries: SpendEntry[], nowMs: number, windowMs: number): number | null {
   const inWindow = entries.filter(e => e.at >= nowMs - windowMs && e.at <= nowMs)
   if (inWindow.length === 0) return null
+  const oldest = Math.min(...inWindow.map(e => e.at))
+  if (nowMs - oldest < windowMs * 0.8) return null
   return tokensInWindow(entries, nowMs, windowMs) / (windowMs / 3_600_000)
 }
 

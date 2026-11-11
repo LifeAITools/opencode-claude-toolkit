@@ -25,8 +25,15 @@ describe('скользящее окно токенов', () => {
   })
 
   test('токены в час: сумма за окно / длина окна', () => {
-    const e = [{ at: NOW - 5 * MIN, tokens: 50_000 }]
-    expect(tokensPerHour(e, NOW, 10 * MIN)).toBeCloseTo(300_000, 6)
+    // Ряд покрывает всё окно: первый вызов 10 минут назад.
+    const e = [{ at: NOW - 10 * MIN, tokens: 50_000, }, { at: NOW - 5 * MIN, tokens: 50_000 }]
+    expect(tokensPerHour(e, NOW, 10 * MIN)).toBeCloseTo(600_000, 6)
+  })
+
+  test('ряд покрывает меньше 80% окна — НЕ считаем: делитель завышил бы скорость', () => {
+    // Перезапуск 6 минут назад: делить на все 10 — значит в 1.67 раза завысить.
+    const e = [{ at: NOW - 6 * MIN, tokens: 50_000 }, { at: NOW - 1 * MIN, tokens: 50_000 }]
+    expect(tokensPerHour(e, NOW, 10 * MIN)).toBeNull()
   })
 
   test('старое отбрасывается и не тянет окно назад', () => {

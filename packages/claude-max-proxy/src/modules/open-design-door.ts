@@ -557,6 +557,11 @@ async function serve(req: Request): Promise<Response> {
   // 🔴 ВЫБОР ОДИН РАЗ НА СЕССИЮ. Живая сессия не переезжает — даже если сосед стал свободнее.
   // Объявлен ДО `finish`: счётчик расхода пишется из `finish`, а тот зовётся и на путях отказа.
   let chosen: OdPick | null = null
+  // 🔴 ОБЪЯВЛЕНА ДО `finish`: `finish` читает её на ВСЕХ путях, включая ранние отказы
+  // (апстрим недоступен, все слоты заняты, нет ключа). Объявленная ниже (как было в 1.3.9),
+  // она давала TDZ-ReferenceError на этих путях — и вместо названного 502 клиент получал
+  // 500 с HTML-страницей Bun (живой случай 11.11: вся eco-od у флота).
+  const arrivals: number[] = []
 
   let finished = false
   const finish = (text: string | null, streamed = false) => {
@@ -770,7 +775,6 @@ async function serve(req: Request): Promise<Response> {
   let kept = ''
   let keptBytes = 0
   // Время КАЖДОГО чтения: по нему видно, пачкует ли поставщик (см. stream-timing.ts).
-  const arrivals: number[] = []
   const decoder = new TextDecoder()
   /**
    * 🔴 ОБРЫВ КЛИЕНТА — НОРМА, А НЕ ОШИБКА ДВЕРИ (замер 11.11.2026: после выкатки журнал

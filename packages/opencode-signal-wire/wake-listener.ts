@@ -1511,11 +1511,67 @@ export function processSessionCount(pid: number): number {
 /** Данные слота, отложенные до первой привязки: «unknown» — это «ещё не знаю», а не имя. */
 let _pendingDiscovery: { dir: string; data: DiscoveryFile } | null = null
 
+/**
+ * ШТАМП СВЕЖЕСТИ (`lastSeen`) — обещанная половина контракта, которой не было.
+ *
+ * 🔴 ЗАЧЕМ (находка владельца lat-context 11.11.2026 + контракт в `wake-types.ts:165-172`):
+ * роутер судит «жива ли дверь» по `lastSeen` из файла (свежесть < 90 с = здорова без пробы),
+ * а без штампа падает на `startedAt` и после 90 секунд пробует каждый слот по HTTP каждые
+ * 30 с. Простое сердцебиение дешевле двадцати проб. Частота — наша, 30 с (порог 90 с = 3×).
+ * Остановилась дверь — штамп перестал идти, роутер упирается в /health и в TTL: «перестал
+ * метить» честно означает «перестал отвечать».
+ */
+export function discoveryHeartbeatMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.WAKE_HEARTBEAT_MS ?? 30_000)
+  if (!Number.isFinite(raw) || raw <= 0) return 30_000
+  return Math.max(10, Math.floor(raw))
+}
+
+/** Все слоты, записанные ЭТИМ процессом: у процесса их может быть несколько (multi-session). */
+const _discoveryPaths = new Set<string>()
+let _heartbeat: ReturnType<typeof setInterval> | null = null
+
+/** Обновить `lastSeen` одного слота атомарно. `false` — файла нет или он не читается. */
+export function stampDiscoveryLastSeen(path: string, nowIso: string = new Date().toISOString()): boolean {
+  try {
+    const disc = JSON.parse(readFileSync(path, 'utf-8')) as DiscoveryFile
+    disc.lastSeen = nowIso
+    const tmpPath = path + '.tmp'
+    writeFileSync(tmpPath, JSON.stringify(disc))
+    renameSync(tmpPath, path)
+    return true
+  } catch {
+    // Файла больше нет (дверь остановлена/слот убрал роутер) — это НЕ ошибка записи.
+    return false
+  }
+}
+
+function stampAllDiscovery(): void {
+  for (const path of _discoveryPaths) {
+    if (!stampDiscoveryLastSeen(path)) _discoveryPaths.delete(path)
+  }
+}
+
+function ensureHeartbeat(): void {
+  if (_heartbeat) return
+  _heartbeat = setInterval(stampAllDiscovery, discoveryHeartbeatMs())
+  ;(_heartbeat as any).unref?.()
+}
+
+/** Для испытаний: остановить сердцебиение и забыть слоты. */
+export function resetDiscoveryHeartbeatForTest(): void {
+  if (_heartbeat) clearInterval(_heartbeat)
+  _heartbeat = null
+  _discoveryPaths.clear()
+}
+
 /** Запись слота атомарно (tmp → rename): половина документа читателю — не правда. */
-function writeDiscoverySlot(path: string, data: DiscoveryFile): void {
+export function writeDiscoverySlot(path: string, data: DiscoveryFile): void {
   const tmpPath = path + '.tmp'
   writeFileSync(tmpPath, JSON.stringify(data))
   renameSync(tmpPath, path)
+  _discoveryPaths.add(path)
+  ensureHeartbeat()
 }
 
 /**
@@ -2079,6 +2135,10 @@ export async function startWakeListener(
       memberId: discoveryMemberId,
       pid: process.pid,
       startedAt: new Date().toISOString(),
+      // 🔴 ШТАМП СВЕЖЕСТИ — с первой же записи (см. heartbeat ниже). Комментарий контракта
+      // в `wake-types.ts` обещал «populated by heartbeat-writer»; писателя не было, и
+      // читатель падал на `startedAt` (замер владельца lat-context 11.11.2026).
+      lastSeen: new Date().toISOString(),
       transport: 'http',
       // 🔴 22.10.2026: здесь БОЛЬШЕ НЕТ вызывных полей — parentMemberId, parentSessionId,
       // spawnDepth, maxSpawnDepth, maxSubagents, subscribePreset. Их дом — ЗАПРОС (wake-router
@@ -2118,6 +2178,9 @@ export async function startWakeListener(
   // ─── Queue drain timer ───────────────────────
 
   const drainInterval = setInterval(async () => {
+    // Штамп свежести — на каждом тике, ещё до раннего выхода: сердцебиение не должно
+    // зависеть от того, есть ли в очереди работа.
+    if (_discoveryPaths.size > 0) stampAllDiscovery()
     if (queue.length === 0) return
     try {
       if (await isAgentBusy()) return
@@ -2197,6 +2260,9 @@ export async function startWakeListener(
     cleaned = true
     clearInterval(drainInterval)
     clearInterval(fileDoorInterval)
+    if (_heartbeat) clearInterval(_heartbeat)
+    _heartbeat = null
+    _discoveryPaths.clear()
     try {
       if (_discoveryPath) unlinkSync(_discoveryPath)
     } catch {}

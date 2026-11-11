@@ -2,6 +2,15 @@
 
 All notable changes to `@life-ai-tools/claude-code-sdk` and the `opencode-claude` plugin.
 
+## [Proxy 1.3.4] - 2026-11-11
+
+### Исправлено
+- **Обрыв клиента в двери `/od` больше не пишется ERROR-строкой на каждый случай.** После выкатки
+  1.3.3 журнал заполнился `OD_ABORTED ERROR ... Invalid state: Controller is already closed`:
+  `cancel()` закрывает контроллер потока, а `pull()`, уже ждавший `reader.read()`, возвращался
+  позже и пытался `enqueue`/`error` в закрытый контроллер. Теперь один флаг `clientGone`,
+  поздний выход гасится молча, ровно один счёт и одно освобождение слота.
+
 ## [Proxy 1.3.3] - 2026-11-11
 
 ### Добавлено

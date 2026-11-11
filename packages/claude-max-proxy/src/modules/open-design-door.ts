@@ -624,11 +624,28 @@ async function serve(req: Request): Promise<Response> {
   let kept = ''
   let keptBytes = 0
   const decoder = new TextDecoder()
-  let aborted = false
+  /**
+   * 🔴 ОБРЫВ КЛИЕНТА — НОРМА, А НЕ ОШИБКА ДВЕРИ (замер 11.11.2026: после выкатки журнал
+   * заполнился `OD_ABORTED ERROR ... Invalid state: Controller is already closed`).
+   * `cancel()` закрывает контроллер, а `pull()`, уже ждавший `reader.read()`, возвращается
+   * позже и пытается `enqueue`/`error` в закрытый контроллер — исключение превращалось
+   * в ERROR-строку на каждый обычный обрыв. Держим один флаг и пишем в контроллер ТОЛЬКО
+   * пока клиент жив; поздний выход гасим молча.
+   */
+  let clientGone = false
+  const closeQuietly = (c: ReadableStreamDefaultController<Uint8Array>) => {
+    try { c.close() } catch { /* контроллер уже закрыт клиентом или ошибкой */ }
+  }
+  const errorQuietly = (c: ReadableStreamDefaultController<Uint8Array>, e: unknown) => {
+    try { c.error(e) } catch { /* контроллер уже закрыт клиентом */ }
+  }
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
+      if (clientGone) return
       try {
         const { done, value } = await reader.read()
+        // Клиент ушёл, пока мы ждали чужой ответ: читать больше некому.
+        if (clientGone) { reader.cancel().catch(() => {}); return }
         if (done) {
           ctx.emit({
             level: upstream.ok ? 'info' : 'error',
@@ -638,7 +655,7 @@ async function serve(req: Request): Promise<Response> {
           })
           finish(kept, true)
           releaseSlot?.()
-          controller.close()
+          closeQuietly(controller)
           return
         }
         if (keptBytes < STREAM_CAP_BYTES) {
@@ -647,6 +664,8 @@ async function serve(req: Request): Promise<Response> {
         }
         controller.enqueue(value)
       } catch (err) {
+        // Уже ушли — это не отказ двери: закрываем счёт и молчим.
+        if (clientGone) { finish(kept, true); releaseSlot?.(); return }
         ctx.emit({
           level: 'error', kind: EVENT.OD_ABORTED, sessionId, model, status: upstream.status,
           durationMs: Date.now() - t0,
@@ -654,11 +673,11 @@ async function serve(req: Request): Promise<Response> {
         })
         finish(kept, true)
         releaseSlot?.()
-        controller.error(err)
+        errorQuietly(controller, err)
       }
     },
     cancel() {
-      aborted = true
+      clientGone = true
       finish(kept, true)
       releaseSlot?.()
       reader.cancel().catch(() => {})
@@ -670,7 +689,6 @@ async function serve(req: Request): Promise<Response> {
     },
   })
 
-  void aborted
   return new Response(stream, { status: upstream.status, headers: passHeaders })
 }
 

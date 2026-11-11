@@ -29,6 +29,7 @@ import { readCallerSession, resolveSessionIdentity } from '../session-identity.j
 import { loadProviderRegistry, keyEnvFor, type ProviderRegistry } from '../provider-registry.js'
 import { UNIFIED_QUOTA_JSON } from '../quota-unified.js'
 import { planPlacement, type PlacementOrg } from '../placement.js'
+import { recentRatesFromSamples } from '../placement-rates.js'
 import {
   newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, classifyError,
   extractUsageChat, usageFromSseText, bodyField,
@@ -218,7 +219,12 @@ export interface OdAccountView {
 export function odPlacementInputs(
   accounts: OdAccountView[],
   activeAgentsByEmail: Map<string, number> = new Map(),
-  opts: { inFlightByEmail?: Map<string, number>; slotCap?: number } = {},
+  opts: {
+    inFlightByEmail?: Map<string, number>
+    slotCap?: number
+    /** Скорость расхода (доля окна/час) по аккаунту — производная из ряда замеров. */
+    recentRatesByEmail?: Map<string, Record<string, number>>
+  } = {},
 ): PlacementOrg[] {
   return accounts.map(a => {
     const status = String(a.status ?? 'unreadable').toLowerCase()
@@ -236,6 +242,9 @@ export function odPlacementInputs(
       })),
       activeAgents: activeAgentsByEmail.get(name) ?? 0,
       blockedReason,
+      // Скорость расхода: если ряд есть, анализатор берёт БОЛЬШУЮ из средней и текущей —
+      // «сейчас жжём быстрее среднего» и есть всплеск, ради которого ряд копится.
+      ...(opts.recentRatesByEmail?.has(name) ? { recentRates: opts.recentRatesByEmail.get(name) } : {}),
       // Слоты считаем ВСЕГДА, когда включён потолок: занятый аккаунт — не кандидат,
       // даже если его запас лучше всех.
       ...(opts.slotCap !== undefined
@@ -263,6 +272,8 @@ export function pickOpenDesignAccount(
     inFlightByEmail?: Map<string, number>
     /** Потолок слотов; `undefined` — слоты в выборе не учитываются. */
     slotCap?: number
+    /** Производная расхода квоты по аккаунтам (из ряда сэмплов). */
+    recentRatesByEmail?: Map<string, Record<string, number>>
   } = {},
 ): OdPick | null {
   const now = opts.nowMs ?? Date.now()
@@ -273,6 +284,7 @@ export function pickOpenDesignAccount(
     odPlacementInputs(usable, opts.activeAgentsByEmail, {
       inFlightByEmail: opts.inFlightByEmail,
       slotCap: opts.slotCap,
+      recentRatesByEmail: opts.recentRatesByEmail,
     }),
     now,
     opts.seed ?? '',
@@ -364,6 +376,31 @@ function accountsFromQuota(): OdAccountView[] {
       }))
   } catch { return [] }
 }
+
+/**
+ * РЯД СКОРОСТИ РАСХОДА — читается не чаще раза в минуту.
+ * Замер 11.11: сэмплер пишет строку на провайдера каждые 5 минут, файл ~360 КБ на сутки;
+ * читать его на КАЖДЫЙ запрос незачем — производная за минуту не меняется.
+ */
+const RATES_TTL_MS = 60_000
+let ratesCache: { at: number; rates: Map<string, Record<string, number>> } | null = null
+
+export function odRatesFromSamples(nowMs: number = Date.now()): Map<string, Record<string, number>> {
+  if (ratesCache && nowMs - ratesCache.at < RATES_TTL_MS) return ratesCache.rates
+  try {
+    const path = process.env.QUOTA_SAMPLES_PATH ?? join(homedir(), '.claude-local', 'quota-samples.jsonl')
+    const rates = recentRatesFromSamples(readFileSync(path, 'utf8'), { provider: PROVIDER, nowMs })
+    ratesCache = { at: nowMs, rates }
+    return rates
+  } catch {
+    // Нет ряда — нет производной. Это НЕ ноль и НЕ «расхода нет»: анализатор честно
+    // вернётся к средней с начала окна.
+    ratesCache = { at: nowMs, rates: new Map() }
+    return ratesCache.rates
+  }
+}
+/** Для испытаний: сбросить кэш производной. */
+export function resetOdRatesCacheForTest(): void { ratesCache = null }
 
 function keyOf(envName: string): string | null {
   const v = process.env[envName]
@@ -462,16 +499,20 @@ async function serve(req: Request): Promise<Response> {
     const quota = accountsFromQuota()
     // 🔴 СНАЧАЛА — САМ ПО СЕБЕ СВОБОДНЫЙ СЛОТ. Занятый аккаунт не кандидат, даже если у него
     // лучший запас: посадка туда не «следующий агент», а его 400 от поставщика.
+    const rates = odRatesFromSamples()
     chosen = pickOpenDesignAccount(quota, keyByEmail, {
       activeAgentsByEmail: counts,
       inFlightByEmail: odInFlightByEmail(),
       slotCap: odSlotCap(),
+      recentRatesByEmail: rates,
       seed: sessionId ?? '',
     })
     if (!chosen) {
-      // Все слоты заняты. Это НЕ «нет места»: выбираем по запасу как раньше, а ждать
+      // Все слоты заняты. Это НЕ «нет места»: выбираем по запасу и скорости, а ждать
       // будем слот — очередь ограничена и отказ называет причину.
-      chosen = pickOpenDesignAccount(quota, keyByEmail, { activeAgentsByEmail: counts, seed: sessionId ?? '' })
+      chosen = pickOpenDesignAccount(quota, keyByEmail, {
+        activeAgentsByEmail: counts, recentRatesByEmail: rates, seed: sessionId ?? '',
+      })
     }
     if (!chosen) {
       ctx.emit({

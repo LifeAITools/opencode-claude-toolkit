@@ -82,6 +82,15 @@ export interface PlacementAssessment {
   inFlight: number
   /** Потолок слотов или `null`, если слоты не учитываются. */
   slotCap: number | null
+  /**
+   * ЧАСЫ ДО ИСЧЕРПАНИЯ любого измеренного окна ПОСЛЕ посадки ещё одного вызова — при
+   * текущей скорости расхода. Это и есть «давление»: больше часов — свободнее.
+   * `Infinity` — при нынешнем темпе окно не успеет кончиться (или расхода нет вовсе).
+   * 🔴 НЕ ПУТАТЬ С `score`: `score` учитывает сброс окна (связывает ли стена), а давление —
+   * нет, поэтому оно остаётся конечным числом и сравнимо у всех организаций, включая те,
+   * где стена «не успевает». Именно это позволяет видеть «через 5–10 минут будет занята».
+   */
+  pressureHours: number
   /** Какое окно связывает (имя) и сколько ему ещё жить до сброса. */
   binding: Array<{
     window: string
@@ -135,8 +144,11 @@ function stableHash(value: string): number {
  */
 export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment {
   const blocked = org.blockedReason ?? null
-  const agents = Math.max(0, Math.floor(org.activeAgents))
   const inFlight = Math.max(0, Math.floor(org.inFlight ?? 0))
+  // 🔴 ЖИВЫХ АГЕНТОВ БЕРЁМ КАК МАКСИМУМ ИЗ ДВУХ СЧЁТОВ: пины (посаженные сессии) и вызовы
+  // в полёте — это пересекающиеся множества, складывать их значило бы считать одного
+  // дважды. Максимум — консервативно: занятость не занижается.
+  const agents = Math.max(0, Math.floor(org.activeAgents), inFlight)
   const slotCap = typeof org.slotCap === 'number' && org.slotCap > 0 ? Math.floor(org.slotCap) : null
   const slotsFull = slotCap !== null && inFlight >= slotCap
   const measured = org.windows.filter(w => finite(w.util) && w.resetAt !== null)
@@ -153,6 +165,7 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     activeAgents: agents,
     inFlight,
     slotCap,
+    pressureHours: Infinity,
     binding: [],
     verdict: blocked || slotsFull ? 'walled' : measured.length === 0 ? 'unknown' : 'place',
     reason: blocked ?? (measured.length === 0 ? 'ни одно окно не измерено — сказать нечего' : ''),
@@ -182,6 +195,7 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
 
   let bestAfter: number | null = null
   let bestBefore: number | null = null
+  let pressure: number = Infinity
   const binding: PlacementAssessment['binding'] = []
 
   for (const w of measured) {
@@ -203,6 +217,8 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     const ttwAfter = rateAfter <= 1e-9 ? Infinity : Math.max(0, (1 - util) / rateAfter)
 
     if (bestBefore === null || ttwBefore < bestBefore) bestBefore = ttwBefore
+    // Давление — тот же прогноз, но БЕЗ учёта сброса: сравнимо у всех измеренных.
+    if (ttwAfter < pressure) pressure = ttwAfter
     // Связывает только если стена наступит РАНЬШЕ сброса — иначе окно успеет обнулиться.
     if (ttwAfter < remainingH) {
       binding.push({
@@ -225,6 +241,7 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     ...base,
     score,
     scoreBefore,
+    pressureHours: pressure,
     binding,
     verdict,
     reason: `${bindingText}; агентов ${agents}; худший запас ${headText}`,
@@ -262,8 +279,16 @@ export function planPlacement(orgs: PlacementOrg[], nowMs: number, seed = ''): P
     const rank = (v: PlacementAssessment['verdict']) =>
       v === 'place' ? 0 : v === 'unknown' ? 1 : v === 'avoid' ? 2 : 3
     if (rank(a.verdict) !== rank(b.verdict)) return rank(a.verdict) - rank(b.verdict)
-    // Размазывание: меньше живых вызовов — раньше. Только внутри одного вердикта.
+    // 🔴 СНАЧАЛА — СКОЛЬКО ЖИВЫХ ВЫЗОВОВ СЕЙЧАС (слово фаундера 11.11.2026: «если мы сейчас
+    // опять у всех агентов на неё повесим, то через пять-десять минут она будет самой
+    // занятой»). Это единственная величина, которая РАЗМАЗЫВАЕТ нагрузку детерминированно:
+    // при одновременном приходе двенадцати вызовов каждый берёт самый свободный аккаунт, и
+    // они расходятся поровну, а не садятся на один «самый свободный по квоте».
     if (a.inFlight !== b.inFlight) return a.inFlight - b.inFlight
+    // 🔴 РАВНАЯ ЗАНЯТОСТЬ — РЕШАЕТ ПРОГНОЗ РАСХОДА («через пять-десять минут будет занята»).
+    // `pressureHours` — часы до стены по скорости: больше — свободнее. Здесь сходятся и
+    // накопленное (util), и средняя скорость, и текущая производная (`recentRates`).
+    if (a.pressureHours !== b.pressureHours) return b.pressureHours - a.pressureHours
     if (a.score !== b.score) return a.score > b.score ? -1 : 1
     const ah = a.worstHeadroom ?? -1
     const bh = b.worstHeadroom ?? -1

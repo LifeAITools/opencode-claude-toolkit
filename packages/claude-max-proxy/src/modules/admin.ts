@@ -23,7 +23,7 @@ import { join } from 'node:path'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
 import { stuckSessionState, stuckSessionReport, stuckSessionsAll, dropStuck } from '../local-alert.js'
 import { enrichOrgSurface } from '../org-surface.js'
-import { odSlotSnapshot } from './open-design-door.js'
+import { odRatesFromSamples, odSlotSnapshot } from './open-design-door.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -236,7 +236,16 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
     {
       method: 'GET',
       path: '/admin/od-slots',
-      handler: async () => Response.json(odSlotSnapshot()),
+      handler: async () => {
+        const snap = odSlotSnapshot()
+        // Скорость расхода — в ДОЛЯХ ОКНА В ЧАС (5h: 0.12 = 12% окна за час). Это метрика,
+        // по которой выбирается организация; без неё «почему выбрали эту» не проверить.
+        const rates: Record<string, Record<string, number>> = {}
+        for (const [email, r] of odRatesFromSamples()) {
+          rates[email] = Object.fromEntries(Object.entries(r).map(([w, v]) => [w, Math.round(v * 1e4) / 1e4]))
+        }
+        return Response.json({ ...snap, rates })
+      },
     },
 
     // Mark session as Worker-managed

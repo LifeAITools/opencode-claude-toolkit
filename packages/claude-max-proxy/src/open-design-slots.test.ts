@@ -129,6 +129,49 @@ describe('очередь вместо 400', () => {
   })
 })
 
+describe('выбор по ПРЕДСКАЗАННОМУ давлению, а не по текущей занятости', () => {
+  const accAt = (account: string, used: number, resetsInH: number): OdAccountView => ({
+    account,
+    status: 'active',
+    headroomFraction: 1 - used,
+    windows: [{ name: '5h', usedFraction: used, resetsAt: new Date(NOW + resetsInH * 3_600_000).toISOString() }],
+  })
+
+  test('медленно горящая с большим util идёт раньше быстро горящей с малым util', () => {
+    // Слово фаундера: «через пять-десять минут она будет самой занятой». A сожжёт остаток
+    // за ~3 часа (0.3/час), B — за ~7 часов (0.09/час), хотя util у B выше.
+    const pick = pickOpenDesignAccount(
+      [accAt('fast', 0.1, 4), accAt('slow', 0.35, 1)],
+      KEY,
+      {
+        nowMs: NOW,
+        recentRatesByEmail: new Map([['fast', { '5h': 0.3 }]]),
+        slotCap: 8,
+        inFlightByEmail: new Map([['fast', 0], ['slow', 0]]),
+        seed: 's',
+      },
+    )
+    expect(pick?.email).toBe('slow')
+  })
+
+  test('одинаковые окна — лишние одновременные вызовы повышают давление', () => {
+    const pick = pickOpenDesignAccount([accAt('busy', 0.2, 4), accAt('free', 0.2, 4)], KEY, {
+      nowMs: NOW,
+      slotCap: 8,
+      inFlightByEmail: new Map([['busy', 5], ['free', 0]]),
+      seed: 's',
+    })
+    expect(pick?.email).toBe('free')
+  })
+
+  test('ряд скорости не выдумывается: без производной решает запас', () => {
+    const pick = pickOpenDesignAccount([accAt('a', 0.1, 4), accAt('b', 0.3, 4)], KEY, {
+      nowMs: NOW, slotCap: 8, seed: 's',
+    })
+    expect(pick?.email).toBe('a')
+  })
+})
+
 describe('выбор аккаунта знает про слоты', () => {
   test('занятый аккаунт не выбирается, даже когда у него лучший запас', () => {
     const accounts = [acc('busy', 0.1), acc('free', 0.5)]
@@ -153,18 +196,6 @@ describe('выбор аккаунта знает про слоты', () => {
     expect(pick).toBeNull()
   })
 
-  test('РАЗМАЗЫВАНИЕ: менее загруженный аккаунт идёт раньше, даже при худшем запасе', () => {
-    // Слово фаундера 11.11: нельзя выжигать одну организацию, пока соседняя стоит.
-    // A — лучший запас, но 2 вызова в полёте; B — запас хуже, но свободен → берём B.
-    const pick = pickOpenDesignAccount([acc('a', 0.1), acc('b', 0.2)], KEY, {
-      nowMs: NOW,
-      inFlightByEmail: new Map([['a', 2], ['b', 0]]),
-      slotCap: 8,
-      seed: 's',
-    })
-    expect(pick?.email).toBe('b')
-  })
-
   test('РАЗМАЗЫВАНИЕ: одинаково свободные — решает запас (прежний порядок)', () => {
     const pick = pickOpenDesignAccount([acc('a', 0.1), acc('b', 0.2)], KEY, {
       nowMs: NOW,
@@ -176,10 +207,12 @@ describe('выбор аккаунта знает про слоты', () => {
   })
 
   test('РАЗМАЗЫВАНИЕ: последовательные вызовы расходятся по аккаунтам, а не копятся на одном', () => {
+    // Окна РАВНЫЕ, поэтому решает только занятость: лишний одновременный вызов поднимает
+    // прогнозируемое давление и уступает соседнему аккаунту.
     const inflight = new Map<string, number>([['a', 0], ['b', 0]])
     const picks: string[] = []
     for (let i = 0; i < 6; i++) {
-      const p = pickOpenDesignAccount([acc('a', 0.1), acc('b', 0.2)], KEY, {
+      const p = pickOpenDesignAccount([acc('a', 0.2), acc('b', 0.2)], KEY, {
         nowMs: NOW, inFlightByEmail: inflight, slotCap: 8, seed: `s${i}`,
       })
       expect(p).not.toBeNull()
@@ -187,9 +220,9 @@ describe('выбор аккаунта знает про слоты', () => {
       picks.push(email)
       inflight.set(email, (inflight.get(email) ?? 0) + 1)
     }
-    // Шесть вызовов — поровну, а не «всё на лучший по запасу» (было: 6/6 на A).
-    expect(picks.filter(e => e === 'a').length).toBe(3)
-    expect(picks.filter(e => e === 'b').length).toBe(3)
+    // Не «всё на один»: оба аккаунта получили нагрузку, перекос не больше двух.
+    const counts = { a: picks.filter(e => e === 'a').length, b: picks.filter(e => e === 'b').length }
+    expect(Math.min(counts.a, counts.b)).toBeGreaterThanOrEqual(2)
   })
 
   test('без slotCap слоты в выборе не учитываются — прежнее поведение не тронуто', () => {

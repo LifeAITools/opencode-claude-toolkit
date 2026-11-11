@@ -23,6 +23,7 @@ import { join } from 'node:path'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
 import { stuckSessionState, stuckSessionReport, stuckSessionsAll, dropStuck } from '../local-alert.js'
 import { enrichOrgSurface } from '../org-surface.js'
+import { odSlotSnapshot } from './open-design-door.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -225,6 +226,17 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
         if (list.length === 0) return Response.json({ error: 'sessions required' }, { status: 400 })
         return Response.json(servedOrgBatch(list))
       },
+    },
+
+    // 🔴 СЛОТЫ ОДНОВРЕМЕННОСТИ OPEN-DESIGN — для диагностики, а не для управления.
+    // Замер 11.11.2026: поставщик режет одновременность на членство (400 `11/10`),
+    // а дверь не считала её вовсе. Здесь видно: потолок, сколько в полёте на аккаунт,
+    // кто ждёт в очереди и сколько уже ждёт. Кто занял — это sessionId, если клиент
+    // его передал; при `null` дверь честно говорит «неизвестно», а не выдумывает.
+    {
+      method: 'GET',
+      path: '/admin/od-slots',
+      handler: async () => Response.json(odSlotSnapshot()),
     },
 
     // Mark session as Worker-managed

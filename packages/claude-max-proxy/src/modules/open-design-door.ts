@@ -42,6 +42,162 @@ const STREAM_CAP_BYTES = 1_000_000
 /** Сколько живёт выбор аккаунта за сессией. 12 ч — как у пинов двери Go. */
 const PIN_TTL_MS = 12 * 60 * 60 * 1000
 
+/**
+ * ПОТОЛОК ОДНОВРЕМЕННОСТИ НА АККАУНТ (11.11.2026).
+ *
+ * 🔴 ЗАЧЕМ. У поставщика потолок одновременности на ЧЛЕНСТВО — замер 11.11.2026, живой
+ * вызов: `400 [code=tier_limit_exceeded] membership concurrency limit exceeded: 11/10`.
+ * Дверь это не проверяла вовсе: она выбирала аккаунт по ЗАПАСУ, а запас у одновременных
+ * вызовов разный не бывает — двенадцать запросов флота разом уходили на ОДИН аккаунт
+ * (в журнале двери видно 09:16:56–09:16:59Z, все на hello@uniclowd.com), и одиннадцатый
+ * получал отказ поставщика. Свой потолок ниже поставщиковского (8 из 10) — это запас
+ * человеку и всем путям, которые идут мимо этой двери.
+ *
+ * `OD_MAX_CONCURRENT_PER_ACCOUNT` — настройка, а не константа: у другой организации тот
+ * же поставщик может разрешать больше или меньше. Значение выше 10 бессмысленно — это его
+ * потолок, и мы только воспроизведём его отказ своими руками.
+ */
+export function odSlotCap(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.OD_MAX_CONCURRENT_PER_ACCOUNT ?? 8)
+  if (!Number.isFinite(raw) || raw <= 0) return 8
+  return Math.min(10, Math.max(1, Math.floor(raw)))
+}
+/** Сколько ждём свободный слот, прежде чем назвать отказ. Простой слот освобождает ответ модели. */
+export function odQueueMaxWaitMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.OD_QUEUE_MAX_WAIT_MS ?? 30_000)
+  if (!Number.isFinite(raw) || raw <= 0) return 30_000
+  return Math.floor(raw)
+}
+
+interface OdWaiter {
+  email: string
+  sessionId: string | null
+  model: string | null
+  enqueuedAt: number
+  handoff: (release: () => void) => void
+  refuse: (why: string) => void
+  timer: ReturnType<typeof setTimeout> | null
+}
+
+interface OdSlotState { inFlight: number; queue: OdWaiter[] }
+const slots = new Map<string, OdSlotState>()
+
+function slotState(email: string): OdSlotState {
+  let s = slots.get(email)
+  if (!s) { s = { inFlight: 0, queue: [] }; slots.set(email, s) }
+  return s
+}
+
+/** Занятые слоты — карта «аккаунт → сколько в полёте». Для анализатора размещения. */
+export function odInFlightByEmail(): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const [email, s] of slots) if (s.inFlight > 0) out.set(email, s.inFlight)
+  return out
+}
+
+/** Свободен ли слот прямо сейчас (без ожидания и без побочных эффектов). */
+export function odSlotFree(email: string): boolean {
+  return slotState(email).inFlight < odSlotCap()
+}
+
+/**
+ * Занять слот немедленно. `null` — все слоты заняты; ждать нужно через `acquireOdSlot`.
+ * Возвращённая функция освобождает слот ровно один раз (повторные вызовы — no-op).
+ */
+export function tryAcquireOdSlot(email: string): (() => void) | null {
+  const st = slotState(email)
+  if (st.inFlight >= odSlotCap()) return null
+  st.inFlight++
+  return makeRelease(email)
+}
+
+function makeRelease(email: string): () => void {
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const st = slotState(email)
+    st.inFlight = Math.max(0, st.inFlight - 1)
+    // Слот уходит ПРЯМО следующему в очереди, а не «в общий пул»: иначе проснувшиеся
+    // разом увидят свободный слот и снова переполнят аккаунт.
+    const next = st.queue.shift()
+    if (next) {
+      if (next.timer) clearTimeout(next.timer)
+      st.inFlight++
+      next.handoff(makeRelease(email))
+    }
+  }
+}
+
+/**
+ * Занять слот, при необходимости — в ОГРАНИЧЕННОЙ ОЧЕРЕДИ. Отказ — не 400 и не «нет места»:
+ * причина названа, сколько ждали и когда повторить.
+ */
+export async function acquireOdSlot(
+  email: string,
+  meta: { sessionId: string | null; model: string | null },
+): Promise<() => void> {
+  const st = slotState(email)
+  if (st.inFlight < odSlotCap()) {
+    st.inFlight++
+    return makeRelease(email)
+  }
+  const maxWait = odQueueMaxWaitMs()
+  return await new Promise<() => void>((resolve, reject) => {
+    const waiter: OdWaiter = {
+      email,
+      sessionId: meta.sessionId,
+      model: meta.model,
+      enqueuedAt: Date.now(),
+      handoff: (release) => { if (waiter.timer) clearTimeout(waiter.timer); resolve(release) },
+      refuse: (why) => reject(new Error(why)),
+      timer: null,
+    }
+    waiter.timer = setTimeout(() => {
+      const i = st.queue.indexOf(waiter)
+      if (i >= 0) st.queue.splice(i, 1)
+      reject(new OdSlotQueueTimeout(email, Date.now() - waiter.enqueuedAt))
+    }, maxWait)
+    st.queue.push(waiter)
+  })
+}
+
+export class OdSlotQueueTimeout extends Error {
+  constructor(readonly email: string, readonly waitedMs: number) {
+    super(`Slot guard: all ${odSlotCap()} slots on ${email} are busy; waited ${Math.round(waitedMs / 1000)}s`)
+    this.name = 'OdSlotQueueTimeout'
+  }
+}
+
+/** Снимок для диагностики: кто занял, сколько ждёт, каков потолок. */
+export function odSlotSnapshot(): {
+  cap: number
+  queueMaxWaitMs: number
+  accounts: Record<string, { inFlight: number; queued: number }>
+  waiters: Array<{ account: string; sessionId: string | null; model: string | null; waitedMs: number }>
+  measuredAt: string
+} {
+  const now = Date.now()
+  const accounts: Record<string, { inFlight: number; queued: number }> = {}
+  const waiters: Array<{ account: string; sessionId: string | null; model: string | null; waitedMs: number }> = []
+  for (const [email, st] of slots) {
+    if (st.inFlight === 0 && st.queue.length === 0) continue
+    accounts[email] = { inFlight: st.inFlight, queued: st.queue.length }
+    for (const w of st.queue) {
+      waiters.push({ account: email, sessionId: w.sessionId, model: w.model, waitedMs: now - w.enqueuedAt })
+    }
+  }
+  return { cap: odSlotCap(), queueMaxWaitMs: odQueueMaxWaitMs(), accounts, waiters, measuredAt: new Date(now).toISOString() }
+}
+
+/** Для испытаний: обнулить занятость и очередь между проверками. */
+export function resetOdSlotsForTest(): void {
+  for (const st of slots.values()) {
+    for (const w of st.queue) if (w.timer) clearTimeout(w.timer)
+  }
+  slots.clear()
+}
+
 export interface OdAccountView {
   account: string | null
   status: string
@@ -62,6 +218,7 @@ export interface OdAccountView {
 export function odPlacementInputs(
   accounts: OdAccountView[],
   activeAgentsByEmail: Map<string, number> = new Map(),
+  opts: { inFlightByEmail?: Map<string, number>; slotCap?: number } = {},
 ): PlacementOrg[] {
   return accounts.map(a => {
     const status = String(a.status ?? 'unreadable').toLowerCase()
@@ -69,15 +226,21 @@ export function odPlacementInputs(
       : status === 'absent' ? 'организация без подписки'
         : status === 'unreadable' ? 'квоту измерить не удалось'
           : null
+    const name = String(a.account ?? '')
     return {
-      name: String(a.account ?? ''),
+      name,
       windows: (a.windows ?? []).map(w => ({
         name: w.name,
         util: typeof w.usedFraction === 'number' ? w.usedFraction : null,
         resetAt: w.resetsAt ? Date.parse(w.resetsAt) : null,
       })),
-      activeAgents: activeAgentsByEmail.get(String(a.account ?? '')) ?? 0,
+      activeAgents: activeAgentsByEmail.get(name) ?? 0,
       blockedReason,
+      // Слоты считаем ВСЕГДА, когда включён потолок: занятый аккаунт — не кандидат,
+      // даже если его запас лучше всех.
+      ...(opts.slotCap !== undefined
+        ? { inFlight: opts.inFlightByEmail?.get(name) ?? 0, slotCap: opts.slotCap }
+        : {}),
     }
   })
 }
@@ -92,13 +255,28 @@ export interface OdPick {
 export function pickOpenDesignAccount(
   accounts: OdAccountView[],
   keyByEmail: (email: string | null) => string | null,
-  opts: { nowMs?: number; activeAgentsByEmail?: Map<string, number>; seed?: string } = {},
+  opts: {
+    nowMs?: number
+    activeAgentsByEmail?: Map<string, number>
+    seed?: string
+    /** Сколько вызовов уже в полёте на каждый аккаунт — занятые аккаунты не выбираются. */
+    inFlightByEmail?: Map<string, number>
+    /** Потолок слотов; `undefined` — слоты в выборе не учитываются. */
+    slotCap?: number
+  } = {},
 ): OdPick | null {
   const now = opts.nowMs ?? Date.now()
   // Аккаунт без объявленного ключа — НЕ кандидат, и отсекается ДО анализатора: иначе он
   // выиграл бы по запасу и превратил бы выбор в отказ, хотя рядом есть годный.
   const usable = accounts.filter(a => keyByEmail(a.account))
-  const plan = planPlacement(odPlacementInputs(usable, opts.activeAgentsByEmail), now, opts.seed ?? '')
+  const plan = planPlacement(
+    odPlacementInputs(usable, opts.activeAgentsByEmail, {
+      inFlightByEmail: opts.inFlightByEmail,
+      slotCap: opts.slotCap,
+    }),
+    now,
+    opts.seed ?? '',
+  )
   if (!plan.org) return null
   const keyEnv = keyByEmail(plan.org.name)
   if (!keyEnv) return null
@@ -281,7 +459,20 @@ async function serve(req: Request): Promise<Response> {
     // Сколько агентов уже посажено на каждый аккаунт — по пинам этой же двери.
     const counts = new Map<string, number>()
     for (const p of pins.values()) counts.set(p.email, (counts.get(p.email) ?? 0) + 1)
-    chosen = pickOpenDesignAccount(accountsFromQuota(), keyByEmail, { activeAgentsByEmail: counts, seed: sessionId ?? '' })
+    const quota = accountsFromQuota()
+    // 🔴 СНАЧАЛА — САМ ПО СЕБЕ СВОБОДНЫЙ СЛОТ. Занятый аккаунт не кандидат, даже если у него
+    // лучший запас: посадка туда не «следующий агент», а его 400 от поставщика.
+    chosen = pickOpenDesignAccount(quota, keyByEmail, {
+      activeAgentsByEmail: counts,
+      inFlightByEmail: odInFlightByEmail(),
+      slotCap: odSlotCap(),
+      seed: sessionId ?? '',
+    })
+    if (!chosen) {
+      // Все слоты заняты. Это НЕ «нет места»: выбираем по запасу как раньше, а ждать
+      // будем слот — очередь ограничена и отказ называет причину.
+      chosen = pickOpenDesignAccount(quota, keyByEmail, { activeAgentsByEmail: counts, seed: sessionId ?? '' })
+    }
     if (!chosen) {
       ctx.emit({
         level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
@@ -292,7 +483,6 @@ async function serve(req: Request): Promise<Response> {
       finish(null)
       return errorResponse(503, 'no usable OpenDesign account: none active with a declared key env', 'configuration_error')
     }
-    if (sessionId) { pins.set(sessionId, { email: chosen.email, at: Date.now() }); pinned = false; saveOpenDesignPins() }
   }
 
   rec.org_id = chosen.email
@@ -312,6 +502,55 @@ async function serve(req: Request): Promise<Response> {
     rec.error = { kind: 'auth', provider_type: null }
     finish(null)
     return errorResponse(503, `key env ${chosen.keyEnv} for ${chosen.email} is not set`, 'configuration_error')
+  }
+
+  /**
+   * 🔴 СЛОТ БЕРЁТСЯ ДО ОТПРАВКИ И ДЕРЖИТСЯ ДО КОНЦА ОТВЕТА (включая поток). Потолок у
+   * поставщика считает ЖИВЫЕ вызовы, поэтому отпускать раньше конца потока значило бы
+   * снова выпустить одиннадцатого в ту же секунду.
+   */
+  let releaseSlot: (() => void) | null = tryAcquireOdSlot(chosen.email)
+  if (!releaseSlot) {
+    const waitStarted = Date.now()
+    try {
+      releaseSlot = await acquireOdSlot(chosen.email, { sessionId, model })
+      const waitedMs = Date.now() - waitStarted
+      ctx.emit({
+        level: 'info', kind: EVENT.OD_SLOT_WAIT, sessionId, model,
+        msg: `дверь OpenDesign: слот на ${chosen.email} ждал ${(waitedMs / 1000).toFixed(1)}с (потолок ${odSlotCap()})`,
+      })
+    } catch (err) {
+      const timeout = err instanceof OdSlotQueueTimeout ? err : null
+      const waitedSec = Math.round((timeout?.waitedMs ?? Date.now() - waitStarted) / 1000)
+      ctx.emit({
+        level: 'error', kind: EVENT.OD_SLOT_TIMEOUT, sessionId, model,
+        msg: timeout
+          ? `дверь OpenDesign: ${timeout.message} — ждать дольше не имеем права`
+          : `дверь OpenDesign: слот не получен — ${String((err as any)?.message ?? err).slice(0, 160)}`,
+      })
+      rec.response.status = 503
+      rec.error = classifyError(503, false)
+      finish(null)
+      const retryAfter = Math.ceil(odQueueMaxWaitMs() / 1000)
+      return new Response(JSON.stringify({
+        error: {
+          type: 'slot_guard',
+          message: `Slot guard: все ${odSlotCap()} слотов на ${chosen.email} заняты; `
+            + `ждали ${waitedSec}с. Это НЕ отказ поставщика — свой потолок держим ниже его `
+            + `(10 на членство), чтобы не получить его 400. Повторите через ${retryAfter}с.`,
+        },
+      }), {
+        status: 503,
+        headers: { 'content-type': 'application/json', 'retry-after': String(retryAfter) },
+      })
+    }
+  }
+
+  // Привязка пишется ТОЛЬКО когда слот добыт: иначе отказ в очереди оставил бы сессию
+  // привязанной к аккаунту, который её ни разу не обслужил.
+  if (!pinned && sessionId) {
+    pins.set(sessionId, { email: chosen.email, at: Date.now() })
+    saveOpenDesignPins()
   }
 
   const body = { ...parsed, model: upstreamModel(model) }
@@ -340,6 +579,7 @@ async function serve(req: Request): Promise<Response> {
     rec.response.status = 502
     rec.error = classifyError(null, true)
     finish(null)
+    releaseSlot?.()
     return errorResponse(502, `OpenDesign upstream unreachable: ${String(err?.message ?? err).slice(0, 200)}`, 'upstream_error')
   }
 
@@ -372,6 +612,7 @@ async function serve(req: Request): Promise<Response> {
       msg: `дверь OpenDesign: ${chosen.email} → ${upstream.status}`,
     })
     finish(text, false)
+    releaseSlot?.()
     return new Response(text, { status: upstream.status, headers: passHeaders })
   }
 
@@ -396,6 +637,7 @@ async function serve(req: Request): Promise<Response> {
             msg: `дверь OpenDesign: ${chosen!.email} → ${upstream.status} (поток закрыт)`,
           })
           finish(kept, true)
+          releaseSlot?.()
           controller.close()
           return
         }
@@ -411,12 +653,14 @@ async function serve(req: Request): Promise<Response> {
           msg: `дверь OpenDesign: поток оборвался — ${String((err as any)?.message ?? err).slice(0, 160)}`,
         })
         finish(kept, true)
+        releaseSlot?.()
         controller.error(err)
       }
     },
     cancel() {
       aborted = true
       finish(kept, true)
+      releaseSlot?.()
       reader.cancel().catch(() => {})
       ctx.emit({
         level: 'info', kind: EVENT.OD_ABORTED, sessionId, model, status: upstream.status,

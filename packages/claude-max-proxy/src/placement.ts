@@ -47,6 +47,16 @@ export interface PlacementOrg {
   /** Организация запрещена/исчерпана/без входа — не кандидат (причина в `blockedReason`). */
   blockedReason?: string | null
   /**
+   * Сколько вызовов к организации сейчас В ПОЛЁТЕ (занятые слоты). `undefined` — не считаем.
+   * 🔴 ЗАЧЕМ ЭТО ОТДЕЛЬНО ОТ `activeAgents`: посадка — про запас на будущее, а слот — про
+   * «прямо сейчас». У поставщика потолок одновременности на членство (замер 11.11.2026:
+   * OpenDesign отдаёт 400 `tier_limit_exceeded: 11/10`), и в него упираются все вызовы,
+   * пришедшие ОДНОВРЕМЕННО, даже если сессии разные и запас велик.
+   */
+  inFlight?: number
+  /** Потолок одновременности на организацию. `undefined`/0 — слоты не учитываются. */
+  slotCap?: number
+  /**
    * ТЕКУЩАЯ скорость по окнам (доля/час), если есть ряд замеров. Перебивает среднюю,
    * только когда она БОЛЬШЕ: «сейчас жжём быстрее среднего» — это то, ради чего ряд и копится.
    */
@@ -68,6 +78,10 @@ export interface PlacementAssessment {
   /** Сколько окон вообще измерено. 0 — об организации не известно ничего. */
   measuredCount: number
   activeAgents: number
+  /** Занятые слоты одновременности на момент оценки (0, если не считались). */
+  inFlight: number
+  /** Потолок слотов или `null`, если слоты не учитываются. */
+  slotCap: number | null
   /** Какое окно связывает (имя) и сколько ему ещё жить до сброса. */
   binding: Array<{
     window: string
@@ -122,6 +136,9 @@ function stableHash(value: string): number {
 export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment {
   const blocked = org.blockedReason ?? null
   const agents = Math.max(0, Math.floor(org.activeAgents))
+  const inFlight = Math.max(0, Math.floor(org.inFlight ?? 0))
+  const slotCap = typeof org.slotCap === 'number' && org.slotCap > 0 ? Math.floor(org.slotCap) : null
+  const slotsFull = slotCap !== null && inFlight >= slotCap
   const measured = org.windows.filter(w => finite(w.util) && w.resetAt !== null)
   const worstHeadroom = measured.length
     ? 1 - Math.max(...measured.map(w => w.util as number))
@@ -134,11 +151,20 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     worstHeadroom,
     measuredCount: measured.length,
     activeAgents: agents,
+    inFlight,
+    slotCap,
     binding: [],
-    verdict: blocked ? 'walled' : measured.length === 0 ? 'unknown' : 'place',
+    verdict: blocked || slotsFull ? 'walled' : measured.length === 0 ? 'unknown' : 'place',
     reason: blocked ?? (measured.length === 0 ? 'ни одно окно не измерено — сказать нечего' : ''),
   }
   if (blocked) return base
+
+  // 🔴 СЛОТЫ ЗАНЯТЫ — ЭТО ТОТ ЖЕ КЛАСС, ЧТО «УПЁРЛАСЬ», И ОН НЕ ПРО ЗАПАС. Поставщик режет
+  // одновременность, поэтому аккаунт с полными слотами не кандидат даже при 100% запаса:
+  // посадка туда даёт не «следующего агента», а его 400.
+  if (slotsFull) {
+    return { ...base, score: 0, scoreBefore: 0, verdict: 'walled', reason: `все слоты заняты (${inFlight}/${slotCap})` }
+  }
 
   // 🔴 НЕЧЕГО ИЗМЕРЯТЬ — И ЭТО НАЗВАННЫЙ ВЕРДИКТ, А НЕ «ничего не связывает».
   // У такой организации score был бы Infinity и она встала бы ПЕРВОЙ в сортировке.
@@ -234,7 +260,7 @@ export function planPlacement(orgs: PlacementOrg[], nowMs: number, seed = ''): P
   })
 
   const chosen = ranked.find(r => r.verdict !== 'walled') ?? null
-  if (!chosen) return { org: null, ranked, reason: 'все организации упёрлись или запрещены — сажать некуда' }
+  if (!chosen) return { org: null, ranked, reason: 'все организации упёрлись, запрещены или без свободного слота — сажать некуда' }
   if (chosen.verdict === 'unknown') {
     return { org: chosen, ranked, reason: `не измерено ни у одной: ${chosen.name} — ${chosen.reason}` }
   }

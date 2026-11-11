@@ -112,6 +112,10 @@ export type EventKind =
   | 'OD_COMPLETE'
   | 'OD_ERROR'
   | 'OD_ABORTED'
+  /** Слот одновременности был занят — вызов ждал в ограниченной очереди (и сколько). */
+  | 'OD_SLOT_WAIT'
+  /** Слот не дождались: отказ названный, с `retry-after`, а не 400 поставщика. */
+  | 'OD_SLOT_TIMEOUT'
 
   // Go door (OpenCode Go orgs — provider layer, /go/*)
   | 'GO_REQUEST'
@@ -216,6 +220,8 @@ export const EVENT = {
   OD_COMPLETE: 'OD_COMPLETE',
   OD_ERROR: 'OD_ERROR',
   OD_ABORTED: 'OD_ABORTED',
+  OD_SLOT_WAIT: 'OD_SLOT_WAIT',
+  OD_SLOT_TIMEOUT: 'OD_SLOT_TIMEOUT',
   GO_REQUEST: 'GO_REQUEST',
   GO_COMPLETE: 'GO_COMPLETE',
   GO_ERROR: 'GO_ERROR',

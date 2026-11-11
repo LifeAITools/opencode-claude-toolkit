@@ -23,7 +23,7 @@ import { join } from 'node:path'
 import { loadKeepaliveConfig, grantConsent } from '@life-ai-tools/claude-code-sdk'
 import { stuckSessionState, stuckSessionReport, stuckSessionsAll, dropStuck } from '../local-alert.js'
 import { enrichOrgSurface } from '../org-surface.js'
-import { odRatesFromSamples, odSlotSnapshot } from './open-design-door.js'
+import { odMergedRates, odRealSpendSnapshot, odSlotSnapshot } from './open-design-door.js'
 
 let ctx: ModuleContext
 let shutdownFn: (() => void) | null = null
@@ -241,10 +241,12 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
         // Скорость расхода — в ДОЛЯХ ОКНА В ЧАС (5h: 0.12 = 12% окна за час). Это метрика,
         // по которой выбирается организация; без неё «почему выбрали эту» не проверить.
         const rates: Record<string, Record<string, number>> = {}
-        for (const [email, r] of odRatesFromSamples()) {
+        for (const [email, r] of odMergedRates()) {
           rates[email] = Object.fromEntries(Object.entries(r).map(([w, v]) => [w, Math.round(v * 1e4) / 1e4]))
         }
-        return Response.json({ ...snap, rates })
+        // Расход по СОБСТВЕННЫМ записям двери (токены за 10 минут) — то, из чего считается
+        // мгновенная производная. Это не доля окна: перевод в долю требует проставки по опросу.
+        return Response.json({ ...snap, rates, spend: odRealSpendSnapshot() })
       },
     },
 

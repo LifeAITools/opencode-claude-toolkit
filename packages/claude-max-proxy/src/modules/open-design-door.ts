@@ -31,6 +31,10 @@ import { UNIFIED_QUOTA_JSON } from '../quota-unified.js'
 import { planPlacement, type PlacementOrg } from '../placement.js'
 import { recentRatesFromSamples } from '../placement-rates.js'
 import {
+  compactSpend, fractionPerToken, realtimeFractionPerHour, spendTokensOfUsage,
+  tokensPerHour, type SpendEntry,
+} from '../spend-ledger.js'
+import {
   newRecord, writeDump, redactHeaders, pickQuotaSeen, sha256, classifyError,
   extractUsageChat, usageFromSseText, bodyField,
 } from '../provider-dump.js'
@@ -402,6 +406,77 @@ export function odRatesFromSamples(nowMs: number = Date.now()): Map<string, Reco
 /** Для испытаний: сбросить кэш производной. */
 export function resetOdRatesCacheForTest(): void { ratesCache = null }
 
+/**
+ * РАСХОД В РЕАЛЬНОМ ВРЕМЕНИ — собственные записи двери, а не опрос поставщика.
+ * Ключ — аккаунт; значение — завершённые вызовы с токенами и временем за последний час.
+ */
+const spendByEmail = new Map<string, SpendEntry[]>()
+const REALTIME_RATE_WINDOW_MS = 10 * 60 * 1000
+const CALIBRATION_WINDOW_MS = 30 * 60 * 1000
+
+function recordSpend(email: string, usage: { input?: number | null; output?: number | null }): void {
+  const tokens = spendTokensOfUsage(usage)
+  if (tokens === null || tokens <= 0) return
+  const now = Date.now()
+  const list = compactSpend(spendByEmail.get(email) ?? [], now)
+  list.push({ at: now, tokens })
+  spendByEmail.set(email, list)
+}
+
+export function odRealSpendSnapshot(nowMs: number = Date.now()): Record<string, { calls: number; tokensIn10m: number }> {
+  const out: Record<string, { calls: number; tokensIn10m: number }> = {}
+  for (const [email, entries] of spendByEmail) {
+    const kept = compactSpend(entries, nowMs)
+    out[email] = {
+      calls: kept.filter(e => e.at >= nowMs - REALTIME_RATE_WINDOW_MS).length,
+      tokensIn10m: kept.filter(e => e.at >= nowMs - REALTIME_RATE_WINDOW_MS).reduce((a, e) => a + e.tokens, 0),
+    }
+  }
+  return out
+}
+
+/**
+ * Слить две скорости в одну карту «доля окна в час»: опрос (доля, 5 мин) и наши записи
+ * (токены, мгновенно). Проставка «доля на токен» берётся из пары за ОДИН промежуток
+ * (30 минут), иначе множить нельзя. Нет проставки — остаётся опрос, без выдумки.
+ */
+export function odMergedRates(nowMs: number = Date.now()): Map<string, Record<string, number>> {
+  const sampled = odRatesFromSamples(nowMs)
+  const merged = new Map<string, Record<string, number>>()
+  for (const [email, windows] of sampled) merged.set(email, { ...windows })
+  for (const [email, entries] of spendByEmail) {
+    const kept = compactSpend(entries, nowMs)
+    if (kept.length === 0) continue
+    const recentTokens = tokensPerHour(kept, nowMs, REALTIME_RATE_WINDOW_MS)
+    const sampledTokens = tokensPerHour(kept, nowMs, CALIBRATION_WINDOW_MS)
+    const sampleWindows = sampled.get(email) ?? {}
+    for (const [win, sampledFrac] of Object.entries(sampleWindows)) {
+      const ratio = fractionPerToken(sampledFrac, sampledTokens)
+      const realtime = realtimeFractionPerHour(recentTokens, ratio)
+      if (realtime === null) continue
+      const current = merged.get(email) ?? {}
+      // Берём БОЛЬШУЮ: всплеск важнее сглаженного опроса — ради него всё и считается.
+      current[win] = Math.max(sampledFrac ?? 0, realtime)
+      merged.set(email, current)
+    }
+  }
+  return merged
+}
+
+/** Для испытаний: обнулить скользящее окно расхода. */
+export function resetOdSpendForTest(): void { spendByEmail.clear() }
+
+/** Для испытаний: записать расход с ЯВНЫМ временем (проверка проставки и окна). */
+export function odRecordSpendForTest(
+  email: string, usage: { input?: number | null; output?: number | null }, atMs: number,
+): void {
+  const tokens = spendTokensOfUsage(usage)
+  if (tokens === null || tokens <= 0) return
+  const list = compactSpend(spendByEmail.get(email) ?? [], atMs)
+  list.push({ at: atMs, tokens })
+  spendByEmail.set(email, list)
+}
+
 function keyOf(envName: string): string | null {
   const v = process.env[envName]
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -461,6 +536,10 @@ async function serve(req: Request): Promise<Response> {
   rec.request.body_bytes = new TextEncoder().encode(rawText).byteLength
   rec.request.body_sha256 = sha256(rawText)
 
+  // 🔴 ВЫБОР ОДИН РАЗ НА СЕССИЮ. Живая сессия не переезжает — даже если сосед стал свободнее.
+  // Объявлен ДО `finish`: счётчик расхода пишется из `finish`, а тот зовётся и на путях отказа.
+  let chosen: OdPick | null = null
+
   let finished = false
   const finish = (text: string | null, streamed = false) => {
     if (finished) return
@@ -479,11 +558,11 @@ async function serve(req: Request): Promise<Response> {
     }
     rec.usage_raw = usage
     rec.usage_norm = extractUsageChat(usage)
+    // 🔴 РЕАЛЬНОЕ ВРЕМЯ: токены этого вызова попадают в скользящее окно сразу, а не через
+    // пять минут опроса. Это и есть производная, по которой принимается решение.
+    if (chosen?.email && rec.usage_norm) recordSpend(chosen.email, rec.usage_norm)
     writeDump(rec)
   }
-
-  // 🔴 ВЫБОР ОДИН РАЗ НА СЕССИЮ. Живая сессия не переезжает — даже если сосед стал свободнее.
-  let chosen: OdPick | null = null
   let pinned = false
   if (sessionId) {
     const p = pins.get(sessionId)
@@ -499,7 +578,7 @@ async function serve(req: Request): Promise<Response> {
     const quota = accountsFromQuota()
     // 🔴 СНАЧАЛА — САМ ПО СЕБЕ СВОБОДНЫЙ СЛОТ. Занятый аккаунт не кандидат, даже если у него
     // лучший запас: посадка туда не «следующий агент», а его 400 от поставщика.
-    const rates = odRatesFromSamples()
+    const rates = odMergedRates()
     chosen = pickOpenDesignAccount(quota, keyByEmail, {
       activeAgentsByEmail: counts,
       inFlightByEmail: odInFlightByEmail(),

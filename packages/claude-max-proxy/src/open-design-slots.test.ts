@@ -19,8 +19,16 @@ import {
   pickOpenDesignAccount,
   resetOdSlotsForTest,
   tryAcquireOdSlot,
+  odMergedRates,
+  odRecordSpendForTest,
+  odRealSpendSnapshot,
+  resetOdRatesCacheForTest,
+  resetOdSpendForTest,
   type OdAccountView,
 } from './modules/open-design-door.js'
+import { writeFileSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const KEY = (email: string | null) => (email ? `KEY_${email}` : null)
 
@@ -126,6 +134,49 @@ describe('очередь вместо 400', () => {
     expect(snap.waiters[0]?.sessionId).toBe('ses_wait')
     expect(snap.waiters[0]?.account).toBe('a')
     held()
+  })
+})
+
+describe('расход в реальном времени поверх опроса', () => {
+  test('токены наших запросов дают мгновенную скорость, опрос — проставку', () => {
+    const file = join(tmpdir(), `od-samples-${Date.now()}.jsonl`)
+    const lines = [
+      JSON.stringify({ ms: NOW - 30 * 60_000, provider: 'open-design', orgs: [{ name: 'a', windows: [{ window: '5h', util: 0.10 }] }] }),
+      JSON.stringify({ ms: NOW - 10 * 60_000, provider: 'open-design', orgs: [{ name: 'a', windows: [{ window: '5h', util: 0.20 }] }] }),
+    ].join('\n')
+    writeFileSync(file, lines)
+    process.env.QUOTA_SAMPLES_PATH = file
+    resetOdRatesCacheForTest()
+    resetOdSpendForTest()
+    try {
+      // Опрос: 0.10 доли за 20 минут = 0.30/час.
+      // Наши записи за те же 30 минут: 300k токенов → 600k/час → проставка 0.3/600k = 5e-7.
+      odRecordSpendForTest('a', { input: 150_000, output: 0 }, NOW - 25 * 60_000)
+      odRecordSpendForTest('a', { input: 140_000, output: 10_000 }, NOW - 5 * 60_000)
+      // За последние 10 минут: 150k токенов → 900k/час → 0.45/час, больше опроса.
+      const rates = odMergedRates(NOW)
+      expect(rates.get('a')?.['5h']).toBeCloseTo(0.45, 6)
+      expect(odRealSpendSnapshot(NOW).a.tokensIn10m).toBe(150_000)
+    } finally {
+      delete process.env.QUOTA_SAMPLES_PATH
+      resetOdRatesCacheForTest()
+      resetOdSpendForTest()
+      try { unlinkSync(file) } catch { /* уже нет */ }
+    }
+  })
+
+  test('без проставки (нет опроса) мгновенная скорость не выдумывается', () => {
+    resetOdRatesCacheForTest()
+    resetOdSpendForTest()
+    odRecordSpendForTest('b', { input: 100_000, output: 0 }, NOW - 5 * 60_000)
+    delete process.env.QUOTA_SAMPLES_PATH
+    resetOdRatesCacheForTest()
+    try {
+      expect(odMergedRates(NOW).has('b')).toBe(false)
+    } finally {
+      resetOdSpendForTest()
+      resetOdRatesCacheForTest()
+    }
   })
 })
 

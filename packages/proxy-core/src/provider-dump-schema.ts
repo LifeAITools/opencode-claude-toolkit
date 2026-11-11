@@ -96,7 +96,16 @@ export interface DumpRecord {
   usage_raw: unknown | null
   usage_norm: UsageNorm
   quota_seen: Record<string, string>
-  timing: { ttfb_ms: number | null; total_ms: number | null }
+  timing: {
+    ttfb_ms: number | null
+    total_ms: number | null
+    /** Рисунок потока (только у потоковых ответов): см. `stream-timing.ts`. */
+    chunks?: number | null
+    chunk_median_gap_ms?: number | null
+    chunk_max_gap_ms?: number | null
+    chunk_zero_gaps?: number | null
+    chunk_span_ms?: number | null
+  }
   error: { kind: ErrorKind; provider_type: string | null } | null
 }
 

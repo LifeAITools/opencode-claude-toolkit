@@ -30,6 +30,7 @@ import { loadProviderRegistry, keyEnvFor, type ProviderRegistry } from '../provi
 import { UNIFIED_QUOTA_JSON } from '../quota-unified.js'
 import { planPlacement, type PlacementOrg } from '../placement.js'
 import { recentRatesFromSamples } from '../placement-rates.js'
+import { chunkTiming } from '../stream-timing.js'
 import {
   compactSpend, fractionPerToken, realtimeFractionPerHour, spendTokensOfUsage,
   tokensPerHour, tokensRateInRange, type SpendEntry,
@@ -575,6 +576,14 @@ async function serve(req: Request): Promise<Response> {
     }
     rec.usage_raw = usage
     rec.usage_norm = extractUsageChat(usage)
+    if (arrivals.length > 0) {
+      const t = chunkTiming(arrivals)
+      rec.timing.chunks = t.chunks
+      rec.timing.chunk_median_gap_ms = t.medianGapMs
+      rec.timing.chunk_max_gap_ms = t.maxGapMs
+      rec.timing.chunk_zero_gaps = t.zeroGaps
+      rec.timing.chunk_span_ms = t.spanMs
+    }
     // 🔴 РЕАЛЬНОЕ ВРЕМЯ: токены этого вызова попадают в скользящее окно сразу, а не через
     // пять минут опроса. Это и есть производная, по которой принимается решение.
     if (chosen?.email && rec.usage_norm) recordSpend(chosen.email, rec.usage_norm)
@@ -760,6 +769,8 @@ async function serve(req: Request): Promise<Response> {
   // Копию держим только для usage в журнале: сам поток не задерживается ни на байт.
   let kept = ''
   let keptBytes = 0
+  // Время КАЖДОГО чтения: по нему видно, пачкует ли поставщик (см. stream-timing.ts).
+  const arrivals: number[] = []
   const decoder = new TextDecoder()
   /**
    * 🔴 ОБРЫВ КЛИЕНТА — НОРМА, А НЕ ОШИБКА ДВЕРИ (замер 11.11.2026: после выкатки журнал
@@ -795,9 +806,12 @@ async function serve(req: Request): Promise<Response> {
           closeQuietly(controller)
           return
         }
-        if (keptBytes < STREAM_CAP_BYTES) {
-          kept += decoder.decode(value, { stream: true })
-          keptBytes += value.byteLength
+        if (value) {
+          if (arrivals.length < 2000) arrivals.push(Date.now())
+          if (keptBytes < STREAM_CAP_BYTES) {
+            kept += decoder.decode(value, { stream: true })
+            keptBytes += value.byteLength
+          }
         }
         controller.enqueue(value)
       } catch (err) {

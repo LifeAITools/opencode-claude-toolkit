@@ -251,9 +251,9 @@ EnvironmentFile=-$HOME/.claude-local/open-design-keys.env
 # 🔴 Registry path is EXPLICIT: the compiled binary resolves import.meta.dir to bin/, so a
 # relative ../../config lands outside the install (measured 06.11: door answered 503
 # "provider registry is not readable" while the file was present and parsed).
-# Без обратных кавычек НАРОЧНО: heredoc ниже не в кавычках, и `...` в комментарии
-# выполнялось бы как подстановка команды (ошибки "import.meta.dir: command not found"
-# в выводе деплоя 08.11 — именно отсюда; юнит при этом собирался правильно).
+# Без обратных кавычек НАРОЧНО: heredoc ниже не в кавычках, поэтому текст в них
+# выполнялся бы как подстановка команды (ошибки "command not found" в выводе деплоя
+# 08.11 и 11.11 — именно отсюда; юнит при этом собирался правильно).
 Environment=PROVIDER_REGISTRY_PATH=$INSTALLED/config/providers.yaml
 
 [Install]

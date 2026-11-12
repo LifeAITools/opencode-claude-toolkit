@@ -1561,7 +1561,15 @@ export class ProxyClient {
           continue
         }
         const windows = usageToWindows(res.data as OauthUsage)
-        this.orgUsage.set(orgId, { orgId, windows, measuredAt: Date.now() })
+        const measuredAt = Date.now()
+        this.orgUsage.set(orgId, { orgId, windows, measuredAt })
+        // Число — с предметом и возрастом (рельса number-carries-subject-and-age): чья
+        // организация, какое окно, когда сбросится, когда измерено и откуда.
+        this.events.emit({
+          level: 'info', kind: 'ORG_USAGE_MEASURED', orgId, source: 'oauth-usage',
+          measuredAt: new Date(measuredAt).toISOString(),
+          windows: windows.map(w => ({ window: w.name, util: w.util, resetAt: w.resetAt ? new Date(w.resetAt).toISOString() : null })),
+        })
       } catch (err) {
         this.events.emit({ level: 'info', kind: 'ORG_USAGE_POLL_FAILED', orgId, msg: String((err as Error)?.message ?? err).slice(0, 160) })
       }

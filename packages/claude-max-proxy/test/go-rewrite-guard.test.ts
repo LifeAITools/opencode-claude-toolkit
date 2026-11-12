@@ -153,6 +153,19 @@ describe('hasMarkerInLastUserMessage — согласие меткой', () => {
       messages: [{ role: 'user', content: [{ type: 'input_text', input_text: marker }] }],
     }, marker)).toBe(true)
   })
+  // Живой случай 12.11.2026 (dsh, дверь Anthropic, тот же класс): ход собран из нескольких
+  // user-сообщений в одну секунду — подсказка → метка человека → заметка о времени.
+  // Метка обязана считаться в ЛЮБОЙ реплике текущего хода, а граница хода — ответ ассистента.
+  test('метка в середине текущего хода считается', () => {
+    expect(hasMarkerInLastUserMessage({
+      messages: [m('hi'), { role: 'assistant', content: 'ok' }, m('<hint>'), m(`${marker} go`), m('Time sampled')],
+    }, marker)).toBe(true)
+  })
+  test('метка ДО последнего ответа ассистента — не считается', () => {
+    expect(hasMarkerInLastUserMessage({
+      messages: [m(`${marker} old`), { role: 'assistant', content: 'ok' }, m('<hint>'), m('go')],
+    }, marker)).toBe(false)
+  })
   test('без сообщений пользователя — false, не бросает', () => {
     expect(hasMarkerInLastUserMessage({ messages: [{ role: 'assistant', content: marker }] }, marker)).toBe(false)
     expect(hasMarkerInLastUserMessage({}, marker)).toBe(false)

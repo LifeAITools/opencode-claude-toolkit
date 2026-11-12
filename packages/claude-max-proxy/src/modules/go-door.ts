@@ -1147,7 +1147,12 @@ export function shouldAutoRevert(input: {
 }
 
 /**
- * Метка согласия в ПОСЛЕДНЕМ сообщении пользователя (диалект OpenAI).
+ * Метка согласия в ТЕКУЩЕМ ХОДЕ (диалект OpenAI): в любой user-реплике после последнего
+ * ответа ассистента. Метка из прошлого хода не считается — граница хода по ответу.
+ * 🔴 Раньше — только последняя реплика. 12.11.2026 dsh собирал ход из трёх user-сообщений
+ * в одну секунду (подсказка → метка человека → заметка о времени), и метка, поставленная
+ * человеком, была невидима (тот же класс исправлен у двери Anthropic, ccb2e43).
+ * Имя функции оставлено ради вызывающих.
  * `content` бывает строкой или массивом частей — читаем оба, никогда не бросаем.
  */
 export function hasMarkerInLastUserMessage(body: any, marker: string): boolean {
@@ -1155,6 +1160,7 @@ export function hasMarkerInLastUserMessage(body: any, marker: string): boolean {
     const msgs = Array.isArray(body?.messages) ? body.messages : []
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
+      if (m?.role === 'assistant') break   // граница текущего хода
       if (m?.role !== 'user') continue
       const content = m.content
       let text = ''
@@ -1170,7 +1176,7 @@ export function hasMarkerInLastUserMessage(body: any, marker: string): boolean {
         }
         text = parts.join('\n')
       }
-      return text.includes(marker)
+      if (text.includes(marker)) return true
     }
     return false
   } catch {

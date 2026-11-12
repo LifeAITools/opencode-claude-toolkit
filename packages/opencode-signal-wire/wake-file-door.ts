@@ -74,7 +74,15 @@ export function renderFileWake(w: WakeEnvelope): { text: string; renderedV?: num
   return { text: renderWake(w) }
 }
 
-const defaultReceipt = (w: WakeEnvelope, v?: number) => postReceipt(w, undefined, v)
+/**
+ * Квитанция по умолчанию. `log` передаётся ЧЕТВЁРТЫМ аргументом (`opts`), а не через `drain`:
+ * асинхронный провал (401/бросок/таймаут) пишет сам `postReceipt` — без `opts.log` он уходит
+ * в журнал ЯДРА (`SIGNAL_WIRE_LOG_FILE`, иначе `~/.claude/signal-wire-debug.log`), а не в
+ * журнал двери, где мы ищем побудки. Замер ядра 12.11 показал, что без заголовка секрета
+ * квитанция молча терялась; теперь её провал называться будет там, где смотрят.
+ */
+const defaultReceipt = (log?: (line: string) => void) =>
+  (w: WakeEnvelope, v?: number) => postReceipt(w, undefined, v, log ? { log } : undefined)
 
 /** Один проход. Интервалом управляет вызывающий. */
 export async function pollFileDoor(deps: FileDoorDeps): Promise<FileDoorOutcome> {
@@ -94,7 +102,7 @@ export async function pollFileDoor(deps: FileDoorDeps): Promise<FileDoorOutcome>
         return sent
       },
       render: renderFileWake,
-      receipt: deps.receipt ?? defaultReceipt,
+      receipt: deps.receipt ?? defaultReceipt(deps.log),
       log: deps.log,
     })
     return { kind: 'window', result }
@@ -102,7 +110,7 @@ export async function pollFileDoor(deps: FileDoorDeps): Promise<FileDoorOutcome>
   const result = await drainWakeDirsAsync(dirs, {
     deliver: (text) => deps.send(sessionId, text),
     render: renderFileWake,
-    receipt: deps.receipt ?? defaultReceipt,
+    receipt: deps.receipt ?? defaultReceipt(deps.log),
     log: deps.log,
   })
   return { kind: 'drained', sessionId, result }

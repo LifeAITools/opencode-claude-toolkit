@@ -70,6 +70,13 @@ export interface PidAdaptation {
    */
   kCalByClass: Record<string, number>
   kDefault: number
+  /**
+   * Фоновый расход окна, не объяснённый ни одной отслеживаемой сессией (доля/час).
+   * Замер 12.11.2026 на истории (research/placement-pid-plant-identification-2026-11.md):
+   * ≈0.020/ч на организацию (p10–p90 0.018–0.023). Отдельный вход, а не часть K_class:
+   * вложенный в коэффициент сессии, он считался бы дважды.
+   */
+  driftPerHour: number
   /** Коэффициент забывания оценки (0..1, ближе к 1 — медленнее). */
   forget: number
   adaptMin: number
@@ -147,8 +154,8 @@ const HOUR = 3_600_000
  * Ожидаемый расход окна (доля/час) от уже посаженных сессий: Σ K_cal[класс]·сессии.
  * Класс без калибровки — `kDefault`.
  */
-export function expectedLoadPerHour(sessionsByClass: Record<string, number>, adapt: Pick<PidAdaptation, 'kCalByClass' | 'kDefault'>): number {
-  let sum = 0
+export function expectedLoadPerHour(sessionsByClass: Record<string, number>, adapt: Pick<PidAdaptation, 'kCalByClass' | 'kDefault'> & { driftPerHour?: number }): number {
+  let sum = adapt.driftPerHour ?? 0
   for (const [cls, n] of Object.entries(sessionsByClass)) {
     if (!(n > 0)) continue
     const k = adapt.kCalByClass[cls]

@@ -14,7 +14,7 @@ const T0 = Date.UTC(2026, 10, 12, 14, 0)
 const gains: PidGains = { kp: 4, ki: 1, kd: 2, kff: 0.5 }
 const limits: PidLimits = { wMax: 1, slewPerHour: 2, integralMax: 0.5, brakeMargin: 0.01, derivTauHours: 0.25 }
 const adapt: PidAdaptation = {
-  enabled: true, kCalByClass: { 'anthropic/opus': 0.04, 'anthropic/haiku': 0.005 }, kDefault: 0.02,
+  enabled: true, kCalByClass: { 'anthropic/opus': 0.04, 'anthropic/haiku': 0.005 }, kDefault: 0.02, driftPerHour: 0,
   forget: 0.98, adaptMin: 0.25, adaptMax: 4, minObservations: 6,
 }
 
@@ -23,6 +23,10 @@ describe('классы сессий — провайдер и модель (сл
     expect(expectedLoadPerHour({ 'anthropic/opus': 2 }, adapt)).toBeCloseTo(0.08)
     expect(expectedLoadPerHour({ 'anthropic/haiku': 2 }, adapt)).toBeCloseTo(0.01)
     expect(expectedLoadPerHour({ 'open-design/deepseek': 1 }, adapt)).toBeCloseTo(0.02)
+  })
+  test('фоновый расход добавляется один раз, даже без сессий', () => {
+    expect(expectedLoadPerHour({}, { ...adapt, driftPerHour: 0.02 })).toBeCloseTo(0.02)
+    expect(expectedLoadPerHour({ 'anthropic/opus': 1 }, { ...adapt, driftPerHour: 0.02 })).toBeCloseTo(0.06)
   })
   test('sessionClass сводит идентификаторы моделей к семействам', () => {
     expect(sessionClass('anthropic', 'claude-opus-5-5')).toBe('anthropic/opus')

@@ -103,6 +103,35 @@ describe('rewrite guard (e2e via handleRequest, guard enabled by fixture)', () =
     c.stop()
   })
 
+  // An agent without a human cannot consent (rail no-cold-cache-write-without-
+  // explicit-word) — but a first write is blocked ONLY above minColdStartTokens,
+  // so shrinking below it is a way out that needs nobody. The refusal must SAY
+  // so, in a field a harness keys on and in the prose, with the exact number.
+  // Asked by vibe-deepseek-harness-owner 12.11.2026 (dsh treated the refusal as
+  // retry, not compaction). Only the first-write shape carries it: for a
+  // rewrite there is no size that guarantees passage.
+  test('a first-write refusal names the agent way out — compact below minColdStartTokens', async () => {
+    const c = mkClient()
+    const r = await c.handleRequest(hugeColdBody(), {}, { sessionId: 'rg-cold-shrink' })
+    const j = await r.json() as { error?: { message?: string; shrinkBelowTokens?: number; minColdStartTokens?: number } }
+    expect(j.error?.shrinkBelowTokens).toBe(j.error?.minColdStartTokens)
+    expect(j.error?.message?.startsWith('Cache guard')).toBe(true)
+    expect(j.error?.message).toContain(`compact the conversation below ${j.error?.minColdStartTokens} tokens`)
+    c.stop()
+  })
+
+  test('a REWRITE refusal does not promise a size that clears it', async () => {
+    const path = join(TMP, 'rg-shrink-rw.json')
+    seedIdleFor(path, 'rg-shrink-rw', reqBody(), 10 * 60_000)
+    const c = mkClient({ prefixHistoryPath: path })
+    const r = await c.handleRequest(reqBody(), {}, { sessionId: 'rg-shrink-rw' })
+    const j = await r.json() as { error?: { message?: string; shrinkBelowTokens?: number | null } }
+    expect(j.error?.shrinkBelowTokens ?? null).toBeNull()
+    expect(j.error?.message).not.toContain('compact the conversation below')
+    c.stop()
+    rmSync(path, { force: true })
+  })
+
   test('huge first request WITH the override marker passes (same consent flow)', async () => {
     const c = mkClient()
     const r = await c.handleRequest(hugeColdBody('[cache-rewrite-ok]'), {}, { sessionId: 'rg-cold-2' })

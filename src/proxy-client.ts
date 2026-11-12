@@ -2519,6 +2519,15 @@ export class ProxyClient {
               consecutiveBlocks: streak,
               minRewriteTokens: guard.minRewriteTokens,
               minColdStartTokens: guard.minColdStartTokens,
+              // The way out that needs NOBODY. A first write is blocked only
+              // above minColdStartTokens, so a turn compacted below it passes
+              // as a routine start — the one exit an agent without a human
+              // may take on its own (it must never self-consent: rail
+              // no-cold-cache-write-without-explicit-word). null for a rewrite:
+              // there no size guarantees passage, and a number would lie.
+              // Asked by vibe-deepseek-harness-owner 12.11.2026 — dsh read the
+              // refusal as "retry" and only compacted on CONTEXT_WINDOW_EXCEEDED.
+              shrinkBelowTokens: isFirstWrite ? guard.minColdStartTokens : null,
               // Machine-parseable consent affordances so a programmatic client
               // or agent harness can act on the block without scraping prose.
               consent: {
@@ -2552,6 +2561,10 @@ export class ProxyClient {
                 : `Cache guard: this turn would ${spendPhrase} `)
                 + `(${rewriteAssessment.rewriteClass}) — `
                 + `an unconfirmed quota spend, blocked for all consumers. `
+                + (isFirstWrite
+                  ? `NO-CONSENT WAY OUT: compact the conversation below ${guard.minColdStartTokens} tokens `
+                    + `and send again — a first write under that size is a routine start and passes. `
+                  : '')
                 // 🔴 СПОСОБ, ДОСТУПНЫЙ ЧЕЛОВЕКУ, НАЗВАН ПЕРВЫМ И ЦЕЛИКОМ.
                 //
                 // Владелец чат-сервиса 05.09.2026 принёс замер: этот текст

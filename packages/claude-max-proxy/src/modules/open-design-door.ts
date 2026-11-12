@@ -75,6 +75,53 @@ export function odQueueMaxWaitMs(env: NodeJS.ProcessEnv = process.env): number {
   return Math.floor(raw)
 }
 
+/**
+ * 🔴 ПРЕДЕЛЫ ОЖИДАНИЯ ПОСТАВЩИКА (12.11.2026). Без них молчащий поставщик держал слот ВЕЧНО:
+ * в 14:20–14:21Z семь вызовов на relishev@gmail.com ушли и не вернулись (ни ответа, ни обрыва),
+ * и два часа каждый вызов на аккаунт получал «все 8 слотов заняты» — 79 отказов за час при
+ * четырёх повторяющих сессиях. Предел — не про скорость модели, а про «жив ли разговор».
+ *
+ * Заголовки: замер 12.11 по журналу двери (n=1273 ответов 200 на relishev) — первый байт
+ * p50 4.8с, p99 54с, максимум 118с; 180с не режет ни один живой ответ.
+ * Тишина внутри потока: медиана паузы 2мс, максимум ~0.8с (замер 11.11) — 120с значит
+ * «поток умер», а не «модель думает».
+ */
+export function odUpstreamHeadersTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.OD_UPSTREAM_HEADERS_TIMEOUT_MS ?? 180_000)
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 180_000
+}
+export function odUpstreamIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.OD_UPSTREAM_IDLE_TIMEOUT_MS ?? 120_000)
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 120_000
+}
+
+class OdUpstreamSilence extends Error {
+  constructor(readonly phase: 'headers' | 'stream', readonly limitMs: number) {
+    super(phase === 'headers'
+      ? `поставщик не ответил за ${Math.round(limitMs / 1000)}с`
+      : `поток молчит дольше ${Math.round(limitMs / 1000)}с`)
+    this.name = 'OdUpstreamSilence'
+  }
+}
+
+/** Чтение с пределом тишины: молчание дольше предела = ошибка, а не вечное ожидание. */
+async function readWithin<T>(p: Promise<T>, limitMs: number, onTimeout: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        // Сначала отказ, ПОТОМ обрыв: обрыв читателя тут же завершает ждущее чтение как
+        // `done`, и гонку выиграл бы ложный «поток закрыт» — обрыв посередине выглядел бы
+        // как законченный ответ (поймано испытанием 12.11).
+        timer = setTimeout(() => { reject(new OdUpstreamSilence('stream', limitMs)); onTimeout() }, limitMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 interface OdWaiter {
   email: string
   sessionId: string | null
@@ -720,9 +767,25 @@ async function serve(req: Request): Promise<Response> {
   })
 
   let upstream: Response
+  const headersLimitMs = odUpstreamHeadersTimeoutMs()
+  const upstreamCtl = new AbortController()
+  const headersTimer = setTimeout(() => upstreamCtl.abort(new OdUpstreamSilence('headers', headersLimitMs)), headersLimitMs)
   try {
-    upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+    upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: upstreamCtl.signal })
   } catch (err: any) {
+    clearTimeout(headersTimer)
+    const silence = upstreamCtl.signal.aborted ? upstreamCtl.signal.reason : null
+    if (silence instanceof OdUpstreamSilence) {
+      ctx.emit({
+        level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
+        msg: `дверь OpenDesign: ${chosen.email} не ответил за ${Math.round(headersLimitMs / 1000)}с — вызов снят, слот возвращён`,
+      })
+      rec.response.status = 504
+      rec.error = classifyError(504, false)
+      finish(null)
+      releaseSlot?.()
+      return errorResponse(504, `OpenDesign upstream sent no response headers within ${Math.round(headersLimitMs / 1000)}s`, 'upstream_timeout')
+    }
     ctx.emit({
       level: 'error', kind: EVENT.OD_ERROR, sessionId, model,
       msg: `дверь OpenDesign: апстрим недоступен — ${String(err?.message ?? err).slice(0, 200)}`,
@@ -734,6 +797,7 @@ async function serve(req: Request): Promise<Response> {
     return errorResponse(502, `OpenDesign upstream unreachable: ${String(err?.message ?? err).slice(0, 200)}`, 'upstream_error')
   }
 
+  clearTimeout(headersTimer)
   rec.timing.ttfb_ms = Date.now() - t0
   rec.response.status = upstream.status
   const respHeaders = redactHeaders(upstream.headers)
@@ -750,7 +814,8 @@ async function serve(req: Request): Promise<Response> {
   }
 
   if (parsed?.stream !== true || !upstream.body) {
-    const text = await upstream.text().catch(() => '')
+    const text = await readWithin(upstream.text(), odUpstreamIdleTimeoutMs(), () => upstreamCtl.abort())
+      .catch(() => '')
     let outTokens: number | null = null
     try {
       const j = JSON.parse(text)
@@ -795,7 +860,11 @@ async function serve(req: Request): Promise<Response> {
     async pull(controller) {
       if (clientGone) return
       try {
-        const { done, value } = await reader.read()
+        const idleLimitMs = odUpstreamIdleTimeoutMs()
+        const { done, value } = await readWithin(reader.read(), idleLimitMs, () => {
+          reader.cancel().catch(() => {})
+          upstreamCtl.abort()
+        })
         // Клиент ушёл, пока мы ждали чужой ответ: читать больше некому.
         if (clientGone) { reader.cancel().catch(() => {}); return }
         if (done) {

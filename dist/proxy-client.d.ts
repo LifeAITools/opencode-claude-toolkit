@@ -172,6 +172,20 @@ export declare class ProxyClient {
     private proactiveOrgSweep;
     _runOrgProactiveSweep(): Promise<void>;
     private refreshOrgUsage;
+    remeasureOrgUsage(orgQuery: string): Promise<{
+        ok: true;
+        orgId: string;
+        windows: Array<{
+            window: string;
+            util: number | null;
+            resetAt: string | null;
+        }>;
+    } | {
+        ok: false;
+        orgId?: string;
+        error: string;
+        retryAfterSec?: number;
+    }>;
     _refreshOrgUsage(): Promise<void>;
     _ageOrgUsageStart(ms: number): void;
     _setOrgUsage(r: OrgUsageReading): void;

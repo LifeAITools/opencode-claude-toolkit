@@ -1576,6 +1576,43 @@ export class ProxyClient {
     }
   }
 
+  /**
+   * «Запас этой организации сбросили — перемерь сейчас» (слово фаундера 12.11.2026: сброс 5ч в
+   * панели Anthropic должен быть увиден распределителем, а не ждать 90 минут старого показания).
+   * Снимает СВОИ ограничения частоты (час между вызовами), но не паузу 429 от Anthropic: её
+   * нарушать нельзя, и она возвращается вызывающему названной. Показание до замера стирается —
+   * старое «99%» больше не правда, а «не измерено» распределитель честно не сравнивает.
+   */
+  async remeasureOrgUsage(orgQuery: string): Promise<
+    { ok: true; orgId: string; windows: Array<{ window: string; util: number | null; resetAt: string | null }> }
+    | { ok: false; orgId?: string; error: string; retryAfterSec?: number }
+  > {
+    const entry = this.orgVault.resolve(orgQuery)
+    if (!entry) return { ok: false, error: `no vault org matches "${orgQuery}"` }
+    const orgId = entry.orgId
+    const pause = this.orgUsageBackoffUntil.get(orgId) ?? 0
+    if (pause > Date.now()) {
+      return { ok: false, orgId, error: 'Anthropic rate-limit pause in effect for /api/oauth/usage', retryAfterSec: Math.ceil((pause - Date.now()) / 1000) }
+    }
+    this.orgUsage.delete(orgId)
+    this.orgUsageEndpointAt.delete(orgId)
+    const token = await this.withFreshOrgToken(orgId, { reason: 'usage-remeasure' })
+    if (!token) return { ok: false, orgId, error: 'no live token for this org' }
+    this.orgUsageEndpointAt.set(orgId, Date.now())
+    const res = await this.orgUsageReader.read(token, `claude-cli/${getCompatVersion()}`)
+    if (res === null) return { ok: false, orgId, error: 'usage read failed' }
+    if ('retryAfterSec' in res) {
+      this.orgUsageBackoffUntil.set(orgId, Date.now() + res.retryAfterSec * 1000)
+      return { ok: false, orgId, error: 'Anthropic answered 429', retryAfterSec: res.retryAfterSec }
+    }
+    const windows = usageToWindows(res.data as OauthUsage)
+    const measuredAt = Date.now()
+    this.orgUsage.set(orgId, { orgId, windows, measuredAt })
+    const view = windows.map(w => ({ window: w.name, util: w.util, resetAt: w.resetAt ? new Date(w.resetAt).toISOString() : null }))
+    this.events.emit({ level: 'info', kind: 'ORG_USAGE_MEASURED', orgId, source: 'oauth-usage:remeasure', measuredAt: new Date(measuredAt).toISOString(), windows: view })
+    return { ok: true, orgId, windows: view }
+  }
+
   /** Test seam — один проход опроса запаса. */
   async _refreshOrgUsage(): Promise<void> { return this.refreshOrgUsage() }
   /** Test seam — сдвинуть «старт процесса» в прошлое (как будто служба работает давно). */

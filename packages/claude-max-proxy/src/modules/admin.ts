@@ -561,6 +561,21 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
       handler: async () => Response.json(enrichOrgSurface(ctx.proxyClient.orgSurface())),
     },
 
+    // «Запас организации сбросили — перемерь сейчас». Body: { org } (UUID, префикс или почта).
+    // Нужен после ручного сброса 5ч в панели Anthropic: без него распределитель новых сессий
+    // держался бы за старое показание до 90 минут. Пауза 429 от Anthropic соблюдается.
+    {
+      method: 'POST',
+      path: '/admin/orgs/remeasure',
+      handler: async (req) => {
+        let body: { org?: string } = {}
+        try { body = await req.json() as any } catch { /* fall through to 400 */ }
+        if (!body.org) return Response.json({ error: 'org required' }, { status: 400 })
+        const r = await ctx.proxyClient.remeasureOrgUsage(body.org)
+        return Response.json(r, { status: r.ok ? 200 : ('retryAfterSec' in r && r.retryAfterSec ? 429 : 404) })
+      },
+    },
+
     // Explicit per-session org rotate (maintenance, one-shot guard consent).
     // Body: { sessionId, org } — org accepts a UUID, unique prefix, or name.
     {

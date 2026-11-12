@@ -277,3 +277,37 @@ describe('новый вход снимает «нужен повторный в�
     c.stop()
   })
 })
+
+describe('remeasureOrgUsage — «сбросили, перемерь» (фаундер 12.11.2026)', () => {
+  function mk(reader: any) {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    vault.upsert({ orgId: 'org-r', accountEmail: 'r@x', accessToken: 'tok-r', refreshToken: null, expiresAt: Date.now() + H, capturedAt: Date.now() })
+    writeActiveCreds('tok-x', Date.now() + H)
+    return new ProxyClient({
+      config: { kaCacheTtlSec: 1, orgProactiveRefreshSec: 0 },
+      credentialsProvider: { getAccessToken: async () => 'tok-x', invalidate() {} },
+      upstreamFetcher: { fetch: async () => new Response(SSE, { status: 200 }) },
+      orgUsageReader: reader,
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-other', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+    } as ProxyClientOptions)
+  }
+  test('старое 99% стирается, новое показание сразу (минуя часовой интервал)', async () => {
+    const c = mk({ read: async () => ({ data: { five_hour: { utilization: 0, resets_at: '2026-11-12T18:00:00Z' } } }) })
+    c._setOrgUsage({ orgId: 'org-r', measuredAt: Date.now(), windows: [{ name: '5h', util: 0.99, resetAt: Date.now() + H }] })
+    const r = await c.remeasureOrgUsage('r@x')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.windows[0]!.util).toBe(0)
+    c.stop()
+  })
+  test('пауза 429 от Anthropic соблюдается и называется', async () => {
+    const c = mk({ read: async () => ({ retryAfterSec: 300 }) })
+    const a = await c.remeasureOrgUsage('org-r')
+    expect(a.ok).toBe(false)
+    const b = await c.remeasureOrgUsage('org-r')
+    expect(b.ok).toBe(false)
+    if (!b.ok) expect(b.retryAfterSec).toBeGreaterThan(0)
+    c.stop()
+  })
+})

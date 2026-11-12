@@ -78,6 +78,8 @@ import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { chooseBirthOrg, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
 import { getCompatVersion } from './subscription-compat.js'
+import { PlacementController, loadPlacementControl } from './placement-control.js'
+import { sessionClass } from './placement-pid.js'
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { consumeConsent } from './rewrite-consent.js'
@@ -347,6 +349,8 @@ export interface ProxyClientOptions {
    *  каталогом конфигурации, а не в нём, поэтому из `claudeConfigDir` не выводится. Тесты
    *  подставляют свой, иначе снимок учётки тянет организацию машины в тестовое хранилище. */
   accountConfigPath?: string
+  /** Файл ручки распределителя (`~/.claude/placement.json` по умолчанию). */
+  placementConfigPath?: string
 
   /**
    * Optional: path to `.credentials.json` (the active org's on-disk credential).
@@ -670,6 +674,14 @@ export class ProxyClient {
   private readonly orgUsageBackoffUntil: Map<string, number> = new Map()
   /** Когда справочный вызов запаса делался по организации в последний раз. */
   private readonly orgUsageEndpointAt: Map<string, number> = new Map()
+  /** Класс модели живой сессии (`anthropic/opus` …) — нагрузка регулятора делится по классам. */
+  private readonly sessionClassById: Map<string, string> = new Map()
+  /** ПИД поверх выбора при рождении (src/placement-control.ts); выключен, пока нет файла ручки. */
+  private readonly placementController = new PlacementController()
+  /** Путь файла ручки; тесты подставляют свой. */
+  private placementConfigPath: string | undefined
+  /** Момент последнего рождения сессии — «был ли приток» для anti-windup регулятора. */
+  private lastBirthAt = 0
   /** Старт процесса: справочный вызов не раньше чем через интервал после него (см. refreshOrgUsage). */
   private orgUsageStartedAt = Date.now()
   /** Сколько окна ест прогрев по каждому аккаунту за скользящий час — для линии сторожа запаса
@@ -728,6 +740,7 @@ export class ProxyClient {
     this.orgVault = opts.orgVault ?? new OrgVault()
     this.claudeConfigDir = opts.claudeConfigDir ?? getClaudeConfigDir()
     this.accountConfigPath = opts.accountConfigPath
+    this.placementConfigPath = opts.placementConfigPath
     this.credentialsPath = opts.credentialsPath ?? getDefaultCredentialsPath()
     this.oauthRefresher = opts.oauthRefresher ?? refreshOAuthToken
     this.acquireConfigLock = opts.acquireConfigLock ?? acquireConfigDirLock
@@ -1645,14 +1658,36 @@ export class ProxyClient {
     for (const p of this.sessionPins.values()) {
       if (p.orgId) pinsByOrg.set(p.orgId, (pinsByOrg.get(p.orgId) ?? 0) + 1)
     }
+    // ПИД поверх выбора (ручка ~/.claude/placement.json; выключен — веса нет, выбор прежний).
+    const ctl = loadPlacementControl(this.placementConfigPath)
+    let weights: Map<string, { weight: number; mode: string; reason: string }> | undefined
+    if (ctl.enabled) {
+      weights = new Map()
+      const classesByOrg = new Map<string, Record<string, number>>()
+      for (const [sid, p] of this.sessionPins) {
+        if (!p.orgId) continue
+        const cls = this.sessionClassById.get(sid) ?? 'anthropic/opus'
+        const m = classesByOrg.get(p.orgId) ?? {}
+        m[cls] = (m[cls] ?? 0) + 1
+        classesByOrg.set(p.orgId, m)
+      }
+      const inflow = now - this.lastBirthAt < 30 * 60_000
+      for (const c of candidates) {
+        const reading = this.orgUsage.get(c.orgId)
+        if (!reading) continue
+        const out = this.placementController.weight(ctl, c.orgId, reading.windows, classesByOrg.get(c.orgId) ?? {}, now, inflow)
+        if (out) weights.set(c.orgId, { weight: out.weight, mode: out.mode, reason: out.reason })
+      }
+    }
+    this.lastBirthAt = now
     const r = chooseBirthOrg({
       candidates, readings: this.orgUsage, pinsByOrg, nowMs: now,
-      maxReadingAgeMs: ORG_USAGE_MAX_AGE_MS, seed: sessionId,
+      maxReadingAgeMs: ORG_USAGE_MAX_AGE_MS, seed: sessionId, weights,
     })
     if (r.orgId && r.plan) {
       this.events.emit({
         level: 'info', kind: 'ORG_PLACED', sessionId, orgId: r.orgId,
-        msg: `new session placed by headroom: ${r.plan.reason}`,
+        msg: `new session placed by headroom: ${r.plan.reason}${r.control ? ` · регулятор: ${r.control}` : ''}`,
         ranked: r.plan.ranked.map(a => ({ org: a.name.slice(0, 8), verdict: a.verdict, agents: a.activeAgents, pressureH: Number.isFinite(a.pressureHours) ? +a.pressureHours.toFixed(1) : null })),
       })
     }
@@ -2575,6 +2610,7 @@ export class ProxyClient {
     // смерти. В расписке запуска субагент значится ИМЕНЕМ, своего номера там
     // нет; связать имя с номером можно только здесь (02.09.2026, вопрос
     // владельца anywhisper: «где родителю взять номер, пока тот жив»).
+    this.sessionClassById.set(sessionId, sessionClass('anthropic', String(model)))
     this.events.emit({
       level: 'info', kind: 'REAL_REQUEST_START', sessionId, model, bodyBytes, idSource,
       agentId: ctx.agentId ?? null,

@@ -36,6 +36,7 @@ export interface ProxyClientOptions {
     orgVault?: OrgVault;
     claudeConfigDir?: string;
     accountConfigPath?: string;
+    placementConfigPath?: string;
     credentialsPath?: string;
     oauthRefresher?: (refreshToken: string) => Promise<RefreshedTokens>;
     acquireConfigLock?: (configDir: string) => Promise<(() => Promise<void>) | null>;
@@ -95,6 +96,10 @@ export declare class ProxyClient {
     private orgUsageTimer;
     private readonly orgUsageBackoffUntil;
     private readonly orgUsageEndpointAt;
+    private readonly sessionClassById;
+    private readonly placementController;
+    private placementConfigPath;
+    private lastBirthAt;
     private orgUsageStartedAt;
     private readonly kaSpend;
     private readonly orgRefreshInflight;

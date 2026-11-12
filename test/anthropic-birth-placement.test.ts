@@ -311,3 +311,82 @@ describe('remeasureOrgUsage — «сбросили, перемерь» (фаун
     c.stop()
   })
 })
+
+describe('регулятор поверх выбора при рождении (src/placement-control.ts)', () => {
+  function client(cfg: object | null) {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    const exp = Date.now() + 3 * H
+    vault.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    vault.upsert({ orgId: 'org-b', accessToken: 'tok-b', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    writeActiveCreds('tok-a', exp)
+    const cfgPath = join(TMP, `placement-${seq++}.json`)
+    if (cfg) writeFileSync(cfgPath, JSON.stringify(cfg))
+    const auth: string[] = []
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 1, orgProactiveRefreshSec: 0 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async (_u: string, init: any) => { auth.push(init.headers.authorization ?? init.headers.Authorization); return new Response(SSE, { status: 200, headers: { 'content-type': 'text/event-stream' } }) } },
+      orgUsageReader: { read: async () => null },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+      placementConfigPath: cfgPath,
+    } as ProxyClientOptions)
+    return { c, auth }
+  }
+  const now = () => Date.now()
+  const both = (c: ProxyClient, a5: number, b5: number) => {
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: now(), windows: [{ name: '5h', util: a5, resetAt: now() + 4 * H }, { name: 'week', util: 0.1, resetAt: now() + 100 * H }] })
+    c._setOrgUsage({ orgId: 'org-b', measuredAt: now(), windows: [{ name: '5h', util: b5, resetAt: now() + 4 * H }, { name: 'week', util: 0.1, resetAt: now() + 100 * H }] })
+  }
+
+  test('нет файла ручки — выбор прежний (свободнее — org-b)', async () => {
+    const { c, auth } = client(null)
+    both(c, 0.5, 0.1)
+    await c.handleRequest(body(), {}, { sessionId: 'ctl-off' })
+    expect(auth.at(-1)).toBe('Bearer tok-b')
+    c.stop()
+  })
+
+  test('drain на org-a: вес растёт со временем отставания (slew), приток на неё растёт', async () => {
+    // Регулятор шагает по ЧАСАМ ВЫБОРА (Date.now): двигаем часы, а не ждём их.
+    const realNow = Date.now
+    let clock = realNow()
+    Date.now = () => clock
+    try {
+      const { c, auth } = client({ enabled: true, drain: [{ org: 'org-a', targetUtil: 0.99, deadline: new Date(clock + 4 * H).toISOString() }] })
+      let early = 0, late = 0
+      for (let step = 0; step < 12; step++) {
+        both(c, 0.5, 0.1)                  // org-a не двигается — отставание от траектории растёт
+        for (let i = 0; i < 10; i++) {
+          await c.handleRequest(body(`s${step}-${i}`), {}, { sessionId: `ctl-d-${step}-${i}` })
+          if (auth.at(-1) === 'Bearer tok-a') step < 2 ? early++ : step >= 9 ? late++ : 0
+        }
+        clock += 10 * 60_000
+      }
+      expect(late).toBeGreaterThan(early)
+      expect(late).toBeGreaterThan(15)     // к концу — большинство новых на org-a
+      c.stop()
+    } finally {
+      Date.now = realNow
+    }
+  })
+
+  test('тормоз: прогноз уже посаженных ≥ цели — на org-a новых не шлём, даже под drain', async () => {
+    const { c, auth } = client({ enabled: true, drain: [{ org: 'org-a', targetUtil: 0.9, deadline: new Date(now() + 4 * H).toISOString() }] })
+    both(c, 0.89, 0.1)
+    await c.handleRequest(body(), {}, { sessionId: 'ctl-brake' })
+    expect(auth.at(-1)).toBe('Bearer tok-b')
+    c.stop()
+  })
+
+  test('живая сессия под drain другой организации не переезжает', async () => {
+    const { c, auth } = client(null)
+    both(c, 0.5, 0.1)
+    await c.handleRequest(body(), {}, { sessionId: 'ctl-live' })      // родилась на org-b
+    writeFileSync(join(TMP, 'unused.json'), '{}')
+    await c.handleRequest(body('again'), {}, { sessionId: 'ctl-live' })
+    expect(auth.at(-1)).toBe('Bearer tok-b')
+    c.stop()
+  })
+})

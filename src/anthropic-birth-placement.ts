@@ -78,6 +78,11 @@ export interface BirthPlacementInput {
   /** Показание старше этого — не измерение, а воспоминание. */
   maxReadingAgeMs: number
   seed: string
+  /**
+   * Веса ПИД (src/placement-control.ts) по организациям. Нет поля — выбор как раньше.
+   * Вес 0 — тормоз: организация не кандидат. Больший вес — раньше в выборе (drain).
+   */
+  weights?: Map<string, { weight: number; mode: string; reason: string }>
 }
 
 export interface BirthPlacementResult {
@@ -86,6 +91,8 @@ export interface BirthPlacementResult {
   plan: PlacementPlan | null
   /** Почему `null`: одна организация, никто не измерен, все исключены. */
   skipped: string | null
+  /** Что решил регулятор (если участвовал) — для журнала. */
+  control?: string
 }
 
 /**
@@ -112,5 +119,26 @@ export function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult
   }
   const plan = planPlacement(orgs, input.nowMs, input.seed)
   if (!plan.org) return { orgId: null, plan, skipped: plan.reason }
-  return { orgId: plan.org.name, plan, skipped: null }
+  if (!input.weights || input.weights.size === 0) return { orgId: plan.org.name, plan, skipped: null }
+
+  // ── Регулятор поверх ранжира. Тормоз (вес 0) исключает организацию; из оставшихся годных
+  // (не walled) первой идёт та, у кого БОЛЬШЕ вес — drain-организация, пока отстаёт от
+  // траектории, и ровно пропорционально весу (детерминированно по seed), чтобы приток на неё
+  // был долей, а не «всё или ничего». Равные веса — порядок planPlacement.
+  const usable = plan.ranked.filter(a => a.verdict !== 'walled' && (input.weights!.get(a.name)?.weight ?? 1) > 0)
+  const ctlText = [...input.weights].map(([o, w]) => `${o.slice(0, 8)} ${w.mode} w=${w.weight.toFixed(2)}`).join('; ')
+  if (usable.length === 0) return { orgId: null, plan, skipped: 'регулятор затормозил все организации — прежний выбор', control: ctlText }
+  const drainers = usable.filter(a => input.weights!.get(a.name)?.mode === 'drain' && (input.weights!.get(a.name)?.weight ?? 0) > 0)
+  if (drainers.length > 0) {
+    const d = drainers[0]!
+    const w = input.weights.get(d.name)!.weight
+    // Доля притока = вес: псевдослучайно, но повторяемо по seed (номер сессии).
+    let h = 0x811c9dc5
+    for (let i = 0; i < input.seed.length; i++) { h ^= input.seed.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+    if ((h >>> 0) / 2 ** 32 < w) return { orgId: d.name, plan, skipped: null, control: ctlText }
+    const other = usable.find(a => a.name !== d.name)
+    if (other) return { orgId: other.name, plan, skipped: null, control: ctlText }
+    return { orgId: d.name, plan, skipped: null, control: ctlText }
+  }
+  return { orgId: usable[0]!.name, plan, skipped: null, control: ctlText }
 }

@@ -15,6 +15,7 @@ export interface PidAdaptation {
     enabled: boolean;
     kCalByClass: Record<string, number>;
     kDefault: number;
+    driftPerHour: number;
     forget: number;
     adaptMin: number;
     adaptMax: number;
@@ -60,6 +61,8 @@ export interface PidOutput {
     };
     braked: boolean;
 }
-export declare function expectedLoadPerHour(sessionsByClass: Record<string, number>, adapt: Pick<PidAdaptation, "kCalByClass" | "kDefault">): number;
+export declare function expectedLoadPerHour(sessionsByClass: Record<string, number>, adapt: Pick<PidAdaptation, "kCalByClass" | "kDefault"> & {
+    driftPerHour?: number;
+}): number;
 export declare function sessionClass(provider: string, model: string): string;
 export declare function pidStep(state: PidState, input: PidInput, gains: PidGains, limits: PidLimits, adapt: PidAdaptation): PidOutput;

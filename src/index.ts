@@ -280,3 +280,7 @@ export {
   pidStep, newPidState, expectedLoadPerHour, sessionClass,
   type PidGains, type PidLimits, type PidAdaptation, type PidState, type PidInput, type PidOutput, type DrainTarget,
 } from './placement-pid.js'
+export {
+  parsePlacementControl, loadPlacementControl, PlacementController, CALIBRATED as PLACEMENT_PID_CALIBRATED,
+  type PlacementControlConfig, type DrainEntry,
+} from './placement-control.js'

@@ -44,3 +44,4 @@ export type { AnthropicEnrichResult, CompatEmit } from "./subscription-compat.js
 export { assessOrg, planPlacement, placementInputs, NEAR_WALL_HOURS, type PlacementWindow, type PlacementOrg, type PlacementAssessment, type PlacementPlan, } from "./placement.js";
 export { chooseBirthOrg, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage, type BirthCandidate, type BirthPlacementResult, } from "./anthropic-birth-placement.js";
 export { pidStep, newPidState, expectedLoadPerHour, sessionClass, type PidGains, type PidLimits, type PidAdaptation, type PidState, type PidInput, type PidOutput, type DrainTarget, } from "./placement-pid.js";
+export { parsePlacementControl, loadPlacementControl, PlacementController, CALIBRATED as PLACEMENT_PID_CALIBRATED, type PlacementControlConfig, type DrainEntry, } from "./placement-control.js";

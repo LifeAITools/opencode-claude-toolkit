@@ -31,10 +31,16 @@ export interface BirthPlacementInput {
     nowMs: number;
     maxReadingAgeMs: number;
     seed: string;
+    weights?: Map<string, {
+        weight: number;
+        mode: string;
+        reason: string;
+    }>;
 }
 export interface BirthPlacementResult {
     orgId: string | null;
     plan: PlacementPlan | null;
     skipped: string | null;
+    control?: string;
 }
 export declare function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult;

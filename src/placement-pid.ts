@@ -244,7 +244,12 @@ export function pidStep(
     ? clamp(state.sxy / state.sxx, 1 / adapt.adaptMax, 1 / adapt.adaptMin) : 1
   const forecastRate = Math.max(0, state.derivFiltered, load * theta)
   const forecast = util + forecastRate * hoursLeft
-  const braked = forecast >= target.targetUtil - limits.brakeMargin
+  // 🔴 ЗАПАС РАСТЁТ, КОГДА ОБЪЕКТ ГОРЯЧЕЕ ОЖИДАНИЯ (калибровка 12.11: при объекте ×1.5–×2
+  // время у стены росло до 3.8–6%, потому что θ̂ копится десятками шагов). Отношение
+  // измеренной скорости к ожидаемой — мгновенный признак «горячее»; запас умножается на него
+  // (не меньше 1, не больше 4). Холодный объект запас не уменьшает: тормозить раньше безопасно.
+  const hotRatio = load > 1e-6 ? clamp(state.derivFiltered / load, 1, 4) : 1
+  const braked = forecast >= target.targetUtil - limits.brakeMargin * hotRatio
 
   const p = gains.kp * adaptMul * error
   const d = -gains.kd * state.derivFiltered

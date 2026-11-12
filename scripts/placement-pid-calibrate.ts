@@ -76,13 +76,13 @@ type Policy = (ctx: { t: number; utilA: number; utilB: number; sessA: Record<str
 /** Допуск в B (0..1): `null` — B принимает всё, пока не 0.98 (жадный выбор). */
 type BGate = ((ctx: { t: number; utilB: number; sessB: Record<string, number>; inflow: boolean }) => number) | null
 
-interface RunResult { finalA: number; maxA: number; wallFrac: number; bothWall: boolean; reach: number }
+interface RunResult { finalA: number; maxA: number; wallFrac: number; bothWall: boolean; reach: number; placedAfterBrake: number }
 
 function run(startT: number, util0: number, policy: Policy, seed: number, bGate: BGate = null): RunResult {
   const r = rng(seed)
   type Sess = { cls: string; born: number }
   const A: Sess[] = [], B: Sess[] = []
-  let uA = util0, uB = 0.3, maxA = uA, wall = 0, steps = 0, bothWall = false
+  let uA = util0, uB = 0.3, maxA = uA, wall = 0, steps = 0, bothWall = false, placedAfterBrake = 0
   const end = startT + WINDOW_H * 3600
   // Достижимый потолок: ВСЕ новые сессии на A, без потолка 1.0 — сколько вообще можно набрать
   // этим притоком. Недобор считается только до min(цель, потолок): регулятор не виноват, что
@@ -107,7 +107,7 @@ function run(startT: number, util0: number, policy: Policy, seed: number, bGate:
     // так меряется регулятор A, а не искусственная перегрузка B.
     for (const [cls, n] of Object.entries(arrivals)) for (let i = 0; i < n; i++) {
       const toA = r() < wA
-      if (toA) A.push({ cls, born: t })
+      if (toA) { A.push({ cls, born: t }); if (uA >= 0.9) placedAfterBrake++ }
       else if (r() < gB) B.push({ cls, born: t })
     }
     const dtH = STEP_MIN / 60
@@ -117,7 +117,7 @@ function run(startT: number, util0: number, policy: Policy, seed: number, bGate:
     if (uA >= 1) wall++
     if (uA >= 0.98 && uB >= 0.98) bothWall = true
   }
-  return { finalA: uA, maxA, wallFrac: wall / steps, bothWall, reach }
+  return { finalA: uA, maxA, wallFrac: wall / steps, bothWall, reach, placedAfterBrake }
 }
 
 function score(rs: RunResult[]) {
@@ -130,7 +130,9 @@ function score(rs: RunResult[]) {
   }
   const n = rs.length
   const reachable = rs.filter(x => x.reach >= TARGET).length / n
-  return { score: s / n, under: under / n, over: over / n, wall: wall / n, both: both / n, reachable }
+  const walledRuns = rs.filter(x => x.wallFrac > 0)
+  const lateInWalled = walledRuns.reduce((m, x) => m + x.placedAfterBrake, 0)
+  return { score: s / n, under: under / n, over: over / n, wall: wall / n, both: both / n, reachable, walledRuns: walledRuns.length, lateInWalled }
 }
 
 // ── Политики.
@@ -142,7 +144,9 @@ const greedy: Policy = ({ utilA, utilB }) => {
 const naiveDrain: Policy = ({ utilA }) => (utilA < TARGET ? 1 : 0)
 
 const ADAPT: PidAdaptation = {
-  enabled: true, kCalByClass: K, kDefault: 0.0256, driftPerHour: DRIFT,
+  // СВОЯ копия: регулятор знает калибровку, а не истинный объект. Общий словарь делал
+  // проверку устойчивости фиктивной — при умножении объекта регулятор «узнавал» об этом.
+  enabled: true, kCalByClass: { ...K }, kDefault: 0.0256, driftPerHour: DRIFT,
   forget: 0.97, adaptMin: 0.25, adaptMax: 4, minObservations: 6,
 }
 function pidPolicy(gains: PidGains, limits: PidLimits, deadlineMs: number): Policy {
@@ -201,7 +205,7 @@ for (const mul of [0.5, 1.5, 2]) {
 }
 
 const pct = (v: number) => (100 * v).toFixed(2)
-const row = (n: string, s: ReturnType<typeof score>) => `| ${n} | ${pct(s.under)} п.п. | ${pct(s.over)} п.п. | ${pct(s.wall)}% | ${pct(s.both)}% | ${s.score.toFixed(4)} |`
+const row = (n: string, s: ReturnType<typeof score>) => `| ${n} | ${pct(s.under)} п.п. | ${pct(s.over)} п.п. | ${pct(s.wall)}% | ${pct(s.both)}% | ${s.walledRuns} / ${s.lateInWalled} | ${s.score.toFixed(4)} |`
 const md = [
   '# Калибровка ПИД-регулятора распределения — 2026-11-12',
   '',
@@ -209,8 +213,8 @@ const md = [
   '`research/placement-pid-plant-identification-2026-11.md`; приток — реальный, по 5-мин слотам истории.',
   `Сценарий: дожечь организацию A до ${TARGET} к сбросу 5ч-окна; B принимает остальное. ${SAMPLE.length} отрезков истории × старт A ∈ {${UTIL0.join(', ')}} = ${SAMPLE.length * UTIL0.length} прогонов.`,
   '',
-  '| Политика | Недобор до достижимого | Перелёт за 99.5% | Время у стены (A≥100%) | Обе ≥98% разом | Счёт |',
-  '|---|---|---|---|---|---|',
+  '| Политика | Недобор до достижимого | Перелёт за 99.5% | Время у стены (A≥100%) | Обе ≥98% разом | Прогонов у стены / новых сессий на A после 90% в них | Счёт |',
+  '|---|---|---|---|---|---|---|',
   ...results.map(r => row(r.name, r.s)),
   '',
   `Цель 0.99 достижима притоком в ${pct(results[0]!.s.reachable)}% прогонов (в остальных недобор считается до потолка).`,
@@ -219,8 +223,8 @@ const md = [
   '',
   '## Устойчивость (объект горячее/холоднее калибровки, коэффициенты те же)',
   '',
-  '| Сценарий | Недобор | Перелёт | У стены | Обе разом | Счёт |',
-  '|---|---|---|---|---|---|',
+  '| Сценарий | Недобор | Перелёт | У стены | Обе разом | Прогонов у стены / новых на A после 90% | Счёт |',
+  '|---|---|---|---|---|---|---|',
   ...robust.map(r => row(r.name, r.s)),
   '',
   '## Ограничения',

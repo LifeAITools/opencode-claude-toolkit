@@ -178,6 +178,43 @@ describe('quota guard (e2e via handleRequest, guard enabled by fixture at 0.95)'
     await c.stop()
   })
 
+  // Live 12.11.2026 20:14Z (dsh, session-8c0a4688): a harness assembles ONE turn
+  // from several user messages in the same second — an injected hint, the
+  // person's own "[%quota-ok%]", then a time-context note. Only the LAST user
+  // message was scanned, so the founder's consent was invisible and the turn
+  // looped on the same refusal. The current turn is EVERY user message after
+  // the last assistant reply; consent anywhere in it counts.
+  const multiUserTurn = (marker: string, priorTurnMarker = false) => JSON.stringify({
+    model: 'claude-opus-4-7',
+    system: [{ type: 'text', text: 'system prompt', cache_control: { type: 'ephemeral' } }],
+    tools: [],
+    messages: [
+      { role: 'user', content: 'earlier ' + (priorTurnMarker ? marker : '') },
+      { role: 'assistant', content: 'earlier answer' },
+      { role: 'user', content: '<injected hint>' },
+      { role: 'user', content: marker + ' go on' },
+      { role: 'user', content: 'Time sampled while preparing turn 24' },
+    ],
+  })
+
+  test('the marker counts in ANY user message of the current turn, not only the last one', async () => {
+    const c = mkClient(0.97)
+    await prime(c, 'qg-multi-user')
+    const r = await c.handleRequest(multiUserTurn('[quota-ok]'), {}, { sessionId: 'qg-multi-user' })
+    expect(r.status).not.toBe(400)
+    await c.stop()
+  })
+
+  test('a marker from a PREVIOUS turn (before the last assistant reply) does not count', async () => {
+    const c = mkClient(0.97)
+    await prime(c, 'qg-old-marker')
+    const stale = JSON.parse(multiUserTurn('[quota-ok]', true))
+    stale.messages[3].content = 'go on'
+    const r = await c.handleRequest(JSON.stringify(stale), {}, { sessionId: 'qg-old-marker' })
+    expect(r.status).toBe(400)
+    await c.stop()
+  })
+
   test('an out-of-band grant releases the turn — the channel a sub-agent has', async () => {
     const c = mkClient(0.97)
     await prime(c, 'qg-consent-grant')

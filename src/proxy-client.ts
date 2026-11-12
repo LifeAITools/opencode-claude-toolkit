@@ -4563,11 +4563,17 @@ export function extractSessionIdFromBody(
  *     apply: the user has no message to add a marker to, so blocking would
  *     strand the loop forever. Such a request is always let through (the
  *     PREDICTED_CACHE_MISS log still records it).
- *   hasMarker — the override marker is present in this message's text. Only
- *     the latest user message is scanned, so a marker left in conversation
- *     history does NOT count — fresh-consent: the marker must be in the turn
- *     being sent now. This is why no marker-counting is needed: an old marker
- *     is structurally excluded by "latest message only".
+ *   hasMarker — the override marker is present in the CURRENT TURN: every
+ *     user message after the last assistant reply. A marker left in an
+ *     earlier turn does NOT count — fresh-consent is preserved structurally,
+ *     the boundary is the assistant reply, not "the last message".
+ *     🔴 WHY NOT "LATEST MESSAGE ONLY" (the rule until 12.11.2026): a harness
+ *     may assemble one turn from several user messages in the same second.
+ *     Live, dsh session-8c0a4688 20:14Z: injected hint → the founder's own
+ *     "[%quota-ok%]" → a time-context note. The note was last, the founder's
+ *     consent was invisible, and the turn looped on the same refusal.
+ *     isContinuation still reads the LATEST user message only — a tool_result
+ *     there is what makes this request a loop continuation.
  */
 /**
  * Правило режима человека (FR-7), вынесенное ЧИСТОЙ функцией — чтобы его можно
@@ -4592,25 +4598,35 @@ export function inspectLastUserMessage(
   try {
     const msgs = (body as { messages?: unknown })?.messages
     if (!Array.isArray(msgs)) return NONE
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i]
-      if (!m || typeof m !== 'object' || (m as { role?: unknown }).role !== 'user') continue
-      const content = (m as { content?: unknown }).content
-      let isContinuation = false
+    const readUser = (content: unknown): { text: string; toolResult: boolean } => {
+      if (typeof content === 'string') return { text: content, toolResult: false }
       let text = ''
-      if (typeof content === 'string') {
-        text = content
-      } else if (Array.isArray(content)) {
+      let toolResult = false
+      if (Array.isArray(content)) {
         for (const block of content) {
           if (!block || typeof block !== 'object') continue
           const b = block as { type?: unknown; text?: unknown }
-          if (b.type === 'tool_result') isContinuation = true
+          if (b.type === 'tool_result') toolResult = true
           if (typeof b.text === 'string') text += b.text + '\n'
         }
       }
-      return { isContinuation, hasMarker: !!marker && text.includes(marker) }
+      return { text, toolResult }
     }
-    return NONE
+    let seenUser = false
+    let isContinuation = false
+    let hasMarker = false
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (!m || typeof m !== 'object') continue
+      const role = (m as { role?: unknown }).role
+      if (role === 'assistant') break            // граница текущего хода
+      if (role !== 'user') continue
+      const { text, toolResult } = readUser((m as { content?: unknown }).content)
+      if (!seenUser) isContinuation = toolResult  // продолжение — только по ПОСЛЕДНЕЙ реплике
+      seenUser = true
+      if (marker && text.includes(marker)) hasMarker = true
+    }
+    return seenUser ? { isContinuation, hasMarker } : NONE
   } catch {
     return NONE
   }

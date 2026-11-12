@@ -370,7 +370,7 @@ describe('регулятор поверх выбора при рождении (
     } finally {
       Date.now = realNow
     }
-  })
+  }, 30_000)
 
   test('тормоз: прогноз уже посаженных ≥ цели — на org-a новых не шлём, даже под drain', async () => {
     const { c, auth } = client({ enabled: true, drain: [{ org: 'org-a', targetUtil: 0.9, deadline: new Date(now() + 4 * H).toISOString() }] })
@@ -388,5 +388,48 @@ describe('регулятор поверх выбора при рождении (
     await c.handleRequest(body('again'), {}, { sessionId: 'ctl-live' })
     expect(auth.at(-1)).toBe('Bearer tok-b')
     c.stop()
+  })
+})
+
+describe('перезапуск прокси не переселяет сессию, родившуюся на АКТИВНОЙ организации (12.11.2026)', () => {
+  test('выбор совпал с активной → пин в хранилище; новый процесс на том же хранилище не переселяет', async () => {
+    const vaultPath = join(TMP, `vault-${seq++}.json`)
+    const exp = Date.now() + 3 * H
+    const mkVault = () => {
+      const v = new OrgVault(vaultPath)
+      v.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+      v.upsert({ orgId: 'org-b', accessToken: 'tok-b', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+      return v
+    }
+    writeActiveCreds('tok-a', exp)
+    const mk = (auth: string[]) => new ProxyClient({
+      config: { kaCacheTtlSec: 1, orgProactiveRefreshSec: 0 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async (_u: string, init: any) => { auth.push(init.headers.authorization ?? init.headers.Authorization); return new Response(SSE, { status: 200, headers: { 'content-type': 'text/event-stream' } }) } },
+      orgUsageReader: { read: async () => null },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: mkVault(), ...ISOLATED,
+    } as ProxyClientOptions)
+    const now = Date.now()
+    const usage = (c: ProxyClient, a: number, b: number) => {
+      c._setOrgUsage({ orgId: 'org-a', measuredAt: now, windows: [{ name: '5h', util: a, resetAt: now + 4 * H }, { name: 'week', util: 0.1, resetAt: now + 100 * H }] })
+      c._setOrgUsage({ orgId: 'org-b', measuredAt: now, windows: [{ name: '5h', util: b, resetAt: now + 4 * H }, { name: 'week', util: 0.1, resetAt: now + 100 * H }] })
+    }
+    // Процесс 1: org-a (активная) свободнее → выбор совпал с активной.
+    const auth1: string[] = []
+    const c1 = mk(auth1)
+    usage(c1, 0.1, 0.5)
+    await c1.handleRequest(body(), {}, { sessionId: 'born-active' })
+    expect(auth1.at(-1)).toBe('Bearer tok-a')
+    c1.stop()
+    expect(new OrgVault(vaultPath).getPin('born-active')).toEqual({ orgId: 'org-a' })
+    // Процесс 2 (перезапуск): теперь свободнее org-b — живая сессия всё равно остаётся на org-a.
+    const auth2: string[] = []
+    const c2 = mk(auth2)
+    usage(c2, 0.9, 0.1)
+    await c2.handleRequest(body('again'), {}, { sessionId: 'born-active' })
+    expect(auth2.at(-1)).toBe('Bearer tok-a')
+    c2.stop()
   })
 })

@@ -160,7 +160,9 @@ describe('vault snapshot + restart pin restore', () => {
     const resp = await c.handleRequest(body('hello'), {}, { sessionId: 'sess-1' })
     expect(resp.status).toBe(200)
     expect(sink.auth[0]).toBe('Bearer token-current')
-    expect(new OrgVault(vaultPath).getPin('sess-1')).toBeNull()   // dead binding cleaned
+    // Мёртвая привязка снята и ЗАМЕНЕНА живой — той организацией, что обслужила ход (12.11.2026:
+    // раньше здесь оставалось пусто, и перезапуск прокси делал такую сессию «новой» → перенос).
+    expect(new OrgVault(vaultPath).getPin('sess-1')).toEqual({ orgId: 'org-current' })
     c.stop()
   })
 })

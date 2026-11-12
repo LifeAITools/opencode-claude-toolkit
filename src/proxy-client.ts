@@ -2108,14 +2108,15 @@ export class ProxyClient {
         if (birthOrg && birthOrg !== account.orgId) {
           const tok = await this.withFreshOrgToken(birthOrg, { reason: 'birth-placement' })
           const ve = this.orgVault.get(birthOrg)
-          if (tok) {
-            account = { orgId: birthOrg, token: tok, expiresAt: ve?.expiresAt ?? null }
-            // Закрепить СРАЗУ и в хранилище: без этого пин появлялся бы только по ответу
-            // Anthropic (TOFU ниже), и перезапуск прокси между запросом и ответом вернул бы
-            // сессию на активную организацию — то есть сменил бы ей организацию.
-            this.orgVault.setPin(sessionId, birthOrg)
-          }
+          if (tok) account = { orgId: birthOrg, token: tok, expiresAt: ve?.expiresAt ?? null }
         }
+        // 🔴 ЗАКРЕПИТЬ В ХРАНИЛИЩЕ ВСЕГДА — И КОГДА ВЫБОР СОВПАЛ С АКТИВНОЙ ОРГАНИЗАЦИЕЙ.
+        // 12.11.2026: сессия 19cbecb3 родилась на oeliseva в 10:23, когда oeliseva была АКТИВНОЙ;
+        // запись стояла только внутри `birthOrg !== account.orgId`, поэтому в хранилище ничего не
+        // легло. Пин жил лишь в памяти, перезапуск в 11:37 его стёр, и в 11:48 живую сессию сочли
+        // новой и посадили на relishev — перенос, который рельса no-live-account-migration
+        // запрещает. Пин закрепляет ту организацию, что ушла в запрос.
+        if (account.orgId) this.orgVault.setPin(sessionId, account.orgId)
       }
       const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now(), cacheOptOut)
       if (sel.stop) {
@@ -2753,7 +2754,11 @@ export class ProxyClient {
           // reuses the existing pin machinery (vault token refresh, HOLD,
           // restart-restore). servedOrg is ground truth (response header) — we
           // bind to what was actually served, not the racy resolver default.
-          if (!cacheOptOut && !this.sessionPins.has(sessionId)) {
+          // 🔴 СМОТРЕТЬ В ХРАНИЛИЩЕ, А НЕ В ПАМЯТЬ: `selectSessionToken` кладёт пин в память на
+          // ПЕРВОМ запросе, до ответа, поэтому проверка памяти здесь не срабатывала никогда — и
+          // ни одна сессия, родившаяся на активной организации, не попадала в хранилище
+          // (12.11.2026: после перезапуска такие сессии считались новыми и переселялись).
+          if (!cacheOptOut && !this.orgVault.getPin(sessionId)) {
             const ve = this.orgVault.get(servedOrg)
             if (ve && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
               this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })

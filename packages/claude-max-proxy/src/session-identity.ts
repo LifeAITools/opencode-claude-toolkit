@@ -50,6 +50,22 @@ export function readCallerSession(headers: { get(name: string): string | null })
   return { sessionId: null, header: null }
 }
 
+/**
+ * Заголовок сессии для двери Anthropic: сначала родной `x-claude-code-session-id`,
+ * затем имена зовущего (`CALLER_SESSION_HEADERS`).
+ *
+ * 🔴 ЗАЧЕМ ВТОРАЯ ПОЛОВИНА: агенты dsh (DeepSeek Harness) ходят на Claude через
+ * посредник :4000 и называют разговор `x-opencode-session-id` — тем же именем, что на
+ * двери Go/OD (слово фаундера 12.11: Claude для dsh — только по ручному выбору модели).
+ * Без неё их запрос не опознан → прогрев не вооружается и кэш остывает между ходами.
+ * Родной заголовок остаётся первым: Claude Code через посредник шлёт именно его.
+ */
+export function readAnthropicSessionHeader(headers: { get(name: string): string | null }): string | null {
+  const native = (headers.get('x-claude-code-session-id') ?? '').trim()
+  if (native) return native
+  return readCallerSession(headers).sessionId
+}
+
 /** Откуда взялось имя сессии. `none` — не опознана (обслужить, прогрев не вооружать). */
 export type SessionIdSource = 'header' | 'body' | 'derived' | 'none'
 

@@ -8,7 +8,7 @@
 
 import type { ProxyModule, ModuleContext, RouteDefinition } from '../module.js'
 import { extractSessionIdFromBody, cacheInjectionDisabled } from '@life-ai-tools/claude-code-sdk'
-import { resolveSessionIdentity, toEngineIdSource } from '../session-identity.js'
+import { resolveSessionIdentity, toEngineIdSource, readAnthropicSessionHeader } from '../session-identity.js'
 import { serveSparkRequest } from './spark-responses.js'
 import { isSparkModel } from '../spark-translate.js'
 import { enrichAnthropicRequest , clampEffortIfThinkingDisabled } from '../openai-translate.js'
@@ -66,7 +66,7 @@ export function createAnthropicModule(): ProxyModule {
         // заголовок → тело → честное «не опознан». У двери Anthropic носитель
         // есть и в теле (`metadata.user_id`), поэтому она отдаёт извлекатель.
         const identity = resolveSessionIdentity({
-          headerValue: req.headers.get('x-claude-code-session-id'),
+          headerValue: readAnthropicSessionHeader(req.headers),
           bodyText: rawBodyStr,
           bodyExtractor: extractSessionIdFromBody,
         })

@@ -8,7 +8,7 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { resolveSessionIdentity, toEngineIdSource, readCallerSession } from '../src/session-identity.js'
+import { resolveSessionIdentity, toEngineIdSource, readCallerSession, readAnthropicSessionHeader } from '../src/session-identity.js'
 
 describe('resolveSessionIdentity — одна точка на все двери (FR-19/D3)', () => {
   test('заголовок — первая дверь, тело при этом НЕ читается', () => {
@@ -89,5 +89,24 @@ describe('readCallerSession — имена зовущего, ИЗМЕРЕННЫ�
   test('пустой/пробельный заголовок — не имя; ничего нет — не опознан', () => {
     expect(readCallerSession(h({ 'x-opencode-session-id': '   ' })).sessionId).toBeNull()
     expect(readCallerSession(h({}))).toEqual({ sessionId: null, header: null })
+  })
+})
+
+describe('readAnthropicSessionHeader — дверь Anthropic узнаёт и агентов dsh (12.11.2026)', () => {
+  const h = (map: Record<string, string>) => ({ get: (n: string) => map[n] ?? null })
+
+  test('родной заголовок Claude Code — первый', () => {
+    expect(readAnthropicSessionHeader(h({ 'x-claude-code-session-id': 'cc-1', 'x-opencode-session-id': 'ses_a' })))
+      .toBe('cc-1')
+  })
+
+  test('агент dsh через посредник: x-opencode-session-id — узнан', () => {
+    expect(readAnthropicSessionHeader(h({ 'x-opencode-session-id': 'session-42' }))).toBe('session-42')
+  })
+
+  test('пустой родной не перекрывает имя зовущего; ничего нет — null', () => {
+    expect(readAnthropicSessionHeader(h({ 'x-claude-code-session-id': ' ', 'x-litellm-session-id': 'chat-1' })))
+      .toBe('chat-1')
+    expect(readAnthropicSessionHeader(h({}))).toBeNull()
   })
 })

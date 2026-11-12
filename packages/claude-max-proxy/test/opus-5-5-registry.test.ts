@@ -84,3 +84,32 @@ describe('thinking repair is model-aware', () => {
     expect(EFFORT_ABOVE_HIGH_RE.test(raw) || THINKING_DISABLED_RE.test(raw)).toBe(true)
   })
 })
+
+describe('registry: fable-5-2 and haiku-5-5 (12.11.2026 — model cards + pricing page)', () => {
+  test('fable-5-2 resolves to itself with its own (lower) price, not to 5.1', () => {
+    expect(getModelMetadata('claude-fable-5-2')?.name).toBe('Claude Fable 5.2')
+    expect(getModelMetadata('claude-fable-5-2[1m]')?.name).toBe('Claude Fable 5.2')
+    expect(MAX_MODELS['claude-fable-5-2']!.cost).toEqual({ input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 })
+    expect(MAX_MODELS['claude-fable-5-2']!.thinkingCanDisable).toBe(false)
+    expect(getModelMetadata('claude-fable-5-1')?.name).toBe('Claude Fable 5.1')
+  })
+  test('haiku-5-5 is NOT folded into haiku-4-5: adaptive, no sampling, 1M', () => {
+    const m = getModelMetadata('claude-haiku-5-5')!
+    expect(m.name).toBe('Claude Haiku 5.5')
+    expect(m.adaptiveThinking).toBe(true)
+    expect(m.samplingParams).toBe(false)
+    expect(m.context).toBe(1_000_000)
+    expect(m.cost).toEqual({ input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 })
+    // the model card allows disabled thinking (at effort ≤ high) — the repair must not treat it as fable
+    expect(m.thinkingCanDisable).not.toBe(false)
+  })
+  test('both reachable through the OpenAI surface', () => {
+    expect(resolveModel('claude-fable-5-2')).toBe('claude-fable-5-2')
+    expect(resolveModel('claude-v5.2-fable')).toBe('claude-fable-5-2')
+    expect(resolveModel('claude-haiku-5-5')).toBe('claude-haiku-5-5')
+    expect(resolveModel('claude-v5.5-haiku')).toBe('claude-haiku-5-5')
+    const ids = SUPPORTED_MODELS.map(m => m.id)
+    expect(ids).toContain('claude-fable-5-2')
+    expect(ids).toContain('claude-haiku-5-5')
+  })
+})

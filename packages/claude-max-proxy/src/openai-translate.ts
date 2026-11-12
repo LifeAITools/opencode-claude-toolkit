@@ -108,6 +108,7 @@ const GPT_TO_CLAUDE: Record<string, string> = {
 }
 
 const PROXY_MODEL_MAP: Record<string, string> = {
+  'claude-v5.2-fable': 'claude-fable-5-2',
   'claude-v5.1-fable': 'claude-fable-5-1',
   'claude-v5.5-opus': 'claude-opus-5-5',
   'claude-v5-fable': 'claude-fable-5',
@@ -118,10 +119,12 @@ const PROXY_MODEL_MAP: Record<string, string> = {
   'claude-v4.6-opus': 'claude-opus-4-6',
   'claude-v4.7-opus': 'claude-opus-4-7',
   'claude-v4.8-opus': 'claude-opus-4-8',
+  'claude-v5.5-haiku': 'claude-haiku-5-5',
   'claude-v4.5-haiku': 'claude-haiku-4-5-20251001',
 }
 
 const DIRECT_MODEL_MAP: Record<string, string> = {
+  'claude-fable-5-2': 'claude-fable-5-2',
   'claude-fable-5-1': 'claude-fable-5-1',
   'claude-opus-5-5': 'claude-opus-5-5',
   'claude-fable-5': 'claude-fable-5',
@@ -132,6 +135,7 @@ const DIRECT_MODEL_MAP: Record<string, string> = {
   'claude-opus-4-6': 'claude-opus-4-6',
   'claude-opus-4-7': 'claude-opus-4-7',
   'claude-opus-4-8': 'claude-opus-4-8',
+  'claude-haiku-5-5': 'claude-haiku-5-5',
   'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
   'claude-haiku-4-5-20251001': 'claude-haiku-4-5-20251001',
   'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514',
@@ -164,6 +168,7 @@ export function resolveModel(model: string): string {
 
 export const SUPPORTED_MODELS = [
   // Claude native names
+  { id: 'claude-fable-5-2', name: 'Claude Fable 5.2' },
   { id: 'claude-fable-5-1', name: 'Claude Fable 5.1' },
   { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
   { id: 'claude-fable-5', name: 'Claude Fable 5' },
@@ -174,8 +179,10 @@ export const SUPPORTED_MODELS = [
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
   { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
   { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
+  { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
   { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
   // Proxy-style IDs
+  { id: 'claude-v5.2-fable', name: 'Claude V5.2 Fable' },
   { id: 'claude-v5.1-fable', name: 'Claude V5.1 Fable' },
   { id: 'claude-v5.5-opus', name: 'Claude V5.5 Opus' },
   { id: 'claude-v5-fable', name: 'Claude V5 Fable' },
@@ -186,6 +193,7 @@ export const SUPPORTED_MODELS = [
   { id: 'claude-v4.6-opus', name: 'Claude V4.6 Opus' },
   { id: 'claude-v4.7-opus', name: 'Claude V4.7 Opus' },
   { id: 'claude-v4.8-opus', name: 'Claude V4.8 Opus' },
+  { id: 'claude-v5.5-haiku', name: 'Claude V5.5 Haiku' },
   { id: 'claude-v4.5-haiku', name: 'Claude V4.5 Haiku' },
   // GPT aliases (for OpenAI agents that hardcode GPT model names)
   { id: 'gpt-4o', name: 'GPT-4o → Claude Sonnet 4.6' },

@@ -120,6 +120,22 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
   // order, and 'claude-opus-5-5-…' also contains 'claude-opus-5'. Point releases
   // go ABOVE their base model.
   //
+  // Fable 5.2 — released 2026-11-09; successor to Fable 5.1 at a LOWER price
+  // ($8/$40, cache read $0.20, 5m write $10 — pricing page, 12.11.2026). Model card
+  // (GET /v1/models/claude-fable-5-2) matches 5.1 field for field: adaptive-only,
+  // disabled/enabled/between_tools all unsupported, 1M in / 128k out.
+  // Point release ABOVE 5.1: the fuzzy matcher walks insertion order.
+  'claude-fable-5-2': {
+    name: 'Claude Fable 5.2',
+    context: 1_000_000,
+    defaultOutput: 64_000,
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    thinkingDefault: 'on',
+    thinkingCanDisable: false,
+    cost: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
+  },
   // Fable 5.1 — successor to Fable 5, same tier and per-token price, but cache
   // reads are $0.25 (NOT the 0.1× convention). Thinking always on ({type:"disabled"}
   // → 400), forced tool_choice any/tool → 400.
@@ -245,6 +261,22 @@ export const MAX_MODELS: Record<string, ModelMetadata> = {
     adaptiveThinking: true,
     samplingParams: true,
     cost: { input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 },
+  },
+  // Haiku 5.5 — released 2026-10-07. Prices for prompts ≤100k tokens ($0.10/$0.50,
+  // cache read $0.01, 5m write $0.125); ABOVE 100k the whole request bills 5× ($0.50/$2.50) —
+  // the registry carries one price, so long prompts are under-counted by design here.
+  // Model card: adaptive on by default, disabled ALLOWED (only at effort ≤ high),
+  // effort default 'medium', sampling non-default → 400, 1M in / 128k out.
+  // ABOVE haiku-4-5 so the fuzzy matcher does not fold it into the old model.
+  'claude-haiku-5-5': {
+    name: 'Claude Haiku 5.5',
+    context: 1_000_000,
+    defaultOutput: 64_000,
+    maxOutput: 128_000,
+    adaptiveThinking: true,
+    samplingParams: false,
+    thinkingDefault: 'on',
+    cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   },
   'claude-haiku-4-5-20251001': {
     name: 'Claude Haiku 4.5',
@@ -449,6 +481,7 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
     lower.includes('opus-5') ||
     lower.includes('sonnet-5') ||
     lower.includes('fable-5') ||
+    lower.includes('haiku-5') ||
     lower.includes('opus-4-8') ||
     lower.includes('opus-4-7') ||
     lower.includes('opus-4-6') ||
@@ -472,6 +505,7 @@ export function supportsSamplingParams(modelId: string): boolean {
     lower.includes('opus-5') ||
     lower.includes('sonnet-5') ||
     lower.includes('fable-5') ||
+    lower.includes('haiku-5') ||
     lower.includes('opus-4-8') ||
     lower.includes('opus-4-7')
   )

@@ -1,4 +1,4 @@
-import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, ProxyEvent, Session } from "./proxy-ports.js";
+import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, IOrgUsageReader, ProxyEvent, Session } from "./proxy-ports.js";
 export interface FileCredentialsProviderOptions {
     path?: string;
     expiryBufferMs?: number;
@@ -48,6 +48,13 @@ export declare class InMemorySessionStore<EngineT = unknown> implements ISession
 }
 export declare class DefaultLivenessChecker implements ILivenessChecker {
     isAlive(pid: number): boolean;
+}
+export declare class NativeOrgUsageReader implements IOrgUsageReader {
+    read(token: string, userAgent: string): Promise<{
+        data: unknown;
+    } | {
+        retryAfterSec: number;
+    } | null>;
 }
 export declare class NativeFetchUpstream implements IUpstreamFetcher {
     fetch(url: string, init: {

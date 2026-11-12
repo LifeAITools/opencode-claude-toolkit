@@ -191,6 +191,8 @@ let CC_COMPAT_VERSION = '2.1.152'
 
 /** Update compat version at runtime (called from config on boot). */
 export function setCompatVersion(v: string): void { if (v) CC_COMPAT_VERSION = v }
+/** Текущая версия совместимости — для заголовков служебных запросов к Anthropic. */
+export function getCompatVersion(): string { return CC_COMPAT_VERSION }
 
 const OAUTH_BETA = 'oauth-2025-04-20'
 const CLAUDE_CODE_BETA = 'claude-code-20250219'

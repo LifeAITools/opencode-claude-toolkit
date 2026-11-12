@@ -155,3 +155,16 @@ describe('сбор входа из отчёта квоты и пинов', () =>
     expect(inputs[2].blockedReason).toBeNull()
   })
 })
+
+describe('planPlacement — стена до сброса важнее давления (12.11.2026)', () => {
+  test('неделя 95% упрётся через 7.6ч → проигрывает организации с горячим, но сбрасывающимся 5ч', () => {
+    const H = 3_600_000
+    const now = Date.UTC(2026, 10, 12, 10)
+    const mk = (name: string, u5: number, uw: number) => ({
+      name, activeAgents: 0,
+      windows: [{ name: '5h', util: u5, resetAt: now + H }, { name: 'week', util: uw, resetAt: now + 24 * H }],
+    })
+    const plan = planPlacement([mk('weekly-hot', 0.05, 0.95), mk('calm', 0.40, 0.10)], now, 'ses')
+    expect(plan.org?.name).toBe('calm')
+  })
+})

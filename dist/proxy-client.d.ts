@@ -1,6 +1,7 @@
 import { KeepaliveEngine } from "./keepalive-engine.js";
-import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, Session } from "./proxy-ports.js";
+import type { ICredentialsProvider, IEventEmitter, ILivenessChecker, ISessionStore, IUpstreamFetcher, IOrgUsageReader, Session } from "./proxy-ports.js";
 import type { StreamEvent } from "./types.js";
+import { type OrgUsageReading } from "./anthropic-birth-placement.js";
 import { type OrgIdResolver } from "./org-identity.js";
 import { OrgVault } from "./org-vault.js";
 import { type RefreshedTokens } from "./auth.js";
@@ -25,6 +26,7 @@ export interface ProxyClientOptions {
     eventEmitter?: IEventEmitter;
     sessionStore?: ISessionStore<KeepaliveEngine>;
     upstreamFetcher?: IUpstreamFetcher;
+    orgUsageReader?: IOrgUsageReader;
     livenessChecker?: ILivenessChecker;
     orgIdResolver?: OrgIdResolver;
     prefixHistoryPath?: string;
@@ -33,6 +35,7 @@ export interface ProxyClientOptions {
     kaSnapshotPath?: string;
     orgVault?: OrgVault;
     claudeConfigDir?: string;
+    accountConfigPath?: string;
     credentialsPath?: string;
     oauthRefresher?: (refreshToken: string) => Promise<RefreshedTokens>;
     acquireConfigLock?: (configDir: string) => Promise<(() => Promise<void>) | null>;
@@ -64,6 +67,7 @@ export declare class ProxyClient {
     private readonly events;
     private readonly store;
     private readonly upstream;
+    private readonly orgUsageReader;
     private readonly liveness;
     private readonly streamTracer;
     private readonly realRetryDelaysMs;
@@ -87,12 +91,18 @@ export declare class ProxyClient {
     private readonly orgRotateConsent;
     private readonly lastServedOrg;
     private readonly rateLimitByOrg;
+    private readonly orgUsage;
+    private orgUsageTimer;
+    private readonly orgUsageBackoffUntil;
+    private readonly orgUsageEndpointAt;
+    private orgUsageStartedAt;
     private readonly kaSpend;
     private readonly orgRefreshInflight;
     private readonly orgLastRefreshAt;
     private readonly orgRefreshCooldown;
     private orgProactiveTimer;
     private readonly claudeConfigDir;
+    private readonly accountConfigPath;
     private readonly credentialsPath;
     private readonly oauthRefresher;
     private readonly acquireConfigLock;
@@ -161,6 +171,11 @@ export declare class ProxyClient {
     private getTokenForSession;
     private proactiveOrgSweep;
     _runOrgProactiveSweep(): Promise<void>;
+    private refreshOrgUsage;
+    _refreshOrgUsage(): Promise<void>;
+    _ageOrgUsageStart(ms: number): void;
+    _setOrgUsage(r: OrgUsageReading): void;
+    private chooseOrgForNewSession;
     private gcSessionPins;
     _gcSessionPins(now?: number): void;
     _orgCooldown(orgId: string): {

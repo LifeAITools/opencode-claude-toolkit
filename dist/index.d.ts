@@ -14,8 +14,8 @@ export { readOwnerPassport, scrubSecrets } from "./owner-passport.js";
 export type { OwnerPassport } from "./owner-passport.js";
 export { CacheMetricsCollector } from "./cache-metrics.js";
 export type { RecordedRequest, MetricsSummary, RegressionInfo, CacheMetricsOptions, } from "./cache-metrics.js";
-export type { ICredentialsProvider, IEventEmitter, ISessionStore, IUpstreamFetcher, ILivenessChecker, ProxyEvent, Session, ProxyClientAdapters, } from "./proxy-ports.js";
-export { FileCredentialsProvider, ConsoleEventEmitter, NullEventEmitter, InMemorySessionStore, DefaultLivenessChecker, NativeFetchUpstream, } from "./proxy-adapters.js";
+export type { ICredentialsProvider, IEventEmitter, ISessionStore, IUpstreamFetcher, IOrgUsageReader, ILivenessChecker, ProxyEvent, Session, ProxyClientAdapters, } from "./proxy-ports.js";
+export { FileCredentialsProvider, ConsoleEventEmitter, NullEventEmitter, InMemorySessionStore, DefaultLivenessChecker, NativeFetchUpstream, NativeOrgUsageReader, } from "./proxy-adapters.js";
 export type { FileCredentialsProviderOptions, ConsoleEventEmitterOptions, } from "./proxy-adapters.js";
 export { ProxyClient, extractSessionIdFromBody, humanModeAllowsSpend } from "./proxy-client.js";
 export type { ProxyClientConfig, ProxyClientOptions, HandleRequestContext, RateLimitSnapshot, } from "./proxy-client.js";
@@ -41,3 +41,5 @@ export { connectVoiceStream, transcribeFile, transcribeAudioFile, startMicRecord
 export type { VoiceStreamCallbacks, VoiceStreamConnection, VoiceStreamOptions, TranscribeFileOptions, } from "./voice.js";
 export { enrichAnthropicRequest, clampEffortIfThinkingDisabled, injectCacheMarkers, withBillingBlock, cacheInjectionDisabled, CACHE_OPT_OUT_HEADER, hasAnyCacheControl, setCompatVersion, } from "./subscription-compat.js";
 export type { AnthropicEnrichResult, CompatEmit } from "./subscription-compat.js";
+export { assessOrg, planPlacement, placementInputs, NEAR_WALL_HOURS, type PlacementWindow, type PlacementOrg, type PlacementAssessment, type PlacementPlan, } from "./placement.js";
+export { chooseBirthOrg, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage, type BirthCandidate, type BirthPlacementResult, } from "./anthropic-birth-placement.js";

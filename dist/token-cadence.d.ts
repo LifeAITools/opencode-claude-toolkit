@@ -8,3 +8,6 @@ export declare const REFRESH_FAILURE_COOLDOWN_BASE_MS: number;
 export declare const REFRESH_FAILURE_COOLDOWN_MAX_MS: number;
 export declare const REVOKE_RELOGIN_COOLDOWN_MS: number;
 export declare const DEFAULT_ORG_PROACTIVE_SWEEP_SEC = 60;
+export declare const ORG_USAGE_POLL_MS: number;
+export declare const ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS: number;
+export declare const ORG_USAGE_MAX_AGE_MS: number;

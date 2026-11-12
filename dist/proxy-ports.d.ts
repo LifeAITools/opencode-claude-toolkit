@@ -53,6 +53,13 @@ export interface IUpstreamFetcher {
         signal?: AbortSignal;
     }): Promise<Response>;
 }
+export interface IOrgUsageReader {
+    read(token: string, userAgent: string): Promise<{
+        data: unknown;
+    } | {
+        retryAfterSec: number;
+    } | null>;
+}
 export interface ILivenessChecker {
     isAlive(pid: number): boolean;
 }

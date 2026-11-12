@@ -59,6 +59,13 @@ export const ANTHROPIC_API_MESSAGES = `${ANTHROPIC_API_BASE}/v1/messages`;
 export const ANTHROPIC_API_MESSAGES_COUNT_TOKENS = `${ANTHROPIC_API_BASE}/v1/messages/count_tokens`;
 
 /**
+ * Subscription usage (no inference): `five_hour` / `seven_day` with `utilization` (0–100)
+ * and `resets_at`. Mirrors Claude Code CLI `services/api/usage.ts:55`
+ * (`${BASE_API_URL}/api/oauth/usage`). Read per org to place a NEW session by headroom.
+ */
+export const ANTHROPIC_OAUTH_USAGE_URL = `${ANTHROPIC_API_BASE}/api/oauth/usage`;
+
+/**
  * Anthropic platform/console base — used as the host portion of OAuth
  * console URLs (authorize, token exchange, callback). Kept separate
  * from {@link ANTHROPIC_API_BASE} because the OAuth surface lives on a

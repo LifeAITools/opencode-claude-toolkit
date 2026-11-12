@@ -2,6 +2,7 @@ export declare const ANTHROPIC_API_HOST = "api.anthropic.com";
 export declare const ANTHROPIC_API_BASE = "https://api.anthropic.com";
 export declare const ANTHROPIC_API_MESSAGES = "https://api.anthropic.com/v1/messages";
 export declare const ANTHROPIC_API_MESSAGES_COUNT_TOKENS = "https://api.anthropic.com/v1/messages/count_tokens";
+export declare const ANTHROPIC_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 export declare const ANTHROPIC_PLATFORM_BASE = "https://platform.claude.com";
 export declare const ANTHROPIC_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 export declare const ANTHROPIC_OAUTH_AUTHORIZE_URL = "https://claude.com/cai/oauth/authorize";

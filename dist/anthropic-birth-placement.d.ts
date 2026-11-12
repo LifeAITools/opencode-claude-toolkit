@@ -1,0 +1,40 @@
+import { type PlacementPlan, type PlacementWindow } from "./placement.js";
+export interface OauthUsageWindow {
+    utilization: number | null;
+    resets_at: string | null;
+}
+export interface OauthUsage {
+    five_hour?: OauthUsageWindow | null;
+    seven_day?: OauthUsageWindow | null;
+}
+export interface OrgUsageReading {
+    orgId: string;
+    windows: PlacementWindow[];
+    measuredAt: number;
+}
+export declare function usageToWindows(u: OauthUsage | null | undefined): PlacementWindow[];
+export declare function headerSnapshotToWindows(snap: {
+    utilization5h: number | null;
+    utilization7d: number | null;
+    resetAt: number | null;
+    resetAt7d?: number | null;
+}): PlacementWindow[];
+export interface BirthCandidate {
+    orgId: string;
+    needsRelogin: boolean;
+    tokenAlive: boolean;
+}
+export interface BirthPlacementInput {
+    candidates: BirthCandidate[];
+    readings: Map<string, OrgUsageReading>;
+    pinsByOrg: Map<string, number>;
+    nowMs: number;
+    maxReadingAgeMs: number;
+    seed: string;
+}
+export interface BirthPlacementResult {
+    orgId: string | null;
+    plan: PlacementPlan | null;
+    skipped: string | null;
+}
+export declare function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult;

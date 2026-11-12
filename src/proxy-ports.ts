@@ -244,6 +244,24 @@ export interface IUpstreamFetcher {
   ): Promise<Response>
 }
 
+// ═══ Port 4b: Org Usage Reader (optional) ══════════════════════════
+
+/**
+ * Reads one org's subscription headroom WITHOUT inference (`GET /api/oauth/usage`,
+ * mirror of Claude Code CLI `services/api/usage.ts`). Separate from IUpstreamFetcher on
+ * purpose: that port is the inference path (POST + SSE body, no internal retries), this is
+ * a small control-plane read. Returns parsed JSON or `null` on any non-2xx / network error —
+ * «не измерено», never zero. Default adapter: NativeOrgUsageReader.
+ */
+export interface IOrgUsageReader {
+  /**
+   * `{ data }` — показание; `{ retryAfterSec }` — 429 этого справочного вызова (у него СВОЙ
+   * лимит частоты, замер 12.11.2026: после ~десятка обращений за минуту — 429, retry-after 96);
+   * `null` — иной провал. Ни один исход не означает «запас ноль».
+   */
+  read(token: string, userAgent: string): Promise<{ data: unknown } | { retryAfterSec: number } | null>
+}
+
 // ═══ Port 5: Liveness Checker (optional) ═══════════════════════════
 
 /**

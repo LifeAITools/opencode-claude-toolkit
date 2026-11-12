@@ -9,6 +9,7 @@ export declare function followSessionId(headers: Record<string, string | undefin
 export declare function hasAnyCacheControl(body: Record<string, unknown>): boolean;
 export declare function injectCacheMarkers(body: Record<string, unknown>): number;
 export declare function setCompatVersion(v: string): void;
+export declare function getCompatVersion(): string;
 export interface AnthropicEnrichResult {
     body: string;
     headers: Record<string, string>;

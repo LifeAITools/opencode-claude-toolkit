@@ -64,6 +64,7 @@ import type {
   ILivenessChecker,
   ISessionStore,
   IUpstreamFetcher,
+  IOrgUsageReader,
   Session,
 } from './proxy-ports.js'
 import {
@@ -71,9 +72,12 @@ import {
   DefaultLivenessChecker,
   InMemorySessionStore,
   NativeFetchUpstream,
+  NativeOrgUsageReader,
 } from './proxy-adapters.js'
 import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
+import { chooseBirthOrg, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
+import { getCompatVersion } from './subscription-compat.js'
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { consumeConsent } from './rewrite-consent.js'
@@ -102,6 +106,9 @@ import {
   REFRESH_FAILURE_COOLDOWN_MAX_MS,
   REVOKE_RELOGIN_COOLDOWN_MS,
   DEFAULT_ORG_PROACTIVE_SWEEP_SEC,
+  ORG_USAGE_POLL_MS,
+  ORG_USAGE_MAX_AGE_MS,
+  ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS,
 } from './token-cadence.js'
 import {
   writeRewriteBlockDump,
@@ -276,6 +283,8 @@ export interface ProxyClientOptions {
 
   /** Optional: how to talk to upstream. Default: native fetch */
   upstreamFetcher?: IUpstreamFetcher
+  /** Чтение запаса организации без вызова модели (`/api/oauth/usage`). По умолчанию — сеть. */
+  orgUsageReader?: IOrgUsageReader
 
   /** Optional: how to check PID liveness. Default: POSIX kill -0 */
   livenessChecker?: ILivenessChecker
@@ -334,6 +343,10 @@ export interface ProxyClientOptions {
    * for tests. Default: `getClaudeConfigDir()`.
    */
   claudeConfigDir?: string
+  /** Файл учётки Claude Code (`oauthAccount`). По умолчанию `~/.claude.json` — он лежит РЯДОМ с
+   *  каталогом конфигурации, а не в нём, поэтому из `claudeConfigDir` не выводится. Тесты
+   *  подставляют свой, иначе снимок учётки тянет организацию машины в тестовое хранилище. */
+  accountConfigPath?: string
 
   /**
    * Optional: path to `.credentials.json` (the active org's on-disk credential).
@@ -521,6 +534,7 @@ export class ProxyClient {
   private readonly events: IEventEmitter
   private readonly store: ISessionStore<KeepaliveEngine>
   private readonly upstream: IUpstreamFetcher
+  private readonly orgUsageReader: IOrgUsageReader
   private readonly liveness: ILivenessChecker
   /** След потока «греюсь» (PRP 09): живые дельты SSE → файл на сессию. */
   private readonly streamTracer = new StreamTracer(streamTraceDir())
@@ -647,6 +661,17 @@ export class ProxyClient {
    *  account that has 2/3 of its window free — measured 2026-09-03, when one
    *  account sat at 0.98 while the other was at 0.33. */
   private readonly rateLimitByOrg: Map<string, RateLimitSnapshot> = new Map()
+  /** Запас каждой организации Anthropic по `/api/oauth/usage` (без вызова модели) — вход
+   *  выбора организации при РОЖДЕНИИ сессии (src/anthropic-birth-placement.ts). Пишется
+   *  фоновым опросом; путь запроса сеть не ждёт. */
+  private readonly orgUsage: Map<string, OrgUsageReading> = new Map()
+  private orgUsageTimer: ReturnType<typeof setInterval> | null = null
+  /** До какого момента справочный вызов запаса этой организации отдыхает (429 retry-after). */
+  private readonly orgUsageBackoffUntil: Map<string, number> = new Map()
+  /** Когда справочный вызов запаса делался по организации в последний раз. */
+  private readonly orgUsageEndpointAt: Map<string, number> = new Map()
+  /** Старт процесса: справочный вызов не раньше чем через интервал после него (см. refreshOrgUsage). */
+  private orgUsageStartedAt = Date.now()
   /** Сколько окна ест прогрев по каждому аккаунту за скользящий час — для линии сторожа запаса
    *  (src/quota-stop-line.ts). Пишется на каждом KA_FIRE_COMPLETE. */
   private readonly kaSpend = new KaSpendMeter()
@@ -660,6 +685,7 @@ export class ProxyClient {
   private orgProactiveTimer: ReturnType<typeof setInterval> | null = null
   /** Config dir (`~/.claude`) + `.credentials.json` path — active-org co-write. */
   private readonly claudeConfigDir: string
+  private readonly accountConfigPath: string | undefined
   private readonly credentialsPath: string
   /** OAuth refresh-grant fn (injectable for tests). */
   private readonly oauthRefresher: (refreshToken: string) => Promise<RefreshedTokens>
@@ -693,6 +719,7 @@ export class ProxyClient {
     this.liveness = opts.livenessChecker ?? new DefaultLivenessChecker()
     this.store = opts.sessionStore ?? new InMemorySessionStore<KeepaliveEngine>(this.liveness)
     this.upstream = opts.upstreamFetcher ?? new NativeFetchUpstream()
+    this.orgUsageReader = opts.orgUsageReader ?? new NativeOrgUsageReader()
     this.orgIdResolver = opts.orgIdResolver ?? new FileOrgIdResolver()
     this.prefixHistoryPath = opts.prefixHistoryPath ?? PREFIX_HISTORY_PATH
     this.rewriteBlockDumpDir = opts.rewriteBlockDumpDir ?? DEFAULT_REWRITE_DUMP_DIR
@@ -700,6 +727,7 @@ export class ProxyClient {
     this.kaSnapshotPath = opts.kaSnapshotPath ?? DEFAULT_KA_SNAPSHOT_PATH
     this.orgVault = opts.orgVault ?? new OrgVault()
     this.claudeConfigDir = opts.claudeConfigDir ?? getClaudeConfigDir()
+    this.accountConfigPath = opts.accountConfigPath
     this.credentialsPath = opts.credentialsPath ?? getDefaultCredentialsPath()
     this.oauthRefresher = opts.oauthRefresher ?? refreshOAuthToken
     this.acquireConfigLock = opts.acquireConfigLock ?? acquireConfigDirLock
@@ -779,6 +807,18 @@ export class ProxyClient {
       }, sweepSec * 1000)
       if (this.orgProactiveTimer && typeof this.orgProactiveTimer === 'object' && 'unref' in this.orgProactiveTimer) {
         (this.orgProactiveTimer as any).unref()
+      }
+    }
+    // Запас организаций для выбора при рождении сессии. Тот же выключатель, что у обхода
+    // токенов (0 — тесты зовут _refreshOrgUsage() сами): без живых токенов опрашивать нечем.
+    if (sweepSec && sweepSec > 0) {
+      // 🔴 НЕ опрашивать в момент старта: память о паузе 429 живёт в процессе и пропадает при
+      // перезапуске, и каждая выкатка била бы общий лимит частоты по всем организациям сразу
+      // (замер 12.11.2026: три выкатки подряд — retry-after 3300 с). Первые минуты запас и так
+      // приходит из заголовков настоящих ходов; справочный вызов — с первого тика таймера.
+      this.orgUsageTimer = setInterval(() => { void this.refreshOrgUsage() }, ORG_USAGE_POLL_MS)
+      if (this.orgUsageTimer && typeof this.orgUsageTimer === 'object' && 'unref' in this.orgUsageTimer) {
+        (this.orgUsageTimer as any).unref()
       }
     }
   }
@@ -997,7 +1037,7 @@ export class ProxyClient {
     const candidates = new Set<string>()
     const active = this.orgIdResolver.current()
     if (active) candidates.add(active)
-    const cfgOrg = readOrgInfoFromConfig().orgId
+    const cfgOrg = readOrgInfoFromConfig(this.accountConfigPath).orgId
     if (cfgOrg) candidates.add(cfgOrg)
     if (candidates.size === 0) return
     let thawedSessions = 0
@@ -1048,7 +1088,7 @@ export class ProxyClient {
   async snapshotCurrentAccount(reason: string): Promise<void> {
     try {
       const token = await this.credentials.getAccessToken()
-      const { orgId, orgName, accountEmail } = readOrgInfoFromConfig()
+      const { orgId, orgName, accountEmail } = readOrgInfoFromConfig(this.accountConfigPath)
       const resolvedOrg = orgId ?? this.orgIdResolver.current()
       if (!resolvedOrg || !token) return
       // 🔴 capturedAt IS THE TOKEN'S BIRTH, NOT THE MOMENT WE LOOKED AT IT.
@@ -1254,7 +1294,7 @@ export class ProxyClient {
         expiresAt: fresh.expiresAt,
         scopes: fresh.scopes,
       })
-      const info = readOrgInfoFromConfig()
+      const info = readOrgInfoFromConfig(this.accountConfigPath)
       this.orgVault.upsert({
         orgId,
         orgName: info.orgName ?? undefined,
@@ -1463,6 +1503,102 @@ export class ProxyClient {
 
   /** Test seam — run one proactive sweep synchronously. */
   async _runOrgProactiveSweep(): Promise<void> { return this.proactiveOrgSweep() }
+
+  /**
+   * Опрос запаса КАЖДОЙ живой организации хранилища (`/api/oauth/usage`, без вызова модели).
+   * Токен — только через `withFreshOrgToken` (точка свежести проекта). Провал опроса не
+   * стирает прежнее показание и не продлевает его: возраст решает в `chooseBirthOrg`.
+   */
+  private async refreshOrgUsage(): Promise<void> {
+    const orgIds = new Set<string>()
+    const active = this.orgIdResolver.current()
+    if (active) orgIds.add(active)
+    for (const e of this.orgVault.list()) orgIds.add(e.orgId)
+    const now = Date.now()
+    for (const orgId of orgIds) {
+      if (this.orgRefreshCooldown.get(orgId)?.needsRelogin) continue
+      if ((this.orgUsageBackoffUntil.get(orgId) ?? 0) > now) continue
+      // Свежее показание из настоящих ходов есть — справочный вызов не нужен. Иначе не чаще
+      // раза в ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS: лимит частоты этого вызова общий.
+      const last = this.orgUsage.get(orgId)
+      if (last && now - last.measuredAt < ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS) continue
+      // Отсчёт и от старта процесса: память о вызовах и паузах 429 в нём не переживает перезапуск.
+      if (now - (this.orgUsageEndpointAt.get(orgId) ?? this.orgUsageStartedAt) < ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS) continue
+      // Опрашиваем только организацию с ЖИВЫМ ключом или с чем его обновить: истёкшая без
+      // refresh-токена не кандидат вовсе, а лишний вызов тратит общий лимит частоты.
+      // Только организация с ЖИВЫМ ключом прямо сейчас. «Есть чем обновить» не годится: у
+      // давно истёкших refresh тоже есть, но он отозван (16 ORG_TOKEN_NEEDS_RELOGIN за сутки), и
+      // каждый такой вызов тратит общий лимит частоты впустую.
+      const meta = this.orgTokenMeta(orgId)
+      if (!meta?.accessToken) continue
+      if (meta.expiresAt !== null && meta.expiresAt <= now) continue
+      try {
+        const token = await this.withFreshOrgToken(orgId, { reason: 'usage-poll' })
+        if (!token) continue
+        this.orgUsageEndpointAt.set(orgId, Date.now())
+        const res = await this.orgUsageReader.read(token, `claude-cli/${getCompatVersion()}`)
+        if (res === null) {
+          this.events.emit({ level: 'info', kind: 'ORG_USAGE_POLL_FAILED', orgId })
+          continue
+        }
+        if ('retryAfterSec' in res) {
+          this.orgUsageBackoffUntil.set(orgId, Date.now() + res.retryAfterSec * 1000)
+          this.events.emit({ level: 'info', kind: 'ORG_USAGE_POLL_FAILED', orgId, status: 429, retryAfterSec: res.retryAfterSec })
+          continue
+        }
+        const windows = usageToWindows(res.data as OauthUsage)
+        this.orgUsage.set(orgId, { orgId, windows, measuredAt: Date.now() })
+      } catch (err) {
+        this.events.emit({ level: 'info', kind: 'ORG_USAGE_POLL_FAILED', orgId, msg: String((err as Error)?.message ?? err).slice(0, 160) })
+      }
+    }
+  }
+
+  /** Test seam — один проход опроса запаса. */
+  async _refreshOrgUsage(): Promise<void> { return this.refreshOrgUsage() }
+  /** Test seam — сдвинуть «старт процесса» в прошлое (как будто служба работает давно). */
+  _ageOrgUsageStart(ms: number): void { this.orgUsageStartedAt -= ms }
+  /** Test seam — подложить показание. */
+  _setOrgUsage(r: OrgUsageReading): void { this.orgUsage.set(r.orgId, r) }
+
+  /**
+   * Организация для НОВОЙ сессии (нет пина ни в памяти, ни в хранилище). `null` — оставить
+   * прежний выбор (активная организация машины). Живая сессия сюда не попадает никогда.
+   */
+  private chooseOrgForNewSession(sessionId: string): string | null {
+    const now = Date.now()
+    const candidates: Array<{ orgId: string; needsRelogin: boolean; tokenAlive: boolean }> = []
+    const seen = new Set<string>()
+    const add = (orgId: string) => {
+      if (seen.has(orgId)) return
+      seen.add(orgId)
+      const meta = this.orgTokenMeta(orgId)
+      candidates.push({
+        orgId,
+        needsRelogin: this.orgRefreshCooldown.get(orgId)?.needsRelogin === true,
+        tokenAlive: !!meta?.accessToken && (meta.expiresAt === null || meta.expiresAt > now),
+      })
+    }
+    const active = this.orgIdResolver.current()
+    if (active) add(active)
+    for (const e of this.orgVault.list()) add(e.orgId)
+    const pinsByOrg = new Map<string, number>()
+    for (const p of this.sessionPins.values()) {
+      if (p.orgId) pinsByOrg.set(p.orgId, (pinsByOrg.get(p.orgId) ?? 0) + 1)
+    }
+    const r = chooseBirthOrg({
+      candidates, readings: this.orgUsage, pinsByOrg, nowMs: now,
+      maxReadingAgeMs: ORG_USAGE_MAX_AGE_MS, seed: sessionId,
+    })
+    if (r.orgId && r.plan) {
+      this.events.emit({
+        level: 'info', kind: 'ORG_PLACED', sessionId, orgId: r.orgId,
+        msg: `new session placed by headroom: ${r.plan.reason}`,
+        ranked: r.plan.ranked.map(a => ({ org: a.name.slice(0, 8), verdict: a.verdict, agents: a.activeAgents, pressureH: Number.isFinite(a.pressureHours) ? +a.pressureHours.toFixed(1) : null })),
+      })
+    }
+    return r.orgId
+  }
 
   /**
    * Session-pin GC (T4.3): retire vault pins whose session is NEITHER currently
@@ -1866,6 +2002,27 @@ export class ProxyClient {
         }
       }
       rotateConsumed = this.orgRotateConsent.delete(sessionId)
+      // ── ВЫБОР ОРГАНИЗАЦИИ ПРИ РОЖДЕНИИ (слово фаундера 12.11.2026) ─────────────────────
+      // Только для сессии, у которой НЕТ пина ни в памяти, ни в хранилище: сохранённый пин,
+      // совпавший с активной организацией, восстанавливается неявно (selectSessionToken), и
+      // выбор по запасу перебил бы его — это и была бы миграция живой сессии. Не трогаем:
+      // [%reload-ok%] (явный выбор человека — текущий вход), follow-session (организация
+      // потребителя), cache-less (пина нет по построению — идёт за живой учёткой).
+      if (!this.sessionPins.has(sessionId) && !this.orgVault.getPin(sessionId)
+          && !reloadAsked && !cacheOptOut && !(followId && followId !== sessionId)) {
+        const birthOrg = this.chooseOrgForNewSession(sessionId)
+        if (birthOrg && birthOrg !== account.orgId) {
+          const tok = await this.withFreshOrgToken(birthOrg, { reason: 'birth-placement' })
+          const ve = this.orgVault.get(birthOrg)
+          if (tok) {
+            account = { orgId: birthOrg, token: tok, expiresAt: ve?.expiresAt ?? null }
+            // Закрепить СРАЗУ и в хранилище: без этого пин появлялся бы только по ответу
+            // Anthropic (TOFU ниже), и перезапуск прокси между запросом и ответом вернул бы
+            // сессию на активную организацию — то есть сменил бы ей организацию.
+            this.orgVault.setPin(sessionId, birthOrg)
+          }
+        }
+      }
       const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now(), cacheOptOut)
       if (sel.stop) {
         this.events.emit({
@@ -2486,6 +2643,11 @@ export class ProxyClient {
           // not inference. This is what the quota guard reads before the NEXT
           // turn of any session on this account.
           this.rateLimitByOrg.set(servedOrg, reqRateLimit)
+          // Тот же ответ — бесплатное показание запаса для выбора при рождении сессии.
+          {
+            const windows = headerSnapshotToWindows(reqRateLimit)
+            if (windows.length) this.orgUsage.set(servedOrg, { orgId: servedOrg, windows, measuredAt: Date.now() })
+          }
           this.orgVault.markVerified(servedOrg)
           // TOFU auto-pin: the first org Anthropic actually serves a session
           // becomes a sticky implicit pin, so an unpinned session stops

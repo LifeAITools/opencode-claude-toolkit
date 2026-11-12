@@ -23,10 +23,12 @@ import type {
   ILivenessChecker,
   ISessionStore,
   IUpstreamFetcher,
+  IOrgUsageReader,
   ProxyEvent,
   Session,
 } from './proxy-ports.js'
 import type { StoredCredentials, CredentialsFile } from './types.js'
+import { ANTHROPIC_OAUTH_USAGE_URL } from './anthropic-endpoints.js'
 
 // ═══ Adapter 1: FileCredentialsProvider ═══════════════════════════════
 //
@@ -336,6 +338,26 @@ export class DefaultLivenessChecker implements ILivenessChecker {
 // Default upstream transport — uses global fetch (Node 18+, Bun, Deno).
 // Zero dependencies. Consumers needing tracing/retries/mTLS would replace
 // this with a custom adapter.
+
+export class NativeOrgUsageReader implements IOrgUsageReader {
+  async read(token: string, userAgent: string): Promise<{ data: unknown } | { retryAfterSec: number } | null> {
+    try {
+      const res = await fetch(ANTHROPIC_OAUTH_USAGE_URL, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'user-agent': userAgent },
+        signal: AbortSignal.timeout(5_000),
+      })
+      if (res.status === 429) {
+        const ra = Number(res.headers.get('retry-after'))
+        return { retryAfterSec: Number.isFinite(ra) && ra > 0 ? ra : 120 }
+      }
+      if (!res.ok) return null
+      return { data: await res.json() }
+    } catch {
+      return null
+    }
+  }
+}
 
 export class NativeFetchUpstream implements IUpstreamFetcher {
   async fetch(

@@ -93,6 +93,7 @@ export type {
   IEventEmitter,
   ISessionStore,
   IUpstreamFetcher,
+  IOrgUsageReader,
   ILivenessChecker,
   // Types used by ports
   ProxyEvent,
@@ -108,6 +109,7 @@ export {
   InMemorySessionStore,
   DefaultLivenessChecker,
   NativeFetchUpstream,
+  NativeOrgUsageReader,
 } from './proxy-adapters.js'
 export type {
   FileCredentialsProviderOptions,
@@ -263,3 +265,14 @@ export {
   setCompatVersion,
 } from './subscription-compat.js'
 export type { AnthropicEnrichResult, CompatEmit } from './subscription-compat.js'
+
+// Выбор организации по запасу и динамике — один алгоритм на все двери (OD/Go в прокси,
+// Anthropic при рождении сессии здесь). Переехал из пакета прокси 12.11.2026.
+export {
+  assessOrg, planPlacement, placementInputs, NEAR_WALL_HOURS,
+  type PlacementWindow, type PlacementOrg, type PlacementAssessment, type PlacementPlan,
+} from './placement.js'
+export {
+  chooseBirthOrg, usageToWindows, headerSnapshotToWindows,
+  type OrgUsageReading, type OauthUsage, type BirthCandidate, type BirthPlacementResult,
+} from './anthropic-birth-placement.js'

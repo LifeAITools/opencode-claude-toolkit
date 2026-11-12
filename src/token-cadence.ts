@@ -71,3 +71,13 @@ export const REVOKE_RELOGIN_COOLDOWN_MS = 30 * 60 * 1000 // 30 min
 
 /** Default cadence of the daemon-owned per-org proactive refresh sweep. */
 export const DEFAULT_ORG_PROACTIVE_SWEEP_SEC = 60 // 1 min
+
+/** Шаг опроса запаса организаций Anthropic (`/api/oauth/usage`, без вызова модели) —
+ *  вход выбора организации при РОЖДЕНИИ сессии (anthropic-birth-placement.ts). */
+export const ORG_USAGE_POLL_MS = 5 * 60_000 // 5 min — шаг ПРОВЕРКИ, а не вызова
+/** Справочный вызов по организации — не чаще этого и только если НЕТ свежего показания из
+ *  настоящих ходов. Замер 12.11.2026: лимит частоты `/api/oauth/usage` общий на машину,
+ *  после ~десятка вызовов retry-after дорос до 3300 с — поэтому основной источник — заголовки. */
+export const ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS = 60 * 60_000 // 1 h
+/** Показание запаса старше этого в выборе не участвует: это уже воспоминание, не замер. */
+export const ORG_USAGE_MAX_AGE_MS = 90 * 60_000 // 90 min — покрывает часовой шаг справочного вызова

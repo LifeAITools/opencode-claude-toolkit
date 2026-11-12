@@ -181,13 +181,20 @@ export function bodyField(text: string | null): unknown | null {
   try { return JSON.parse(text) } catch { return text.slice(0, 20_000) }
 }
 
-let ensured = false
+/**
+ * Каталог, который уже создан. 🔴 Помним ИМЕННО КАТАЛОГ, а не «что-то когда-то создано»:
+ * `dumpDir()` читает окружение на каждой записи, и булев флаг после смены каталога молча
+ * пропускал `mkdirSync` — запись падала в catch и терялась без единого слова (12.11.2026:
+ * три испытания go-door проходили поодиночке и падали в полном наборе — соседний файл
+ * успевал взвести флаг на своём каталоге).
+ */
+let ensuredDir: string | null = null
 /** Пишет запись. Не бросает: дамп не имеет права уронить ход. */
 export function writeDump(rec: DumpRecord): void {
   if (!dumpEnabled()) return
   try {
     const dir = dumpDir()
-    if (!ensured) { mkdirSync(dir, { recursive: true }); ensured = true }
+    if (ensuredDir !== dir) { mkdirSync(dir, { recursive: true }); ensuredDir = dir }
     const file = join(dir, `${rec.ts.slice(0, 10)}.jsonl`)
     appendFile(file, JSON.stringify(rec) + '\n', { mode: 0o600 }, (err) => {
       if (!err) { try { chmodSync(file, 0o600) } catch { /* ignore */ } }
@@ -196,4 +203,4 @@ export function writeDump(rec: DumpRecord): void {
 }
 
 /** Для испытаний: сброс кэша «каталог создан». */
-export function _resetDumpForTests(): void { ensured = false }
+export function _resetDumpForTests(): void { ensuredDir = null }

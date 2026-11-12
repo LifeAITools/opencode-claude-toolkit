@@ -1102,6 +1102,15 @@ export class ProxyClient {
       // the vault showed life_h=1.24 for an 8-h token. Same token → keep its birth.
       const prev = this.orgVault.get(resolvedOrg)
       const capturedAt = prev && prev.accessToken === token ? prev.capturedAt : Date.now()
+      // 🔴 НОВЫЙ ВХОД СНИМАЕТ «НУЖЕН ПОВТОРНЫЙ ВХОД». Человек сделал ровно то, о чём просила
+      // пометка (12.11.2026: вход в oeliseva после 09:48 ORG_TOKEN_NEEDS_RELOGIN) — а пометка
+      // держалась бы ещё до 30 мин, и всё это время организация не обновлялась, не опрашивалась
+      // и не выбиралась для новых сессий. Снимаем, только когда ключ ДРУГОЙ (то есть новый вход).
+      if (!prev || prev.accessToken !== token) {
+        if (this.orgRefreshCooldown.delete(resolvedOrg)) {
+          this.events.emit({ level: 'info', kind: 'ORG_RELOGIN_CLEARED', orgId: resolvedOrg, reason })
+        }
+      }
       this.orgVault.upsert({
         orgId: resolvedOrg,
         orgName: orgName ?? undefined,
@@ -1523,7 +1532,12 @@ export class ProxyClient {
       const last = this.orgUsage.get(orgId)
       if (last && now - last.measuredAt < ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS) continue
       // Отсчёт и от старта процесса: память о вызовах и паузах 429 в нём не переживает перезапуск.
-      if (now - (this.orgUsageEndpointAt.get(orgId) ?? this.orgUsageStartedAt) < ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS) continue
+      // ИСКЛЮЧЕНИЕ — организация, о которой не знаем НИЧЕГО (нет ни одного показания): новый
+      // вход, ходов ещё не было. Без одного вызова распределитель её не увидит вовсе, а выбор
+      // «по старому правилу» отдаст новые сессии ей вслепую (12.11.2026, вход oeliseva).
+      const neverMeasured = !last
+      const since = this.orgUsageEndpointAt.get(orgId) ?? (neverMeasured ? 0 : this.orgUsageStartedAt)
+      if (now - since < ORG_USAGE_ENDPOINT_MIN_INTERVAL_MS) continue
       // Опрашиваем только организацию с ЖИВЫМ ключом или с чем его обновить: истёкшая без
       // refresh-токена не кандидат вовсе, а лишний вызов тратит общий лимит частоты.
       // Только организация с ЖИВЫМ ключом прямо сейчас. «Есть чем обновить» не годится: у

@@ -172,11 +172,11 @@ describe('опрос запаса — уважает 429 этого справо
       rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
     } as ProxyClientOptions)
     await c._refreshOrgUsage()
-    expect(calls).toBe(0)                 // сразу после старта справочный вызов не делается
+    expect(calls).toBe(1)                 // о ней ничего не известно — один вызов сразу
     c._ageOrgUsageStart(2 * H)
     await c._refreshOrgUsage()
     await c._refreshOrgUsage()
-    expect(calls).toBe(1)                 // один вызов, затем пауза 429 — повтора нет
+    expect(calls).toBe(1)                 // дальше пауза 429 — повтора нет
     c.stop()
   })
 
@@ -226,6 +226,54 @@ describe('запас из заголовков настоящего ответа
     c._ageOrgUsageStart(2 * H)
     await c._refreshOrgUsage()
     expect(reads).toBe(0)
+    c.stop()
+  })
+})
+
+describe('после перезапуска измеренная организация не опрашивается первый час', () => {
+  test('показание из ходов есть → справочный вызов ждёт часа после старта', async () => {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    vault.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: Date.now() + H, capturedAt: Date.now() })
+    writeActiveCreds('tok-a', Date.now() + H)
+    let calls = 0
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 1, orgProactiveRefreshSec: 0 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {} },
+      upstreamFetcher: { fetch: async () => new Response(SSE, { status: 200 }) },
+      orgUsageReader: { read: async () => { calls++; return { data: {} } } },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+    } as ProxyClientOptions)
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: Date.now() - 2 * H, windows: [{ name: '5h', util: 0.1, resetAt: Date.now() + H }] })
+    await c._refreshOrgUsage()
+    expect(calls).toBe(0)
+    c.stop()
+  })
+})
+
+describe('новый вход снимает «нужен повторный вход»', () => {
+  test('после нового ключа организация снова кандидат (ORG_RELOGIN_CLEARED)', async () => {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    vault.upsert({ orgId: 'org-n', accessToken: 'old-tok', refreshToken: null, expiresAt: Date.now() - H, capturedAt: Date.now() - 2 * H })
+    const cfg = join(TMP, `claude-${seq++}.json`)
+    writeFileSync(cfg, JSON.stringify({ oauthAccount: { organizationUuid: 'org-n', emailAddress: 'n@x' } }))
+    const ev: any[] = []
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 1, orgProactiveRefreshSec: 0 },
+      credentialsProvider: { getAccessToken: async () => 'new-tok', invalidate() {}, currentExpiresAt: () => Date.now() + H },
+      upstreamFetcher: { fetch: async () => new Response(SSE, { status: 200 }) },
+      orgUsageReader: { read: async () => null },
+      eventEmitter: { emit: (e: any) => ev.push(e) },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-n', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault,
+      ...ISOLATED, accountConfigPath: cfg,
+    } as ProxyClientOptions)
+    ;(c as any).orgRefreshCooldown.set('org-n', { until: Date.now() + 30 * 60_000, attempts: 3, needsRelogin: true })
+    await c.snapshotCurrentAccount('credentials-changed')
+    expect((c as any).orgRefreshCooldown.has('org-n')).toBe(false)
+    expect(ev.some(e => e.kind === 'ORG_RELOGIN_CLEARED')).toBe(true)
     c.stop()
   })
 })

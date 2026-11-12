@@ -276,3 +276,7 @@ export {
   chooseBirthOrg, usageToWindows, headerSnapshotToWindows,
   type OrgUsageReading, type OauthUsage, type BirthCandidate, type BirthPlacementResult,
 } from './anthropic-birth-placement.js'
+export {
+  pidStep, newPidState, expectedLoadPerHour, sessionClass,
+  type PidGains, type PidLimits, type PidAdaptation, type PidState, type PidInput, type PidOutput, type DrainTarget,
+} from './placement-pid.js'

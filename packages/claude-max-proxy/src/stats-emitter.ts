@@ -79,7 +79,7 @@ interface StatsLine {
   v: number
   ts: string
   pid: number
-  type: 'stream'
+  type: 'stream' | 'keepalive'
   model: string
   /** Proxy session id of the request — lets quota consumers attribute a
    *  CLAUDE SESSION to its org (multi-org hosts). */
@@ -158,6 +158,69 @@ function ensureDir(path: string): void {
 }
 
 /**
+ * Строка статистики из события ответа (обычный ход или прогрев) — чистая функция, чтобы
+ * испытания не писали в настоящий файл машины. `null` — квоты нет ни по одному окну.
+ */
+export function buildStatsLine(e: ProxyEvent): StatsLine | null {
+  const ev = e as RealRequestCompleteEvent | KaFireCompleteEvent
+  // 🔴 ПРОГРЕВ НЕ ДОЕЗЖАЛ СЮДА НИ РАЗУ (research/quota-billable-actions-2026-11.md: 0 из 6 739).
+  // Событие прогрева несёт в `rateLimit` СЫРОЙ снимок SDK — `utilization5h/7d`, — а читалось
+  // `util5h/7d`; оба null → строка молча отбрасывалась. А прогрев ПЛАТНЫЙ (тот же отчёт: по цене
+  // чтения кэша), так что всякая модель квоты на этом файле недосчитывала расход. Читаем оба имени.
+  const rl = (ev.rateLimit ?? {}) as Record<string, unknown>
+  const pick = (...keys: string[]) => {
+    for (const k of keys) { const v = rl[k]; if (typeof v === 'number' && Number.isFinite(v)) return v }
+    return null
+  }
+  const util5h = pick('util5h', 'utilization5h') ?? (typeof (ev as any).util5h === 'number' ? (ev as any).util5h : null)
+  const util7d = pick('util7d', 'utilization7d') ?? (typeof (ev as any).util7d === 'number' ? (ev as any).util7d : null)
+  const isKa = (e as any).kind === 'KA_FIRE_COMPLETE'
+  // The processor skips lines with no util on both axes — don't bother writing them.
+  if (util5h === null && util7d === null) return null
+
+  // Org precedence: the EVENT's per-request org (multi-org proxy — the org
+  // whose token actually served this request) wins; the credentials-file
+  // fallback covers pre-multi-org SDK builds / unpinned sessions.
+  const org = ev.org ?? currentOrgKey()
+  const line: StatsLine = {
+    v: STATS_SCHEMA_VERSION,
+    ts: ev.ts,
+    pid: PROXY_PID,
+    // Прогрев — свой тип: потребители, которым нужны ходы (quota-watcher, разбор сессий),
+    // фильтруют `stream`; модель квоты обязана видеть и `keepalive`.
+    type: isKa ? 'keepalive' : 'stream',
+    model: ev.model ?? '?',
+    ...(org ? { org } : {}),
+    ...(ev.sessionId ? { ses: ev.sessionId } : {}),
+    usage: projectUsage(ev.usage),
+    rateLimit: {
+      status: (ev.rateLimit as any)?.status ?? null,
+      util5h,
+      util7d,
+      // 🔴 ВРЕМЯ СБРОСА ТЕРЯЛОСЬ ИМЕННО ЗДЕСЬ, И ЭТОТ ЖЕ ФАЙЛ ОБЕЩАЛ ЕГО ДВАЖДЫ.
+      //
+      // Тип строки выше объявляет `resetAt?`, шапка модуля описывает его словами («present only
+      // when upstream gave a reset hint»), потребитель (quota-watcher) ждёт его в той же форме —
+      // а сборка события клала три поля из четырёх. Заголовок при этом приходит на КАЖДОМ ответе
+      // (замерено 2026-08-17: `anthropic-ratelimit-unified-reset: 1787016000` вместе с
+      // `unified-5h-reset` того же значения, 12054 раза в собственном логе заголовков), и SDK
+      // читал его верно.
+      //
+      // Цена молчания видна была всем: `resetAt: null` во всех аккаунтах и предупреждение прокси
+      // «Reset in nullmin. STOP NEW WORK» — механизм пытался назвать время и печатал пустоту.
+      // Фаундер спросил прямо: «показывает ли 5h квота, во сколько она будет сброшена».
+      ...((ev.rateLimit as any)?.resetAt != null ? { resetAt: (ev.rateLimit as any).resetAt } : {}),
+      // И ВТОРОЕ ОКНО — ровно тем же способом. Вчерашняя починка довезла пятичасовое и оставила
+      // недельное лежать в SDK: `resetAt7d` читается в proxy-client.ts:2801 из собственного
+      // заголовка `anthropic-ratelimit-unified-7d-reset`, но во всём claude-max-proxy/src/ не
+      // встречался ни разу. Потребитель (реестр присутствия, подвал сообщений фаундера) ждёт оба.
+      ...((ev.rateLimit as any)?.resetAt7d != null ? { resetAt7d: (ev.rateLimit as any).resetAt7d } : {}),
+    },
+  }
+  return line
+}
+
+/**
  * Start the stats emitter. Returns an unsubscribe fn (for hot-stop / tests).
  * Mirrors startLogger(cfg)'s lifecycle so server.ts wires it the same way.
  */
@@ -168,49 +231,8 @@ export function startStatsEmitter(): () => void {
     // Only responses carrying rate-limit utilisation feed the quota processor.
     if (e.kind !== 'REAL_REQUEST_COMPLETE' && e.kind !== 'KA_FIRE_COMPLETE') return
 
-    const ev = e as RealRequestCompleteEvent | KaFireCompleteEvent
-    const util5h = ev.rateLimit?.util5h ?? null
-    const util7d = ev.rateLimit?.util7d ?? null
-    // The processor skips lines with no util on both axes — don't bother writing them.
-    if (util5h === null && util7d === null) return
-
-    // Org precedence: the EVENT's per-request org (multi-org proxy — the org
-    // whose token actually served this request) wins; the credentials-file
-    // fallback covers pre-multi-org SDK builds / unpinned sessions.
-    const org = ev.org ?? currentOrgKey()
-    const line: StatsLine = {
-      v: STATS_SCHEMA_VERSION,
-      ts: ev.ts,
-      pid: PROXY_PID,
-      type: 'stream',
-      model: ev.model ?? '?',
-      ...(org ? { org } : {}),
-      ...(ev.sessionId ? { ses: ev.sessionId } : {}),
-      usage: projectUsage(ev.usage),
-      rateLimit: {
-        status: (ev.rateLimit as any)?.status ?? null,
-        util5h,
-        util7d,
-        // 🔴 ВРЕМЯ СБРОСА ТЕРЯЛОСЬ ИМЕННО ЗДЕСЬ, И ЭТОТ ЖЕ ФАЙЛ ОБЕЩАЛ ЕГО ДВАЖДЫ.
-        //
-        // Тип строки выше объявляет `resetAt?`, шапка модуля описывает его словами («present only
-        // when upstream gave a reset hint»), потребитель (quota-watcher) ждёт его в той же форме —
-        // а сборка события клала три поля из четырёх. Заголовок при этом приходит на КАЖДОМ ответе
-        // (замерено 2026-08-17: `anthropic-ratelimit-unified-reset: 1787016000` вместе с
-        // `unified-5h-reset` того же значения, 12054 раза в собственном логе заголовков), и SDK
-        // читал его верно.
-        //
-        // Цена молчания видна была всем: `resetAt: null` во всех аккаунтах и предупреждение прокси
-        // «Reset in nullmin. STOP NEW WORK» — механизм пытался назвать время и печатал пустоту.
-        // Фаундер спросил прямо: «показывает ли 5h квота, во сколько она будет сброшена».
-        ...((ev.rateLimit as any)?.resetAt != null ? { resetAt: (ev.rateLimit as any).resetAt } : {}),
-        // И ВТОРОЕ ОКНО — ровно тем же способом. Вчерашняя починка довезла пятичасовое и оставила
-        // недельное лежать в SDK: `resetAt7d` читается в proxy-client.ts:2801 из собственного
-        // заголовка `anthropic-ratelimit-unified-7d-reset`, но во всём claude-max-proxy/src/ не
-        // встречался ни разу. Потребитель (реестр присутствия, подвал сообщений фаундера) ждёт оба.
-        ...((ev.rateLimit as any)?.resetAt7d != null ? { resetAt7d: (ev.rateLimit as any).resetAt7d } : {}),
-      },
-    }
+    const line = buildStatsLine(e)
+    if (!line) return
     appendStatsLine(line)
   })
 

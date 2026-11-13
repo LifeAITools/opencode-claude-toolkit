@@ -78,7 +78,8 @@ import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { chooseBirthOrg, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
 import { getCompatVersion } from './subscription-compat.js'
-import { PlacementController, loadPlacementControl } from './placement-control.js'
+import { PlacementController, loadPlacementControl, loadModelAllowlist } from './placement-control.js'
+import { orgsAllowedForModel } from './org-model-allowlist.js'
 import { sessionClass } from './placement-pid.js'
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
@@ -1637,7 +1638,7 @@ export class ProxyClient {
    * Организация для НОВОЙ сессии (нет пина ни в памяти, ни в хранилище). `null` — оставить
    * прежний выбор (активная организация машины). Живая сессия сюда не попадает никогда.
    */
-  private chooseOrgForNewSession(sessionId: string): string | null {
+  private chooseOrgForNewSession(sessionId: string, model: string, activeOrg: string | null): string | null {
     const now = Date.now()
     const candidates: Array<{ orgId: string; needsRelogin: boolean; tokenAlive: boolean }> = []
     const seen = new Set<string>()
@@ -1654,6 +1655,34 @@ export class ProxyClient {
     const active = this.orgIdResolver.current()
     if (active) add(active)
     for (const e of this.orgVault.list()) add(e.orgId)
+    // ── ОРГАНИЗАЦИЯ ПОД МОДЕЛЬ (слово фаундера 13.11, TG 85103) ────────────────────────────
+    // Отсев ДО выбора и независимо от регулятора: модель, закреплённая за организацией, туда и
+    // только туда; организация со списком не берёт чужих моделей. Иначе выбор по запасу отдал
+    // бы свободную Fable-организацию первому же Opus — и сжёг бы объём, ради которого её держат.
+    const rules = loadModelAllowlist(this.placementConfigPath)
+    const fit = orgsAllowedForModel(rules, candidates.map(c => c.orgId), model)
+    const fitSet = new Set(fit.allowed)
+    if (rules.size > 0) {
+      const dropped = candidates.filter(c => !fitSet.has(c.orgId)).map(c => c.orgId.slice(0, 8))
+      candidates.splice(0, candidates.length, ...candidates.filter(c => fitSet.has(c.orgId)))
+      if (dropped.length > 0) {
+        this.events.emit({
+          level: 'info', kind: 'ORG_MODEL_FILTER', sessionId,
+          msg: `модель ${model}: ${fit.exclusive ? 'закреплена за' : 'не допущена на'} ${fit.exclusive ? fit.allowed.map(o => o.slice(0, 8)).join(', ') || 'НИ ОДНУ живую' : dropped.join(', ')}`,
+        })
+      }
+    }
+    // Правило сильнее «прежнего поведения»: если активная организация модели запрещена или
+    // модель закреплена за другой, решение «сравнивать не с чем» не вправе оставить сессию
+    // на активной. Возвращаем лучшую из разрешённых живых — или null, если таких нет.
+    const ruleFallback = (): string | null => {
+      if (rules.size === 0) return null
+      if (activeOrg && fitSet.has(activeOrg)) return null          // активная разрешена — как раньше
+      const live = candidates.filter(c => c.tokenAlive && !c.needsRelogin)
+      if (live.length === 0) return null
+      const util = (o: string) => Math.max(0, ...(this.orgUsage.get(o)?.windows ?? []).map(w => w.util ?? 0))
+      return [...live].sort((a, b) => util(a.orgId) - util(b.orgId))[0]!.orgId
+    }
     const pinsByOrg = new Map<string, number>()
     for (const p of this.sessionPins.values()) {
       if (p.orgId) pinsByOrg.set(p.orgId, (pinsByOrg.get(p.orgId) ?? 0) + 1)
@@ -1690,6 +1719,15 @@ export class ProxyClient {
         msg: `new session placed by headroom: ${r.plan.reason}${r.control ? ` · регулятор: ${r.control}` : ''}`,
         ranked: r.plan.ranked.map(a => ({ org: a.name.slice(0, 8), verdict: a.verdict, agents: a.activeAgents, pressureH: Number.isFinite(a.pressureHours) ? +a.pressureHours.toFixed(1) : null })),
       })
+      return r.orgId
+    }
+    const forced = ruleFallback()
+    if (forced) {
+      this.events.emit({
+        level: 'info', kind: 'ORG_PLACED', sessionId, orgId: forced,
+        msg: `new session placed by model rule: ${model} → ${forced.slice(0, 8)} (выбор по запасу: ${r.skipped ?? 'нет'})`,
+      })
+      return forced
     }
     return r.orgId
   }
@@ -2104,7 +2142,30 @@ export class ProxyClient {
       // потребителя), cache-less (пина нет по построению — идёт за живой учёткой).
       if (!this.sessionPins.has(sessionId) && !this.orgVault.getPin(sessionId)
           && !reloadAsked && !cacheOptOut && !(followId && followId !== sessionId)) {
-        const birthOrg = this.chooseOrgForNewSession(sessionId)
+        const birthOrg = this.chooseOrgForNewSession(sessionId, String(model), account.orgId)
+        // 🔴 ПРАВИЛО МОДЕЛИ НЕЛЬЗЯ ОБОЙТИ «ПРЕЖНИМ ПОВЕДЕНИЕМ». Выбор вернул null, а активная
+        // организация модели запрещена (Opus на Fable-организации, Fable на чужой) — тихо сесть на
+        // активную значит сжечь ровно тот объём, ради которого правило заведено. Отказ, а не трата.
+        if (!birthOrg) {
+          const rules = loadModelAllowlist(this.placementConfigPath)
+          const fit = orgsAllowedForModel(rules, account.orgId ? [account.orgId] : [], String(model))
+          if (rules.size > 0 && account.orgId && fit.allowed.length === 0) {
+            this.events.emit({
+              level: 'error', kind: 'MODEL_GUARD_BLOCKED', sessionId, orgId: account.orgId,
+              msg: `модель ${model} не допущена на организацию ${account.orgId.slice(0, 8)}, другой разрешённой живой нет`,
+            })
+            return jsonResponse(400, {
+              error: {
+                type: 'model_guard',
+                // Начало «Model guard» — контракт, как «Cache guard» / «Quota guard»: у CLI нет
+                // класса для нашего 400, соседи опознают отказ по этому началу.
+                message: `Model guard: model ${model} is not allowed on organization ${account.orgId.slice(0, 8)} `
+                  + `(~/.claude/placement.json → orgModels), and no other live organization allows it. `
+                  + `Log into an organization that allows this model, or pick another model.`,
+              },
+            })
+          }
+        }
         if (birthOrg && birthOrg !== account.orgId) {
           const tok = await this.withFreshOrgToken(birthOrg, { reason: 'birth-placement' })
           const ve = this.orgVault.get(birthOrg)

@@ -23,6 +23,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { pidStep, newPidState, type PidGains, type PidLimits, type PidAdaptation, type PidState, type PidOutput } from './placement-pid.js'
 import type { PlacementWindow } from './placement.js'
+import { parseModelAllowlist, type ModelAllowlist } from './org-model-allowlist.js'
 
 export interface DrainEntry { org: string; targetUtil: number; deadlineMs: number }
 
@@ -80,6 +81,24 @@ export function parsePlacementControl(raw: any): PlacementControlConfig {
       kDefault: num(raw?.kDefault, CALIBRATED.adapt.kDefault, 0, 1),
       driftPerHour: num(raw?.driftPerHour, CALIBRATED.adapt.driftPerHour, 0, 0.5),
     },
+  }
+}
+
+let cachedRules: { mtimeMs: number; path: string; rules: ModelAllowlist } | null = null
+/**
+ * Правило «организация под модель» из того же файла (поле `orgModels`). Читается ОТДЕЛЬНО от
+ * `enabled`: это ограничение, а не настройка регулятора, и действует при выключенном ПИД.
+ * Нет файла / нет поля — пустое правило, выбор прежний.
+ */
+export function loadModelAllowlist(path = DEFAULT_PLACEMENT_CONFIG_PATH): ModelAllowlist {
+  try {
+    const m = statSync(path).mtimeMs
+    if (cachedRules && cachedRules.path === path && cachedRules.mtimeMs === m) return cachedRules.rules
+    const rules = parseModelAllowlist(JSON.parse(readFileSync(path, 'utf8')))
+    cachedRules = { mtimeMs: m, path, rules }
+    return rules
+  } catch {
+    return new Map()
   }
 }
 

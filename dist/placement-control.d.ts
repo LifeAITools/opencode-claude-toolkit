@@ -1,5 +1,6 @@
 import { type PidGains, type PidLimits, type PidAdaptation, type PidOutput } from "./placement-pid.js";
 import type { PlacementWindow } from "./placement.js";
+import { type ModelAllowlist } from "./org-model-allowlist.js";
 export interface DrainEntry {
     org: string;
     targetUtil: number;
@@ -16,6 +17,7 @@ export interface PlacementControlConfig {
 export declare const CALIBRATED: Omit<PlacementControlConfig, "enabled" | "drain">;
 export declare const DEFAULT_PLACEMENT_CONFIG_PATH: string;
 export declare function parsePlacementControl(raw: any): PlacementControlConfig;
+export declare function loadModelAllowlist(path?: string): ModelAllowlist;
 export declare function loadPlacementControl(path?: string): PlacementControlConfig;
 export declare class PlacementController {
     private readonly states;

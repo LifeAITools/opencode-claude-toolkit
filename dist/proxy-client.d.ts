@@ -37,6 +37,7 @@ export interface ProxyClientOptions {
     claudeConfigDir?: string;
     accountConfigPath?: string;
     placementConfigPath?: string;
+    orgModelRules?: () => Record<string, string[]>;
     credentialsPath?: string;
     oauthRefresher?: (refreshToken: string) => Promise<RefreshedTokens>;
     acquireConfigLock?: (configDir: string) => Promise<(() => Promise<void>) | null>;
@@ -99,6 +100,7 @@ export declare class ProxyClient {
     private readonly sessionClassById;
     private readonly placementController;
     private placementConfigPath;
+    private orgModelRules;
     private lastBirthAt;
     private orgUsageStartedAt;
     private readonly kaSpend;
@@ -194,6 +196,7 @@ export declare class ProxyClient {
     _refreshOrgUsage(): Promise<void>;
     _ageOrgUsageStart(ms: number): void;
     _setOrgUsage(r: OrgUsageReading): void;
+    private modelRules;
     private chooseOrgForNewSession;
     private gcSessionPins;
     _gcSessionPins(now?: number): void;

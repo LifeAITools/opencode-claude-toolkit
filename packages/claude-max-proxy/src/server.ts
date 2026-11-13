@@ -264,6 +264,9 @@ const proxyClient = new ProxyClient({
   },
   credentialsProvider: credentialsAdapter,
   eventEmitter: new BusEventEmitterAdapter(),
+  // Модели организаций Anthropic — из реестра провайдеров (слово фаундера 13.11, TG 85158).
+  orgModelRules: anthropicOrgModelRules(providerRegistryPath(), msg =>
+    console.error(`[claude-max-proxy] реестр провайдеров не разобран — правило моделей Anthropic держит прежнее: ${msg}`)),
   // Custom liveness: PID check + Worker managed session override.
   livenessChecker: {
     isAlive(pid: number): boolean {
@@ -422,6 +425,7 @@ import { createOpenAICompatModule } from './modules/openai-compat.js'
 import { createSparkResponsesModule } from './modules/spark-responses.js'
 import { createGoDoorModule, goDoorReadiness } from './modules/go-door.js'
 import { createOpenDesignDoorModule } from './modules/open-design-door.js'
+import { anthropicOrgModelRules, providerRegistryPath } from './anthropic-org-models.js'
 
 // Compat version: configured value is the FLOOR; the installed Claude Code wins when
 // newer (the API gates new models on client version — see cc-version.ts).

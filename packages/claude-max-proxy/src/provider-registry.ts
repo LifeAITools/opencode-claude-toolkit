@@ -30,6 +30,13 @@ export interface ProviderDecl {
   /** Где лежат ключи аккаунтов: email → ИМЯ переменной окружения (не сам секрет). */
   accountKeys?: Array<{ email: string; keyEnv: string }>
   quota?: { adapter: string } & Record<string, unknown>
+  /**
+   * Модели на уровне ОРГАНИЗАЦИИ (слово фаундера 13.11.2026, TG 85158): организация,
+   * объявившая свой список, обслуживает только его, а модель из такого списка садится только
+   * туда. Организации без записи — общие. Распределитель Anthropic читает правило ОТСЮДА —
+   * второго списка нет.
+   */
+  orgModels?: Array<{ org: string; name?: string; models: string[] }>
 }
 
 export interface ModelPreference {
@@ -87,9 +94,29 @@ export function parseProviderRegistry(text: string): ProviderRegistry {
             .filter((k: { email: string; keyEnv: string }) => k.email && k.keyEnv)
         : undefined,
       quota: p.quota && typeof p.quota === 'object' ? { adapter: str(p.quota.adapter), ...p.quota } : undefined,
+      orgModels: Array.isArray(p.org_models)
+        ? p.org_models.flatMap((o: any) => {
+            const org = str(o?.org)
+            if (!org || !Array.isArray(o?.models)) return []
+            const models = o.models.map(str).filter(Boolean)
+            if (!models.length) return []
+            return [{ org, ...(o.name ? { name: str(o.name) } : {}), models }]
+          })
+        : undefined,
     })
   }
   if (!providers.length) throw new ProviderRegistryError('реестр провайдеров пуст')
+  // Модель организации, которой провайдер не объявил, — опечатка, а не правило: такая
+  // организация молча осталась бы без моделей вовсе. Громко, при разборе.
+  for (const p of providers) {
+    for (const o of p.orgModels ?? []) {
+      for (const m of o.models) {
+        if (!p.models.some(pm => modelMatches(m, pm) || modelMatches(pm, m))) {
+          throw new ProviderRegistryError(`организация «${o.org}» провайдера «${p.id}» называет модель «${m}», которой нет в его models`)
+        }
+      }
+    }
+  }
   const ids = new Set(providers.map(p => p.id))
   const prefs: ModelPreference[] = []
   for (const m of raw.model_preferences ?? []) {
@@ -178,6 +205,13 @@ export function keyEnvFor(reg: ProviderRegistry, provider: string, email: string
 }
 
 /** Все модели провайдера — для проверки «а эту модель он вообще обслуживает». */
+/** Правило «организация → её модели» одного провайдера, в форме { orgId: [модели] }. */
+export function orgModelRulesFor(reg: ProviderRegistry, providerId: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const o of reg.providers.find(p => p.id === providerId)?.orgModels ?? []) out[o.org] = [...o.models]
+  return out
+}
+
 export function modelsOf(reg: ProviderRegistry, providerId: string): string[] {
   return reg.providers.find(p => p.id === providerId)?.models ?? []
 }

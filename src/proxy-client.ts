@@ -79,7 +79,7 @@ import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { chooseBirthOrg, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
 import { getCompatVersion } from './subscription-compat.js'
 import { PlacementController, loadPlacementControl, loadModelAllowlist } from './placement-control.js'
-import { orgsAllowedForModel } from './org-model-allowlist.js'
+import { orgsAllowedForModel, parseModelAllowlist, type ModelAllowlist } from './org-model-allowlist.js'
 import { sessionClass } from './placement-pid.js'
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
@@ -352,6 +352,13 @@ export interface ProxyClientOptions {
   accountConfigPath?: string
   /** Файл ручки распределителя (`~/.claude/placement.json` по умолчанию). */
   placementConfigPath?: string
+  /**
+   * Правило «организация Anthropic → её модели» из реестра провайдеров потребителя
+   * (claude-max-proxy: config/providers.yaml → anthropic.org_models; слово фаундера 13.11,
+   * TG 85158 — одно место знания). Зовётся на каждый выбор, чтобы правка реестра бралась
+   * без перезапуска. Нет функции — только `orgModels` в файле распределителя (запасной путь).
+   */
+  orgModelRules?: () => Record<string, string[]>
 
   /**
    * Optional: path to `.credentials.json` (the active org's on-disk credential).
@@ -681,6 +688,7 @@ export class ProxyClient {
   private readonly placementController = new PlacementController()
   /** Путь файла ручки; тесты подставляют свой. */
   private placementConfigPath: string | undefined
+  private orgModelRules: (() => Record<string, string[]>) | undefined
   /** Момент последнего рождения сессии — «был ли приток» для anti-windup регулятора. */
   private lastBirthAt = 0
   /** Старт процесса: справочный вызов не раньше чем через интервал после него (см. refreshOrgUsage). */
@@ -742,6 +750,7 @@ export class ProxyClient {
     this.claudeConfigDir = opts.claudeConfigDir ?? getClaudeConfigDir()
     this.accountConfigPath = opts.accountConfigPath
     this.placementConfigPath = opts.placementConfigPath
+    this.orgModelRules = opts.orgModelRules
     this.credentialsPath = opts.credentialsPath ?? getDefaultCredentialsPath()
     this.oauthRefresher = opts.oauthRefresher ?? refreshOAuthToken
     this.acquireConfigLock = opts.acquireConfigLock ?? acquireConfigDirLock
@@ -1638,6 +1647,19 @@ export class ProxyClient {
    * Организация для НОВОЙ сессии (нет пина ни в памяти, ни в хранилище). `null` — оставить
    * прежний выбор (активная организация машины). Живая сессия сюда не попадает никогда.
    */
+  /**
+   * Правило моделей: реестр провайдеров (основной источник) поверх `orgModels` файла
+   * распределителя (запасной). При одном и том же ключе организации побеждает реестр.
+   */
+  private modelRules(): ModelAllowlist {
+    const merged: ModelAllowlist = new Map(loadModelAllowlist(this.placementConfigPath))
+    try {
+      const fromRegistry = parseModelAllowlist({ orgModels: this.orgModelRules?.() ?? {} })
+      for (const [k, v] of fromRegistry) merged.set(k, v)
+    } catch { /* реестр недоступен — остаётся запасной источник; правило не смеет ронять ход */ }
+    return merged
+  }
+
   private chooseOrgForNewSession(sessionId: string, model: string, activeOrg: string | null): string | null {
     const now = Date.now()
     const candidates: Array<{ orgId: string; needsRelogin: boolean; tokenAlive: boolean }> = []
@@ -1659,7 +1681,7 @@ export class ProxyClient {
     // Отсев ДО выбора и независимо от регулятора: модель, закреплённая за организацией, туда и
     // только туда; организация со списком не берёт чужих моделей. Иначе выбор по запасу отдал
     // бы свободную Fable-организацию первому же Opus — и сжёг бы объём, ради которого её держат.
-    const rules = loadModelAllowlist(this.placementConfigPath)
+    const rules = this.modelRules()
     const fit = orgsAllowedForModel(rules, candidates.map(c => c.orgId), model)
     const fitSet = new Set(fit.allowed)
     if (rules.size > 0) {
@@ -2167,7 +2189,7 @@ export class ProxyClient {
       // no-live-account-migration), а тихая трата — ровно то, ради чего правило заведено.
       {
         const servingOrg = sel.held ? (this.sessionPins.get(sessionId)?.orgId ?? account.orgId) : account.orgId
-        const rules = loadModelAllowlist(this.placementConfigPath)
+        const rules = this.modelRules()
         if (rules.size > 0 && servingOrg && !sel.stop
             && orgsAllowedForModel(rules, [servingOrg], String(model)).allowed.length === 0) {
           this.events.emit({

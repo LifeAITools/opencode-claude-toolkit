@@ -3,7 +3,7 @@
  * куда идти за моделью, и что будет, если предпочтённый провайдер недоступен.
  */
 import { describe, expect, test } from 'bun:test'
-import { parseProviderRegistry, resolveModel, modelMatches, ProviderRegistryError, modelsOf, resolveCandidates } from './provider-registry.js'
+import { parseProviderRegistry, resolveModel, modelMatches, ProviderRegistryError, modelsOf, resolveCandidates, orgModelRulesFor } from './provider-registry.js'
 
 const YAML = `
 version: 1
@@ -133,5 +133,50 @@ account_overrides:
     const c = resolveCandidates(reg, 'deepseek-v4.1-flash', accs, new Date('2026-11-05T10:00:00Z'))
     expect(c[0].model).toBe('deepseek-v4.1-flash-od')
     expect(c.find(x => x.account === 'vip@x')!.why).toContain('личная организация')
+  })
+})
+
+// ── Модели на уровне ОРГАНИЗАЦИИ (слово фаундера 13.11.2026, TG 85158) ─────────────────
+// «у каждого провайдера … и соответствующие организации в этом провайдере есть предоставляемые
+// модели, чтобы балансировщик мог понимать, куда можно сажать». Одно место знания — этот реестр;
+// распределитель Anthropic читает его, а не второй список.
+describe('организация провайдера объявляет свои модели', () => {
+  const Y = `
+version: 1
+providers:
+  - id: anthropic
+    kind: oauth-cli
+    models: [claude-opus-5-5, claude-sonnet-5-5, claude-fable-5-2]
+    org_models:
+      - org: 7f3c0000-aaaa
+        name: рога и копыта
+        models: [claude-fable-5-2]
+      - org: ""
+        models: [x]
+      - org: bad
+        models: "not-a-list"
+`
+  const reg = parseProviderRegistry(Y)
+
+  test('разобраны только валидные записи', () => {
+    expect(reg.providers[0].orgModels).toEqual([{ org: '7f3c0000-aaaa', name: 'рога и копыта', models: ['claude-fable-5-2'] }])
+  })
+
+  test('orgModelRulesFor отдаёт правило провайдера в форме { orgId: [модели] }', () => {
+    expect(orgModelRulesFor(reg, 'anthropic')).toEqual({ '7f3c0000-aaaa': ['claude-fable-5-2'] })
+    expect(orgModelRulesFor(reg, 'opencode-go')).toEqual({})
+  })
+
+  test('модель организации обязана быть среди моделей провайдера', () => {
+    expect(() => parseProviderRegistry(`
+version: 1
+providers:
+  - id: anthropic
+    kind: oauth-cli
+    models: [claude-opus-5-5]
+    org_models:
+      - org: o1
+        models: [claude-fable-5-2]
+`)).toThrow(ProviderRegistryError)
   })
 })

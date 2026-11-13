@@ -102,6 +102,33 @@ providers:
       - deepseek-v4.1-flash-od
       - deepseek-v4.1-flash-eco-od
 
+  # ─── Anthropic (подписка Claude Max, вход OAuth через нативный `claude`) ─────────────
+  # Организации и их токены живут в ~/.claude-local/org-vault.json (их пишет сам прокси
+  # при входе) — здесь их НЕ перечисляем, чтобы не заводить второго писателя.
+  # 🔴 org_models — МОДЕЛИ НА УРОВНЕ ОРГАНИЗАЦИИ (слово фаундера 13.11.2026, TG 85103/85140/
+  # 85158): организация со списком обслуживает ТОЛЬКО его, модель из списка садится ТОЛЬКО туда,
+  # и ни reload, ни follow-session, ни старое закрепление этого не обходят (проверка на
+  # последнем шаге; нарушение — 400 «Model guard», живые сессии не переносятся). Организации
+  # без записи — общие. Правка берётся без перезапуска.
+  #   org_models:
+  #     - org: <orgId или его префикс>      # номер из /admin/orgs
+  #       name: <для человека>
+  #       models: [claude-fable-5-2]
+  - id: anthropic
+    kind: oauth-cli
+    accounts_from: ~/.claude-local/org-vault.json
+    models:
+      - claude-fable-5-2
+      - claude-fable-5-1
+      - claude-fable-5
+      - claude-opus-5-5
+      - claude-opus-5
+      - claude-sonnet-5-5
+      - claude-sonnet-5
+      - claude-haiku-5-5
+      - claude-opus-4-8
+    org_models: []
+
 model_preferences:
   # 🔴 ГЛАВНОЕ ПРАВИЛО ЭТОГО ФАЙЛА. DeepSeek V4.1 Flash на OpenCode Go есть по квоте, но
   # по качеству и скорости непригоден (слово фаундера). Идём в OpenDesign; если он

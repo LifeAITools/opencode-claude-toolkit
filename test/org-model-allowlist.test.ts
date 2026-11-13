@@ -64,7 +64,7 @@ const SSE = 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 let seq = 0
 const body = (model: string) => JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] })
 
-function setup(active: 'org-a' | 'org-f', withB = true) {
+function setup(active: 'org-a' | 'org-f', withB = true, opts: { fileRule?: boolean; registryRule?: Record<string, string[]> } = {}) {
   const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
   const exp = Date.now() + 3 * H
   const tok = (o: string) => `tok-${o}`
@@ -73,7 +73,7 @@ function setup(active: 'org-a' | 'org-f', withB = true) {
   vault.upsert({ orgId: 'org-f', accessToken: tok('org-f'), refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
   writeFileSync(ISOLATED.credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: tok(active), refreshToken: null, expiresAt: exp } }))
   const cfg = join(TMP, `placement-${seq++}.json`)
-  writeFileSync(cfg, JSON.stringify({ enabled: false, orgModels: { 'org-f': ['claude-fable-5-2'] } }))
+  writeFileSync(cfg, JSON.stringify(opts.fileRule === false ? { enabled: false } : { enabled: false, orgModels: { 'org-f': ['claude-fable-5-2'] } }))
   const auth: string[] = []
   const c = new ProxyClient({
     config: { kaCacheTtlSec: 1 },
@@ -86,6 +86,7 @@ function setup(active: 'org-a' | 'org-f', withB = true) {
     proxyStartedAt: 0,
     orgVault: vault,
     placementConfigPath: cfg,
+    ...(opts.registryRule ? { orgModelRules: () => opts.registryRule! } : {}),
     ...ISOLATED,
   } as ProxyClientOptions)
   const now = Date.now()
@@ -212,6 +213,36 @@ describe('ProxyClient — модель и организация при рожд
     expect(((await r.json()) as any).error?.message).toContain('Start a NEW session')
     expect(auth).toHaveLength(0)
     expect(vault.getPin('old-fable')).toEqual({ orgId: 'org-a' })   // пин не тронут
+    c.stop()
+  })
+})
+
+// Слово фаундера 13.11 (TG 85158): модели организации объявляются там же, где провайдер и его
+// организации, — в реестре провайдеров. Клиент получает правило оттуда через orgModelRules.
+describe('правило из реестра провайдеров (orgModelRules)', () => {
+  test('без файла распределителя: реестр один закрывает Fable-организацию от Opus', async () => {
+    const { c, auth } = setup('org-a', true, { fileRule: false, registryRule: { 'org-f': ['claude-fable-5-2'] } })
+    await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'reg-opus' })
+    expect(auth.at(-1)).not.toBe('Bearer tok-org-f')
+    await c.handleRequest(body('claude-fable-5-2'), {}, { sessionId: 'reg-fable' })
+    expect(auth.at(-1)).toBe('Bearer tok-org-f')
+    c.stop()
+  })
+
+  test('один ключ в обоих источниках — побеждает реестр', async () => {
+    // файл: org-f только Fable; реестр: org-f — Fable и Opus → Opus на org-f допустим
+    const { c, auth } = setup('org-f', true, { registryRule: { 'org-f': ['claude-fable-5-2', 'claude-opus-5-5'] } })
+    const r = await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'reg-wins' })
+    expect(r.status).not.toBe(400)
+    c.stop()
+  })
+
+  test('реестр бросил — правило из файла продолжает действовать, ход не падает', async () => {
+    const { c, auth } = setup('org-a', true, {})
+    ;(c as any).orgModelRules = () => { throw new Error('registry unreadable') }
+    const r = await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'reg-broken' })
+    expect(r.status).not.toBe(500)
+    expect(auth.at(-1)).not.toBe('Bearer tok-org-f')
     c.stop()
   })
 })

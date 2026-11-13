@@ -176,11 +176,42 @@ describe('ProxyClient — модель и организация при рожд
     c.stop()
   })
 
-  test('живая сессия не переезжает, когда правило появилось после её рождения', async () => {
+  // Слово фаундера 13.11 (TG 85140): «ни опус, ни санет не пытались даже, если остальные
+  // организации будут загружены». Выбор при рождении — не единственный путь к организации:
+  // [%reload-ok%] сажает на ТЕКУЩИЙ вход машины, а после входа в Fable-организацию текущей
+  // станет именно она. Правило обязано стоять на последнем шаге — перед отправкой.
+  test('[%reload-ok%] не сажает Opus на Fable-организацию, когда она — текущий вход', async () => {
+    const { c, auth } = setup('org-f')
+    const reload = JSON.stringify({ model: 'claude-opus-5-5', messages: [{ role: 'user', content: 'go [%reload-ok%]' }] })
+    const r = await c.handleRequest(reload, {}, { sessionId: 'opus-reload' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { type?: string } }
+    expect(j.error?.type).toBe('model_guard')
+    expect(auth.some(a => a === 'Bearer tok-org-f')).toBe(false)
+    c.stop()
+  })
+
+  test('старая Opus-сессия, закреплённая на организации ДО правила, тоже не тратит её', async () => {
     const { c, auth, vault } = setup('org-a')
-    vault.setPin('old-fable', 'org-a')                 // Fable-сессия, родившаяся до правила
-    await c.handleRequest(body('claude-fable-5-2'), {}, { sessionId: 'old-fable' })
-    expect(auth.at(-1)).toBe('Bearer tok-org-a')
+    vault.setPin('old-opus', 'org-f')
+    const r = await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'old-opus' })
+    expect(r.status).toBe(400)
+    expect(auth.some(a => a === 'Bearer tok-org-f')).toBe(false)
+    c.stop()
+  })
+
+  // Fable, родившаяся на org-a ДО правила: переносить живую сессию нельзя (рельса
+  // no-live-account-migration — перенос = разовая перезапись всего контекста), а тратить org-a
+  // на Fable правило запрещает («Fable уходит только на эту организацию», TG 85140). Значит —
+  // названный отказ с советом начать новую сессию, и НИ ОДНОГО запроса ни на org-a, ни на org-f.
+  test('живая Fable-сессия на чужой организации: не переносится и не тратит её — отказ', async () => {
+    const { c, auth, vault } = setup('org-a')
+    vault.setPin('old-fable', 'org-a')
+    const r = await c.handleRequest(body('claude-fable-5-2'), {}, { sessionId: 'old-fable' })
+    expect(r.status).toBe(400)
+    expect(((await r.json()) as any).error?.message).toContain('Start a NEW session')
+    expect(auth).toHaveLength(0)
+    expect(vault.getPin('old-fable')).toEqual({ orgId: 'org-a' })   // пин не тронут
     c.stop()
   })
 })

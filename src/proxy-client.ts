@@ -2143,29 +2143,6 @@ export class ProxyClient {
       if (!this.sessionPins.has(sessionId) && !this.orgVault.getPin(sessionId)
           && !reloadAsked && !cacheOptOut && !(followId && followId !== sessionId)) {
         const birthOrg = this.chooseOrgForNewSession(sessionId, String(model), account.orgId)
-        // 🔴 ПРАВИЛО МОДЕЛИ НЕЛЬЗЯ ОБОЙТИ «ПРЕЖНИМ ПОВЕДЕНИЕМ». Выбор вернул null, а активная
-        // организация модели запрещена (Opus на Fable-организации, Fable на чужой) — тихо сесть на
-        // активную значит сжечь ровно тот объём, ради которого правило заведено. Отказ, а не трата.
-        if (!birthOrg) {
-          const rules = loadModelAllowlist(this.placementConfigPath)
-          const fit = orgsAllowedForModel(rules, account.orgId ? [account.orgId] : [], String(model))
-          if (rules.size > 0 && account.orgId && fit.allowed.length === 0) {
-            this.events.emit({
-              level: 'error', kind: 'MODEL_GUARD_BLOCKED', sessionId, orgId: account.orgId,
-              msg: `модель ${model} не допущена на организацию ${account.orgId.slice(0, 8)}, другой разрешённой живой нет`,
-            })
-            return jsonResponse(400, {
-              error: {
-                type: 'model_guard',
-                // Начало «Model guard» — контракт, как «Cache guard» / «Quota guard»: у CLI нет
-                // класса для нашего 400, соседи опознают отказ по этому началу.
-                message: `Model guard: model ${model} is not allowed on organization ${account.orgId.slice(0, 8)} `
-                  + `(~/.claude/placement.json → orgModels), and no other live organization allows it. `
-                  + `Log into an organization that allows this model, or pick another model.`,
-              },
-            })
-          }
-        }
         if (birthOrg && birthOrg !== account.orgId) {
           const tok = await this.withFreshOrgToken(birthOrg, { reason: 'birth-placement' })
           const ve = this.orgVault.get(birthOrg)
@@ -2180,6 +2157,36 @@ export class ProxyClient {
         if (account.orgId) this.orgVault.setPin(sessionId, account.orgId)
       }
       const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now(), cacheOptOut)
+      // ══ MODEL GUARD — организация под модель, ПОСЛЕДНИЙ ШАГ ═══════════════════════════════
+      // Слово фаундера 13.11 (TG 85103/85140): Fable-организация — только Fable, «ни опус, ни
+      // санет не пытались даже». Выбор при рождении — не единственный путь к организации:
+      // [%reload-ok%] сажает на текущий вход машины (после входа в Fable-организацию — на неё),
+      // follow-session берёт организацию потребителя, старый пин жил до правила. Поэтому правило
+      // проверяется ЗДЕСЬ, когда организация запроса уже решена, — одно место на все пути.
+      // Отказ, а не перенос: живую сессию между организациями не двигаем (рельса
+      // no-live-account-migration), а тихая трата — ровно то, ради чего правило заведено.
+      {
+        const servingOrg = sel.held ? (this.sessionPins.get(sessionId)?.orgId ?? account.orgId) : account.orgId
+        const rules = loadModelAllowlist(this.placementConfigPath)
+        if (rules.size > 0 && servingOrg && !sel.stop
+            && orgsAllowedForModel(rules, [servingOrg], String(model)).allowed.length === 0) {
+          this.events.emit({
+            level: 'error', kind: 'MODEL_GUARD_BLOCKED', sessionId, orgId: servingOrg,
+            msg: `модель ${model} не допущена на организацию ${servingOrg.slice(0, 8)} (orgModels) — ход не отправлен`,
+          })
+          return jsonResponse(400, {
+            error: {
+              type: 'model_guard',
+              // Начало «Model guard» — контракт, как «Cache guard» / «Quota guard»: у CLI нет
+              // класса для нашего 400, соседи опознают отказ по этому началу.
+              message: `Model guard: model ${model} is not allowed on organization ${servingOrg.slice(0, 8)} `
+                + `(~/.claude/placement.json → orgModels). This organization is reserved for other models. `
+                + `Start a NEW session (it will be placed on an organization that allows ${model}), `
+                + `log into such an organization, or pick a model this organization allows.`,
+            },
+          })
+        }
+      }
       if (sel.stop) {
         this.events.emit({
           level: 'error',

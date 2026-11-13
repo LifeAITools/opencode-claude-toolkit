@@ -51,6 +51,7 @@ import { computeGoWindows, GO_MODEL_MONTHLY_LIMIT_USD } from './provider-go-usag
 import { readUnifiedQuota } from './provider-unified-quota'
 import { stampSessionLaunch } from './session-stamp'
 import { describeProviderQuota, PROVIDER_QUOTA_ENDPOINTS, queryProviderQuota, type ProviderQuota } from './provider-quota'
+import { emitAgentBeat, type AgentBeatEvent } from './agent-beat'
 
 const DEBUG = process.env.OPENCODE_SIGNAL_WIRE_DEBUG !== '0'
 const LOG_FILE = join(homedir(), '.claude', 'opencode-signal-wire-debug.log')
@@ -114,6 +115,12 @@ function writePresence(state: 'busy' | 'idle'): void {
     child.on('error', () => { try { spawn(bin, args, { detached: true, stdio: 'ignore' }).unref() } catch { /* ignore */ } })
     child.unref()
   } catch { /* fail-open */ }
+}
+// Переходы хода в журнал двери `context agent beat` (решение фаундера 13.11: присутствие наружу —
+// через представителя машины; см. agent-beat.ts). Рядом с writePresence: те же границы, та же
+// схема «фоном и без ожидания», но провал назван строкой AGENT_BEAT_FAILED.
+function beat(event: AgentBeatEvent): void {
+  emitAgentBeat(event, { resolveBin: resolveCtxBin, cwd: process.cwd(), log: logStep })
 }
 // Клеймо запуска — один раз на процесс (реестр однократен, повтор безопасен).
 const stampGuard: { done?: boolean } = {}
@@ -928,6 +935,7 @@ export default {
           if (idleSession) {
             // Присутствие: конец хода (паритет с Stop → idle у claude).
             writePresence('idle')
+            beat('session.idle')
             try {
               // Канал `agent_text` на конце хода: проза ТОГО ЖЕ хода (та же, что копится из
               // `message.part.delta`). Читаем через `peek`, НЕ `take`: границу хода обнуляет
@@ -1009,6 +1017,7 @@ export default {
         if (eventType === 'session.created' && signalWireEngine) {
           const startedSession = extractSessionId(event)
           if (startedSession && isFirstSessionStart(startedSession)) {
+            beat('session.start')
             try {
               await signalWireEngine.evaluateHook({ source: 'plugin', type: 'session.start', sessionId: startedSession, timestamp: Date.now(), payload: {} })
               logStep('SESSION_START_FORWARDED', { sessionId: startedSession })
@@ -1098,6 +1107,7 @@ export default {
           if (serr && (!boundSessionId || serr.sessionId === boundSessionId)) {
             // Присутствие: ход оборван ошибкой — тоже конец хода (паритет с StopFailure → idle).
             writePresence('idle')
+            beat('session.idle')
             try {
               await signalWireEngine.evaluateHook({
                 source: 'plugin',
@@ -1276,6 +1286,7 @@ export default {
             idleContinuationSessions.delete(event.sessionId)
             // Присутствие в реестре: ход начался (паритет с UserPromptSubmit → busy у claude).
             writePresence('busy')
+            beat('chat.message')
             if (prevProse) {
               const payload = event.payload as { channels?: Record<string, string> }
               payload.channels = { ...(payload.channels ?? {}), agent_text: prevProse }

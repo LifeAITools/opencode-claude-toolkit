@@ -488,7 +488,7 @@ describe('запасной выбор: сравнивать не с чем — �
   })
 
   test('активная НЕ в стене — прежнее поведение, даже если замер старый', () => {
-    const r = chooseNonWalledFallback({ candidates: cand, readings: mk(0.99, 0.1), activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    const r = chooseNonWalledFallback({ candidates: cand, readings: mk(0.9, 0.1), activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
     expect(r.orgId).toBeNull()
     expect(r.reason).toContain('не в стене')
   })
@@ -567,7 +567,7 @@ describe('прокси: новая сессия при старых замера
   test('активная не в стене, замеры старые → остаёмся на активной', async () => {
     const { c, auth } = setup()
     const old = Date.now() - 2 * H
-    c._setOrgUsage({ orgId: 'org-a', measuredAt: old, windows: [{ name: '5h', util: 0.4, resetAt: old + H }, { name: 'week', util: 0.99, resetAt: Date.now() + 31 * H }] })
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: old, windows: [{ name: '5h', util: 0.4, resetAt: old + H }, { name: 'week', util: 0.9, resetAt: Date.now() + 31 * H }] })
     c._setOrgUsage({ orgId: 'org-b', measuredAt: old, windows: [{ name: '5h', util: 0.2, resetAt: old + H }, { name: 'week', util: 0.1, resetAt: Date.now() + 6 * 24 * H }] })
     await c.handleRequest(body(), {}, { sessionId: 'stale-free-1' })
     expect(auth.at(-1)).toBe('Bearer tok-a')
@@ -686,6 +686,78 @@ describe('снимок запаса при старте: пустая памят
     const { c, auth } = seededClient({ accounts: {} })
     await c.handleRequest(body(), {}, { sessionId: 'seed-missing' })
     expect(auth.at(-1)).toBe('Bearer tok-a')
+    c.stop()
+  })
+})
+
+// ── 14.11.2026, 12:06Z: у недельного окна 0.99 поставщик отвечает 429 задолго до 1.00
+// (oeliseva: retry-after 110 787 с, сброс 15.11 18:00Z). «0.99» — это стена, а не запас.
+describe('почти исчерпанная неделя — это стена, а не «лучше соседа»', () => {
+  const stale = NOW - 2 * H
+  const cand = [alive('org-active'), alive('org-free')]
+  const mk = (activeWeek: number, resetInH: number) => new Map([
+    ['org-active', { orgId: 'org-active', measuredAt: stale, windows: [{ name: '5h', util: 0.4, resetAt: NOW + resetInH * H }, { name: 'week', util: activeWeek, resetAt: NOW + resetInH * H }] }],
+    ['org-free', { orgId: 'org-free', measuredAt: stale, windows: [{ name: 'week', util: 0.1, resetAt: NOW + 6 * 24 * H }] }],
+  ])
+
+  test('неделя 0.99 со сбросом через 31 ч — активная запрещена, уходим', () => {
+    const r = chooseNonWalledFallback({ candidates: cand, readings: mk(0.99, 31), activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBe('org-free')
+  })
+
+  test('неделя 0.99, но сброс через 20 минут — не запрет: стена снимается сама', () => {
+    const readings = new Map([
+      ['org-active', { orgId: 'org-active', measuredAt: stale, windows: [{ name: 'week', util: 0.99, resetAt: NOW + 20 / 60 * H }] }],
+    ])
+    const r = chooseNonWalledFallback({ candidates: cand, readings, activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBeNull()
+  })
+
+  test('флаг «поставщик отказал» запрещает даже при util 0.5', () => {
+    const readings = new Map([
+      ['org-active', { orgId: 'org-active', measuredAt: stale, exhausted: true, windows: [{ name: '5h', util: 0.5, resetAt: NOW + 3 * H }] }],
+    ])
+    const r = chooseNonWalledFallback({ candidates: cand, readings, activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBe('org-free')
+  })
+})
+
+describe('снимок читает И `orgs`: знание об отказе не исчезает вместе с замером', () => {
+  function clientFromQuota(quotaFile: object) {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    const exp = Date.now() + 3 * H
+    vault.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    vault.upsert({ orgId: 'org-b', accessToken: 'tok-b', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    writeActiveCreds('tok-a', exp)
+    const qp = join(TMP, `quota-${seq++}.json`)
+    writeFileSync(qp, JSON.stringify(quotaFile))
+    const auth: string[] = []
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 1 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async (_u: string, init: any) => { auth.push(init.headers.authorization ?? init.headers.Authorization); return new Response(SSE, { status: 200, headers: { 'content-type': 'text/event-stream' } }) } },
+      orgUsageReader: { read: async () => null },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+      quotaStatusPath: qp,
+    } as ProxyClientOptions)
+    return { c, auth }
+  }
+
+  test('в `accounts` организации нет, а в `orgs` она exhausted — новая сессия её не берёт', async () => {
+    const now = Date.now()
+    const { c, auth } = clientFromQuota({
+      updatedAt: new Date(now).toISOString(),
+      accounts: {},                                        // свежего замера нет вовсе
+      orgs: [
+        { orgId: 'org-a', status: 'exhausted', windowsSource: 'carried', windowsAt: new Date(now - H).toISOString(), util5h: 0, util7d: 0.99, reset5hAt: null, reset7dAt: new Date(now + 30 * H).toISOString() },
+        { orgId: 'org-b', status: 'active', windowsSource: 'measured', windowsAt: new Date(now).toISOString(), util5h: 0.2, util7d: 0.1, reset5hAt: new Date(now + 3 * H).toISOString(), reset7dAt: new Date(now + 6 * 24 * H).toISOString() },
+      ],
+    })
+    await c.handleRequest(body(), {}, { sessionId: 'orgs-only-1' })
+    expect(auth.at(-1)).toBe('Bearer tok-b')
+    expect(c._getOrgUsage('org-a')?.exhausted).toBe(true)
     c.stop()
   })
 })

@@ -29,6 +29,36 @@ export interface OrgUsageReading {
   orgId: string
   windows: PlacementWindow[]
   measuredAt: number
+  /**
+   * Поставщик УЖЕ отказал этой организации (429 с retry-after): у окна может стоять 0.99, а
+   * приходить будут отказы до самого сброса. Это знание о стене, а не оценка запаса —
+   * поэтому оно запрещает посадку новой сессии, даже когда `util < 1`.
+   */
+  exhausted?: boolean
+}
+
+/**
+ * 🔴 «ПОЧТИ ИСЧЕРПАНО» — ЭТО ТОЖЕ СТЕНА. У недельного окна 0.99 и сброс через 30 часов
+ * поставщик отвечает 429 задолго до 1.00 (замер 14.11.2026: oeliseva при util7d 0.99 выдавала
+ * 429 с retry-after 110 787 с). Для выбора новой сессии это не «лучше, чем у соседа», а
+ * «сажать некуда». Порог назван здесь, а не размазан по коду.
+ */
+const WEEK_EFFECTIVELY_WALLED = 0.98
+/** Сброс ближе этого — стена снимается сама, и запрет был бы ложным. */
+const WALL_CLEARS_SOON_H = 1
+
+/** Окно исчерпано СЕЙЧАС: либо поставщик отказал, либо окно на 1.00, либо неделя у порога. */
+export function windowIsWalled(reading: OrgUsageReading | undefined, nowMs: number): boolean {
+  if (!reading) return false
+  if (reading.exhausted === true) return true
+  const resetInH = (w: PlacementWindow): number => (typeof w.resetAt === 'number' ? (w.resetAt - nowMs) / 3_600_000 : Infinity)
+  return reading.windows.some(w => {
+    if (typeof w.util !== 'number') return false
+    const soon = resetInH(w) <= WALL_CLEARS_SOON_H
+    if (w.util >= 1 && !soon) return true
+    if (w.name === 'week' && w.util >= WEEK_EFFECTIVELY_WALLED && resetInH(w) > WALL_CLEARS_SOON_H) return true
+    return false
+  })
 }
 
 /** `utilization` приходит в процентах (замер 12.11: 30.0 при 30%). Перевод в долю 0..1. */
@@ -177,11 +207,7 @@ export function chooseNonWalledFallback(input: {
 }): { orgId: string | null; reason: string } {
   const { candidates, readings, activeOrg, nowMs } = input
   if (!activeOrg) return { orgId: null, reason: 'активная организация неизвестна — прежнее поведение' }
-  const walledNow = (orgId: string): boolean => {
-    const r = readings.get(orgId)
-    if (!r || r.windows.length === 0) return false
-    return r.windows.some(w => typeof w.util === 'number' && w.util >= 1 && (w.resetAt === null || w.resetAt > nowMs))
-  }
+  const walledNow = (orgId: string): boolean => windowIsWalled(readings.get(orgId), nowMs)
   if (!walledNow(activeOrg)) {
     return { orgId: null, reason: `активная ${activeOrg.slice(0, 8)} не в стене — прежнее поведение` }
   }

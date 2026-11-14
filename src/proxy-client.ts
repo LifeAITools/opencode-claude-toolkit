@@ -1567,28 +1567,51 @@ export class ProxyClient {
   private seedOrgUsageFromQuotaStatus(): void {
     let raw: any
     try { raw = JSON.parse(readFileSync(this.quotaStatusPath, 'utf8')) } catch { return }
-    const accounts = raw?.accounts
-    if (!accounts || typeof accounts !== 'object') return
     const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
     const at = (v: unknown): number | null => {
       if (num(v) && v > 0) return v                       // epoch мс
       if (typeof v === 'string') { const t = Date.parse(v); return Number.isFinite(t) ? t : null }
       return null
     }
+    /** Окна из записи сторожа: NULL не становится нулём, окно просто не добавляется. */
+    const windowsOf = (a: any): OrgUsageReading['windows'] => {
+      const out: OrgUsageReading['windows'] = []
+      const add = (name: string, util: unknown, resetsAt: unknown, resetAtMs: unknown) => {
+        if (!num(util)) return
+        out.push({ name, util: Math.max(0, util), resetAt: at(resetAtMs) ?? at(resetsAt) })
+      }
+      add('5h', a?.util5h, a?.reset5hAt, a?.resetAt)
+      add('week', a?.util7d, a?.reset7dAt, a?.resetAt7d)
+      return out
+    }
+    // 🔴 ДВА ИСТОЧНИКА, И ОНИ ОТВЕЧАЮТ НА РАЗНЫЕ ВОПРОСЫ. `accounts` — свежий машинный
+    // замер сторожа (окна с issuedAt). `orgs` — ЗНАНИЕ ОБ ОРГАНИЗАЦИИ, включая «поставщик
+    // уже отказал» (status exhausted) и перенесённые (carried) окна с собственной датой
+    // windowsAt. Одного `accounts` мало: организация, в которую сейчас не ходят, из него
+    // исчезает — а именно она и бывает исчерпанной (замер 12:06Z: oeliseva есть в `orgs`
+    // как exhausted и отсутствует в `accounts`).
+    for (const o of Array.isArray(raw?.orgs) ? raw.orgs : []) {
+      const orgId = typeof o?.orgId === 'string' ? o.orgId : ''
+      if (!orgId) continue
+      const windows = windowsOf(o)
+      const measuredAt = at(o?.windowsAt) ?? at(o?.lastVerifiedAt) ?? at(raw?.updatedAt)
+      if (windows.length === 0 || measuredAt === null) continue
+      this.orgUsage.set(orgId, { orgId, windows, measuredAt, ...(o?.status === 'exhausted' ? { exhausted: true } : {}) })
+    }
+    const accounts = raw?.accounts
+    if (!accounts || typeof accounts !== 'object') return
     for (const [orgId, a] of Object.entries<any>(accounts)) {
       if (!orgId) continue
       const measuredAt = at(a?.issuedAt) ?? at(raw?.updatedAt)
       if (measuredAt === null) continue                   // без возраста показание не годится
-      const windows: OrgUsageReading['windows'] = []
-      const add = (name: string, util: unknown, resetsAt: unknown, resetAtMs: unknown) => {
-        if (!num(util)) return                              // NULL ≠ 0
-        const resetAt = at(resetAtMs) ?? at(resetsAt)
-        windows.push({ name, util: Math.max(0, util), resetAt })
-      }
-      add('5h', a?.util5h, a?.reset5hAt, a?.resetAt)
-      add('week', a?.util7d, a?.reset7dAt, a?.resetAt7d)
+      const windows = windowsOf(a)
       if (windows.length === 0) continue
-      this.orgUsage.set(orgId, { orgId, windows, measuredAt })
+      const prev = this.orgUsage.get(orgId)
+      this.orgUsage.set(orgId, {
+        orgId, windows, measuredAt,
+        // Отказ поставщика не отменяется свежим замером: он снимается только сбросом окна.
+        ...(prev?.exhausted ? { exhausted: true } : {}),
+      })
     }
   }
 

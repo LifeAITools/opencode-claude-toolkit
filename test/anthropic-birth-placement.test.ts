@@ -623,3 +623,69 @@ describe('выбор не состоялся — это записано, а н�
     c.stop()
   })
 })
+
+// ── 14.11.2026: после перезапуска прокси карта запасов ПУСТА, и первое рождение честно
+// получает «сравнивать не с чем». Снимок сторожа квоты поднимается при старте; NULL в нём —
+// не ноль (правило null-is-not-zero-in-measurements).
+describe('снимок запаса при старте: пустая память не роняет новую сессию в стену', () => {
+  function seededClient(quotaFile: object, events: any[] = []) {
+    const vaultPath = join(TMP, `vault-${seq++}.json`)
+    const exp = Date.now() + 3 * H
+    const vault = new OrgVault(vaultPath)
+    vault.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    vault.upsert({ orgId: 'org-b', accessToken: 'tok-b', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    writeActiveCreds('tok-a', exp)
+    const qp = join(TMP, `quota-${seq++}.json`)
+    writeFileSync(qp, JSON.stringify(quotaFile))
+    const auth: string[] = []
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 1 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async (_u: string, init: any) => { auth.push(init.headers.authorization ?? init.headers.Authorization); return new Response(SSE, { status: 200, headers: { 'content-type': 'text/event-stream' } }) } },
+      orgUsageReader: { read: async () => null },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+      quotaStatusPath: qp,
+      eventEmitter: { emit: (e: any) => events.push(e) },
+    } as ProxyClientOptions)
+    return { c, auth }
+  }
+  const iso = (d: number) => new Date(d).toISOString()
+
+  test('активная (org-a) в стене по снимку, org-b жива → сессия уходит на org-b', async () => {
+    const now = Date.now()
+    const { c, auth } = seededClient({
+      updatedAt: iso(now),
+      accounts: {
+        'org-a': { issuedAt: iso(now), util5h: 0.4, util7d: 1.0, resetAt: now + H, resetAt7d: now + 31 * H },
+        'org-b': { issuedAt: iso(now), util5h: 0.2, util7d: 0.1, resetAt: now + H, resetAt7d: now + 6 * 24 * H },
+      },
+    })
+    await c.handleRequest(body(), {}, { sessionId: 'seed-1' })
+    expect(auth.at(-1)).toBe('Bearer tok-b')
+    c.stop()
+  })
+
+  test('неделя в снимке NULL — окно НЕ добавляется (null не становится нулём)', async () => {
+    const now = Date.now()
+    const { c } = seededClient({
+      updatedAt: iso(now),
+      accounts: {
+        'org-a': { issuedAt: iso(now), util5h: 0.9, util7d: null, resetAt: now + H, resetAt7d: null },
+        'org-b': { issuedAt: iso(now), util5h: 0.2, util7d: 0.1, resetAt: now + H, resetAt7d: now + 6 * 24 * H },
+      },
+    })
+    const a = c._getOrgUsage('org-a')
+    expect(a?.windows.map(w => w.name)).toEqual(['5h'])      // недели нет вовсе
+    expect(c._getOrgUsage('org-b')?.windows.map(w => w.name)).toEqual(['5h', 'week'])
+    c.stop()
+  })
+
+  test('снимка нет — прежнее поведение (активная), и это не ошибка', async () => {
+    const { c, auth } = seededClient({ accounts: {} })
+    await c.handleRequest(body(), {}, { sessionId: 'seed-missing' })
+    expect(auth.at(-1)).toBe('Bearer tok-a')
+    c.stop()
+  })
+})

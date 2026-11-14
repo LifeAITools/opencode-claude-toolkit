@@ -288,6 +288,12 @@ export interface ProxyClientOptions {
   upstreamFetcher?: IUpstreamFetcher
   /** Чтение запаса организации без вызова модели (`/api/oauth/usage`). По умолчанию — сеть. */
   orgUsageReader?: IOrgUsageReader
+  /**
+   * Снимок запаса, уже измеренный на этой машине (пишет сторож квоты). Читается один раз при
+   * старте: после перезапуска прокси карта запасов пуста, и первое рождение видит «нечего
+   * сравнивать» — именно так 14.11.2026 сессия села в исчерпанную организацию.
+   */
+  quotaStatusPath?: string
 
   /** Optional: how to check PID liveness. Default: POSIX kill -0 */
   livenessChecker?: ILivenessChecker
@@ -547,6 +553,7 @@ export class ProxyClient {
   private readonly store: ISessionStore<KeepaliveEngine>
   private readonly upstream: IUpstreamFetcher
   private readonly orgUsageReader: IOrgUsageReader
+  private readonly quotaStatusPath: string
   private readonly liveness: ILivenessChecker
   /** След потока «греюсь» (PRP 09): живые дельты SSE → файл на сессию. */
   private readonly streamTracer = new StreamTracer(streamTraceDir())
@@ -741,6 +748,14 @@ export class ProxyClient {
     this.store = opts.sessionStore ?? new InMemorySessionStore<KeepaliveEngine>(this.liveness)
     this.upstream = opts.upstreamFetcher ?? new NativeFetchUpstream()
     this.orgUsageReader = opts.orgUsageReader ?? new NativeOrgUsageReader()
+    this.quotaStatusPath = opts.quotaStatusPath ?? join(homedir(), '.claude-local', 'quota-status.json')
+    // 🔴 ЗАПАС, УЖЕ ИЗМЕРЕННЫЙ НА МАШИНЕ, ПОДНИМАЕТСЯ ПРИ СТАРТЕ (14.11.2026, TG 85966/85967).
+    // Память прокси после перезапуска пуста, и первое рождение честно получает «свежо измерено
+    // 0 из 2» — то есть выбор не состоялся и сессия осталась на активной организации. Замер
+    // 11:13Z: активной была oeliseva с неделей 100% → 38 отказов 429 за час. Снимок сторожа
+    // квоты несёт те же окна с их собственным issuedAt: возраст у него свой и честный, поэтому
+    // строка без числа НЕ становится нулём (правило null-is-not-zero).
+    this.seedOrgUsageFromQuotaStatus()
     this.orgIdResolver = opts.orgIdResolver ?? new FileOrgIdResolver()
     this.prefixHistoryPath = opts.prefixHistoryPath ?? PREFIX_HISTORY_PATH
     this.rewriteBlockDumpDir = opts.rewriteBlockDumpDir ?? DEFAULT_REWRITE_DUMP_DIR
@@ -1538,6 +1553,46 @@ export class ProxyClient {
   async _runOrgProactiveSweep(): Promise<void> { return this.proactiveOrgSweep() }
 
   /**
+   * Снимок запаса, УЖЕ ИЗМЕРЕННЫЙ на этой машине (файл сторожа квоты), — в память прокси при
+   * старте. Ничего не опрашивает и ничего не выдумывает: у каждого окна остаётся СВОЙ `issuedAt`,
+   * поэтому возраст показания честный, и `chooseBirthOrg` сам решит, считать его свежим.
+   *
+   * 🔴 ОТСУТСТВУЮЩЕЕ ЧИСЛО — НЕ НОЛЬ. Поле `null`/отсутствует → окно не добавляется вовсе
+   * (правило null-is-not-zero-in-measurements): «не измерено» не должно притворяться нулевым
+   * расходом и не должно смещать выбор в сторону этой организации.
+   *
+   * Нет файла, битый файл, чужая форма — молча выходим: это подсказка, а не источник истины,
+   * и выбор обязан работать без неё (тогда просто «сравнивать не с чем», и это названо).
+   */
+  private seedOrgUsageFromQuotaStatus(): void {
+    let raw: any
+    try { raw = JSON.parse(readFileSync(this.quotaStatusPath, 'utf8')) } catch { return }
+    const accounts = raw?.accounts
+    if (!accounts || typeof accounts !== 'object') return
+    const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+    const at = (v: unknown): number | null => {
+      if (num(v) && v > 0) return v                       // epoch мс
+      if (typeof v === 'string') { const t = Date.parse(v); return Number.isFinite(t) ? t : null }
+      return null
+    }
+    for (const [orgId, a] of Object.entries<any>(accounts)) {
+      if (!orgId) continue
+      const measuredAt = at(a?.issuedAt) ?? at(raw?.updatedAt)
+      if (measuredAt === null) continue                   // без возраста показание не годится
+      const windows: OrgUsageReading['windows'] = []
+      const add = (name: string, util: unknown, resetsAt: unknown, resetAtMs: unknown) => {
+        if (!num(util)) return                              // NULL ≠ 0
+        const resetAt = at(resetAtMs) ?? at(resetsAt)
+        windows.push({ name, util: Math.max(0, util), resetAt })
+      }
+      add('5h', a?.util5h, a?.reset5hAt, a?.resetAt)
+      add('week', a?.util7d, a?.reset7dAt, a?.resetAt7d)
+      if (windows.length === 0) continue
+      this.orgUsage.set(orgId, { orgId, windows, measuredAt })
+    }
+  }
+
+  /**
    * Опрос запаса КАЖДОЙ живой организации хранилища (`/api/oauth/usage`, без вызова модели).
    * Токен — только через `withFreshOrgToken` (точка свежести проекта). Провал опроса не
    * стирает прежнее показание и не продлевает его: возраст решает в `chooseBirthOrg`.
@@ -1643,6 +1698,8 @@ export class ProxyClient {
   _ageOrgUsageStart(ms: number): void { this.orgUsageStartedAt -= ms }
   /** Test seam — подложить показание. */
   _setOrgUsage(r: OrgUsageReading): void { this.orgUsage.set(r.orgId, r) }
+  /** Только для испытаний: что реально лежит в памяти запасов после старта. */
+  _getOrgUsage(orgId: string): OrgUsageReading | undefined { return this.orgUsage.get(orgId) }
 
   /**
    * Организация для НОВОЙ сессии (нет пина ни в памяти, ни в хранилище). `null` — оставить

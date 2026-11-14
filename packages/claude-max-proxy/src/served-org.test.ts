@@ -125,3 +125,43 @@ describe('батч: 105 сессий одним проходом, отсутст
     expect(r.truncatedTotal).toBe(0)
   })
 })
+
+// ── 14.11.2026: один номер сессии ходит в РАЗНЫЕ провайдеры (у dsh сессия dab65d00 звала и
+// Anthropic, и OpenDesign). Ответ «org» без указания двери читался как организация Anthropic.
+describe('какая дверь ответила — названа рядом с организацией', () => {
+  test('запись с провайдером отдаёт его, а не только org', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'served-'))
+    process.env.PROVIDER_DUMP_DIR = dir
+    writeFileSync(join(dir, `${day()}.jsonl`), JSON.stringify({
+      session_id: 'ses_multi', org_id: 'hello@od.example', org_source: 'quota',
+      ts: new Date().toISOString(), provider: 'opencode-go', door: 'proxy:opencode-go',
+    }))
+    const r = servedOrgOf('ses_multi')
+    expect(r.org).toBe('hello@od.example')
+    expect(r.provider).toBe('opencode-go')
+    expect(r.door).toBe('proxy:opencode-go')
+  })
+
+  test('запись без провайдера — поля ОТСУТСТВУЮТ, форма прежняя', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'served-'))
+    process.env.PROVIDER_DUMP_DIR = dir
+    writeFileSync(join(dir, `${day()}.jsonl`), JSON.stringify({
+      session_id: 'ses_plain', org_id: 'org-x', org_source: 'pin', ts: new Date().toISOString(),
+    }))
+    const r = servedOrgOf('ses_plain')
+    expect(r.provider).toBeUndefined()
+    expect(r.door).toBeUndefined()
+  })
+
+  test('батч называет дверь так же', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'served-'))
+    process.env.PROVIDER_DUMP_DIR = dir
+    writeFileSync(join(dir, `${day()}.jsonl`), [
+      JSON.stringify({ session_id: 'ses_go', org_id: 'hello@od.example', org_source: 'quota', ts: new Date().toISOString(), provider: 'opencode-go' }),
+      JSON.stringify({ session_id: 'ses_plain2', org_id: 'org-y', org_source: 'pin', ts: new Date().toISOString() }),
+    ].join('\n'))
+    const b = servedOrgBatch(['ses_go', 'ses_plain2'])
+    expect(b.results[0]?.provider).toBe('opencode-go')
+    expect(b.results[1]?.provider).toBeUndefined()
+  })
+})

@@ -60,7 +60,7 @@ export function resolveRewriteConsentTtlSec(
  * живет часами. Если записи нет — это честное `found:false` («дверь ещё не обслуживала»),
  * НЕ повод подставлять `active` или организацию по членству.
  */
-export function servedOrgOf(session: string): { found: boolean; session: string; org?: string; source?: string | null; at?: string; ageSec?: number } {
+export function servedOrgOf(session: string): { found: boolean; session: string; org?: string; source?: string | null; at?: string; ageSec?: number; provider?: string; door?: string } {
   const dir = process.env.PROVIDER_DUMP_DIR ?? join(homedir(), '.claude-local', 'provider-dump')
   const days = [0, 1].map((d) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10))
   for (const day of days) {
@@ -71,11 +71,21 @@ export function servedOrgOf(session: string): { found: boolean; session: string;
       const line = lines[i]
       if (!line || !line.includes(session)) continue
       try {
-        const rec = JSON.parse(line) as { session_id?: string | null; org_id?: string | null; org_source?: string | null; ts?: string }
+        const rec = JSON.parse(line) as { session_id?: string | null; org_id?: string | null; org_source?: string | null; ts?: string; provider?: string; door?: string }
         if (rec.session_id !== session) continue
         const at = typeof rec.ts === 'string' ? rec.ts : null
         const ageSec = at ? Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000)) : undefined
-        return { found: true, session, org: rec.org_id ?? undefined, source: rec.org_source ?? null, at: at ?? undefined, ageSec }
+        // 🔴 КАКАЯ ДВЕРЬ ОТВЕТИЛА — ЧАСТЬ ОТВЕТА, А НЕ УКРАШЕНИЕ (замер 14.11.2026).
+        // Один номер сессии может ходить в РАЗНЫЕ провайдеры: у dsh сессия dab65d00 звала
+        // Anthropic (claude-sonnet-5-5, org b3219c9b) и OpenDesign (deepseek-v4.1-flash,
+        // hello@synqwire.io). Запись в журнале была одна — от двери OpenDesign, — и ответ
+        // «served org = hello@synqwire.io» читался как «Anthropic-организация». Теперь
+        // читатель видит провайдера рядом с организацией и сам понимает, о чём это.
+        return {
+          found: true, session, org: rec.org_id ?? undefined, source: rec.org_source ?? null, at: at ?? undefined, ageSec,
+          ...(typeof rec.provider === 'string' && rec.provider ? { provider: rec.provider } : {}),
+          ...(typeof rec.door === 'string' && rec.door ? { door: rec.door } : {}),
+        }
       } catch { /* битая строка — идём дальше */ }
     }
   }
@@ -92,6 +102,9 @@ export interface ServedOrgBatchEntry {
   source?: string | null
   at?: string
   ageSec?: number
+  /** Какая дверь ответила (см. servedOrgOf): один номер сессии ходит в разные провайдеры. */
+  provider?: string
+  door?: string
   status: 'found' | 'no_choice_yet' | 'unknown'
 }
 
@@ -151,7 +164,7 @@ export function servedOrgBatch(sessions: string[]): {
     for (let i = lines.length - 1; i >= 0 && seen.size < wanted.length; i--) {
       const line = lines[i]
       if (!line) continue
-      let rec: { session_id?: string | null; org_id?: string | null; org_source?: string | null; ts?: string }
+      let rec: { session_id?: string | null; org_id?: string | null; org_source?: string | null; ts?: string; provider?: string; door?: string }
       try { rec = JSON.parse(line) } catch { continue }
       const id = rec.session_id
       if (typeof id !== 'string' || !id || seen.has(id) || !wantedSet.has(id)) continue
@@ -166,6 +179,8 @@ export function servedOrgBatch(sessions: string[]): {
         at: at ?? undefined,
         ageSec,
         status: org ? 'found' : 'unknown',
+        ...(typeof rec.provider === 'string' && rec.provider ? { provider: rec.provider } : {}),
+        ...(typeof rec.door === 'string' && rec.door ? { door: rec.door } : {}),
       })
     }
   }

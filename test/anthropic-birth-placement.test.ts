@@ -574,3 +574,52 @@ describe('прокси: новая сессия при старых замера
     c.stop()
   })
 })
+
+// ── Молчание о несостоявшемся выборе и было единственной уликой инцидента 11:13Z: запись о
+// рождении отсутствовала, и это читалось как «всё хорошо». Причина обязана быть в журнале.
+describe('выбор не состоялся — это записано, а не пропущено', () => {
+  function clientWithEvents(events: any[]) {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    const exp = Date.now() + 3 * H
+    vault.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    vault.upsert({ orgId: 'org-b', accessToken: 'tok-b', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    writeActiveCreds('tok-a', exp)
+    return new ProxyClient({
+      config: { kaCacheTtlSec: 1 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async () => new Response(SSE, { status: 200, headers: { 'content-type': 'text/event-stream' } }) },
+      orgUsageReader: { read: async () => null },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+      eventEmitter: { emit: (e: any) => events.push(e) },
+    } as ProxyClientOptions)
+  }
+
+  test('активная не в стене, замеры устарели → ORG_PLACEMENT_SKIPPED с причиной', async () => {
+    const events: any[] = []
+    const c = clientWithEvents(events)
+    const old = Date.now() - 2 * H
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: old, windows: [{ name: 'week', util: 0.9, resetAt: Date.now() + 31 * H }] })
+    c._setOrgUsage({ orgId: 'org-b', measuredAt: old, windows: [{ name: 'week', util: 0.1, resetAt: Date.now() + 6 * 24 * H }] })
+    await c.handleRequest(body(), {}, { sessionId: 'skip-logged' })
+    const ev = events.find(e => e.kind === 'ORG_PLACEMENT_SKIPPED')
+    expect(ev).toBeTruthy()
+    expect(ev.msg).toContain('свежо измерено 0 из 2')
+    expect(ev.msg).toContain('остаётся на активной')
+    c.stop()
+  })
+
+  test('активная в стене → ORG_PLACED by safety, а не молчание', async () => {
+    const events: any[] = []
+    const c = clientWithEvents(events)
+    const old = Date.now() - 2 * H
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: old, windows: [{ name: 'week', util: 1.0, resetAt: Date.now() + 31 * H }] })
+    c._setOrgUsage({ orgId: 'org-b', measuredAt: old, windows: [{ name: 'week', util: 0.1, resetAt: Date.now() + 6 * 24 * H }] })
+    await c.handleRequest(body(), {}, { sessionId: 'safety-logged' })
+    const ev = events.find(e => e.kind === 'ORG_PLACED')
+    expect(ev).toBeTruthy()
+    expect(ev.msg).toContain('placed by safety')
+    c.stop()
+  })
+})

@@ -433,3 +433,39 @@ describe('перезапуск прокси не переселяет сесси
     c2.stop()
   })
 })
+
+// ── 14.11.2026, TG 85936/85941: регулятор смотрел только на 5ч и затормозил relishev
+// (5ч 0.77, неделя 0.56), а все новые сессии ушли на oeliseva с НЕДЕЛЕЙ 0.99. Тормоз не смеет
+// отдать сессию аккаунту, который выбор по запасу ставит НИЖЕ затормаживаемого: отступать
+// можно только на равный или лучший. Иначе «не упереться всем разом» само загоняет в стену.
+describe('тормоз регулятора не гонит на аккаунт с почти пустой неделей', () => {
+  const t = NOW
+  const readings = new Map([
+    ['rel', { orgId: 'rel', measuredAt: t, windows: [{ name: '5h', util: 0.77, resetAt: t + 2 * H }, { name: 'week', util: 0.56, resetAt: t + 5 * 24 * H }] }],
+    ['oel', { orgId: 'oel', measuredAt: t, windows: [{ name: '5h', util: 0.42, resetAt: t + 3 * H }, { name: 'week', util: 0.99, resetAt: t + 31 * H }] }],
+  ])
+  const candidates = [
+    { orgId: 'rel', needsRelogin: false, tokenAlive: true },
+    { orgId: 'oel', needsRelogin: false, tokenAlive: true },
+  ]
+  test('rel заторможен по 5ч, но oel хуже по неделе — сессия идёт на rel', () => {
+    const r = chooseBirthOrg({
+      candidates, readings, pinsByOrg: new Map([['rel', 10], ['oel', 10]]), nowMs: t,
+      maxReadingAgeMs: H, seed: 's1',
+      weights: new Map([['rel', { weight: 0, mode: 'balance', reason: 'тормоз' }], ['oel', { weight: 1, mode: 'balance', reason: '' }]]),
+    })
+    expect(r.orgId).toBe('rel')
+  })
+  test('тормоз по-прежнему работает, когда запасной аккаунт не хуже', () => {
+    const fine = new Map([
+      ['rel', readings.get('rel')!],
+      ['oel', { orgId: 'oel', measuredAt: t, windows: [{ name: '5h', util: 0.10, resetAt: t + 3 * H }, { name: 'week', util: 0.20, resetAt: t + 5 * 24 * H }] }],
+    ])
+    const r = chooseBirthOrg({
+      candidates, readings: fine, pinsByOrg: new Map([['rel', 10], ['oel', 10]]), nowMs: t,
+      maxReadingAgeMs: H, seed: 's1',
+      weights: new Map([['rel', { weight: 0, mode: 'balance', reason: 'тормоз' }], ['oel', { weight: 1, mode: 'balance', reason: '' }]]),
+    })
+    expect(r.orgId).toBe('oel')
+  })
+})

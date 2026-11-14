@@ -125,7 +125,15 @@ export function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult
   // (не walled) первой идёт та, у кого БОЛЬШЕ вес — drain-организация, пока отстаёт от
   // траектории, и ровно пропорционально весу (детерминированно по seed), чтобы приток на неё
   // был долей, а не «всё или ничего». Равные веса — порядок planPlacement.
-  const usable = plan.ranked.filter(a => a.verdict !== 'walled' && (input.weights!.get(a.name)?.weight ?? 1) > 0)
+  // 🔴 ТОРМОЗ ОТСТУПАЕТ ТОЛЬКО НА РАВНЫЙ ИЛИ ЛУЧШИЙ (14.11.2026, TG 85936/85941). Регулятор ведёт
+  // одно 5ч-окно; ранжир planPlacement видит ОБА окна. Затормозив relishev (5ч 0.77, неделя 0.56),
+  // регулятор отдал все новые сессии oeliseva с НЕДЕЛЕЙ 0.99 — ранжир ставил её ниже. Поэтому
+  // заторможенная организация выбывает, только если выше неё по ранжиру остаётся незаторможенная:
+  // тогда отступ — на лучшую. Иначе тормоз гнал бы в стену ровно то, от чего он защищает.
+  const live = plan.ranked.filter(a => a.verdict !== 'walled')
+  const brakedOut = (a: typeof live[number]) => (input.weights!.get(a.name)?.weight ?? 1) <= 0
+  const firstFree = live.findIndex(a => !brakedOut(a))
+  const usable = live.filter((a, i) => !brakedOut(a) || (firstFree >= 0 && i < firstFree))
   const ctlText = [...input.weights].map(([o, w]) => `${o.slice(0, 8)} ${w.mode} w=${w.weight.toFixed(2)}`).join('; ')
   if (usable.length === 0) return { orgId: null, plan, skipped: 'регулятор затормозил все организации — прежний выбор', control: ctlText }
   const drainers = usable.filter(a => input.weights!.get(a.name)?.mode === 'drain' && (input.weights!.get(a.name)?.weight ?? 0) > 0)

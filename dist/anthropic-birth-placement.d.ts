@@ -44,3 +44,13 @@ export interface BirthPlacementResult {
     control?: string;
 }
 export declare function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult;
+export declare function chooseNonWalledFallback(input: {
+    candidates: BirthCandidate[];
+    readings: Map<string, OrgUsageReading>;
+    activeOrg: string | null;
+    nowMs: number;
+    seed: string;
+}): {
+    orgId: string | null;
+    reason: string;
+};

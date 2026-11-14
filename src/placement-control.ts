@@ -143,6 +143,22 @@ export class PlacementController {
       nowMs, util: w5.util, sessionsByClass, inflowSinceLast: inflow, target,
     }, cfg.gains, cfg.limits, cfg.adapt)
     this.lastStepAt.set(orgId, nowMs)
+    // 🔴 НЕДЕЛЯ — ВТОРОЙ ТОРМОЗ (слово фаундера 14.11.2026, TG 85965: «PID на основе данных об
+    // окне, данных об остатке дней до исчерпания»). ПИД ведёт 5ч-окно, а неделя — другое окно
+    // с другим сроком: при 5ч 0.48 и неделе 0.99 организация выглядит для ПИД свободной и
+    // получает приток, хотя упирается в стену через часы, а сбрасывается через сутки. Тормоз по
+    // неделе — тот же порог, что у баланса; НЕ срабатывает, если сброс уже прошёл или пройдёт
+    // в ближайшие полчаса (тогда стена снимается сама, и запрет был бы ложным).
+    if (mode === 'balance') {
+      const w7 = windows.find(w => w.name === 'week')
+      const resetsInH = w7 && typeof w7.resetAt === 'number' ? (w7.resetAt - nowMs) / 3_600_000 : Infinity
+      if (w7 && typeof w7.util === 'number' && w7.util >= cfg.balanceTargetUtil && !(resetsInH <= 0.5)) {
+        return {
+          ...out, weight: 0, braked: true, mode,
+          reason: `неделя ${(100 * w7.util).toFixed(0)}% ≥ цели ${(100 * cfg.balanceTargetUtil).toFixed(0)}%, сброс через ${resetsInH === Infinity ? '?' : resetsInH.toFixed(1)}ч — приток выключен`,
+        }
+      }
+    }
     // В режиме баланса регулятор — ТОЛЬКО тормоз: вес 1, пока тормоз не сработал. Вести к
     // 0.95 никто не просил; просили «не упереться всем разом» (калибровка, вывод 3).
     if (mode === 'balance') return { ...out, weight: out.braked ? 0 : 1, mode }

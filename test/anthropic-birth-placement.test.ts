@@ -12,7 +12,8 @@ import { describe, test, expect } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { chooseBirthOrg, usageToWindows } from '../src/anthropic-birth-placement.js'
+import { chooseBirthOrg, chooseNonWalledFallback, usageToWindows } from '../src/anthropic-birth-placement.js'
+import { PlacementController, parsePlacementControl } from '../src/placement-control.js'
 import { ProxyClient, type ProxyClientOptions } from '../src/proxy-client.js'
 import { OrgVault } from '../src/org-vault.js'
 
@@ -467,5 +468,109 @@ describe('тормоз регулятора не гонит на аккаунт 
       weights: new Map([['rel', { weight: 0, mode: 'balance', reason: 'тормоз' }], ['oel', { weight: 1, mode: 'balance', reason: '' }]]),
     })
     expect(r.orgId).toBe('oel')
+  })
+})
+
+// ── 14.11.2026, TG 85965/85966/85967: «сравнивать не с чем» оставляло новую сессию на активной
+// организации, а та была в стене. Возраст замера обязан работать ТОЛЬКО в сторону запрета.
+describe('запасной выбор: сравнивать не с чем — не значит оставить в стене', () => {
+  const stale = NOW - 2 * H                        // старше границы свежести (90 мин)
+  const cand = [alive('org-active'), alive('org-free')]
+  const mk = (activeWeek: number, freeWeek: number, at = stale) => new Map([
+    ['org-active', { orgId: 'org-active', measuredAt: at, windows: [{ name: '5h', util: 0.4, resetAt: at + H }, { name: 'week', util: activeWeek, resetAt: at + 31 * H }] }],
+    ['org-free', { orgId: 'org-free', measuredAt: at, windows: [{ name: '5h', util: 0.2, resetAt: at + H }, { name: 'week', util: freeWeek, resetAt: at + 6 * 24 * H }] }],
+  ])
+
+  test('активная в стене (неделя 100%) — уходим на живую, хотя замер старый', () => {
+    const r = chooseNonWalledFallback({ candidates: cand, readings: mk(1.0, 0.1), activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBe('org-free')
+    expect(r.reason).toContain('в стене')
+  })
+
+  test('активная НЕ в стене — прежнее поведение, даже если замер старый', () => {
+    const r = chooseNonWalledFallback({ candidates: cand, readings: mk(0.99, 0.1), activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBeNull()
+    expect(r.reason).toContain('не в стене')
+  })
+
+  test('сброс стены уже прошёл — старое «исчерпано» не запрет', () => {
+    const readings = mk(1.0, 0.1)
+    readings.set('org-active', { orgId: 'org-active', measuredAt: stale, windows: [{ name: '5h', util: 0.2, resetAt: NOW - H }, { name: 'week', util: 1.0, resetAt: NOW - H }] })
+    const r = chooseNonWalledFallback({ candidates: cand, readings, activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBeNull()
+  })
+
+  test('все живые в стене — остаёмся на активной (названная причина, не тишина)', () => {
+    const r = chooseNonWalledFallback({ candidates: cand, readings: mk(1.0, 1.0), activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBeNull()
+    expect(r.reason).toContain('все живые')
+  })
+
+  test('неизмеренная живая — не «лучшая»: при известном запасе выбирается измеренная', () => {
+    const readings = new Map([
+      ['org-active', { orgId: 'org-active', measuredAt: stale, windows: [{ name: 'week', util: 1.0, resetAt: NOW + 31 * H }] }],
+      ['org-free', { orgId: 'org-free', measuredAt: stale, windows: [{ name: 'week', util: 0.5, resetAt: NOW + 6 * 24 * H }] }],
+    ])
+    const r = chooseNonWalledFallback({ candidates: [...cand, alive('org-unknown')], readings, activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBe('org-free')
+  })
+
+  test('одновременные рождения расходятся по seed, а не в одну организацию', () => {
+    const readings = mk(1.0, 0.1)
+    readings.set('org-free2', { orgId: 'org-free2', measuredAt: stale, windows: [{ name: '5h', util: 0.2, resetAt: stale + H }, { name: 'week', util: 0.1, resetAt: stale + 6 * 24 * H }] })
+    const seen = new Set<string>()
+    for (let i = 0; i < 24; i++) {
+      const r = chooseNonWalledFallback({ candidates: [...cand, alive('org-free2')], readings, activeOrg: 'org-active', nowMs: NOW, seed: `s${i}` })
+      if (r.orgId) seen.add(r.orgId)
+    }
+    expect(seen.size).toBeGreaterThan(1)
+  })
+})
+
+describe('тормоз по НЕДЕЛЕ (слово фаундера 14.11.2026, TG 85965)', () => {
+  const cfg = parsePlacementControl({ enabled: true })
+  const win = (u5: number, u7: number, reset7InH: number) => [
+    { name: '5h', util: u5, resetAt: NOW + 2 * H },
+    { name: 'week', util: u7, resetAt: NOW + reset7InH * H },
+  ]
+
+  test('5ч свободно, неделя 99% со сбросом через сутки — приток выключен', () => {
+    const out = new PlacementController().weight(cfg, 'oel', win(0.48, 0.99, 31), {}, NOW, true)
+    expect(out?.braked).toBe(true)
+    expect(out?.weight).toBe(0)
+    expect(out?.reason).toContain('неделя')
+  })
+
+  test('неделя 99%, но сброс через 10 минут — не тормозим: стена снимается сама', () => {
+    const out = new PlacementController().weight(cfg, 'oel', win(0.48, 0.99, 10 / 60), {}, NOW, true)
+    expect(out?.braked).toBe(false)
+  })
+
+  test('неделя свободна — поведение прежнее (решает 5ч-ПИД)', () => {
+    const out = new PlacementController().weight(cfg, 'rel', win(0.5, 0.5, 120), {}, NOW, true)
+    expect(out?.braked).toBe(false)
+    expect(out?.weight).toBe(1)
+  })
+})
+
+describe('прокси: новая сессия при старых замерах не садится в стену (11:13Z 14.11)', () => {
+  test('активная неделя 100%, замеры старше 90 мин → уходим на свободную', async () => {
+    const { c, auth } = setup()
+    const old = Date.now() - 2 * H
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: old, windows: [{ name: '5h', util: 0.4, resetAt: old + H }, { name: 'week', util: 1.0, resetAt: Date.now() + 31 * H }] })
+    c._setOrgUsage({ orgId: 'org-b', measuredAt: old, windows: [{ name: '5h', util: 0.2, resetAt: old + H }, { name: 'week', util: 0.1, resetAt: Date.now() + 6 * 24 * H }] })
+    await c.handleRequest(body(), {}, { sessionId: 'stale-wall-1' })
+    expect(auth.at(-1)).toBe('Bearer tok-b')
+    c.stop()
+  })
+
+  test('активная не в стене, замеры старые → остаёмся на активной', async () => {
+    const { c, auth } = setup()
+    const old = Date.now() - 2 * H
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: old, windows: [{ name: '5h', util: 0.4, resetAt: old + H }, { name: 'week', util: 0.99, resetAt: Date.now() + 31 * H }] })
+    c._setOrgUsage({ orgId: 'org-b', measuredAt: old, windows: [{ name: '5h', util: 0.2, resetAt: old + H }, { name: 'week', util: 0.1, resetAt: Date.now() + 6 * 24 * H }] })
+    await c.handleRequest(body(), {}, { sessionId: 'stale-free-1' })
+    expect(auth.at(-1)).toBe('Bearer tok-a')
+    c.stop()
   })
 })

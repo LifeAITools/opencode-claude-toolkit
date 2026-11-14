@@ -150,3 +150,63 @@ export function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult
   }
   return { orgId: usable[0]!.name, plan, skipped: null, control: ctlText }
 }
+
+/**
+ * 🔴 ЗАПАСНОЙ ВЫБОР, КОГДА СРАВНИВАТЬ НЕ С ЧЕМ (14.11.2026, TG 85966/85967).
+ *
+ * `chooseBirthOrg` честно возвращает `null`, когда свежих измерений меньше двух, и вызывающий
+ * в этом случае оставляет сессию на АКТИВНОЙ организации — той, где стоял предыдущий вход.
+ * Замер 11:13Z: у relishev измерению было ровно 90 мин (граница свежести), у oeliseva неделя
+ * 100% — выбор вернул `null`, и новая сессия села прямо в стену: 38 отказов 429 за час.
+ *
+ * ЗДЕСЬ ВОЗРАСТ ЗАМЕРА РАБОТАЕТ ТОЛЬКО В СТОРОНУ ЗАПРЕТА. Старое показание «окно исчерпано»
+ * достаточно, чтобы НЕ сажать новую сессию, и недостаточно, чтобы выбрать организацию по
+ * запасу: выбираем не «лучшую», а «не худшую из тех, про кого известно, что они не в стене».
+ * Окно, чей сброс уже прошёл, исчерпанным не считается — замер устарел вместе со стеной.
+ *
+ * `null` — защищать нечего (активная не в стене) или некуда уходить (все живые в стене);
+ * в обоих случаях вызывающий остаётся на прежнем поведении, и это названо причиной.
+ */
+export function chooseNonWalledFallback(input: {
+  candidates: BirthCandidate[]
+  readings: Map<string, OrgUsageReading>
+  /** Организация, на которой стоял предыдущий вход: её вызывающий оставит при `null`. */
+  activeOrg: string | null
+  nowMs: number
+  seed: string
+}): { orgId: string | null; reason: string } {
+  const { candidates, readings, activeOrg, nowMs } = input
+  if (!activeOrg) return { orgId: null, reason: 'активная организация неизвестна — прежнее поведение' }
+  const walledNow = (orgId: string): boolean => {
+    const r = readings.get(orgId)
+    if (!r || r.windows.length === 0) return false
+    return r.windows.some(w => typeof w.util === 'number' && w.util >= 1 && (w.resetAt === null || w.resetAt > nowMs))
+  }
+  if (!walledNow(activeOrg)) {
+    return { orgId: null, reason: `активная ${activeOrg.slice(0, 8)} не в стене — прежнее поведение` }
+  }
+  const free = candidates.filter(c => c.orgId !== activeOrg && c.tokenAlive && !c.needsRelogin && !walledNow(c.orgId))
+  if (free.length === 0) {
+    return { orgId: null, reason: 'все живые организации в стене или запрещены — остаёмся на активной' }
+  }
+  // Между известными и неизмеренными: известный запас решает первым, чтобы «нечего сказать»
+  // не превратилось в «лучший выбор» (тот же принцип, что в planPlacement).
+  const known = free.filter(c => (readings.get(c.orgId)?.windows.length ?? 0) > 0)
+  const pool = known.length > 0 ? known : free
+  const headroom = (orgId: string): number => {
+    const r = readings.get(orgId)
+    if (!r || r.windows.length === 0) return Infinity
+    return Math.min(...r.windows.map(w => 1 - (typeof w.util === 'number' ? w.util : 1)))
+  }
+  const best = Math.max(...pool.map(c => headroom(c.orgId)))
+  const tied = pool.filter(c => headroom(c.orgId) === best)
+  // Повторяемо по номеру сессии: одновременные рождения не сходятся в одну организацию.
+  let h = 0x811c9dc5
+  for (let i = 0; i < input.seed.length; i++) { h ^= input.seed.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+  const pick = tied[(h >>> 0) % tied.length]!
+  return {
+    orgId: pick.orgId,
+    reason: `активная ${activeOrg.slice(0, 8)} в стене — новая сессия уходит на ${pick.orgId.slice(0, 8)}` +
+      (Number.isFinite(best) ? ` (худший запас ${(100 * best).toFixed(0)}%)` : ' (запас не измерен, но не в стене)'),
+  }
+}

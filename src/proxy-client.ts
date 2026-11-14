@@ -76,7 +76,7 @@ import {
 } from './proxy-adapters.js'
 import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
-import { chooseBirthOrg, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
+import { chooseBirthOrg, chooseNonWalledFallback, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
 import { getCompatVersion } from './subscription-compat.js'
 import { PlacementController, loadPlacementControl, loadModelAllowlist } from './placement-control.js'
 import { orgsAllowedForModel, parseModelAllowlist, type ModelAllowlist } from './org-model-allowlist.js'
@@ -1751,6 +1751,18 @@ export class ProxyClient {
         msg: `new session placed by model rule: ${model} → ${forced.slice(0, 8)} (выбор по запасу: ${r.skipped ?? 'нет'})`,
       })
       return forced
+    }
+    // 🔴 «СРАВНИВАТЬ НЕ С ЧЕМ» НЕ ОЗНАЧАЕТ «ОСТАВИТЬ В СТЕНЕ» (14.11.2026, TG 85966/85967).
+    // 11:13Z у relishev измерению было ровно 90 мин (граница свежести), выбор вернул null, и
+    // новая сессия села на активную oeliseva с неделей 100%: 38 отказов 429 за час. Возраст
+    // замера здесь работает ТОЛЬКО в сторону запрета — см. chooseNonWalledFallback.
+    const safe = chooseNonWalledFallback({ candidates, readings: this.orgUsage, activeOrg, nowMs: now, seed: sessionId })
+    if (safe.orgId) {
+      this.events.emit({
+        level: 'info', kind: 'ORG_PLACED', sessionId, orgId: safe.orgId,
+        msg: `new session placed by safety: ${safe.reason} (выбор по запасу: ${r.skipped ?? 'нет'})`,
+      })
+      return safe.orgId
     }
     return r.orgId
   }

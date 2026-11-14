@@ -27,6 +27,7 @@ export interface ProxyClientOptions {
     sessionStore?: ISessionStore<KeepaliveEngine>;
     upstreamFetcher?: IUpstreamFetcher;
     orgUsageReader?: IOrgUsageReader;
+    quotaStatusPath?: string;
     livenessChecker?: ILivenessChecker;
     orgIdResolver?: OrgIdResolver;
     prefixHistoryPath?: string;
@@ -70,6 +71,7 @@ export declare class ProxyClient {
     private readonly store;
     private readonly upstream;
     private readonly orgUsageReader;
+    private readonly quotaStatusPath;
     private readonly liveness;
     private readonly streamTracer;
     private readonly realRetryDelaysMs;
@@ -178,6 +180,7 @@ export declare class ProxyClient {
     private getTokenForSession;
     private proactiveOrgSweep;
     _runOrgProactiveSweep(): Promise<void>;
+    private seedOrgUsageFromQuotaStatus;
     private refreshOrgUsage;
     remeasureOrgUsage(orgQuery: string): Promise<{
         ok: true;
@@ -196,6 +199,7 @@ export declare class ProxyClient {
     _refreshOrgUsage(): Promise<void>;
     _ageOrgUsageStart(ms: number): void;
     _setOrgUsage(r: OrgUsageReading): void;
+    _getOrgUsage(orgId: string): OrgUsageReading | undefined;
     private modelRules;
     private chooseOrgForNewSession;
     private gcSessionPins;

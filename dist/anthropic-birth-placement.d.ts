@@ -11,7 +11,9 @@ export interface OrgUsageReading {
     orgId: string;
     windows: PlacementWindow[];
     measuredAt: number;
+    exhausted?: boolean;
 }
+export declare function windowIsWalled(reading: OrgUsageReading | undefined, nowMs: number): boolean;
 export declare function usageToWindows(u: OauthUsage | null | undefined): PlacementWindow[];
 export declare function headerSnapshotToWindows(snap: {
     utilization5h: number | null;

@@ -43,6 +43,7 @@ export interface ISessionStore<EngineT = unknown> {
     size(): number;
     isOwnerAlive(sessionId: string): boolean;
     reapDead(): string[];
+    lastReapReasons?(): Map<string, "pid_gone" | "unresolved_idle" | "owner_said_dead">;
     stopAll(): void;
 }
 export interface IUpstreamFetcher {
@@ -62,6 +63,7 @@ export interface IOrgUsageReader {
 }
 export interface ILivenessChecker {
     isAlive(pid: number): boolean;
+    isSessionAlive?(sessionId: string): boolean | undefined;
 }
 export interface ProxyClientAdapters {
     credentialsProvider: ICredentialsProvider;

@@ -265,8 +265,12 @@ export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<En
     return this.liveness.isAlive(sess.pid)
   }
 
+  private reapReasons = new Map<string, 'pid_gone' | 'unresolved_idle' | 'owner_said_dead'>()
+  lastReapReasons(): Map<string, 'pid_gone' | 'unresolved_idle' | 'owner_said_dead'> { return this.reapReasons }
+
   reapDead(): string[] {
     const killed: string[] = []
+    this.reapReasons = new Map()
     for (const [sid, sess] of this.sessions.entries()) {
       // 🔴 СЕССИЯ БЕЗ PID НЕ УМИРАЛА НИКОГДА (замер 24.10.2026). Здесь стояло
       // `if (sess.pid === null) continue` — и пять сессий, пришедших без заголовка сессии и без
@@ -275,10 +279,18 @@ export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<En
       // живым вечно нельзя: после ДВУХ часов простоя запись не может быть ни живой, ни полезной.
       // До границы молчим: неопознанный владелец — не доказательство смерти.
       if (sess.pid === null) {
-        if (Date.now() - sess.lastRequestAt > UNRESOLVED_PID_IDLE_TTL_MS) {
+        // Сначала — тот, кто ЗНАЕТ (внешний источник жизни сессии), и только потом часы простоя.
+        // Часы меряют «давно не было настоящего хода», а сессия в часы тишины ходов не шлёт
+        // по природе — её держит прогрев. Убирать её по часам значит выбросить живую сессию
+        // ровно тогда, когда прогрев честно хранит её кэш (14.11.2026, session-f933b5aa).
+        let verdict: boolean | undefined
+        try { verdict = this.liveness.isSessionAlive?.(sid) } catch { verdict = undefined }
+        if (verdict === true) continue
+        if (verdict === false || Date.now() - sess.lastRequestAt > UNRESOLVED_PID_IDLE_TTL_MS) {
           try { (sess.engine as any)?.stop?.() } catch { /* best-effort */ }
           this.sessions.delete(sid)
           killed.push(sid)
+          this.reapReasons.set(sid, verdict === false ? 'owner_said_dead' : 'unresolved_idle')
         }
         continue
       }
@@ -289,6 +301,7 @@ export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<En
         try { (sess.engine as any)?.stop?.() } catch { /* engine cleanup best-effort */ }
         this.sessions.delete(sid)
         killed.push(sid)
+        this.reapReasons.set(sid, 'pid_gone')
       }
     }
     return killed

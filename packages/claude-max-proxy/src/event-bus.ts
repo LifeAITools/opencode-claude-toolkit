@@ -261,7 +261,7 @@ export interface SessionTrackedEvent extends BaseEvent {
 export interface SessionDeadEvent extends BaseEvent {
   kind: 'SESSION_DEAD'
   sessionId: string
-  reason: 'pid_gone' | 'idle_timeout' | 'explicit_close'
+  reason: 'pid_gone' | 'idle_timeout' | 'explicit_close' | 'unresolved_idle' | 'owner_said_dead'
 }
 
 /**

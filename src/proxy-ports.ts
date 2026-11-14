@@ -207,6 +207,13 @@ export interface ISessionStore<EngineT = unknown> {
    * Implementations should also stop() the engine before removing.
    */
   reapDead(): string[]
+  /**
+   * Почему сняты сессии последнего `reapDead()`: `pid_gone` — процесс владельца умер;
+   * `unresolved_idle` — владелец не опознан и простой больше двух часов; `owner_said_dead` —
+   * внешний источник жизни сказал «мертва». Необязателен: без него причина — `pid_gone`.
+   * До 14.11.2026 все три назывались `pid_gone`, и снятие по часам читалось как смерть процесса.
+   */
+  lastReapReasons?(): Map<string, 'pid_gone' | 'unresolved_idle' | 'owner_said_dead'>
 
   /** Shutdown ALL sessions (stop engines, clear store). */
   stopAll(): void
@@ -275,6 +282,14 @@ export interface IOrgUsageReader {
 export interface ILivenessChecker {
   /** True if the given PID is currently alive; false if reaped or unknown. */
   isAlive(pid: number): boolean
+  /**
+   * Жива ли сессия, чей процесс прокси НЕ опознал (клиент за посредником, `pidUnresolved`).
+   * true — жива (не убирать), false — мертва (убрать сразу), undefined — источник не знает
+   * (прежнее правило двух часов простоя). Необязателен. Живой повод 14.11.2026: флот DeepSeek
+   * Harness держит много сессий в одном процессе за LiteLLM, и уборщик снимал ЖИВЫЕ сессии
+   * через 2 ч после последнего хода, хотя прогрев держал их кэш (session-f933b5aa).
+   */
+  isSessionAlive?(sessionId: string): boolean | undefined
 }
 
 // ═══ Bundled: everything a ProxyClient needs from adapters ════════

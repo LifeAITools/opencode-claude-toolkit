@@ -777,8 +777,9 @@ export class ProxyClient {
     // Keeps state clean + stops KA engines for dead consumers.
     this.reaperTimer = setInterval(() => {
       const reaped = this.store.reapDead()
+      const reasons = this.store.lastReapReasons?.()
       for (const sid of reaped) {
-        this.events.emit({ level: 'info', kind: 'SESSION_DEAD', sessionId: sid, reason: 'pid_gone' })
+        this.events.emit({ level: 'info', kind: 'SESSION_DEAD', sessionId: sid, reason: reasons?.get(sid) ?? 'pid_gone' })
         // Drop this session's prefix-history (keys are `${sid}:${lineageKey}`).
         for (const k of this.prefixHistory.keys()) {
           if (k.startsWith(sid + ':')) this.prefixHistory.delete(k)

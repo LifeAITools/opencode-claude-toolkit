@@ -273,6 +273,9 @@ const proxyClient = new ProxyClient({
       try { process.kill(pid, 0); return true } catch {}
       return managedSessionsSvc.isAliveByPid(pid)
     },
+    // Сессии без опознанного процесса (клиент за LiteLLM): флот DeepSeek Harness сам знает,
+    // какие из них текущие (14.11.2026, session-f933b5aa снята живой). Не знает — часы.
+    isSessionAlive: fleetSessionLiveness(fleetSessionsPath()),
   },
 })
 
@@ -426,6 +429,7 @@ import { createSparkResponsesModule } from './modules/spark-responses.js'
 import { createGoDoorModule, goDoorReadiness } from './modules/go-door.js'
 import { createOpenDesignDoorModule } from './modules/open-design-door.js'
 import { anthropicOrgModelRules, providerRegistryPath } from './anthropic-org-models.js'
+import { fleetSessionLiveness, fleetSessionsPath } from './fleet-session-liveness.js'
 
 // Compat version: configured value is the FLOOR; the installed Claude Code wins when
 // newer (the API gates new models on client version — see cc-version.ts).

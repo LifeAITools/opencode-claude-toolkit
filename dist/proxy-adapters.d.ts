@@ -43,6 +43,8 @@ export declare class InMemorySessionStore<EngineT = unknown> implements ISession
     list(): Session<EngineT>[];
     size(): number;
     isOwnerAlive(sessionId: string): boolean;
+    private reapReasons;
+    lastReapReasons(): Map<string, "pid_gone" | "unresolved_idle" | "owner_said_dead">;
     reapDead(): string[];
     stopAll(): void;
 }

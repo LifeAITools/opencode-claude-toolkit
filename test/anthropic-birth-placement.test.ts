@@ -821,3 +821,42 @@ describe('«поставщик отказал» — это знание, кот�
     c.stop()
   })
 })
+
+// ── 15.11.2026 (задача 415127b2): безымянный запрос — это НЕ сессия.
+// Замер фаундера 14.11: 42 «рождения» проб dsh-availability-report (ping max_tokens 1,
+// idSource=none) сделали из одного распределителя «агентов 47». Метка `anon-*` выдаётся на
+// ОДИН запрос, поэтому пин под ней защищать нечего, а сам пин живёт вечно и считается агентом.
+describe('безымянный запрос не закрепляется за организацией', () => {
+  function client() {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    const exp = Date.now() + 3 * H
+    vault.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    writeActiveCreds('tok-a', exp)
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 1, orgProactiveRefreshSec: 0 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async () => new Response(SSE, { status: 200, headers: { 'content-type': 'text/event-stream', 'anthropic-organization-id': 'org-a' } }) },
+      orgUsageReader: { read: async () => null },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+    } as ProxyClientOptions)
+    return { c, vault }
+  }
+
+  test('idSource=none → ни пина в памяти, ни записи в хранилище', async () => {
+    const { c, vault } = client()
+    const sid = 'anon-' + Date.now().toString(36)
+    await c.handleRequest(body(), {}, { sessionId: sid, idSource: 'none' }).then(r => r.text())
+    expect(c.orgSurface().sessions.find(s => s.sessionId === sid)?.pinnedOrg ?? null).toBeNull()
+    expect(vault.getPin(sid)).toBeNull()
+    c.stop()
+  })
+
+  test('именованная сессия закрепляется как раньше', async () => {
+    const { c } = client()
+    await c.handleRequest(body(), {}, { sessionId: 'named-1' }).then(r => r.text())
+    expect(c.orgSurface().sessions.find(s => s.sessionId === 'named-1')?.pinnedOrg).toBe('org-a')
+    c.stop()
+  })
+})

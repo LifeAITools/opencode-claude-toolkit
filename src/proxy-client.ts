@@ -2009,11 +2009,16 @@ export class ProxyClient {
     reloadAsked: boolean,
     now: number,
     cacheOptOut = false,
+    pinAllowed = true,
   ): { token: string; stop: boolean; held: boolean } {
     // Кэш-лес сессия НИКОГДА не пинится (защищать нечего): берёт переданный токен
     // — свою организацию или организацию потребителя через follow-session — и не
     // оставляет следа в sessionPins/хранилище.
-    if (cacheOptOut) return { token: account.token, stop: false, held: false }
+    // 🔴 И БЕЗЫМЯННЫЙ ЗАПРОС — ТОЖЕ (15.11.2026, задача 415127b2). Его `sessionId` — метка
+    // `anon-*`, выданная НА ЭТОТ запрос; пину нечего защищать (следующий запрос придёт с другой
+    // меткой), а сам пин живёт вечно и считается «агентом»: замер фаундера 14.11 — 42 «рождения»
+    // проб dsh сделали «агентов 47» из одного распределителя. Пин — только именованной сессии.
+    if (cacheOptOut || !pinAllowed) return { token: account.token, stop: false, held: false }
     const pin = this.sessionPins.get(sessionId)
     if (!pin || reloadAsked) {
       this.sessionPins.set(sessionId, { ...account })
@@ -2282,9 +2287,10 @@ export class ProxyClient {
         // легло. Пин жил лишь в памяти, перезапуск в 11:37 его стёр, и в 11:48 живую сессию сочли
         // новой и посадили на relishev — перенос, который рельса no-live-account-migration
         // запрещает. Пин закрепляет ту организацию, что ушла в запрос.
-        if (account.orgId) this.orgVault.setPin(sessionId, account.orgId)
+        // Безымянному запросу пин не нужен: метка одноразовая, «защищать» нечего.
+        if (account.orgId && !unidentified) this.orgVault.setPin(sessionId, account.orgId)
       }
-      const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now(), cacheOptOut)
+      const sel = this.selectSessionToken(sessionId, account, reloadAsked, Date.now(), cacheOptOut, !unidentified)
       // ══ MODEL GUARD — организация под модель, ПОСЛЕДНИЙ ШАГ ═══════════════════════════════
       // Слово фаундера 13.11 (TG 85103/85140): Fable-организация — только Fable, «ни опус, ни
       // санет не пытались даже». Выбор при рождении — не единственный путь к организации:
@@ -2942,7 +2948,10 @@ export class ProxyClient {
       {
         const servedOrg = upstream.headers.get('anthropic-organization-id')
         if (servedOrg) {
-          this.lastServedOrg.set(sessionId, servedOrg)
+          // 🔴 БЕЗЫМЯННЫЙ ЗАПРОС НЕ ПОПАДАЕТ В СПИСОК СЕССИЙ (15.11.2026, задача 415127b2):
+          // его метка одноразовая, а карточка сессии — это то, что читают реестр и присутствие,
+          // и по ней считают «агентов». Пинимать его нечего, и показывать тоже.
+          if (!unidentified) this.lastServedOrg.set(sessionId, servedOrg)
           // Per-account quota reading, recorded where the account is KNOWN from
           // the response itself — the only place the pairing is evidence and
           // not inference. This is what the quota guard reads before the NEXT
@@ -2967,7 +2976,7 @@ export class ProxyClient {
           // ПЕРВОМ запросе, до ответа, поэтому проверка памяти здесь не срабатывала никогда — и
           // ни одна сессия, родившаяся на активной организации, не попадала в хранилище
           // (12.11.2026: после перезапуска такие сессии считались новыми и переселялись).
-          if (!cacheOptOut && !this.orgVault.getPin(sessionId)) {
+          if (!cacheOptOut && !unidentified && !this.orgVault.getPin(sessionId)) {
             const ve = this.orgVault.get(servedOrg)
             if (ve && (ve.expiresAt === null || ve.expiresAt > Date.now())) {
               this.sessionPins.set(sessionId, { orgId: ve.orgId, token: ve.accessToken, expiresAt: ve.expiresAt })

@@ -17,6 +17,7 @@ import { ProxyClient, extractSessionIdFromBody, type ProxyClientOptions } from '
 import type { OrgIdResolver } from '../src/org-identity.js'
 import { lineageKey, prefixHashes } from '../src/lineage.js'
 import { grantConsent } from '../src/rewrite-consent.js'
+import { OrgVault } from '../src/org-vault.js'
 
 // Hermetic consent-grant store — MUST match consentGrantPath in
 // _setup-keepalive-fixture.ts so the guard reads what these tests write.
@@ -59,6 +60,15 @@ function mkClient(extra: Partial<ProxyClientOptions> = {}) {
     // proxy-restart exemption never trips by accident; tests that exercise
     // it pass an explicit recent value.
     proxyStartedAt: 0,
+    // 🔴 ГЕРМЕТИЧНОСТЬ ДО КОНЦА (15.11.2026). Без этих трёх путей клиент читал
+    // НАСТОЯЩУЮ машинную обстановку: живой ~/.claude/org-vault.json и живой
+    // ~/.claude-local/quota-status.json — и тогда распределитель при рождении
+    // закреплял тестовую сессию за живой организацией. Тест «после перезапуска
+    // пин утерян» получал пин ИЗ ХРАНИЛИЩА и зеленел/краснел от состояния машины,
+    // а не от кода (замер 15.11: ORG_PIN_RESTORED для rg-persist-1 на живой org).
+    orgVault: new OrgVault(join(TMP, `vault-${phSeq++}.json`)),
+    quotaStatusPath: join(TMP, `quota-${phSeq++}.json`),
+    credentialsPath: join(TMP, `cred-${phSeq++}.json`),
     ...extra,
   })
 }

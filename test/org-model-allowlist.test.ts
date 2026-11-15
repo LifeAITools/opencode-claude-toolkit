@@ -246,3 +246,55 @@ describe('правило из реестра провайдеров (orgModelRul
     c.stop()
   })
 })
+
+// ── 15.11.2026, вопрос фаундера 13.11 «жёстко сразу или дать старым досидеть»:
+//    modelGuardScope: 'new'. Старый жилец определяется НЕ пином (пин ставится и при рождении),
+//    а СЛЕДОМ РАБОТЫ на этой организации в журнале префиксов — он переживает перезапуск.
+describe('modelGuardScope: new — живым досидеть, новым отказать', () => {
+  test('сессия, уже работавшая на этой организации, дорабатывает без 400', async () => {
+    const { c } = setup('org-f', true, { fileRule: false })      // правила ещё нет
+    await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'legacy-opus' })
+    const cfgPath = (c as any).placementConfigPath as string
+    writeFileSync(cfgPath, JSON.stringify({ enabled: false, modelGuardScope: 'new', orgModels: { 'org-f': ['claude-fable-5-2'] } }))
+    const r = await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'legacy-opus' })
+    expect(r.status).toBe(200)
+    c.stop()
+  })
+
+  test('новая сессия той же модели на закреплённой организации — по-прежнему отказ', async () => {
+    // Только закреплённая организация и жива — уходить новой сессии некуда.
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    const exp = Date.now() + 3 * H
+    vault.upsert({ orgId: 'org-f', accessToken: 'tok-org-f', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    writeFileSync(ISOLATED.credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: 'tok-org-f', refreshToken: null, expiresAt: exp } }))
+    const cfg = join(TMP, `placement-${seq++}.json`)
+    writeFileSync(cfg, JSON.stringify({ enabled: false, modelGuardScope: 'new', orgModels: { 'org-f': ['claude-fable-5-2'] } }))
+    let upstream = 0
+    const c = new ProxyClient({
+      config: { kaCacheTtlSec: 1 },
+      credentialsProvider: { getAccessToken: async () => 'tok-org-f', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async () => { upstream++; return new Response(SSE, { status: 200 }) } },
+      orgUsageReader: { read: async () => null },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-f', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault,
+      placementConfigPath: cfg, ...ISOLATED,
+    } as ProxyClientOptions)
+    const r = await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'fresh-opus' })
+    expect(r.status).toBe(400)
+    const j = await r.json() as { error?: { type?: string } }
+    expect(j.error?.type).toBe('model_guard')
+    expect(upstream).toBe(0)
+    c.stop()
+  })
+
+  test('по умолчанию (без поля) — прежнее жёсткое поведение', async () => {
+    const { c } = setup('org-f', true, { fileRule: false })
+    await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'legacy2' })
+    const cfgPath = (c as any).placementConfigPath as string
+    writeFileSync(cfgPath, JSON.stringify({ enabled: false, orgModels: { 'org-f': ['claude-fable-5-2'] } }))
+    const r = await c.handleRequest(body('claude-opus-5-5'), {}, { sessionId: 'legacy2' })
+    expect(r.status).toBe(400)
+    c.stop()
+  })
+})

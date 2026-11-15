@@ -81,6 +81,10 @@ cp "$PROXY_PKG" "$INSTALLED/package.json"
 # empty for every provider — the presence reader then could not map model -> provider
 # and every OpenDesign/Go row degraded to `quota_absent: no_choice_yet`.
 if [ -d "$PROXY_PKG_DIR/config" ]; then
+  # 🔴 ВОРОТА: битый реестр не выкладывается. 15.11.2026 кривой отступ в providers.yaml
+  # доехал до боя и уронил дверь OpenDesign (503 «provider registry is not readable»).
+  "$BUN" run "$PROXY_PKG_DIR/scripts/validate-registry.ts" "$PROXY_PKG_DIR/config/providers.yaml" \
+    || { log "REGISTRY INVALID — aborting deploy, live config untouched"; exit 1; }
   mkdir -p "$INSTALLED/config"
   rsync -a --exclude='*.bak*' --exclude='*.broken' "$PROXY_PKG_DIR/config/" "$INSTALLED/config/"
   log "config synced (provider registry for quota-unified)"
@@ -508,7 +512,14 @@ log "restarted"
 for i in $(seq 1 20); do curl -s -m2 http://127.0.0.1:5050/health >/dev/null 2>&1 && break; sleep 0.5; done
 H=$(curl -s -m3 http://127.0.0.1:5050/health 2>/dev/null || echo '{}')
 log "health: $H"
-echo "$H" | grep -q '"ok":true' || { log "UNHEALTHY — rollback: cp -a $BK/bin/. $INSTALLED/bin/ && systemctl --user restart claude-max-proxy"; exit 1; }
+# 🔴 АВТООТКАТ: служба не поднялась здоровой — бинарь и реестр возвращаются из бэкапа сами.
+if ! echo "$H" | grep -q '"ok":true'; then
+  log "UNHEALTHY — automatic rollback from $BK"
+  [ -d "$BK/bin" ] && cp -a "$BK/bin/." "$INSTALLED/bin/"
+  [ -d "$BK/config" ] && rsync -a "$BK/config/" "$INSTALLED/config/"
+  systemctl --user restart claude-max-proxy.service
+  exit 1
+fi
 SRC_VER=$(grep -o '"version": "[^"]*"' "$PROXY_PKG" | head -1 | cut -d'"' -f4)
 LIVE_VER=$(curl -s -m3 http://127.0.0.1:5050/version 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 log "version: live=$LIVE_VER source=$SRC_VER"

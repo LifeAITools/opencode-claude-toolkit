@@ -201,6 +201,7 @@ export declare class ProxyClient {
     _setOrgUsage(r: OrgUsageReading): void;
     _getOrgUsage(orgId: string): OrgUsageReading | undefined;
     private modelRules;
+    private sessionRanOnOrg;
     private chooseOrgForNewSession;
     private gcSessionPins;
     _gcSessionPins(now?: number): void;

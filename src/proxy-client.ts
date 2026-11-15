@@ -1745,6 +1745,14 @@ export class ProxyClient {
     return merged
   }
 
+  /** Работала ли ЭТА сессия уже на этой организации (след в журнале префиксов).
+   *  Единственный признак «старого» жильца, переживающий перезапуск прокси. */
+  private sessionRanOnOrg(sessionId: string, orgId: string): boolean {
+    const prefix = `${sessionId}:`
+    for (const [k, v] of this.prefixHistory) if (k.startsWith(prefix) && v?.orgId === orgId) return true
+    return false
+  }
+
   private chooseOrgForNewSession(sessionId: string, model: string, activeOrg: string | null): string | null {
     const now = Date.now()
     const candidates: Array<{ orgId: string; needsRelogin: boolean; tokenAlive: boolean }> = []
@@ -2302,7 +2310,17 @@ export class ProxyClient {
       {
         const servingOrg = sel.held ? (this.sessionPins.get(sessionId)?.orgId ?? account.orgId) : account.orgId
         const rules = this.modelRules()
-        if (rules.size > 0 && servingOrg && !sel.stop
+        // 🔴 ОБЛАСТЬ ДЕЙСТВИЯ (`modelGuardScope`; вопрос фаундера 13.11 «жёстко сразу или дать
+        // старым досидеть»). `all` — отказ всем (как было). `new` — «старым досидеть»: сессия,
+        // у которой по журналу префиксов УЖЕ есть работа на ЭТОЙ организации, дорабатывает без
+        // 400; всё остальное — отказ. Признак НЕ «есть пин» (пин ставится и при рождении, по
+        // нему новую сессию не отличить), а именно след работы на организации — он переживает
+        // перезапуск прокси, тогда как отметка «родился до правила» в памяти не переживёт.
+        // Почему это не дыра: новая сессия на закреплённой организации следа не имеет и
+        // получает отказ, то есть чужой модели организацию всё равно не сжечь.
+        const guardScope = loadPlacementControl(this.placementConfigPath).modelGuardScope
+        const legacyOnOrg = guardScope === 'new' && servingOrg !== null && this.sessionRanOnOrg(sessionId, servingOrg)
+        if (!legacyOnOrg && rules.size > 0 && servingOrg && !sel.stop
             && orgsAllowedForModel(rules, [servingOrg], String(model)).allowed.length === 0) {
           this.events.emit({
             level: 'error', kind: 'MODEL_GUARD_BLOCKED', sessionId, orgId: servingOrg,

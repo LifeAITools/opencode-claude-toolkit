@@ -28,8 +28,14 @@ import { parseModelAllowlist, type ModelAllowlist } from './org-model-allowlist.
 
 export interface DrainEntry { org: string; targetUtil: number; deadlineMs: number }
 
+/** Область действия правила «модель ↔ организация»: `all` — жёстко всем (как было),
+ *  `new` — только новым сессиям (живые досиживают; выбор при рождении всё равно не даст
+ *  чужой модели сесть на закреплённую организацию). */
+export type ModelGuardScope = 'all' | 'new'
+
 export interface PlacementControlConfig {
   enabled: boolean
+  modelGuardScope: ModelGuardScope
   balanceTargetUtil: number
   /**
    * 🔴 СЛОВО ФАУНДЕРА 15.11.2026 (TG 87399): «надо стараться израсходовать 5 часовую на 97% но не
@@ -49,6 +55,7 @@ export interface PlacementControlConfig {
 
 /** Коэффициенты калибровки 12.11.2026 (research/placement-pid-calibration-2026-11.md). */
 export const CALIBRATED: Omit<PlacementControlConfig, 'enabled' | 'drain'> = {
+  modelGuardScope: 'all',
   balanceTargetUtil: 0.97,
   weekBrakeUtil: 0.98,
   gains: { kp: 16, ki: 0, kd: 2, kff: 0.5 },
@@ -74,6 +81,7 @@ export function parsePlacementControl(raw: any): PlacementControlConfig {
   }) : []
   return {
     enabled: raw?.enabled === true,
+    modelGuardScope: raw?.modelGuardScope === 'new' ? 'new' : 'all',
     balanceTargetUtil: num(raw?.balanceTargetUtil, CALIBRATED.balanceTargetUtil, 0.5, 0.99),
     weekBrakeUtil: num(raw?.weekBrakeUtil, CALIBRATED.weekBrakeUtil, 0.5, 1),
     drain,

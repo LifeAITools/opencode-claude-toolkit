@@ -6,8 +6,10 @@ export interface DrainEntry {
     targetUtil: number;
     deadlineMs: number;
 }
+export type ModelGuardScope = "all" | "new";
 export interface PlacementControlConfig {
     enabled: boolean;
+    modelGuardScope: ModelGuardScope;
     balanceTargetUtil: number;
     weekBrakeUtil: number;
     drain: DrainEntry[];

@@ -418,6 +418,7 @@ const stopKaPurchaseNotice = startKaPurchaseNotice(
 // server.ts is a thin router that loads modules and dispatches.
 
 import { loadModules, matchRoute, type ModuleContext } from './module.js'
+import { requireControlAuth } from './control-auth.js'
 import { setCompatVersion } from './openai-translate.js'
 import { detectInstalledCcVersion, resolveCompatVersion } from './cc-version.js'
 import { createHealthModule } from './modules/health.js'
@@ -525,6 +526,14 @@ let isDraining = false
 /** Сколько ходов сейчас в полёте — по ним и решается, когда можно уходить. */
 let inFlightRequests = 0
 
+/**
+ * Токен управляющей плоскости. Отсутствие в окружении — это НЕ «всё разрешено»:
+ * `requireControlAuth` при пустом токене закрывает удалённый доступ вовсе, а локальный
+ * (loopback) оставляет рабочим. Так служба ведёт себя на этой машине: в systemd-юните
+ * ADMIN_TOKEN нет, поэтому правят дверь только свои процессы.
+ */
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || null
+
 const server = Bun.serve({
   port: RUNTIME_PORT,
   hostname: RUNTIME_HOST,
@@ -550,6 +559,18 @@ const server = Bun.serve({
     }
     const route = matchRoute(allRoutes, req.method, url.pathname)
     if (!route) return new Response('Not Found', { status: 404 })
+    // 🔴 УПРАВЛЯЮЩАЯ ПЛОСКОСТЬ ЗАКРЫТА ДЛЯ ЧУЖИХ (15.11.2026, находка владельца SynqTask).
+    // Дверь слушает 0.0.0.0: попутный /v1 нужен боковым контейнерам, но вместе с ним наружу
+    // оказывались и /admin/*, где не только чтение списка сессий: /admin/shutdown,
+    // /admin/cache-rewrite-ok (согласие на дорогую запись!), /admin/disarm, /admin/quota-ok.
+    // Модуль контроля (control-auth.ts) существовал и был НЕ ПОДКЛЮЧЁН — охрана стояла
+    // написанной и не работала. Правило: локальный вызов (loopback) проходит без настройки;
+    // удалённый — только с Bearer ADMIN_TOKEN, а без настроенного токена удалённый запрещён
+    // вовсе (fail-closed). Данные (/v1, /od, /go) намеренно НЕ задеты.
+    if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+      const denied = requireControlAuth(req, server, ADMIN_TOKEN)
+      if (denied) return denied
+    }
     // Считаем ход в полёте: слив при остановке ждёт именно этого числа, а не
     // обещания сокета. Стриминговый ответ считается завершённым, когда вернулся
     // объект ответа — тело дочитывает клиент, и держать ради него остановку

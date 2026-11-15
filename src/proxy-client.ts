@@ -1664,9 +1664,13 @@ export class ProxyClient {
         }
         const windows = usageToWindows(res.data as OauthUsage)
         const measuredAt = Date.now()
-        this.orgUsage.set(orgId, { orgId, windows, measuredAt })
-        // Число — с предметом и возрастом (рельса number-carries-subject-and-age): чья
-        // организация, какое окно, когда сбросится, когда измерено и откуда.
+        // 🔴 СПРАВОЧНЫЙ ЗАМЕР НЕ ОПРОВЕРГАЕТ ОТКАЗ (15.11.2026). `/api/oauth/usage` отвечает
+        // окнами и тогда, когда модель уже отказывает (429 с retry-after до сброса), поэтому
+        // «поставщик отказал» здесь НЕ снимается: это знание о стене, а не оценка запаса.
+        // Прежняя редакция теряла флаг на первом же замере, и организация с неделей 1.00 снова
+        // становилась кандидатом при рождении сессии — ровно то, что случилось в 17:48:42Z.
+        const prev = this.orgUsage.get(orgId)
+        this.orgUsage.set(orgId, { orgId, windows, measuredAt, ...(prev?.exhausted ? { exhausted: true } : {}) })
         this.events.emit({
           level: 'info', kind: 'ORG_USAGE_MEASURED', orgId, source: 'oauth-usage',
           measuredAt: new Date(measuredAt).toISOString(),
@@ -3138,6 +3142,22 @@ export class ProxyClient {
         // общего `this.lastRateLimit`: последний перезаписывается параллельным
         // запросом ДРУГОГО аккаунта, и отказ получил бы чужую долю под своим
         // именем (та же гонка, что описана у reqRateLimit выше).
+        // 🔴 ОТКАЗ — ЭТО ЗНАНИЕ О СТЕНЕ, А НЕ ОЦЕНКА ЗАПАСА (15.11.2026). Прежде флаг
+        // `exhausted` ставился только сторожевым снимком при старте службы и терялся на первом
+        // же успешном ответе/замере — поэтому организация с неделей 1.00 снова считалась
+        // «не в стене», и новая сессия садилась в 429 (замер 17:48:42Z, сессия 3359b8b0).
+        // Здесь отказ записывается под ИМЕНЕМ ОРГАНИЗАЦИИ ИЗ ОТВЕТА и с окнами ЭТОГО ответа.
+        const served429 = this.resolveServedOrg(sessionId)
+        if (served429) {
+          const windows = headerSnapshotToWindows(reqRateLimit)
+          const prevReading = this.orgUsage.get(served429)
+          this.orgUsage.set(served429, {
+            orgId: served429,
+            windows: windows.length ? windows : (prevReading?.windows ?? []),
+            measuredAt: windows.length ? Date.now() : (prevReading?.measuredAt ?? Date.now()),
+            exhausted: true,
+          })
+        }
         this.events.emit({
           level: 'error',
           kind: 'UPSTREAM_RATE_LIMITED',

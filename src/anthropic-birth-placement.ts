@@ -44,19 +44,22 @@ export interface OrgUsageReading {
  * «сажать некуда». Порог назван здесь, а не размазан по коду.
  */
 const WEEK_EFFECTIVELY_WALLED = 0.98
-/** Сброс ближе этого — стена снимается сама, и запрет был бы ложным. */
-const WALL_CLEARS_SOON_H = 1
-
 /** Окно исчерпано СЕЙЧАС: либо поставщик отказал, либо окно на 1.00, либо неделя у порога. */
 export function windowIsWalled(reading: OrgUsageReading | undefined, nowMs: number): boolean {
   if (!reading) return false
   if (reading.exhausted === true) return true
-  const resetInH = (w: PlacementWindow): number => (typeof w.resetAt === 'number' ? (w.resetAt - nowMs) / 3_600_000 : Infinity)
+  const resetInMs = (w: PlacementWindow): number => (typeof w.resetAt === 'number' ? w.resetAt - nowMs : Infinity)
   return reading.windows.some(w => {
     if (typeof w.util !== 'number') return false
-    const soon = resetInH(w) <= WALL_CLEARS_SOON_H
-    if (w.util >= 1 && !soon) return true
-    if (w.name === 'week' && w.util >= WEEK_EFFECTIVELY_WALLED && resetInH(w) > WALL_CLEARS_SOON_H) return true
+    // 🔴 «СБРОСИТСЯ ЧЕРЕЗ ДЕСЯТЬ МИНУТ» — ДЛЯ РОЖДЕНИЯ ЭТО ВСЁ РАВНО СТЕНА (замер 15.11.2026,
+    // 17:48:42Z). Новая сессия, посаженная за 12 минут до сброса недели oeliseva (util7d 1.00),
+    // получила 429 на первом же ходе и не работала эти 12 минут — «снимается сама» верно для
+    // того, кто ждёт, и неверно для того, кто только что родился. Прежняя редакция снимала
+    // запрет для ЛЮБОГО сброса ближе часа — и держала в стене именно новорождённого.
+    // Стена снимается только тогда, когда сброс УЖЕ прошёл: устарело само показание, а не стена.
+    const cleared = resetInMs(w) <= 0
+    if (w.util >= 1 && !cleared) return true
+    if (w.name === 'week' && w.util >= WEEK_EFFECTIVELY_WALLED && !cleared) return true
     return false
   })
 }

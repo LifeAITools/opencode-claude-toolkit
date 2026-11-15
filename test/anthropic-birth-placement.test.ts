@@ -705,12 +705,24 @@ describe('почти исчерпанная неделя — это стена, 
     expect(r.orgId).toBe('org-free')
   })
 
-  test('неделя 0.99, но сброс через 20 минут — не запрет: стена снимается сама', () => {
+  test('неделя 0.99, но сброс через 20 минут — ДЛЯ РОЖДЕНИЯ всё равно стена (замер 15.11.2026)', () => {
+    // Повод — живой случай: сессия 3359b8b0 родилась за 12 минут до сброса недели oeliseva
+    // (util7d 1.00) и получила 429 на первом же ходе. «Снимается сама» верно для того, кто
+    // ждёт; новорождённый эти 12 минут не работает.
     const readings = new Map([
       ['org-active', { orgId: 'org-active', measuredAt: stale, windows: [{ name: 'week', util: 0.99, resetAt: NOW + 20 / 60 * H }] }],
     ])
     const r = chooseNonWalledFallback({ candidates: cand, readings, activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
+    expect(r.orgId).toBe('org-free')
+  })
+
+  test('сброс уже прошёл — запрета нет: устарело показание, а не стена', () => {
+    const readings = new Map([
+      ['org-active', { orgId: 'org-active', measuredAt: stale, windows: [{ name: 'week', util: 1.0, resetAt: NOW - 5 * 60_000 }] }],
+    ])
+    const r = chooseNonWalledFallback({ candidates: cand, readings, activeOrg: 'org-active', nowMs: NOW, seed: 's1' })
     expect(r.orgId).toBeNull()
+    expect(r.reason).toContain('не в стене')
   })
 
   test('флаг «поставщик отказал» запрещает даже при util 0.5', () => {
@@ -758,6 +770,54 @@ describe('снимок читает И `orgs`: знание об отказе н
     await c.handleRequest(body(), {}, { sessionId: 'orgs-only-1' })
     expect(auth.at(-1)).toBe('Bearer tok-b')
     expect(c._getOrgUsage('org-a')?.exhausted).toBe(true)
+    c.stop()
+  })
+})
+
+// ── 15.11.2026, 17:48:42Z: организация с неделей 1.00 осталась «не в стене», и новая сессия
+//    получила 429 на первом ходе. Две причины, обе закрыты здесь.
+describe('«поставщик отказал» — это знание, которое не теряется', () => {
+  function client(reader: () => Promise<any>, fetchImpl: () => Response) {
+    const vault = new OrgVault(join(TMP, `vault-${seq++}.json`))
+    const exp = Date.now() + 3 * H
+    vault.upsert({ orgId: 'org-a', accessToken: 'tok-a', refreshToken: null, expiresAt: exp, capturedAt: Date.now() })
+    writeActiveCreds('tok-a', exp)
+    return new ProxyClient({
+      config: { kaCacheTtlSec: 1, orgProactiveRefreshSec: 0 },
+      credentialsProvider: { getAccessToken: async () => 'tok-a', invalidate() {}, currentExpiresAt: () => exp },
+      upstreamFetcher: { fetch: async () => fetchImpl() },
+      orgUsageReader: { read: reader as any },
+      prefixHistoryPath: join(TMP, `ph-${seq++}.json`),
+      orgIdResolver: { current: () => 'org-a', invalidate() {} },
+      rewriteBlockDumpDir: join(TMP, 'dumps'), proxyStartedAt: 0, orgVault: vault, ...ISOLATED,
+    } as ProxyClientOptions)
+  }
+
+  test('справочный замер окна НЕ снимает флаг отказа', async () => {
+    const c = client(async () => ({ data: { five_hour: { utilization: 0, resets_at: null }, seven_day: { utilization: 90, resets_at: null } } }), () => new Response(SSE, { status: 200 }))
+    c._setOrgUsage({ orgId: 'org-a', measuredAt: Date.now() - 2 * H, exhausted: true, windows: [{ name: 'week', util: 1.0, resetAt: Date.now() + 12 * 60_000 }] })
+    await c._refreshOrgUsage()
+    expect(c._getOrgUsage('org-a')?.exhausted).toBe(true)
+    c.stop()
+  })
+
+  test('429 с именем организации записывает отказ под её именем и с окнами ответа', async () => {
+    const reset7d = Math.floor(Date.now() / 1000) + 600
+    const c = client(async () => null, () => new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'exceeded' } }), {
+      status: 429,
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-organization-id': 'org-a',
+        'anthropic-ratelimit-unified-5h-utilization': '0',
+        'anthropic-ratelimit-unified-7d-utilization': '1',
+        'anthropic-ratelimit-unified-7d-reset': String(reset7d),
+        'retry-after': '600',
+      },
+    }))
+    await c.handleRequest(body(), {}, { sessionId: 'r429-1' }).then(r => r.text()).catch(() => null)
+    const reading = c._getOrgUsage('org-a')
+    expect(reading?.exhausted).toBe(true)
+    expect(reading?.windows.find(w => w.name === 'week')?.util).toBe(1)
     c.stop()
   })
 })

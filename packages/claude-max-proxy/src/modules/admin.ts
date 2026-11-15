@@ -54,6 +54,43 @@ export function resolveRewriteConsentTtlSec(
 
 
 /**
+ * Строка `/admin/sessions` — и состояние ТЕПЛА рядом с обычными полями.
+ *
+ * 🔴 Зачем поля про прогрев (15.11.2026, запрос владельца dsh). Соседняя служба считала
+ * разговор остывшим по «последнему вызову модели», а этот счётчик видит только НАСТОЯЩИЕ
+ * ходы агента: наши успешные прогревы шли каждые 27.5 мин (замер: 13 выстрелов за 5.5 ч),
+ * и в её глазах агент молчал шесть часов. Два разных явления читались как одно.
+ *
+ * `lastWarmAt` — когда кэш последний раз ПОДТВЕРЖДЁН (ходом или прогревом), `cacheWarmUntil`
+ * — до какого момента он тёплый, `cacheTtlSec` — фактический срок ЭТОЙ сессии (у веток он
+ * разный, поэтому не берём общий из настроек). `null` — «не подтверждён», НЕ ноль.
+ * Форма прежних полей не тронута: добавление не ломает существующих читателей.
+ */
+export function sessionRowOf(s: {
+  sessionId: string; pid: number | null; model: string | null
+  firstSeenAt: number; lastRequestAt: number
+  engine?: unknown
+}): {
+  sessionId: string; pid: number | null; model: string | null
+  firstSeenAt: number; lastRequestAt: number
+  lastWarmAt: number | null; cacheWarmUntil: number | null
+  cacheTtlSec: number | null; kaState: 'armed' | 'disarmed' | 'none'
+} {
+  const engine = s.engine as { _warmth?: { lastWarmedAt?: unknown; ttlMs?: unknown; armed?: unknown } } | undefined
+  const w = engine && typeof engine._warmth === 'object' && engine._warmth !== null ? engine._warmth : null
+  const lastWarmAt = w && typeof w.lastWarmedAt === 'number' ? w.lastWarmedAt : null
+  const ttlMs = w && typeof w.ttlMs === 'number' && Number.isFinite(w.ttlMs) ? w.ttlMs : null
+  return {
+    sessionId: s.sessionId, pid: s.pid, model: s.model,
+    firstSeenAt: s.firstSeenAt, lastRequestAt: s.lastRequestAt,
+    lastWarmAt,
+    cacheWarmUntil: lastWarmAt !== null && ttlMs !== null ? lastWarmAt + ttlMs : null,
+    cacheTtlSec: ttlMs !== null ? Math.round(ttlMs / 1000) : null,
+    kaState: !w ? 'none' : (w.armed === true ? 'armed' : 'disarmed'),
+  }
+}
+
+/**
  * Последняя запись журнала двери про эту сессию: кто её обслужил и откуда взялась организация.
  *
  * Читаем только сегодняшний и вчерашний файл и идём с конца: журнал построчный, а сессия
@@ -195,16 +232,16 @@ export function createAdminModule(onShutdown: () => void): ProxyModule {
   shutdownFn = onShutdown
 
   const routes: RouteDefinition[] = [
-    // List tracked sessions
+    // List tracked sessions (+ состояние тепла: см. sessionRowOf).
+    // `?session=<id>` — одна строка для точечных вопросов; батч без параметра прежний.
     {
       method: 'GET',
       path: '/admin/sessions',
-      handler: async () => Response.json({
-        sessions: ctx.proxyClient.listSessions().map(s => ({
-          sessionId: s.sessionId, pid: s.pid, model: s.model,
-          firstSeenAt: s.firstSeenAt, lastRequestAt: s.lastRequestAt,
-        })),
-      }),
+      handler: async (req) => {
+        const only = (new URL(req.url).searchParams.get('session') ?? '').trim()
+        const rows = ctx.proxyClient.listSessions().map(sessionRowOf)
+        return Response.json({ sessions: only ? rows.filter(r => r.sessionId === only) : rows })
+      },
     },
 
     // Кто ОБСЛУЖИЛ сессию — факт из собственного журнала двери, а не догадка из env.

@@ -3139,6 +3139,45 @@ export class KeepaliveEngine {
   /** @internal — for test inspection */
   get _timer(): ReturnType<typeof setInterval> | null { return this.timer }
 
+  /** Готов ли движок греть эту сессию прямо сейчас (есть живые снимки веток). */
+  get armed(): boolean { return this.registry.size > 0 }
+
+  /**
+   * 🔴 СОСТОЯНИЕ ТЕПЛА ДЛЯ ВНЕШНИХ ЧИТАТЕЛЕЙ (15.11.2026, запрос владельца dsh).
+   *
+   * Соседняя служба держала письма агенту, потому что видела «6 часов без вызова модели»:
+   * её счётчик считал только НАСТОЯЩИЕ ходы, а наши успешные прогревы шли каждые 27.5 мин
+   * (замер: 13 выстрелов за 5.5 ч, ни одного пропуска). Два разных явления читались как одно.
+   *
+   * Здесь — ОДНО число, которое отвечает на их вопрос «до какого момента кэш тёплый»:
+   * `lastWarmedAt` ставится и настоящим ходом (кэш доказан), и успешным прогревом
+   * (тот же штамп, см. `lastWarmedAt = Date.now()` на успехе выстрела). Срок берётся у САМОЙ
+   * СВЕЖЕЙ ветки с метками, а не из настроек: у веток он разный (час в рабочем режиме,
+   * пять минут на коротком), и чтение общего срока уже один раз приводило к ошибке.
+   *
+   * `null` — не ноль: ветки без единого подтверждения не имеют «тёплого до».
+   */
+  get _warmth(): { lastWarmedAt: number | null; cacheWrittenAt: number | null; ttlMs: number; armed: boolean } {
+    let lastWarmedAt: number | null = null
+    for (const st of this.lineageStats.values()) {
+      const at = st.lastWarmedAt
+      if (typeof at === 'number' && at > 0 && (lastWarmedAt === null || at > lastWarmedAt)) lastWarmedAt = at
+    }
+    let newest: RegistryEntry | null = null
+    for (const e of this.lastSnapshots.values()) {
+      const at = typeof e.cacheWrittenAt === 'number' ? e.cacheWrittenAt : 0
+      const bestAt = newest && typeof newest.cacheWrittenAt === 'number' ? newest.cacheWrittenAt : 0
+      if (!newest || at > bestAt) newest = e
+    }
+    const branchTtl = newest && typeof newest.cacheTtlMs === 'number' && newest.cacheTtlMs > 0 ? newest.cacheTtlMs : null
+    return {
+      lastWarmedAt,
+      cacheWrittenAt: newest && typeof newest.cacheWrittenAt === 'number' ? newest.cacheWrittenAt : null,
+      ttlMs: branchTtl ?? this.cacheTtlMs,
+      armed: this.registry.size > 0,
+    }
+  }
+
   /** @internal — for test inspection */
   get _config() { return this.config }
 

@@ -13,7 +13,8 @@ import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { chooseBirthOrg, chooseNonWalledFallback, usageToWindows } from '../src/anthropic-birth-placement.js'
-import { PlacementController, parsePlacementControl } from '../src/placement-control.js'
+import { PlacementController, parsePlacementControl, CALIBRATED } from '../src/placement-control.js'
+import { planPlacement } from '../src/placement.js'
 import { ProxyClient, type ProxyClientOptions } from '../src/proxy-client.js'
 import { OrgVault } from '../src/org-vault.js'
 
@@ -858,5 +859,44 @@ describe('безымянный запрос не закрепляется за �
     await c.handleRequest(body(), {}, { sessionId: 'named-1' }).then(r => r.text())
     expect(c.orgSurface().sessions.find(s => s.sessionId === 'named-1')?.pinnedOrg).toBe('org-a')
     c.stop()
+  })
+})
+
+// ── 15.11.2026 (TG 87399): «5ч на 97% но не упереться; недельную на 100%, упереться минимальным
+//    количеством; максимизировать использование лимита при минимуме жёстких отказов».
+describe('цели окон разведены: 5ч к 0.97, недельный тормоз 0.98', () => {
+  test('умолчания калибровки: 0.97 для 5ч и 0.98 для недели (не одно число на оба окна)', () => {
+    expect(CALIBRATED.balanceTargetUtil).toBe(0.97)
+    expect(CALIBRATED.weekBrakeUtil).toBe(0.98)
+    const cfg = parsePlacementControl(null)
+    expect(cfg.balanceTargetUtil).toBe(0.97)
+    expect(cfg.weekBrakeUtil).toBe(0.98)
+  })
+
+  test('неделя 0.97 — ещё кормим (цель «до 100%»), 0.985 — тормозим (поставщик отказывает уже при 0.99)', () => {
+    const cfg = parsePlacementControl({ enabled: true })
+    const win = (u5: number, u7: number, reset7InH: number) => [
+      { name: '5h', util: u5, resetAt: NOW + 2 * H },
+      { name: 'week', util: u7, resetAt: NOW + reset7InH * H },
+    ]
+    const under = new PlacementController().weight(cfg, 'oel', win(0.2, 0.97, 31), {}, NOW, true)
+    expect(under?.braked).toBe(false)
+    const over = new PlacementController().weight(cfg, 'oel', win(0.2, 0.985, 31), {}, NOW, true)
+    expect(over?.braked).toBe(true)
+    expect(over?.weight).toBe(0)
+  })
+
+  test('ни одна стена не грозит — приток идёт туда, чей остаток умрёт раньше', () => {
+    const now = NOW
+    const mk = (name: string, reset7H: number) => ({
+      name,
+      windows: [
+        { name: '5h', util: 0.2, resetAt: now + 3 * H },
+        { name: 'week', util: 0.2, resetAt: now + reset7H * H },
+      ],
+      activeAgents: 0,
+    })
+    const plan = planPlacement([mk('soon', 24), mk('far', 144)], now, 'seed')
+    expect(plan.org?.name).toBe('soon')
   })
 })

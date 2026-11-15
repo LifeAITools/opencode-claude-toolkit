@@ -31,6 +31,7 @@ export interface PlacementAssessment {
         avgRatePerHour?: number;
     }>;
     verdict: "place" | "unknown" | "avoid" | "walled";
+    tightestResetHours: number | null;
     reason: string;
 }
 export interface PlacementPlan {

@@ -9,6 +9,7 @@ export interface DrainEntry {
 export interface PlacementControlConfig {
     enabled: boolean;
     balanceTargetUtil: number;
+    weekBrakeUtil: number;
     drain: DrainEntry[];
     gains: PidGains;
     limits: PidLimits;

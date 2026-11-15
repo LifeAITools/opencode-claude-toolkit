@@ -106,6 +106,9 @@ export interface PlacementAssessment {
    * `avoid` — измерено, но до стены меньше NEAR_WALL_HOURS; `walled` — упёрлась/запрещена.
    */
   verdict: 'place' | 'unknown' | 'avoid' | 'walled'
+  /** Часы до САМОГО БЛИЗКОГО сброса среди измеренных окон; `null` — нечего считать.
+   *  Нужен для правила «чей остаток умрёт раньше — того и выжигаем» (см. planPlacement). */
+  tightestResetHours: number | null
   /** Человеческая причина — одной строкой. */
   reason: string
 }
@@ -168,6 +171,9 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     pressureHours: Infinity,
     binding: [],
     verdict: blocked || slotsFull ? 'walled' : measured.length === 0 ? 'unknown' : 'place',
+    tightestResetHours: measured.length
+      ? Math.max(0, Math.min(...measured.map(w => (w.resetAt as number) - nowMs)) / 3_600_000)
+      : null,
     reason: blocked ?? (measured.length === 0 ? 'ни одно окно не измерено — сказать нечего' : ''),
   }
   if (blocked) return base
@@ -306,6 +312,18 @@ export function planPlacement(orgs: PlacementOrg[], nowMs: number, seed = ''): P
       }
       const fa = avail(a), fb = avail(b)
       if (fa !== fb) return fa > fb ? -1 : 1
+    }
+    // 🔴 СРОК СБРОСА РАНЬШЕ ДАВЛЕНИЯ, КОГДА СТЕНЫ НЕТ НИ У КОГО (слово фаундера 15.11.2026, TG
+    // 87399: «недельную на 100% но упереться минимальным количеством»; «скоро сброс → выжечь,
+    // много дней → беречь»). Если у обеих организаций ни одно окно не упрётся до сброса
+    // (`score = Infinity`), то остаток той, что сбросится раньше, будет ПОТЕРЯН, а остаток
+    // дальней — ещё успеет понадобиться. Поэтому приток идёт к той, чей сброс ближе. Это НЕ
+    // отменяет занятость (она выше) и НЕ трогает случай, когда стена грозит (там решает score).
+    // Измерено в research/placement-pid-week-2026-11.md: посаженных в стену 17.6% против 19.5%.
+    if (!Number.isFinite(a.score) && !Number.isFinite(b.score)) {
+      const ea = a.tightestResetHours ?? Infinity
+      const eb = b.tightestResetHours ?? Infinity
+      if (ea !== eb) return ea - eb
     }
     // 🔴 РАВНАЯ ЗАНЯТОСТЬ И РАВНАЯ СТЕНА — РЕШАЕТ ПРОГНОЗ РАСХОДА («через пять-десять минут
     // будет занята»). `pressureHours` — часы до стены по скорости без учёта сброса: больше —

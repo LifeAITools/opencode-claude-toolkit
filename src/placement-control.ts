@@ -9,7 +9,8 @@
  * ФАЙЛ `~/.claude/placement.json` (перечитывается при изменении, без перезапуска):
  *   {
  *     "enabled": false,                       // false — выбор как раньше (planPlacement)
- *     "balanceTargetUtil": 0.95,              // тормоз остальных: не выше этого к сбросу 5ч
+ *     "balanceTargetUtil": 0.97,              // 5ч: довести до 97%, но НЕ упереться (слово фаундера)
+ *     "weekBrakeUtil": 0.98,                  // неделя: кормить до 98%, остаток дожигают живые
  *     "drain": [ { "org": "b3219c9b", "targetUtil": 0.99, "deadline": "2026-11-12T20:00:00Z" } ],
  *     "gains":  { "kp": 16, "ki": 0, "kd": 2, "kff": 0.5 },
  *     "limits": { "wMax": 1, "slewPerHour": 3, "integralMax": 0.5, "brakeMargin": 0.05, "derivTauHours": 0.25 },
@@ -30,6 +31,16 @@ export interface DrainEntry { org: string; targetUtil: number; deadlineMs: numbe
 export interface PlacementControlConfig {
   enabled: boolean
   balanceTargetUtil: number
+  /**
+   * 🔴 СЛОВО ФАУНДЕРА 15.11.2026 (TG 87399): «надо стараться израсходовать 5 часовую на 97% но не
+   * упереться, недельную на 100% но упереться минимальным количеством — задача максимизация
+   * использования лимита при минимизации случаев, когда сессии упираются жёстко слишком рано».
+   * Поэтому у окон РАЗНЫЕ цели: 5ч ведёт ПИД к 0.97 (выше прежних 0.95 — лимит используется
+   * полнее), а недельный тормоз стоит на 0.98: поставщик отказывает уже при ~0.99 (замер 14.11:
+   * retry-after 110 787 с), и последние два процента дожигают УЖЕ посаженные сессии, а не новые,
+   * которым отказ стоил бы работы.
+   */
+  weekBrakeUtil: number
   drain: DrainEntry[]
   gains: PidGains
   limits: PidLimits
@@ -38,7 +49,8 @@ export interface PlacementControlConfig {
 
 /** Коэффициенты калибровки 12.11.2026 (research/placement-pid-calibration-2026-11.md). */
 export const CALIBRATED: Omit<PlacementControlConfig, 'enabled' | 'drain'> = {
-  balanceTargetUtil: 0.95,
+  balanceTargetUtil: 0.97,
+  weekBrakeUtil: 0.98,
   gains: { kp: 16, ki: 0, kd: 2, kff: 0.5 },
   limits: { wMax: 1, slewPerHour: 3, integralMax: 0.5, brakeMargin: 0.05, derivTauHours: 0.25 },
   adapt: {
@@ -63,6 +75,7 @@ export function parsePlacementControl(raw: any): PlacementControlConfig {
   return {
     enabled: raw?.enabled === true,
     balanceTargetUtil: num(raw?.balanceTargetUtil, CALIBRATED.balanceTargetUtil, 0.5, 0.99),
+    weekBrakeUtil: num(raw?.weekBrakeUtil, CALIBRATED.weekBrakeUtil, 0.5, 1),
     drain,
     gains: {
       kp: num(g.kp, CALIBRATED.gains.kp, 0, 100), ki: num(g.ki, CALIBRATED.gains.ki, 0, 100),
@@ -152,10 +165,10 @@ export class PlacementController {
     if (mode === 'balance') {
       const w7 = windows.find(w => w.name === 'week')
       const resetsInH = w7 && typeof w7.resetAt === 'number' ? (w7.resetAt - nowMs) / 3_600_000 : Infinity
-      if (w7 && typeof w7.util === 'number' && w7.util >= cfg.balanceTargetUtil && !(resetsInH <= 0.5)) {
+      if (w7 && typeof w7.util === 'number' && w7.util >= cfg.weekBrakeUtil && !(resetsInH <= 0.5)) {
         return {
           ...out, weight: 0, braked: true, mode,
-          reason: `неделя ${(100 * w7.util).toFixed(0)}% ≥ цели ${(100 * cfg.balanceTargetUtil).toFixed(0)}%, сброс через ${resetsInH === Infinity ? '?' : resetsInH.toFixed(1)}ч — приток выключен`,
+          reason: `неделя ${(100 * w7.util).toFixed(0)}% ≥ порога ${(100 * cfg.weekBrakeUtil).toFixed(0)}%, сброс через ${resetsInH === Infinity ? '?' : resetsInH.toFixed(1)}ч — приток выключен`,
         }
       }
     }

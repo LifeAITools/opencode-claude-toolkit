@@ -135,6 +135,13 @@ export declare class KeepaliveEngine {
         lastWarmedAt: number;
     }>;
     get _timer(): ReturnType<typeof setInterval> | null;
+    get armed(): boolean;
+    get _warmth(): {
+        lastWarmedAt: number | null;
+        cacheWrittenAt: number | null;
+        ttlMs: number;
+        armed: boolean;
+    };
     get _config(): Required<Pick<KeepaliveConfig, "enabled" | "intervalMs" | "rewriteWarnIdleMs" | "rewriteWarnTokens" | "idleTimeoutMs" | "minTokens" | "maxFiresPerTick" | "rewriteBlockEnabled" | "rewriteBlockIdleMs">> & {
         onHeartbeat?: (stats: KeepaliveStats) => void;
         onTick?: (tick: KeepaliveTick) => void;

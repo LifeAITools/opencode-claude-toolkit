@@ -43,7 +43,7 @@ export interface ISessionStore<EngineT = unknown> {
     size(): number;
     isOwnerAlive(sessionId: string): boolean;
     reapDead(): string[];
-    lastReapReasons?(): Map<string, "pid_gone" | "unresolved_idle" | "owner_said_dead">;
+    lastReapReasons?(): Map<string, "pid_gone" | "owner_said_dead">;
     stopAll(): void;
 }
 export interface IUpstreamFetcher {

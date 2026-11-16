@@ -33,7 +33,6 @@ export declare class ConsoleEventEmitter implements IEventEmitter {
 export declare class NullEventEmitter implements IEventEmitter {
     emit(_event: ProxyEvent): void;
 }
-export declare const UNRESOLVED_PID_IDLE_TTL_MS: number;
 export declare class InMemorySessionStore<EngineT = unknown> implements ISessionStore<EngineT> {
     private sessions;
     private readonly liveness;
@@ -44,7 +43,7 @@ export declare class InMemorySessionStore<EngineT = unknown> implements ISession
     size(): number;
     isOwnerAlive(sessionId: string): boolean;
     private reapReasons;
-    lastReapReasons(): Map<string, "pid_gone" | "unresolved_idle" | "owner_said_dead">;
+    lastReapReasons(): Map<string, "pid_gone" | "owner_said_dead">;
     reapDead(): string[];
     stopAll(): void;
 }

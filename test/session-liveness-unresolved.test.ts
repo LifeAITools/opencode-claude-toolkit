@@ -9,13 +9,13 @@
  *
  * Правило: неопознанный владелец — не доказательство смерти, и не доказательство жизни. Если
  * внешний источник (`isSessionAlive`) говорит «жива» — не убирать. «Не знаю» (undefined) —
- * прежнее правило двух часов. Сессия с опознанным процессом — как раньше, по процессу.
+ * сессию НЕ снимаем (рельса 16.11.2026: по часам простоя не снимать). Сессия с опознанным процессом — как раньше, по процессу.
  */
 import { describe, test, expect } from 'bun:test'
-import { InMemorySessionStore, UNRESOLVED_PID_IDLE_TTL_MS } from '../src/proxy-adapters.js'
+import { InMemorySessionStore } from '../src/proxy-adapters.js'
 
 const idle = (store: InMemorySessionStore<any>, sid: string) => {
-  store.get(sid)!.lastRequestAt = Date.now() - UNRESOLVED_PID_IDLE_TTL_MS - 60_000
+  store.get(sid)!.lastRequestAt = Date.now() - 7 * 24 * 60 * 60 * 1000
 }
 
 describe('уборка сессии без опознанного владельца', () => {
@@ -27,12 +27,12 @@ describe('уборка сессии без опознанного владель
     expect(store.get('fleet-1')).toBeDefined()
   })
 
-  test('источник не знает сессию — прежнее правило двух часов', () => {
+  test('рельса: источник не знает сессию — НЕ снимаем по часам, даже за неделю простоя', () => {
     const store = new InMemorySessionStore<any>({ isAlive: () => false, isSessionAlive: () => undefined })
     store.getOrCreate('anon-1', null, () => ({}))
     idle(store, 'anon-1')
-    expect(store.reapDead()).toEqual(['anon-1'])
-    expect(store.lastReapReasons().get('anon-1')).toBe('unresolved_idle')
+    expect(store.reapDead()).toEqual([])
+    expect(store.get('anon-1')).toBeDefined()
   })
 
   test('источник говорит «мертва» — убирается сразу, не дожидаясь двух часов', () => {
@@ -42,12 +42,11 @@ describe('уборка сессии без опознанного владель
     expect(store.lastReapReasons().get('gone-1')).toBe('owner_said_dead')
   })
 
-  test('источника нет вовсе — поведение как было', () => {
+  test('рельса: источника нет вовсе — тоже не снимаем по часам', () => {
     const store = new InMemorySessionStore<any>({ isAlive: () => false })
     store.getOrCreate('old-1', null, () => ({}))
-    expect(store.reapDead()).toEqual([])        // простоя ещё нет
     idle(store, 'old-1')
-    expect(store.reapDead()).toEqual(['old-1'])
+    expect(store.reapDead()).toEqual([])
   })
 
   test('сессия с опознанным процессом решается по процессу, а не по источнику', () => {
@@ -57,11 +56,10 @@ describe('уборка сессии без опознанного владель
     expect(store.lastReapReasons().get('pid-1')).toBe('pid_gone')
   })
 
-  test('источник бросил — правило двух часов, уборщик не падает', () => {
+  test('источник бросил — сессия остаётся, уборщик не падает', () => {
     const store = new InMemorySessionStore<any>({ isAlive: () => false, isSessionAlive: () => { throw new Error('boom') } })
     store.getOrCreate('x-1', null, () => ({}))
-    expect(store.reapDead()).toEqual([])
     idle(store, 'x-1')
-    expect(store.reapDead()).toEqual(['x-1'])
+    expect(store.reapDead()).toEqual([])
   })
 })

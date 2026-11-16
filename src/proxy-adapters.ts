@@ -205,13 +205,13 @@ export class NullEventEmitter implements IEventEmitter {
 // but ProxyClient doesn't care about the backing — it just calls the port.
 
 /**
- * Сколько держать сессию, чей владелец НЕ ОПОЗНАН, прежде чем признать её брошенной.
- *
- * Два часа — не срок жизни кэша: кэш живёт час, и после двух простоя запись не может быть
- * полезна ни прогреву, ни учёту. До границы молчим, потому что неизвестный владелец — не
- * доказательство смерти (владелец может быть за прокси и жив).
+ * 🔴 РЕЛЬСА no-idle-reap-anthropic-sessions (слово фаундера 16.11.2026, TG 87712): сессию без
+ * опознанного владельца НЕ снимаем по часам простоя. Поддержание кэша Anthropic по подписке
+ * бесплатно, а вернувшаяся после снятия сессия платит холодную перезапись всего разговора
+ * (16.11: kiberos-app 3359b8b0, 619k токенов; за двое суток 80 снятых, 6 вернулись).
+ * Снимает только доказательство смерти: `isSessionAlive === false` (`owner_said_dead`) или
+ * ушедший процесс (`pid_gone`). Бывшее правило «два часа» (c83c6fa, 24.10) удалено.
  */
-export const UNRESOLVED_PID_IDLE_TTL_MS = 2 * 60 * 60 * 1000
 
 export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<EngineT> {
   private sessions = new Map<string, Session<EngineT>>()
@@ -265,19 +265,18 @@ export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<En
     return this.liveness.isAlive(sess.pid)
   }
 
-  private reapReasons = new Map<string, 'pid_gone' | 'unresolved_idle' | 'owner_said_dead'>()
-  lastReapReasons(): Map<string, 'pid_gone' | 'unresolved_idle' | 'owner_said_dead'> { return this.reapReasons }
+  private reapReasons = new Map<string, 'pid_gone' | 'owner_said_dead'>()
+  lastReapReasons(): Map<string, 'pid_gone' | 'owner_said_dead'> { return this.reapReasons }
 
   reapDead(): string[] {
     const killed: string[] = []
     this.reapReasons = new Map()
     for (const [sid, sess] of this.sessions.entries()) {
-      // 🔴 СЕССИЯ БЕЗ PID НЕ УМИРАЛА НИКОГДА (замер 24.10.2026). Здесь стояло
-      // `if (sess.pid === null) continue` — и пять сессий, пришедших без заголовка сессии и без
-      // `metadata.user_id`, прожили 15 часов: движок прогрева тикал по ним 5056 строк в журнал,
-      // хотя греть было нечего (кэш живёт час). Владельца не знаем — но и держать неизвестное
-      // живым вечно нельзя: после ДВУХ часов простоя запись не может быть ни живой, ни полезной.
-      // До границы молчим: неопознанный владелец — не доказательство смерти.
+      // 🔴 СЕССИЯ БЕЗ PID ПО ЧАСАМ НЕ СНИМАЕТСЯ (слово фаундера 16.11.2026, рельса
+      // no-idle-reap-anthropic-sessions). История: до 24.10 тут стояло `continue`, и пять сессий
+      // без заголовка жили 15 часов; правило «два часа» (c83c6fa) это лечило, но за двое суток
+      // сняло 80 сессий, 6 вернулись и заплатили холодную перезапись. Прогрев мёртвого кэша
+      // и так не покупается (KA_FIRE_SKIPPED_CACHE_DEAD), поэтому держать запись дёшево.
       if (sess.pid === null) {
         // Сначала — тот, кто ЗНАЕТ (внешний источник жизни сессии), и только потом часы простоя.
         // Часы меряют «давно не было настоящего хода», а сессия в часы тишины ходов не шлёт
@@ -285,12 +284,11 @@ export class InMemorySessionStore<EngineT = unknown> implements ISessionStore<En
         // ровно тогда, когда прогрев честно хранит её кэш (14.11.2026, session-f933b5aa).
         let verdict: boolean | undefined
         try { verdict = this.liveness.isSessionAlive?.(sid) } catch { verdict = undefined }
-        if (verdict === true) continue
-        if (verdict === false || Date.now() - sess.lastRequestAt > UNRESOLVED_PID_IDLE_TTL_MS) {
+        if (verdict === false) {
           try { (sess.engine as any)?.stop?.() } catch { /* best-effort */ }
           this.sessions.delete(sid)
           killed.push(sid)
-          this.reapReasons.set(sid, verdict === false ? 'owner_said_dead' : 'unresolved_idle')
+          this.reapReasons.set(sid, 'owner_said_dead')
         }
         continue
       }

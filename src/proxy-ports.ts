@@ -209,11 +209,11 @@ export interface ISessionStore<EngineT = unknown> {
   reapDead(): string[]
   /**
    * Почему сняты сессии последнего `reapDead()`: `pid_gone` — процесс владельца умер;
-   * `unresolved_idle` — владелец не опознан и простой больше двух часов; `owner_said_dead` —
+   * (`unresolved_idle` удалён 16.11.2026: по часам простоя не снимаем) `owner_said_dead` —
    * внешний источник жизни сказал «мертва». Необязателен: без него причина — `pid_gone`.
    * До 14.11.2026 все три назывались `pid_gone`, и снятие по часам читалось как смерть процесса.
    */
-  lastReapReasons?(): Map<string, 'pid_gone' | 'unresolved_idle' | 'owner_said_dead'>
+  lastReapReasons?(): Map<string, 'pid_gone' | 'owner_said_dead'>
 
   /** Shutdown ALL sessions (stop engines, clear store). */
   stopAll(): void

@@ -19,6 +19,12 @@ export interface PlacementControlConfig {
     adapt: PidAdaptation;
 }
 export declare const CALIBRATED: Omit<PlacementControlConfig, "enabled" | "drain">;
+export declare function activeLoadByOrg(pins: Iterable<[
+    string,
+    {
+        orgId?: string | null;
+    }
+]>, lastTurnAt: ReadonlyMap<string, number>, classOf: (sessionId: string) => string, nowMs: number, windowMs: number): Map<string, Record<string, number>>;
 export declare const DEFAULT_PLACEMENT_CONFIG_PATH: string;
 export declare function parsePlacementControl(raw: any): PlacementControlConfig;
 export declare function loadModelAllowlist(path?: string): ModelAllowlist;

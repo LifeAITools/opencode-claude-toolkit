@@ -74,6 +74,34 @@ export const CALIBRATED: Omit<PlacementControlConfig, 'enabled' | 'drain'> = {
   },
 }
 
+/**
+ * 🔴 НАГРУЗКА ДЛЯ РЕГУЛЯТОРА — ПО РАБОТАЮЩИМ СЕССИЯМ (17.11.2026, слово фаундера TG 89257).
+ * Закреплённая сессия, которая стоит и только держит кэш, пятичасовое окно почти не жжёт, а
+ * регулятор считал её полноценной: на oeliseva 17 закреплённых при ~4 работающих давали прогноз
+ * 5ч 200% против реальных 60%, и организацию с большим недельным остатком тормозили зря.
+ * Сессия считается работающей, если её последний настоящий ход не старше `windowMs`; без отметки
+ * хода — стоячая. Чистая функция: время и отметки — параметрами.
+ */
+export function activeLoadByOrg(
+  pins: Iterable<[string, { orgId?: string | null }]>,
+  lastTurnAt: ReadonlyMap<string, number>,
+  classOf: (sessionId: string) => string,
+  nowMs: number,
+  windowMs: number,
+): Map<string, Record<string, number>> {
+  const out = new Map<string, Record<string, number>>()
+  const since = nowMs - windowMs
+  for (const [sid, p] of pins) {
+    if (!p.orgId) continue
+    if ((lastTurnAt.get(sid) ?? 0) < since) continue
+    const cls = classOf(sid)
+    const m = out.get(p.orgId) ?? {}
+    m[cls] = (m[cls] ?? 0) + 1
+    out.set(p.orgId, m)
+  }
+  return out
+}
+
 export const DEFAULT_PLACEMENT_CONFIG_PATH = join(homedir(), '.claude', 'placement.json')
 
 const num = (v: unknown, d: number, lo: number, hi: number) =>

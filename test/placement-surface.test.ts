@@ -47,3 +47,36 @@ describe('PlacementController.snapshot', () => {
     expect(JSON.stringify(c.snapshot(cfg))).toBe(JSON.stringify(c.snapshot(cfg)))
   })
 })
+
+// ── 17.11.2026, слово фаундера TG 89257: пятичасовое — лишь сигнал «упрёмся или нет». Нагрузка
+// регулятора считается по РАБОТАЮЩИМ сессиям, а не по закреплённым: стоячая держит кэш и почти не жжёт.
+import { activeLoadByOrg } from '../src/placement-control.js'
+describe('activeLoadByOrg', () => {
+  const NOW = Date.parse('2026-11-17T13:00:00Z'), MIN = 60_000
+  const pins = new Map<string, { orgId: string | null }>([
+    ['a', { orgId: 'oel' }], ['b', { orgId: 'oel' }], ['c', { orgId: 'oel' }], ['d', { orgId: 'rel' }], ['e', { orgId: null }],
+  ])
+  const cls = (sid: string) => (sid === 'c' ? 'anthropic/sonnet' : 'anthropic/opus')
+  test('стоячие не считаются: работали только a и d', () => {
+    const turns = new Map([['a', NOW - 2 * MIN], ['b', NOW - 40 * MIN], ['c', NOW - 3 * 60 * MIN], ['d', NOW - 14 * MIN]])
+    const r = activeLoadByOrg(pins, turns, cls, NOW, 15 * MIN)
+    expect(r.get('oel')).toEqual({ 'anthropic/opus': 1 })
+    expect(r.get('rel')).toEqual({ 'anthropic/opus': 1 })
+  })
+  test('без отметки хода — стоячая, а не работающая', () => {
+    expect(activeLoadByOrg(pins, new Map(), cls, NOW, 15 * MIN).size).toBe(0)
+  })
+  test('класс модели сохраняется: Sonnet и Opus считаются раздельно', () => {
+    const turns = new Map([['a', NOW - MIN], ['c', NOW - MIN]])
+    expect(activeLoadByOrg(pins, turns, cls, NOW, 15 * MIN).get('oel')).toEqual({ 'anthropic/opus': 1, 'anthropic/sonnet': 1 })
+  })
+  test('закреплена без организации — не считается', () => {
+    expect(activeLoadByOrg(pins, new Map([['e', NOW]]), cls, NOW, 15 * MIN).size).toBe(0)
+  })
+  test('граница: ровно на краю окна ещё работает, чуть дальше — нет', () => {
+    const r1 = activeLoadByOrg(pins, new Map([['a', NOW - 15 * MIN]]), cls, NOW, 15 * MIN)
+    const r2 = activeLoadByOrg(pins, new Map([['a', NOW - 15 * MIN - 1]]), cls, NOW, 15 * MIN)
+    expect(r1.get('oel')).toEqual({ 'anthropic/opus': 1 })
+    expect(r2.size).toBe(0)
+  })
+})

@@ -78,9 +78,12 @@ import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
 import { chooseBirthOrg, chooseNonWalledFallback, usageToWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
 import { getCompatVersion } from './subscription-compat.js'
-import { PlacementController, loadPlacementControl, loadModelAllowlist } from './placement-control.js'
+import { PlacementController, loadPlacementControl, loadModelAllowlist, activeLoadByOrg } from './placement-control.js'
 import { orgsAllowedForModel, parseModelAllowlist, type ModelAllowlist } from './org-model-allowlist.js'
 import { sessionClass } from './placement-pid.js'
+
+/** Сессия считается РАБОТАЮЩЕЙ для нагрузки регулятора, если настоящий ход был за это время. */
+const ACTIVE_LOAD_WINDOW_MS = 15 * 60_000
 import { prefixHashes, classifyRewrite, lineageKey, type PrefixHashes } from './lineage.js'
 import { loadKeepaliveConfig } from './keepalive-config.js'
 import { consumeConsent } from './rewrite-consent.js'
@@ -1807,14 +1810,12 @@ export class ProxyClient {
     let weights: Map<string, { weight: number; mode: string; reason: string }> | undefined
     if (ctl.enabled) {
       weights = new Map()
-      const classesByOrg = new Map<string, Record<string, number>>()
-      for (const [sid, p] of this.sessionPins) {
-        if (!p.orgId) continue
-        const cls = this.sessionClassById.get(sid) ?? 'anthropic/opus'
-        const m = classesByOrg.get(p.orgId) ?? {}
-        m[cls] = (m[cls] ?? 0) + 1
-        classesByOrg.set(p.orgId, m)
-      }
+      // 🔴 НАГРУЗКУ СЧИТАЕМ ПО РАБОТАЮЩИМ, А НЕ ПО ЗАКРЕПЛЁННЫМ — см. activeLoadByOrg (17.11.2026).
+      const lastTurn = new Map<string, number>()
+      for (const sess of this.store.list()) lastTurn.set(sess.sessionId, sess.lastRequestAt)
+      const classesByOrg = activeLoadByOrg(
+        this.sessionPins, lastTurn, sid => this.sessionClassById.get(sid) ?? 'anthropic/opus', now, ACTIVE_LOAD_WINDOW_MS,
+      )
       const inflow = now - this.lastBirthAt < 30 * 60_000
       for (const c of candidates) {
         const reading = this.orgUsage.get(c.orgId)

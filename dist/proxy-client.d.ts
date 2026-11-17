@@ -100,6 +100,7 @@ export declare class ProxyClient {
     private readonly orgUsageBackoffUntil;
     private readonly orgUsageEndpointAt;
     private readonly sessionClassById;
+    private readonly lastRealTurnAt;
     private readonly placementController;
     private placementConfigPath;
     private orgModelRules;
@@ -227,7 +228,9 @@ export declare class ProxyClient {
     placementSurface(): {
         config: Record<string, unknown>;
         controller: Array<Record<string, unknown>>;
+        evaluatedNow: Array<Record<string, unknown>>;
     };
+    private evaluatePlacementNow;
     orgSurface(): {
         orgs: Array<{
             orgId: string;

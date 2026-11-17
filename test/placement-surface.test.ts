@@ -80,3 +80,31 @@ describe('activeLoadByOrg', () => {
     expect(r2.size).toBe(0)
   })
 })
+
+describe('PlacementController.snapshot: возраст записи', () => {
+  test('свежий шаг — не устарел; через 30 минут — устарел, возраст назван числом', () => {
+    const c = new PlacementController(), t0 = Date.parse('2026-11-17T10:00:00Z')
+    c.weight(cfg, 'org-z', win(0.2, t0), {}, t0, true)
+    const fresh = c.snapshot(cfg, t0 + 60_000)[0] as any
+    const old = c.snapshot(cfg, t0 + 30 * 60_000)[0] as any
+    expect(fresh.stale).toBe(false)
+    expect(fresh.lastStepAgeSec).toBe(60)
+    expect(old.stale).toBe(true)
+    expect(old.lastStepAgeSec).toBe(1800)
+  })
+})
+
+describe('activeLoadByOrg после перезапуска прокси', () => {
+  test('восстановленные сессии без отметки настоящего хода не считаются работающими (иначе 94 сразу «работают»)', () => {
+    const NOW = Date.parse('2026-11-17T16:00:00Z')
+    const pins = new Map<string, { orgId: string }>()
+    for (let i = 0; i < 94; i++) pins.set(`s${i}`, { orgId: i % 2 ? 'oel' : 'rel' })
+    expect(activeLoadByOrg(pins, new Map(), () => 'anthropic/opus', NOW, 15 * 60_000).size).toBe(0)
+  })
+  test('после настоящего хода сессия сразу считается', () => {
+    const NOW = Date.parse('2026-11-17T16:00:00Z')
+    const pins = new Map([['s1', { orgId: 'oel' }]])
+    const r = activeLoadByOrg(pins, new Map([['s1', NOW - 1000]]), () => 'anthropic/opus', NOW, 15 * 60_000)
+    expect(r.get('oel')).toEqual({ 'anthropic/opus': 1 })
+  })
+})

@@ -191,7 +191,7 @@ export class PlacementController {
    * `adaptMul` = 1/θ (θ — во сколько раз сессии жгут окно быстрее, чем на истории); пока
    * наблюдений меньше `minObservations`, множитель честно 1 и это названо.
    */
-  snapshot(cfg: PlacementControlConfig): Array<Record<string, unknown>> {
+  snapshot(cfg: PlacementControlConfig, nowMs: number = Date.now()): Array<Record<string, unknown>> {
     const rows: Array<Record<string, unknown>> = []
     for (const [org, st] of this.states) {
       const last = this.lastOut.get(org)
@@ -200,6 +200,11 @@ export class PlacementController {
       rows.push({
         org,
         lastStepAt: this.lastStepAt.get(org) ?? null,
+        // 🔴 ВОЗРАСТ ЗАПИСИ (17.11.2026): шаг делается только при рождении сессии, поэтому «затормозили»
+        // может быть решением двухчасовой давности. Без возраста оно читалось как текущее и вводило в
+        // заблуждение (elisevruslan: тормоз с 15:27, а окно сбросилось в 15:30).
+        lastStepAgeSec: this.lastStepAt.has(org) ? Math.max(0, Math.round((nowMs - this.lastStepAt.get(org)!) / 1000)) : null,
+        stale: this.lastStepAt.has(org) ? nowMs - this.lastStepAt.get(org)! > 10 * 60_000 : null,
         observations: st.observations,
         thetaEstimate: theta === null ? null : +theta.toFixed(3),
         adaptTrusted: trusted,

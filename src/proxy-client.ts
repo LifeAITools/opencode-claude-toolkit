@@ -694,6 +694,15 @@ export class ProxyClient {
   private readonly orgUsageEndpointAt: Map<string, number> = new Map()
   /** Класс модели живой сессии (`anthropic/opus` …) — нагрузка регулятора делится по классам. */
   private readonly sessionClassById: Map<string, string> = new Map()
+  /**
+   * 🔴 Время ПОСЛЕДНЕГО НАСТОЯЩЕГО ХОДА по сессии — только из живого запроса, НЕ из восстановления.
+   * `session.lastRequestAt` после перезапуска прокси у всех восстановленных равен «сейчас» (хранилище
+   * создаёт сессию с текущим временем), и все 94 выглядели работающими: тормоз ложно срабатывал
+   * на 15 минут после каждой выкладки. Нет отметки — «не знаю, работала ли», и такая сессия в
+   * нагрузке регулятора не считается (недооценка нагрузки на первые минуты безопаснее переоценки,
+   * потому что измеренная скорость расхода всё равно участвует в прогнозе).
+   */
+  private readonly lastRealTurnAt: Map<string, number> = new Map()
   /** ПИД поверх выбора при рождении (src/placement-control.ts); выключен, пока нет файла ручки. */
   private readonly placementController = new PlacementController()
   /** Путь файла ручки; тесты подставляют свой. */
@@ -1811,10 +1820,8 @@ export class ProxyClient {
     if (ctl.enabled) {
       weights = new Map()
       // 🔴 НАГРУЗКУ СЧИТАЕМ ПО РАБОТАЮЩИМ, А НЕ ПО ЗАКРЕПЛЁННЫМ — см. activeLoadByOrg (17.11.2026).
-      const lastTurn = new Map<string, number>()
-      for (const sess of this.store.list()) lastTurn.set(sess.sessionId, sess.lastRequestAt)
       const classesByOrg = activeLoadByOrg(
-        this.sessionPins, lastTurn, sid => this.sessionClassById.get(sid) ?? 'anthropic/opus', now, ACTIVE_LOAD_WINDOW_MS,
+        this.sessionPins, this.lastRealTurnAt, sid => this.sessionClassById.get(sid) ?? 'anthropic/opus', now, ACTIVE_LOAD_WINDOW_MS,
       )
       const inflow = now - this.lastBirthAt < 30 * 60_000
       for (const c of candidates) {
@@ -1949,7 +1956,7 @@ export class ProxyClient {
   }
 
   /** Живые ручки и состояние регулятора распределителя — для /admin/placement (только чтение). */
-  placementSurface(): { config: Record<string, unknown>; controller: Array<Record<string, unknown>> } {
+  placementSurface(): { config: Record<string, unknown>; controller: Array<Record<string, unknown>>; evaluatedNow: Array<Record<string, unknown>> } {
     const cfg = loadPlacementControl(this.placementConfigPath)
     return {
       config: {
@@ -1960,7 +1967,30 @@ export class ProxyClient {
           adaptMax: cfg.adapt.adaptMax, minObservations: cfg.adapt.minObservations },
       },
       controller: this.placementController.snapshot(cfg),
+      // 🔴 ЧТО РЕШИЛ БЫ РЕГУЛЯТОР ПРЯМО СЕЙЧАС (17.11.2026, слово фаундера TG 89541). Шаг регулятора
+      // делается только при рождении сессии, и последняя запись может быть двухчасовой давности.
+      // Здесь — свежий расчёт на живых замерах и ЖИВОЙ нагрузке; состояние регулятора НЕ меняется
+      // (считается на копии с пустой историей, поэтому без подстройки усиления и без производной).
+      evaluatedNow: this.evaluatePlacementNow(cfg),
     }
+  }
+
+  private evaluatePlacementNow(cfg: ReturnType<typeof loadPlacementControl>): Array<Record<string, unknown>> {
+    if (!cfg.enabled) return []
+    const now = Date.now()
+    const load = activeLoadByOrg(this.sessionPins, this.lastRealTurnAt, sid => this.sessionClassById.get(sid) ?? 'anthropic/opus', now, ACTIVE_LOAD_WINDOW_MS)
+    const probe = new PlacementController()
+    const rows: Array<Record<string, unknown>> = []
+    for (const [orgId, reading] of this.orgUsage) {
+      const out = probe.weight(cfg, orgId, reading.windows, load.get(orgId) ?? {}, now, true)
+      rows.push({
+        org: orgId, measuredAgeSec: Math.round((now - reading.measuredAt) / 1000),
+        activeSessions: Object.values(load.get(orgId) ?? {}).reduce((a, b) => a + b, 0),
+        weight: out ? +out.weight.toFixed(2) : null, braked: out ? out.braked : null,
+        forecast5h: out ? +out.terms.forecast.toFixed(2) : null, reason: out ? out.reason : 'регулятор выключен',
+      })
+    }
+    return rows
   }
 
   /** Org surface snapshot for /admin/orgs — tokens redacted. */
@@ -2127,6 +2157,7 @@ export class ProxyClient {
     // Новая ли она: у только что созданной отметка рождения не раньше нашей.
     const isNewSession = session.firstSeenAt >= bornAt
     session.lastRequestAt = Date.now()
+    this.lastRealTurnAt.set(sessionId, session.lastRequestAt)
     if (isNewSession) {
       // Один раз на сессию — паспорт не меняется, а чтение /proc стоит вызовов.
       const owner = sourcePid !== null ? readOwnerPassport(sourcePid) : null

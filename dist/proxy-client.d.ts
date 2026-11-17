@@ -224,6 +224,10 @@ export declare class ProxyClient {
         ok: false;
         error: string;
     }>;
+    placementSurface(): {
+        config: Record<string, unknown>;
+        controller: Array<Record<string, unknown>>;
+    };
     orgSurface(): {
         orgs: Array<{
             orgId: string;

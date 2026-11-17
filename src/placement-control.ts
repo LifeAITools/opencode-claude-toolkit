@@ -144,6 +144,37 @@ export function loadPlacementControl(path = DEFAULT_PLACEMENT_CONFIG_PATH): Plac
 export class PlacementController {
   private readonly states = new Map<string, PidState>()
   private lastStepAt = new Map<string, number>()
+  /** Последний ответ регулятора по организации — для показа человеку, на выбор не влияет. */
+  private lastOut = new Map<string, { weight: number; mode: string; braked: boolean; reason: string; terms: PidOutput['terms']; at: number }>()
+
+  /**
+   * 🔴 ЖИВОЕ СОСТОЯНИЕ РЕГУЛЯТОРА (слово фаундера 17.11.2026, TG 89220: «посмотреть, какие ручки в
+   * моменте он дергает, как настраивает коэффициенты, чтобы понять, правильный ли он»). Только
+   * чтение: что стоит в состоянии и что регулятор ответил в последний раз. Подстроенное усиление —
+   * `adaptMul` = 1/θ (θ — во сколько раз сессии жгут окно быстрее, чем на истории); пока
+   * наблюдений меньше `minObservations`, множитель честно 1 и это названо.
+   */
+  snapshot(cfg: PlacementControlConfig): Array<Record<string, unknown>> {
+    const rows: Array<Record<string, unknown>> = []
+    for (const [org, st] of this.states) {
+      const last = this.lastOut.get(org)
+      const trusted = st.observations >= cfg.adapt.minObservations && st.sxx > 0
+      const theta = trusted ? st.sxy / st.sxx : null
+      rows.push({
+        org,
+        lastStepAt: this.lastStepAt.get(org) ?? null,
+        observations: st.observations,
+        thetaEstimate: theta === null ? null : +theta.toFixed(3),
+        adaptTrusted: trusted,
+        integral: +st.integral.toFixed(4),
+        derivativePerHour: +st.derivFiltered.toFixed(4),
+        lastOutput: +st.lastOutput.toFixed(3),
+        trajectory: st.t0Ms === null ? null : { startedAt: st.t0Ms, util0: st.util0, targetKey: st.targetKey },
+        last: last ?? null,
+      })
+    }
+    return rows
+  }
 
   /**
    * Вес организации для НОВОЙ сессии. `null` — регулятор не участвует (выключен / нет 5ч-окна).
@@ -164,6 +195,7 @@ export class PlacementController {
       nowMs, util: w5.util, sessionsByClass, inflowSinceLast: inflow, target,
     }, cfg.gains, cfg.limits, cfg.adapt)
     this.lastStepAt.set(orgId, nowMs)
+    this.lastOut.set(orgId, { weight: out.weight, mode, braked: out.braked, reason: out.reason, terms: out.terms, at: nowMs })
     // 🔴 НЕДЕЛЯ — ВТОРОЙ ТОРМОЗ (слово фаундера 14.11.2026, TG 85965: «PID на основе данных об
     // окне, данных об остатке дней до исчерпания»). ПИД ведёт 5ч-окно, а неделя — другое окно
     // с другим сроком: при 5ч 0.48 и неделе 0.99 организация выглядит для ПИД свободной и

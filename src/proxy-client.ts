@@ -1947,6 +1947,21 @@ export class ProxyClient {
     return { ok: true, orgId: live.orgId, orgName: live.orgName, refreshed }
   }
 
+  /** Живые ручки и состояние регулятора распределителя — для /admin/placement (только чтение). */
+  placementSurface(): { config: Record<string, unknown>; controller: Array<Record<string, unknown>> } {
+    const cfg = loadPlacementControl(this.placementConfigPath)
+    return {
+      config: {
+        enabled: cfg.enabled, balanceTargetUtil: cfg.balanceTargetUtil, weekBrakeUtil: cfg.weekBrakeUtil,
+        modelGuardScope: cfg.modelGuardScope, drain: cfg.drain, gains: cfg.gains, limits: cfg.limits,
+        adapt: { enabled: cfg.adapt.enabled, kCalByClass: cfg.adapt.kCalByClass, kDefault: cfg.adapt.kDefault,
+          driftPerHour: cfg.adapt.driftPerHour, forget: cfg.adapt.forget, adaptMin: cfg.adapt.adaptMin,
+          adaptMax: cfg.adapt.adaptMax, minObservations: cfg.adapt.minObservations },
+      },
+      controller: this.placementController.snapshot(cfg),
+    }
+  }
+
   /** Org surface snapshot for /admin/orgs — tokens redacted. */
   orgSurface(): {
     orgs: Array<{ orgId: string; orgName?: string; accountEmail?: string; expiresAt: number | null; hasRefreshToken: boolean; capturedAt: number; lastVerifiedAt?: number }>

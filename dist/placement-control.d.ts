@@ -25,6 +25,8 @@ export declare function loadPlacementControl(path?: string): PlacementControlCon
 export declare class PlacementController {
     private readonly states;
     private lastStepAt;
+    private lastOut;
+    snapshot(cfg: PlacementControlConfig): Array<Record<string, unknown>>;
     weight(cfg: PlacementControlConfig, orgId: string, windows: PlacementWindow[], sessionsByClass: Record<string, number>, nowMs: number, inflow: boolean): (PidOutput & {
         mode: "drain" | "balance";
     }) | null;

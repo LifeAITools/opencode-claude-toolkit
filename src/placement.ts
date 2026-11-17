@@ -30,6 +30,8 @@
  * производная без смены интерфейса.
  */
 
+import { forecastWeek } from './placement-week.js'
+
 export interface PlacementWindow {
   /** `5h` | `week` | `month` — длина берётся из WINDOW_HOURS. */
   name: string
@@ -44,6 +46,13 @@ export interface PlacementOrg {
   windows: PlacementWindow[]
   /** Сколько живых сессий уже посажено на эту организацию. */
   activeAgents: number
+  /**
+   * 🔴 Включает недельную цель с ритмом дня (placement-week.ts) для ЭТОЙ организации. Выключено по
+   * умолчанию: выбор общий для дверей Anthropic, OpenDesign и Go, а профиль активности и цель 99%
+   * — слово фаундера про НЕДЕЛЮ ANTHROPIC (17.11.2026, TG 89208). Чужие маршруты меняются только
+   * явным включением, не молча.
+   */
+  weekGoal?: boolean
   /** Организация запрещена/исчерпана/без входа — не кандидат (причина в `blockedReason`). */
   blockedReason?: string | null
   /**
@@ -109,6 +118,15 @@ export interface PlacementAssessment {
   /** Часы до САМОГО БЛИЗКОГО сброса среди измеренных окон; `null` — нечего считать.
    *  Нужен для правила «чей остаток умрёт раньше — того и выжигаем» (см. planPlacement). */
   tightestResetHours: number | null
+  /**
+   * 🔴 НЕДЕЛЬНАЯ НУЖДА (слово фаундера 17.11.2026, TG 89208: «максимизировать расход, не упираясь»):
+   * сколько недели НЕ успеем выбрать до сброса при нынешнем темпе, с поправкой на ритм дня, делённое
+   * на оставшуюся рабочую массу (см. placement-week.ts). `null` — недельное окно не измерено.
+   * Больше — организацию надо кормить раньше: у неё мало рабочего времени до сброса, а остаток велик.
+   */
+  weekNeed: number | null
+  /** Прогноз недели к сбросу (доля; >1 — упрёмся) или `null`. */
+  weekForecast: number | null
   /** Человеческая причина — одной строкой. */
   reason: string
 }
@@ -174,6 +192,8 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     tightestResetHours: measured.length
       ? Math.max(0, Math.min(...measured.map(w => (w.resetAt as number) - nowMs)) / 3_600_000)
       : null,
+    weekNeed: null,
+    weekForecast: null,
     reason: blocked ?? (measured.length === 0 ? 'ни одно окно не измерено — сказать нечего' : ''),
   }
   if (blocked) return base
@@ -250,8 +270,16 @@ export function assessOrg(org: PlacementOrg, nowMs: number): PlacementAssessment
     pressureHours: pressure,
     binding,
     verdict,
+    ...(org.weekGoal ? weekFields(measured, nowMs) : {}),
     reason: `${bindingText}; агентов ${agents}; худший запас ${headText}`,
   }
+}
+
+/** Недельная нужда и прогноз по измеренному недельному окну; нет окна — оба `null` («не знаю»). */
+function weekFields(measured: PlacementWindow[], nowMs: number): Pick<PlacementAssessment, 'weekNeed' | 'weekForecast'> {
+  const w = measured.find(x => x.name === 'week')
+  const f = w ? forecastWeek(w.util, w.resetAt, nowMs) : null
+  return { weekNeed: f ? f.need : null, weekForecast: f ? f.forecast : null }
 }
 
 function fmt(h: number): string {
@@ -321,6 +349,15 @@ export function planPlacement(orgs: PlacementOrg[], nowMs: number, seed = ''): P
     // отменяет занятость (она выше) и НЕ трогает случай, когда стена грозит (там решает score).
     // Измерено в research/placement-pid-week-2026-11.md: посаженных в стену 17.6% против 19.5%.
     if (!Number.isFinite(a.score) && !Number.isFinite(b.score)) {
+      // 🔴 СЛОВО ФАУНДЕРА 17.11.2026 (TG 89208): цель не «усреднить», а «успеть выбрать неделю к сбросу,
+      // не упираясь в стену», с поправкой на рабочие часы. Если у обеих известна недельная нужда
+      // (сколько недели не успеем выбрать, делённое на оставшуюся РАБОЧУЮ массу — placement-week.ts),
+      // кормим ту, у которой она больше: у неё мало рабочего времени, а остаток ещё велик. Ночь тут
+      // считается по заслугам — организация, до сброса которой остаётся в основном ночь, получает
+      // приток днём. Дальний сброс уходит «на последок» сам: у него рабочей массы много, нужда мала.
+      if (a.weekNeed !== null && b.weekNeed !== null && Math.abs(a.weekNeed - b.weekNeed) > 1e-4) {
+        return b.weekNeed - a.weekNeed
+      }
       const ea = a.tightestResetHours ?? Infinity
       const eb = b.tightestResetHours ?? Infinity
       if (ea !== eb) return ea - eb

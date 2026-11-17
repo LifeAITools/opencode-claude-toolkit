@@ -7,6 +7,7 @@ export interface PlacementOrg {
     name: string;
     windows: PlacementWindow[];
     activeAgents: number;
+    weekGoal?: boolean;
     blockedReason?: string | null;
     inFlight?: number;
     slotCap?: number;
@@ -32,6 +33,8 @@ export interface PlacementAssessment {
     }>;
     verdict: "place" | "unknown" | "avoid" | "walled";
     tightestResetHours: number | null;
+    weekNeed: number | null;
+    weekForecast: number | null;
     reason: string;
 }
 export interface PlacementPlan {

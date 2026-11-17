@@ -1832,7 +1832,7 @@ export class ProxyClient {
       this.events.emit({
         level: 'info', kind: 'ORG_PLACED', sessionId, orgId: r.orgId,
         msg: `new session placed by headroom: ${r.plan.reason}${r.control ? ` · регулятор: ${r.control}` : ''}`,
-        ranked: r.plan.ranked.map(a => ({ org: a.name.slice(0, 8), verdict: a.verdict, agents: a.activeAgents, pressureH: Number.isFinite(a.pressureHours) ? +a.pressureHours.toFixed(1) : null })),
+        ranked: r.plan.ranked.map(a => ({ org: a.name.slice(0, 8), verdict: a.verdict, agents: a.activeAgents, pressureH: Number.isFinite(a.pressureHours) ? +a.pressureHours.toFixed(1) : null, weekNeedPctPerH: a.weekNeed === null ? null : +(a.weekNeed * 100).toFixed(3), weekForecast: a.weekForecast === null ? null : +a.weekForecast.toFixed(2) })),
       })
       return r.orgId
     }

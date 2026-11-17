@@ -142,7 +142,7 @@ export function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult
   for (const c of eligible) {
     const r = input.readings.get(c.orgId)
     if (!r || r.windows.length === 0 || input.nowMs - r.measuredAt > input.maxReadingAgeMs) continue
-    orgs.push({ name: c.orgId, windows: r.windows, activeAgents: input.pinsByOrg.get(c.orgId) ?? 0 })
+    orgs.push({ name: c.orgId, windows: r.windows, activeAgents: input.pinsByOrg.get(c.orgId) ?? 0, weekGoal: true })
   }
   // 🔴 СРАВНИВАТЬ ОДНУ С НИЧЕМ НЕЛЬЗЯ: если свежо измерена одна организация из двух живых,
   // «выбор» всегда отдавал бы её — даже на грани стены, — а неизмеренную морил бы голодом.

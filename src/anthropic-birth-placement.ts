@@ -116,6 +116,15 @@ export interface BirthPlacementInput {
    * Вес 0 — тормоз: организация не кандидат. Больший вес — раньше в выборе (drain).
    */
   weights?: Map<string, { weight: number; mode: string; reason: string }>
+  /**
+   * 🔴 ЖЁСТКИЙ ТОРМОЗ (слово фаундера 17.11.2026, TG 89252: критерий качества — «агент отработал
+   * полную сессию и не упёрся в 97% пятичасового окна»). Заторможенная организация выбывает, пока
+   * есть незаторможенная, у которой НЕДЕЛЯ ниже порога стены: отступать на «лучшую по порядку»
+   * больше нельзя, порядок решает только среди тех, кого тормоз пропустил. Недельная стена остаётся
+   * ограничением: если все незаторможенные у недельной стены, берём прежний путь (мягкий).
+   * `false` — прежнее поведение (тормоз отступает на равного или лучшего по порядку).
+   */
+  hardBrake?: boolean
 }
 
 export interface BirthPlacementResult {
@@ -166,7 +175,15 @@ export function chooseBirthOrg(input: BirthPlacementInput): BirthPlacementResult
   const live = plan.ranked.filter(a => a.verdict !== 'walled')
   const brakedOut = (a: typeof live[number]) => (input.weights!.get(a.name)?.weight ?? 1) <= 0
   const firstFree = live.findIndex(a => !brakedOut(a))
-  const usable = live.filter((a, i) => !brakedOut(a) || (firstFree >= 0 && i < firstFree))
+  // Недельная стена не отменяется жёстким тормозом: незаторможенная с неделей у порога — не выход.
+  const weekOk = (a: typeof live[number]) => {
+    const wk = input.readings.get(a.name)?.windows.find(w => w.name === 'week')
+    return !(wk && typeof wk.util === 'number' && wk.util >= WEEK_EFFECTIVELY_WALLED && !(typeof wk.resetAt === 'number' && wk.resetAt <= input.nowMs))
+  }
+  const hardEscape = input.hardBrake === true && live.some(a => !brakedOut(a) && weekOk(a))
+  const usable = hardEscape
+    ? live.filter(a => !brakedOut(a) && weekOk(a))
+    : live.filter((a, i) => !brakedOut(a) || (firstFree >= 0 && i < firstFree))
   const ctlText = [...input.weights].map(([o, w]) => `${o.slice(0, 8)} ${w.mode} w=${w.weight.toFixed(2)}`).join('; ')
   if (usable.length === 0) return { orgId: null, plan, skipped: 'регулятор затормозил все организации — прежний выбор', control: ctlText }
   const drainers = usable.filter(a => input.weights!.get(a.name)?.mode === 'drain' && (input.weights!.get(a.name)?.weight ?? 0) > 0)

@@ -9,6 +9,7 @@ export interface DrainEntry {
 export type ModelGuardScope = "all" | "new";
 export interface PlacementControlConfig {
     enabled: boolean;
+    brakeMode: "hard" | "soft";
     modelGuardScope: ModelGuardScope;
     balanceTargetUtil: number;
     weekBrakeUtil: number;

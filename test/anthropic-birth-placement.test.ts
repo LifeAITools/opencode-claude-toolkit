@@ -472,6 +472,47 @@ describe('тормоз регулятора не гонит на аккаунт 
   })
 })
 
+
+// ── 17.11.2026, TG 89252: критерий фаундера — «агент отработал полную сессию и не упёрся в 97%
+// пятичасового окна». Жёсткий тормоз: заторможенная не получает новых, пока есть другая, у которой
+// недельная стена не у порога. Порядок по неделе решает только среди пропущенных тормозом.
+describe('жёсткий тормоз пятичасового окна', () => {
+  const t = NOW
+  const mk = (a5: number, aw: number, b5: number, bw: number) => new Map([
+    ['A', { orgId: 'A', measuredAt: t, windows: [{ name: '5h', util: a5, resetAt: t + 2 * H }, { name: 'week', util: aw, resetAt: t + 2 * 24 * H }] }],
+    ['B', { orgId: 'B', measuredAt: t, windows: [{ name: '5h', util: b5, resetAt: t + 3 * H }, { name: 'week', util: bw, resetAt: t + 5 * 24 * H }] }],
+  ])
+  const cands = [{ orgId: 'A', needsRelogin: false, tokenAlive: true }, { orgId: 'B', needsRelogin: false, tokenAlive: true }]
+  const braked = (org: string) => new Map([['A', { weight: org === 'A' ? 0 : 1, mode: 'balance', reason: '' }], ['B', { weight: org === 'B' ? 0 : 1, mode: 'balance', reason: '' }]])
+  const run = (readings: Map<string, any>, weights: Map<string, any>, hardBrake: boolean) => chooseBirthOrg({
+    candidates: cands, readings, pinsByOrg: new Map([['A', 5], ['B', 5]]), nowMs: t, maxReadingAgeMs: H, seed: 's', weights, hardBrake,
+  })
+
+  test('A лучше по порядку (неделя голоднее), но заторможена: жёстко — уходим на B', () => {
+    const r = mk(0.5, 0.3, 0.5, 0.6)
+    const w = new Map([['A', { weight: 1, mode: 'balance', reason: '' }], ['B', { weight: 1, mode: 'balance', reason: '' }]])
+    expect(run(r, w, false).orgId).toBe('A')             // без тормоза порядок выбирает A — сценарий настоящий
+    expect(run(r, braked('A'), false).orgId).toBe('A')   // мягко: тормоз отступает на лучшую по порядку
+    expect(run(r, braked('A'), true).orgId).toBe('B')    // жёстко: не сажаем на заторможенную
+  })
+  test('жёсткий тормоз не загоняет в недельную стену: у единственной незаторможенной неделя 0.99 — остаёмся по-старому', () => {
+    const r = mk(0.5, 0.3, 0.5, 0.99)
+    expect(run(r, braked('A'), true).orgId).toBe('A')    // B у недельной стены: путь прежний, мягкий
+  })
+  test('никто не заторможен — жёсткий режим ничего не меняет', () => {
+    const r = mk(0.5, 0.3, 0.5, 0.6)
+    const w = new Map([['A', { weight: 1, mode: 'balance', reason: '' }], ['B', { weight: 1, mode: 'balance', reason: '' }]])
+    expect(run(r, w, true).orgId).toBe(run(r, w, false).orgId)
+  })
+  test('затормозили обеих — регулятор уступает прежнему выбору (не оставляем без организации)', () => {
+    const r = mk(0.95, 0.4, 0.95, 0.5)
+    const w = new Map([['A', { weight: 0, mode: 'balance', reason: '' }], ['B', { weight: 0, mode: 'balance', reason: '' }]])
+    const x = run(r, w, true)
+    expect(x.orgId).toBeNull()
+    expect(x.skipped).toContain('затормозил все')
+  })
+})
+
 // ── 14.11.2026, TG 85965/85966/85967: «сравнивать не с чем» оставляло новую сессию на активной
 // организации, а та была в стене. Возраст замера обязан работать ТОЛЬКО в сторону запрета.
 describe('запасной выбор: сравнивать не с чем — не значит оставить в стене', () => {

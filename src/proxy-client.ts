@@ -1826,7 +1826,7 @@ export class ProxyClient {
     this.lastBirthAt = now
     const r = chooseBirthOrg({
       candidates, readings: this.orgUsage, pinsByOrg, nowMs: now,
-      maxReadingAgeMs: ORG_USAGE_MAX_AGE_MS, seed: sessionId, weights,
+      maxReadingAgeMs: ORG_USAGE_MAX_AGE_MS, seed: sessionId, weights, hardBrake: ctl.brakeMode === 'hard',
     })
     if (r.orgId && r.plan) {
       this.events.emit({
@@ -1952,7 +1952,7 @@ export class ProxyClient {
     const cfg = loadPlacementControl(this.placementConfigPath)
     return {
       config: {
-        enabled: cfg.enabled, balanceTargetUtil: cfg.balanceTargetUtil, weekBrakeUtil: cfg.weekBrakeUtil,
+        enabled: cfg.enabled, brakeMode: cfg.brakeMode, balanceTargetUtil: cfg.balanceTargetUtil, weekBrakeUtil: cfg.weekBrakeUtil,
         modelGuardScope: cfg.modelGuardScope, drain: cfg.drain, gains: cfg.gains, limits: cfg.limits,
         adapt: { enabled: cfg.adapt.enabled, kCalByClass: cfg.adapt.kCalByClass, kDefault: cfg.adapt.kDefault,
           driftPerHour: cfg.adapt.driftPerHour, forget: cfg.adapt.forget, adaptMin: cfg.adapt.adaptMin,

@@ -38,6 +38,7 @@ export interface BirthPlacementInput {
         mode: string;
         reason: string;
     }>;
+    hardBrake?: boolean;
 }
 export interface BirthPlacementResult {
     orgId: string | null;

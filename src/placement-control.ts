@@ -9,6 +9,7 @@
  * ФАЙЛ `~/.claude/placement.json` (перечитывается при изменении, без перезапуска):
  *   {
  *     "enabled": false,                       // false — выбор как раньше (planPlacement)
+ *     "brakeMode": "hard",                    // hard — заторможенная не получает новых; soft — отступает на лучшую по порядку
  *     "balanceTargetUtil": 0.97,              // 5ч: довести до 97%, но НЕ упереться (слово фаундера)
  *     "weekBrakeUtil": 0.98,                  // неделя: кормить до 98%, остаток дожигают живые
  *     "drain": [ { "org": "b3219c9b", "targetUtil": 0.99, "deadline": "2026-11-12T20:00:00Z" } ],
@@ -35,6 +36,12 @@ export type ModelGuardScope = 'all' | 'new'
 
 export interface PlacementControlConfig {
   enabled: boolean
+  /**
+   * 🔴 `hard` (по умолчанию с 17.11.2026, слово фаундера TG 89252): заторможенная по пятичасовому
+   * окну организация не получает новых сессий, пока есть незаторможенная с недельным остатком.
+   * `soft` — прежнее: тормоз отступает на равную или лучшую по общему порядку выбора.
+   */
+  brakeMode: 'hard' | 'soft'
   modelGuardScope: ModelGuardScope
   balanceTargetUtil: number
   /**
@@ -55,6 +62,7 @@ export interface PlacementControlConfig {
 
 /** Коэффициенты калибровки 12.11.2026 (research/placement-pid-calibration-2026-11.md). */
 export const CALIBRATED: Omit<PlacementControlConfig, 'enabled' | 'drain'> = {
+  brakeMode: 'hard',
   modelGuardScope: 'all',
   balanceTargetUtil: 0.97,
   weekBrakeUtil: 0.98,
@@ -81,6 +89,7 @@ export function parsePlacementControl(raw: any): PlacementControlConfig {
   }) : []
   return {
     enabled: raw?.enabled === true,
+    brakeMode: raw?.brakeMode === 'soft' ? 'soft' : 'hard',
     modelGuardScope: raw?.modelGuardScope === 'new' ? 'new' : 'all',
     balanceTargetUtil: num(raw?.balanceTargetUtil, CALIBRATED.balanceTargetUtil, 0.5, 0.99),
     weekBrakeUtil: num(raw?.weekBrakeUtil, CALIBRATED.weekBrakeUtil, 0.5, 1),

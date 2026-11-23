@@ -53,7 +53,21 @@ describe('unifyProviderFile', () => {
     }
     const [acc] = unifyProviderFile('opencode-go', doc, NOW)
     expect(acc.windows.map(w => [w.name, w.usedFraction])).toEqual([['5h', 0.11], ['week', 0.22], ['month', 1]])
-    expect(acc.level).toBe('ok')
+    // Месяц выжжен — уровень не может быть зелёным (раньше смотрели только пятичасовое окно).
+    expect(acc.status).toBe('exhausted')
+    expect(acc.level).toBe('critical')
+  })
+
+  test('неделя выжжена при нуле в пятичасовом: status exhausted И level critical (23.11.2026)', () => {
+    const doc = { measured_at: '2026-11-05T09:59:00.000Z', accounts: { 'k@x': { org: 'k@x', util5h: 0, util7d: 1.00034, reset5hAt: '2026-11-05T14:00:00.000Z', reset7dAt: '2026-11-06T11:44:00.000Z' } } }
+    const [acc] = unifyProviderFile('open-design', doc, NOW)
+    expect(acc.status).toBe('exhausted')
+    expect(acc.level).toBe('critical')
+  })
+
+  test('ни одного измеренного окна — level null, а не ok', () => {
+    const [acc] = unifyProviderFile('p', { measured_at: '2026-11-05T09:59:00.000Z', accounts: { 'a@b': { org: 'a@b' } } }, NOW)
+    expect(acc.level).toBeNull()
   })
 
   test('отсутствующее число — null, а НЕ ноль', () => {
@@ -62,7 +76,7 @@ describe('unifyProviderFile', () => {
     const five = acc.windows.find(w => w.name === '5h')
     expect(five).toBeUndefined()            // окна нет вовсе, а не «ноль процентов»
     expect(acc.windows.find(w => w.name === 'week')?.usedFraction).toBe(0.3)
-    expect(acc.level).toBeNull()
+    expect(acc.level).toBe('ok')           // уровень по измеренным окнам; пятичасового нет — это не «нет уровня»
   })
 
   test('провайдер объявил «чисел нет»: status absent + причина, окон нет', () => {

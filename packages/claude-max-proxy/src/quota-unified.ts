@@ -20,7 +20,7 @@
  */
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync, mkdirSync } from 'fs'
 import { dirname, join } from 'path'
-import { CLAUDE_LOCAL } from './quota-paths.js'
+import { CLAUDE_LOCAL, UTIL7D_CRITICAL, UTIL7D_WARNING } from './quota-paths.js'
 import { loadProviderRegistry } from './provider-registry.js'
 
 // 🔴 ИМЯ ФАЙЛА НЕ ДОЛЖНО СОВПАДАТЬ С ФАЙЛОМ КВОТЫ ANTHROPIC (замер 05.11.2026).
@@ -230,11 +230,32 @@ function ageOf(measuredAt: string | null, now: Date): number | null {
   return Math.max(0, Math.round((now.getTime() - t) / 1000))
 }
 
-function levelOf(fiveHour: number | null): 'ok' | 'warning' | 'critical' | null {
-  if (fiveHour === null) return null
-  if (fiveHour >= 0.95) return 'critical'
-  if (fiveHour >= 0.8) return 'warning'
-  return 'ok'
+/**
+ * Уровень здоровья аккаунта — по ВСЕМ измеренным окнам, худший из них.
+ *
+ * 🔴 РАНЬШЕ БЫЛО ТОЛЬКО ПЯТИЧАСОВОЕ ОКНО (замер home-relishev-general 23.11.2026): у аккаунта с
+ * неделей 100% и статусом `exhausted` уровень оставался `ok`, потому что пять часов стояли на нуле.
+ * Читатель уровня видел здоровье на выжженном окне, читатель статуса — правду: два ответа про
+ * один предмет, и сторож по уровню молчал именно тогда, когда надо кричать. Теперь выжженное
+ * окно (`exhausted`) даёт `critical` безусловно, а пороги недели и месяца взяты из quota-paths.
+ * Нет ни одного измеренного окна — `null` («не измерено»), а не `ok`.
+ */
+function levelOf(windows: Array<{ name: string; usedFraction: number | null; exhausted: boolean }>): 'ok' | 'warning' | 'critical' | null {
+  const measured = windows.filter(w => w.usedFraction !== null || w.exhausted)
+  if (measured.length === 0) return null
+  const rank = { ok: 0, warning: 1, critical: 2 } as const
+  let worst: keyof typeof rank = 'ok'
+  for (const w of measured) {
+    const u = w.usedFraction
+    let l: keyof typeof rank = 'ok'
+    if (w.exhausted) l = 'critical'
+    else if (u !== null) {
+      const [crit, warn] = w.name === '5h' ? [0.95, 0.8] : [UTIL7D_CRITICAL, UTIL7D_WARNING]
+      l = u >= crit ? 'critical' : u >= warn ? 'warning' : 'ok'
+    }
+    if (rank[l] > rank[worst]) worst = l
+  }
+  return worst
 }
 
 /** Один провайдерный файл → нормализованные аккаунты. Чистая функция: тестируется без диска. */
@@ -350,7 +371,7 @@ export function unifyProviderFile(provider: string, doc: any, now: Date): Unifie
       plan: a?.plan ?? doc.plan ?? null,
       walletUsd: a?.balanceUsd ?? null,
       status,
-      level: levelOf(five),
+      level: levelOf(windows),
       measuredAt,
       ageSec,
       stale,

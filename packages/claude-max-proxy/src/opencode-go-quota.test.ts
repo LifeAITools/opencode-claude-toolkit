@@ -35,3 +35,43 @@ describe('организация с отвергнутым входом не ч�
     expect(o.level).toBeNull()
   })
 })
+
+describe('чьи числа едут в плоские поля при расхождении источников (23.11.2026)', () => {
+  const LIVE = { rolling: { percent: 10, resetsAt: '2099-01-01T00:00:00Z' }, weekly: { percent: 20, resetsAt: '2099-01-02T00:00:00Z' } }
+  const dead = { name: 'reg@x', auth: 'api_key', usage: {}, usage_error: '401 authentication_error', active: true } as any
+  const live = { name: 'used@x', auth: 'api_key', usage: LIVE } as any
+  const disagree: any = { name: null, basis: 'workspace_id', reason: 'sources_disagree', sources: { registry: 'reg@x', registryWorkspace: 'w1', accountState: 'used@x', accountId: 'a', accountOrgId: 'w2' } }
+
+  test('реестровая слепа, названная opencode измерена → числа берутся у неё, обе названы в причине', async () => {
+    const { pickFlatOrg } = await import('./opencode-go-quota.js')
+    const r = pickFlatOrg({ registryActive: dead, accountEmail: 'used@x', orgs: [dead, live], resolution: disagree })
+    expect(r.org?.name).toBe('used@x')
+    expect(r.substituted).toBe(true)
+    expect(r.reasonSuffix).toBe(';registry=reg@x;used=used@x;why=registry_credential_rejected')
+  })
+
+  test('реестровая измерена → остаёмся на ней, даже если источники разошлись', async () => {
+    const { pickFlatOrg } = await import('./opencode-go-quota.js')
+    const r = pickFlatOrg({ registryActive: { ...dead, usage: LIVE }, accountEmail: 'used@x', orgs: [dead, live], resolution: disagree })
+    expect(r.substituted).toBe(false)
+    expect(r.org?.name).toBe('reg@x')
+  })
+
+  test('источники согласны или названная не измерена → не подменяем', async () => {
+    const { pickFlatOrg } = await import('./opencode-go-quota.js')
+    expect(pickFlatOrg({ registryActive: dead, accountEmail: 'used@x', orgs: [dead, live], resolution: { ...disagree, reason: 'agreed' } }).substituted).toBe(false)
+    expect(pickFlatOrg({ registryActive: dead, accountEmail: 'used@x', orgs: [dead, { ...live, usage: {} }], resolution: disagree }).substituted).toBe(false)
+  })
+
+  test('в файле: верхнее org остаётся решением реестра, flatOrg называет чьи окна', () => {
+    const s: any = buildGoQuotaStatus({
+      usage: LIVE as any, error: null, org: 'used@x', registryOrg: 'reg@x', accountHint: 'used@x',
+      activeOrg: { ...disagree, reason: 'sources_disagree;registry=reg@x;used=used@x;why=registry_credential_rejected' },
+      models: [], modelsSource: '', measuredAt: new Date('2026-11-23T22:00:00Z'), orgs: [dead, live],
+    } as any)
+    expect(s.org).toBe('reg@x')
+    expect(s.flatOrg).toBe('used@x')
+    expect(s.activeReason).toContain('used=used@x')
+    expect(s.accounts['used@x'].util5h).toBeCloseTo(0.1)
+  })
+})

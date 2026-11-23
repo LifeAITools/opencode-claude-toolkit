@@ -302,6 +302,52 @@ export function resolveActiveOrg(input: {
 }
 
 /**
+ * 🔴 ЧЬИ ЧИСЛА ЕДУТ В ПЛОСКИЕ ПОЛЯ — РЕШЕНИЕ, ВИДИМОЕ В ОТЧЁТЕ (слово home-relishev-general 23.11.2026).
+ * Плоские поля читает подвал агента, то есть человек в момент решения. Реестр называл активной
+ * hello@lifeaitools.com (вход отвергнут, окон нет), а opencode реально работал на hello@synqwire.io:
+ * подвал показывал пустое там, где мерить можно, и чужой счёт вместо рабочего.
+ *
+ * Правило: реестровая организация остаётся предметом, пока по ней ЕСТЬ измеренные окна. Если по
+ * ней нечего мерить (нет входа/окон), источники РАЗОШЛИСЬ, а организация, которую назвал
+ * `account_state`, есть в реестре и ИЗМЕРЕНА, — берём её окна. Иначе остаёмся на реестровой.
+ * `org`/`orgSource` не меняются (это решение реестра, его читает пускатель); отклонение
+ * называется в `activeReason` ОБОИМИ именами и причиной, чтобы через месяц было видно, что реестр
+ * всё ещё считает иначе.
+ */
+export function pickFlatOrg(input: {
+  registryActive: GoOrgStatus | null
+  accountEmail: string | null
+  orgs: GoOrgStatus[]
+  resolution: ActiveOrgResolution
+}): { org: GoOrgStatus | null; substituted: boolean; reasonSuffix: string } {
+  const { registryActive, accountEmail, orgs, resolution } = input
+  const measuredOf = (o: GoOrgStatus | null): boolean => {
+    const u = (o?.usage ?? null) as GoUsage | null
+    return !!u && [u.rolling, u.weekly, u.monthly].some((w) => typeof w?.percent === 'number')
+  }
+  if (!registryActive || measuredOf(registryActive)) {
+    return { org: registryActive, substituted: false, reasonSuffix: '' }
+  }
+  if (resolution.reason !== 'sources_disagree' || !accountEmail) {
+    return { org: registryActive, substituted: false, reasonSuffix: '' }
+  }
+  const used = orgs.find((o) => o.name === accountEmail) ?? null
+  if (!used || used.name === registryActive.name || !measuredOf(used)) {
+    return { org: registryActive, substituted: false, reasonSuffix: '' }
+  }
+  // Причина — по ТОМУ ЖЕ признаку, что и `credential` в строке организации, а не по сроку пропуска.
+  const err = typeof registryActive.usage_error === 'string' ? registryActive.usage_error : ''
+  const why = registryActive.auth !== 'api_key' && !registryActive.expires_at_ms ? 'registry_no_token'
+    : /401|authentication_error|api_key_expired|Unauthorized/i.test(err) ? 'registry_credential_rejected'
+      : 'registry_no_measured_windows'
+  return {
+    org: used,
+    substituted: true,
+    reasonSuffix: `;registry=${registryActive.name};used=${used.name};why=${why}`,
+  }
+}
+
+/**
  * Читает email активного аккаунта из базы opencode (`account_state` → `account`).
  *
  * ЗАЧЕМ: единственный источник правды о том, на какой паре агент работает СЕЙЧАС.
@@ -449,8 +495,11 @@ export function buildGoQuotaStatus(input: {
   /** Имя→uid: `member.orgUid` — это SynqTask-uid, а в `orgs[]` лежат только ИМЕНА.
    * Мост обязателен, иначе лат-контекст не сопоставит орг агента с записью. */
   orgUids?: Record<string, string>
+  /** 🔴 Решение реестра, КОГДА плоские числа взяты у другой организации (`pickFlatOrg`). Верхнее
+   * `org` читает пускатель как «куда направляет провайдер» — переписывать его чужим именем нельзя. */
+  registryOrg?: string | null
 }): Record<string, unknown> {
-  const { usage, error, org, activeOrg, accountHint, models, modelsSource, measuredAt, orgs, orgUids } = input
+  const { usage, error, org, activeOrg, accountHint, models, modelsSource, measuredAt, orgs, orgUids, registryOrg } = input
   // 🔴 `active` больше НЕ копируется из реестра: подтверждение берётся из сверки с
   // `account_state`. Неизвестно — null (никогда false: «не активна» — тоже утверждение).
   // Старый вызов без `activeOrg` не роняем — считаем, что подтверждения нет.
@@ -474,7 +523,9 @@ export function buildGoQuotaStatus(input: {
     provider: 'opencode-go',
     updatedAt: measuredAt.toISOString(),
     measured_at: measuredAt.toISOString(),
-    org,
+    org: registryOrg ?? org,
+    // Чьи окна лежат в плоских полях `accounts`, когда они взяты не у реестровой организации.
+    ...(registryOrg && registryOrg !== org ? { flatOrg: org } : {}),
     // 🔴 `org` — РЕШЕНИЕ, А НЕ ЗАМЕР (просьба владельца реестра 23.10): это имя организации,
     // куда МЫ решили направлять (строка `active:` командой `use`), и его читает пускатель.
     // Без пометки через месяц никто не отличит решение от измерения. Замер лежит рядом:
@@ -829,17 +880,27 @@ export async function collectOnce(opts: CollectOptions): Promise<Record<string, 
   const doorErrorNamed = carried
     ? `${doorError ?? 'door_unavailable'}; orgs carried from ${carried} (their own age, not re-stamped)`
     : doorError
+  const flat = pickFlatOrg({
+    registryActive: activeOrg,
+    accountEmail: accountState.email,
+    orgs: registry?.orgs ?? [],
+    resolution: activeOrgResolution,
+  })
+  const flatOrg = flat.org
   const status = buildGoQuotaStatus({
-    usage: activeOrg?.usage ?? null,
-    error: doorErrorNamed ?? activeOrg?.usage_error ?? null,
-    org: activeOrg?.name ?? 'unknown',
-    activeOrg: activeOrgResolution,
-    accountHint: activeOrg?.name ?? 'opencode-go-unknown',
+    usage: flatOrg?.usage ?? null,
+    error: doorErrorNamed ?? flatOrg?.usage_error ?? null,
+    org: flatOrg?.name ?? 'unknown',
+    activeOrg: flat.substituted
+      ? { ...activeOrgResolution, reason: (activeOrgResolution.reason + flat.reasonSuffix) as any }
+      : activeOrgResolution,
+    accountHint: flatOrg?.name ?? 'opencode-go-unknown',
     models,
     modelsSource: [sub.source, litellmSource].join('; '),
     measuredAt,
     orgs: registry?.orgs,
     orgUids: readOrgUids(ORG_UIDS_JSON),
+    registryOrg: flat.substituted ? (activeOrg?.name ?? null) : null,
   })
   writeAtomic(opts.outPath, status)
   // 🔴 ЗЕРКАЛО ДЛЯ ТЕХ, КТО ЖИВЁТ В ДРУГОМ КАТАЛОГЕ (26.10.2026). Отчёт читают двое: подвал

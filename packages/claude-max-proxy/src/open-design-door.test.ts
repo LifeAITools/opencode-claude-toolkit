@@ -45,6 +45,20 @@ describe('выбор аккаунта OpenDesign — через анализат
     expect(pick?.email).toBe('hello@kiberos.app')
   })
 
+  test('стена до сброса выше живой занятости: забитый аккаунт без вызовов не обгоняет свободный (23.11.2026)', () => {
+    // Живой случай: у kiberos.com неделя 96% (стена через ~5ч при сбросе через 23ч) и 0 вызовов
+    // в эту секунду, у relishev неделя 16% и 1 вызов. Прежний порядок брал занятость первой.
+    const pick = pickOpenDesignAccount([
+      acc('hello@kiberos.app', 'active', [{ name: 'week', usedFraction: 0.96, resetsAt: iso(23.4) }], 0.04),
+      acc('relishev@gmail.com', 'active', [{ name: 'week', usedFraction: 0.16, resetsAt: iso(23.4) }], 0.84),
+    ], KEY, {
+      nowMs: NOW, seed: 's',
+      inFlightByEmail: new Map([['relishev@gmail.com', 1]]), slotCap: 8,
+      activeAgentsByEmail: new Map([['hello@kiberos.app', 13]]),
+    })
+    expect(pick?.email).toBe('relishev@gmail.com')
+  })
+
   test('посаженные агенты опускают привлекательность аккаунта', () => {
     const accounts = [acc('relishev@gmail.com', 'active', [{ name: '5h', usedFraction: 0.6, resetsAt: iso(4) }], 0.4)]
     const free = pickOpenDesignAccount(accounts, KEY, { nowMs: NOW, activeAgentsByEmail: new Map() })

@@ -294,6 +294,9 @@ export function odPlacementInputs(
       })),
       activeAgents: activeAgentsByEmail.get(name) ?? 0,
       blockedReason,
+      // Недельная цель (слово фаундера 23.11.2026): среди аккаунтов, которым стена не грозит,
+      // первым кормим того, чей недельный остаток сгорит раньше и больше — как у Anthropic.
+      weekGoal: true,
       // Скорость расхода: если ряд есть, анализатор берёт БОЛЬШУЮ из средней и текущей —
       // «сейчас жжём быстрее среднего» и есть всплеск, ради которого ряд копится.
       ...(opts.recentRatesByEmail?.has(name) ? { recentRates: opts.recentRatesByEmail.get(name) } : {}),

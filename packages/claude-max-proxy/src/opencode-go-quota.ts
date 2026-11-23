@@ -22,7 +22,7 @@ import { createHash } from 'crypto'
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
-import { CLAUDE_LOCAL, classifyLevel } from './quota-paths.js'
+import { CLAUDE_LOCAL, classifyLevel, classifyLevelOrNull } from './quota-paths.js'
 
 export const QUOTA_STATUS_OPENCODE_GO_JSON = join(CLAUDE_LOCAL, 'quota-status-opencode-go.json')
 export const GO_MODELS_URL = 'https://opencode.ai/zen/go/v1/models'
@@ -553,7 +553,15 @@ export function buildGoQuotaStatus(input: {
     // Тот же ценз по сбросу, что и у активной организации: у КАЖДОЙ орг свои окна и свой сброс.
     const o5 = livePct(u.rolling), o7 = livePct(u.weekly), oM = livePct(u.monthly)
     const lng = o7 === null ? oM : oM === null ? o7 : Math.max(o7, oM)
-    const status = typeof o.status === 'string' && o.status ? o.status : 'active'
+    // 🔴 `active` НЕ МОЖЕТ СТОЯТЬ РЯДОМ С `credential: rejected` / `no_token` (замер
+    // home-relishev-general 23.11.2026: организация с отвергнутым входом и пустыми окнами
+    // читалась зелёной по двум полям сразу). Нет входа или он отвергнут — мерить нечего,
+    // и статус называет это, а не «активна». Если измеренные окна есть, организация измерена и
+    // остаётся `active`. Ограничение от провайдера (`restricted`) главнее.
+    const cred = credentialOf(o).credential
+    const providerStatus = typeof o.status === 'string' && o.status ? o.status : null
+    const status = providerStatus && providerStatus !== 'active' ? providerStatus
+      : cred && o5 === null && o7 === null && oM === null ? 'unreadable' : 'active'
     return {
       name: o.name,
       // uid — мост к `member.orgUid`; нет в карте — поля нет (потребитель не выдумывает).
@@ -564,7 +572,7 @@ export function buildGoQuotaStatus(input: {
       util5h: o5 === null ? null : o5 / 100,
       util7d: o7 === null ? null : o7 / 100,
       utilMonth: oM === null ? null : oM / 100,
-      level: classifyLevel(o5 === null ? null : o5 / 100, lng === null ? null : lng / 100),
+      level: classifyLevelOrNull(o5 === null ? null : o5 / 100, lng === null ? null : lng / 100),
       // Статус и модельная привязка организации (FR-1/FR-18): их читает пускатель при
       // рождении — «не ограничена и имеет нужную модель». Отсутствие остаётся отсутствием:
       // статуса нет — `active`; причины нет при не-restricted — поля нет; моделей нет — поля нет.

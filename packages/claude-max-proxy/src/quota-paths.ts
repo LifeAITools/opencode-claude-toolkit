@@ -69,15 +69,27 @@ export const UTIL7D_CRITICAL = 0.99
 export const UTIL5H_WARNING = 0.85
 export const UTIL7D_WARNING = 0.95
 
-export function classifyLevel(
-  util5h: number | null,
-  util7d: number | null,
-): 'ok' | 'warning' | 'critical' {
+/**
+ * Уровень по числам, когда хотя бы одно из них ЕСТЬ. Вызывающий сам отсёк «обоих нет»
+ * (наблюдатель Claude делает это раньше, строкой `return`), поэтому ответ всегда определён.
+ */
+export function classifyLevel(util5h: number | null, util7d: number | null): 'ok' | 'warning' | 'critical' {
   const u5 = util5h ?? 0
   const u7 = util7d ?? 0
   if (u5 >= UTIL5H_CRITICAL || u7 >= UTIL7D_CRITICAL) return 'critical'
   if (u5 >= UTIL5H_WARNING || u7 >= UTIL7D_WARNING) return 'warning'
   return 'ok'
+}
+
+/**
+ * 🔴 «ЧИСЕЛ НЕТ» — ЭТО `null`, А НЕ `ok` (замер home-relishev-general 23.11.2026). Для
+ * производителей файла квоты, у которых окна могут быть не измерены вовсе (отвергнутый вход,
+ * закрытое окно): оба `null` дают `null`, иначе уровень зелёный там, где мерить нечего и
+ * сторож молчит. Одно измеренное окно уже даёт уровень.
+ */
+export function classifyLevelOrNull(util5h: number | null, util7d: number | null): 'ok' | 'warning' | 'critical' | null {
+  if (util5h === null && util7d === null) return null
+  return classifyLevel(util5h, util7d)
 }
 
 /** Stage-2 contract for the Alibaba Token Plan collector: same shape, `provider: "alibaba"`. */

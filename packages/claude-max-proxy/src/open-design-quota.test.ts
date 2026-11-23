@@ -88,3 +88,15 @@ describe('несколько входов = несколько организа�
     }
   })
 })
+
+describe('уровень организации: нет чисел — null, а не ok (23.11.2026)', () => {
+  test('организация без измеренных окон получает level null', async () => {
+    const { classifyLevelOrNull, classifyLevel } = await import('./quota-paths.js')
+    expect(classifyLevelOrNull(null, null)).toBeNull()
+    // одно измеренное окно уже даёт уровень
+    expect(classifyLevelOrNull(0.1, null)).toBe('ok')
+    expect(classifyLevelOrNull(null, 0.995)).toBe('critical')
+    // прежняя функция для наблюдателя Claude остаётся определённой
+    expect(classifyLevel(0.1, null)).toBe('ok')
+  })
+})

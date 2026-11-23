@@ -28,7 +28,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from '
 import { homedir } from 'os'
 import { join, dirname } from 'path'
 import { readdirSync } from 'fs'
-import { CLAUDE_LOCAL, classifyLevel } from './quota-paths.js'
+import { CLAUDE_LOCAL, classifyLevelOrNull } from './quota-paths.js'
 
 export const QUOTA_STATUS_OPEN_DESIGN_JSON = join(CLAUDE_LOCAL, 'quota-status-open-design.json')
 export const CONTROL_CREDENTIALS_JSON =
@@ -198,7 +198,7 @@ export function snapshotFromWorkspaces(preflights: Array<{ workspace: WorkspaceR
     accounts[key] = acc
     orgs.push({
       name: acc.org, util5h: acc.util5h, util7d: acc.util7d,
-      level: classifyLevel(acc.util5h ?? null, acc.util7d ?? null),
+      level: classifyLevelOrNull(acc.util5h ?? null, acc.util7d ?? null),
       status: acc.absent ? 'absent' : 'active', windows: acc.windows,
       billingMode: acc.billingMode ?? null,
       funding: acc.funding ?? null,

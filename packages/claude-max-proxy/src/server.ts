@@ -250,6 +250,14 @@ import { ManagedSessionService } from './managed-sessions.js'
 const managedSessionsSvc = new ManagedSessionService()
 managedSessionsSvc.start((e) => emit(e as any))
 
+// Сетевой слепок жизни сессий флота DeepSeek Harness (guard GET /status, токен только на чтение).
+// Выключен, пока не задан DSH_FLEET_STATUS_URL; тогда работает один локальный файл, как прежде.
+const fleetStatusPoller = createFleetStatusPoller({
+  config: fleetStatusConfig(),
+  onError: (msg) => console.error(`[claude-max-proxy] слепок флота не получен — «жива» берётся из локального файла: ${msg}`),
+})
+fleetStatusPoller.start()
+
 const proxyClient = new ProxyClient({
   config: {
     anthropicBaseUrl: cfg.anthropicBaseUrl,
@@ -275,7 +283,8 @@ const proxyClient = new ProxyClient({
     },
     // Сессии без опознанного процесса (клиент за LiteLLM): флот DeepSeek Harness сам знает,
     // какие из них текущие (14.11.2026, session-f933b5aa снята живой). Не знает — часы.
-    isSessionAlive: fleetSessionLiveness(fleetSessionsPath()),
+    // Сначала сетевой слепок сторожа флота (прокси может стоять на другой машине), потом локальный файл.
+    isSessionAlive: firstAlive(fleetStatusPoller.isSessionAlive, fleetSessionLiveness(fleetSessionsPath())),
   },
 })
 
@@ -431,6 +440,7 @@ import { createGoDoorModule, goDoorReadiness } from './modules/go-door.js'
 import { createOpenDesignDoorModule } from './modules/open-design-door.js'
 import { anthropicOrgModelRules, providerRegistryPath } from './anthropic-org-models.js'
 import { fleetSessionLiveness, fleetSessionsPath } from './fleet-session-liveness.js'
+import { createFleetStatusPoller, fleetStatusConfig, firstAlive } from './fleet-status-liveness.js'
 
 // Compat version: configured value is the FLOOR; the installed Claude Code wins when
 // newer (the API gates new models on client version — see cc-version.ts).

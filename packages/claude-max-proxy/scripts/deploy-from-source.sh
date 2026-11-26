@@ -259,6 +259,9 @@ EnvironmentFile=-$HOME/.claude-local/open-design-keys.env
 # выполнялся бы как подстановка команды (ошибки "command not found" в выводе деплоя
 # 08.11 и 11.11 — именно отсюда; юнит при этом собирался правильно).
 Environment=PROVIDER_REGISTRY_PATH=$INSTALLED/config/providers.yaml
+# Сетевой слепок жизни сессий флота DeepSeek Harness (токен только на чтение — файл ~/.dsh/keys/control-token-read).
+# Нет адреса — источник выключен, работает локальный fleet-sessions.json (26.11.2026).
+Environment=DSH_FLEET_STATUS_URL=http://100.64.0.8:3107/status
 
 [Install]
 WantedBy=default.target

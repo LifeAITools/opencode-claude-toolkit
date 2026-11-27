@@ -6,12 +6,13 @@
  * 90 секунд пробовал каждый слот по HTTP каждые 30 с (замер владельца lat-context 11.11.2026).
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   discoveryHeartbeatMs,
   resetDiscoveryHeartbeatForTest,
+  restoreDiscoverySlot,
   stampDiscoveryLastSeen,
   writeDiscoverySlot,
 } from './wake-listener'
@@ -78,5 +79,53 @@ describe('сердцебиение', () => {
     await new Promise(r => setTimeout(r, 100))
     // Главное — не исключение: таймер жив, запись в пропавший слот не роняет дверь.
     expect(true).toBe(true)
+  })
+})
+
+describe('исчезнувший слот возвращается (задача d71ef33e, 27.11.2026)', () => {
+  const body = (over: Record<string, unknown> = {}) => ({
+    port: 38979, token: 'tok-secret', sessionId: 'ses_restore', agentInstanceId: 'opencode:r:1', pid: 7,
+    startedAt: '2026-11-27T05:00:00Z', lastSeen: '2026-11-27T05:00:00Z', transport: 'http', ...over,
+  }) as any
+
+  test('слот удалили у живого слушателя — тик свежести возвращает его с тем же портом, токеном и сессией', async () => {
+    process.env.WAKE_HEARTBEAT_MS = '40'
+    const p = file()
+    writeDiscoverySlot(p, body())
+    unlinkSync(p)
+    await new Promise(r => setTimeout(r, 120))
+    const disc = JSON.parse(readFileSync(p, 'utf-8'))
+    expect(disc.port).toBe(38979)
+    expect(disc.token).toBe('tok-secret')
+    expect(disc.sessionId).toBe('ses_restore')
+    expect(disc.transport).toBe('http')
+    expect(Date.parse(disc.lastSeen)).toBeGreaterThan(Date.parse('2026-11-27T05:00:00Z'))
+    unlinkSync(p)
+  })
+
+  test('restoreDiscoverySlot: слот, о котором процесс не знает, не воскрешается', () => {
+    expect(restoreDiscoverySlot(join(tmpdir(), 'never-written-slot.json'))).toBe(false)
+  })
+
+  test('после остановки двери (забыли слоты) удалённый файл НЕ возвращается', async () => {
+    process.env.WAKE_HEARTBEAT_MS = '40'
+    const p = file()
+    writeDiscoverySlot(p, body())
+    unlinkSync(p)
+    resetDiscoveryHeartbeatForTest()
+    await new Promise(r => setTimeout(r, 120))
+    expect(existsSync(p)).toBe(false)
+  })
+
+  test('тело в памяти следует за тем, что лежит на диске: смена сессии не теряется при воссоздании', () => {
+    const p = file()
+    writeDiscoverySlot(p, body())
+    // внешняя правка файла (как делает привязка сессии) и штамп подтягивают тело из файла
+    writeFileSync(p, JSON.stringify(body({ sessionId: 'ses_rebound' })))
+    expect(stampDiscoveryLastSeen(p)).toBe(true)
+    unlinkSync(p)
+    expect(restoreDiscoverySlot(p)).toBe(true)
+    expect(JSON.parse(readFileSync(p, 'utf-8')).sessionId).toBe('ses_rebound')
+    unlinkSync(p)
   })
 })

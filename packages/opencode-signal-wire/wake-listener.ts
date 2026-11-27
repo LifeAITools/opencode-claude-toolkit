@@ -1170,9 +1170,8 @@ function updateDiscoverySession(sessionId: string, agentInstanceId?: string): bo
     const disc = JSON.parse(readFileSync(_discoveryPath, 'utf-8'))
     disc.sessionId = sessionId
     if (agentInstanceId) disc.agentInstanceId = agentInstanceId
-    const tmpPath = _discoveryPath + '.tmp'
-    writeFileSync(tmpPath, JSON.stringify(disc))
-    renameSync(tmpPath, _discoveryPath)
+    atomicWriteSlot(_discoveryPath, disc)
+    if (_discoveryPaths.has(_discoveryPath)) _discoveryPaths.set(_discoveryPath, disc)
     dbg(`SESSION_BOUND discovery updated session=${sessionId} agentInstanceId=${disc.agentInstanceId ?? '-'}`)
     return true
   } catch (e: any) {
@@ -1527,28 +1526,61 @@ export function discoveryHeartbeatMs(env: NodeJS.ProcessEnv = process.env): numb
   return Math.max(10, Math.floor(raw))
 }
 
-/** Все слоты, записанные ЭТИМ процессом: у процесса их может быть несколько (multi-session). */
-const _discoveryPaths = new Set<string>()
+/**
+ * Все слоты, записанные ЭТИМ процессом, вместе с ПОСЛЕДНИМ известным телом каждого.
+ *
+ * 🔴 ЗАЧЕМ ТЕЛО В ПАМЯТИ (замер 27.11.2026, задача d71ef33e): сердцебиение только штамповало
+ * существующий файл, а исчезнувший молча забывало. Слушатель при этом жил и обслуживал файловую
+ * дверь, но запись обнаружения — единственное, по чему роутер находит HTTP-дверь, — не
+ * возвращалась НИКОГДА: любая внешняя уборка слотов навсегда отнимала у агента дверь, а отказ
+ * выглядел как решение роутера (66 побудок за сутки отложены как `not-a-claude-pane`).
+ * Тело (порт, токен, транспорт, сессия) живёт в памяти процесса — из неё слот и возвращается.
+ */
+const _discoveryPaths = new Map<string, DiscoveryFile>()
 let _heartbeat: ReturnType<typeof setInterval> | null = null
+
+/** Записать тело слота атомарно (tmp → rename). */
+function atomicWriteSlot(path: string, data: DiscoveryFile): void {
+  const tmpPath = path + '.tmp'
+  writeFileSync(tmpPath, JSON.stringify(data))
+  renameSync(tmpPath, path)
+}
 
 /** Обновить `lastSeen` одного слота атомарно. `false` — файла нет или он не читается. */
 export function stampDiscoveryLastSeen(path: string, nowIso: string = new Date().toISOString()): boolean {
   try {
     const disc = JSON.parse(readFileSync(path, 'utf-8')) as DiscoveryFile
     disc.lastSeen = nowIso
-    const tmpPath = path + '.tmp'
-    writeFileSync(tmpPath, JSON.stringify(disc))
-    renameSync(tmpPath, path)
+    atomicWriteSlot(path, disc)
+    // Тело в памяти — то, что реально лежит на диске: правки сессии и подписок не теряются.
+    if (_discoveryPaths.has(path)) _discoveryPaths.set(path, disc)
     return true
   } catch {
-    // Файла больше нет (дверь остановлена/слот убрал роутер) — это НЕ ошибка записи.
+    return false
+  }
+}
+
+/**
+ * Вернуть исчезнувший слот из памяти процесса. `true` — файл теперь на месте.
+ * Слот чужого процесса или забытый при остановке двери (`cleanup`) не воскрешается: его нет в
+ * `_discoveryPaths`, а значит и тела.
+ */
+export function restoreDiscoverySlot(path: string, nowIso: string = new Date().toISOString()): boolean {
+  const body = _discoveryPaths.get(path)
+  if (!body) return false
+  try {
+    atomicWriteSlot(path, { ...body, lastSeen: nowIso })
+    dbg(`DISCOVERY_RESTORED ${path} session=${body.sessionId} port=${body.port} — слот исчез у живого слушателя`)
+    return true
+  } catch (e: any) {
+    dbg(`DISCOVERY_RESTORE_FAILED ${path}: ${e?.message}`)
     return false
   }
 }
 
 function stampAllDiscovery(): void {
-  for (const path of _discoveryPaths) {
-    if (!stampDiscoveryLastSeen(path)) _discoveryPaths.delete(path)
+  for (const path of _discoveryPaths.keys()) {
+    if (!stampDiscoveryLastSeen(path)) restoreDiscoverySlot(path)
   }
 }
 
@@ -1567,10 +1599,8 @@ export function resetDiscoveryHeartbeatForTest(): void {
 
 /** Запись слота атомарно (tmp → rename): половина документа читателю — не правда. */
 export function writeDiscoverySlot(path: string, data: DiscoveryFile): void {
-  const tmpPath = path + '.tmp'
-  writeFileSync(tmpPath, JSON.stringify(data))
-  renameSync(tmpPath, path)
-  _discoveryPaths.add(path)
+  atomicWriteSlot(path, data)
+  _discoveryPaths.set(path, data)
   ensureHeartbeat()
 }
 
@@ -2339,9 +2369,8 @@ export function updateDiscovery(update: {
     }
 
     // Atomic write: tmp → rename
-    const tmpPath = _discoveryPath + '.tmp'
-    writeFileSync(tmpPath, JSON.stringify(current))
-    renameSync(tmpPath, _discoveryPath)
+    atomicWriteSlot(_discoveryPath, current)
+    if (_discoveryPaths.has(_discoveryPath)) _discoveryPaths.set(_discoveryPath, current)
     dbg(`updateDiscovery: subscribe=${JSON.stringify(current.subscribe)} preset=${current.subscribePreset}`)
     return true
   } catch (e: any) {

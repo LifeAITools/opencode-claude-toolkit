@@ -84,19 +84,22 @@ export function usageToWindows(u: OauthUsage | null | undefined): PlacementWindo
 }
 
 /**
- * Прочие окна ответа `/api/oauth/usage` — те, что регулятор НЕ использует (по моделям). Нужны,
- * чтобы видеть, отдаёт ли поставщик отдельный счётчик (27.11.2026: у Fable 5.2 фаундер видит в
- * панели свой недельный счётчик, а в заголовках ответов его нет). Только чтение: в выбор
- * организации они не попадают, пока владелец не решит иначе.
+ * Недельные счётчики ПО МОДЕЛИ из ответа `/api/oauth/usage`, поле `limits[]` с `kind:
+ * "weekly_scoped"` и `scope.model.display_name` (замер 27.11.2026: у elisevruslan общая неделя
+ * 43%, а у Fable свой счётчик 86% — фаундер видел в панели 85%). В заголовках ответов модели
+ * этого счётчика НЕТ, а общее `seven_day` его не заменяет: Fable упирается в стену на 100% СВОЕГО
+ * счётчика при любой общей неделе. Только чтение: в выбор организации эти окна не идут, пока
+ * владелец не решит иначе.
  */
-export function extraUsageWindows(u: OauthUsage | null | undefined): Array<{ name: string; util: number; resetAt: string | null }> {
-  if (!u || typeof u !== 'object') return []
-  const out: Array<{ name: string; util: number; resetAt: string | null }> = []
-  for (const [name, v] of Object.entries(u)) {
-    if (name === 'five_hour' || name === 'seven_day') continue
-    const w = v as OauthUsageWindow | null
-    if (!w || typeof w !== 'object' || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) continue
-    out.push({ name, util: w.utilization / 100, resetAt: typeof w.resets_at === 'string' ? w.resets_at : null })
+export function modelScopedWeekly(u: OauthUsage | null | undefined): Array<{ model: string; util: number; resetAt: string | null }> {
+  const limits = (u as { limits?: unknown } | null | undefined)?.limits
+  if (!Array.isArray(limits)) return []
+  const out: Array<{ model: string; util: number; resetAt: string | null }> = []
+  for (const l of limits as Array<Record<string, any>>) {
+    if (!l || l.kind !== 'weekly_scoped') continue
+    const model = l.scope?.model?.display_name
+    if (typeof model !== 'string' || !model || typeof l.percent !== 'number' || !Number.isFinite(l.percent)) continue
+    out.push({ model, util: l.percent / 100, resetAt: typeof l.resets_at === 'string' ? l.resets_at : null })
   }
   return out
 }

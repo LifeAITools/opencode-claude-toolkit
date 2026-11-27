@@ -942,22 +942,20 @@ describe('цели окон разведены: 5ч к 0.97, недельный 
   })
 })
 
-describe('extraUsageWindows — прочие окна ответа квоты (счётчики по моделям)', () => {
-  test('берёт окна по моделям, не трогает five_hour и seven_day, доли 0..1', async () => {
-    const { extraUsageWindows } = await import('../src/anthropic-birth-placement.js')
-    const r = extraUsageWindows({
-      five_hour: { utilization: 41, resets_at: '2026-11-27T17:00:00Z' },
-      seven_day: { utilization: 42, resets_at: '2026-12-01T18:00:00Z' },
-      seven_day_fable: { utilization: 85, resets_at: '2026-12-01T18:00:00Z' },
-      seven_day_opus: null,
-      note: 'x',
-    } as any)
-    expect(r).toEqual([{ name: 'seven_day_fable', util: 0.85, resetAt: '2026-12-01T18:00:00Z' }])
+describe('modelScopedWeekly — недельный счётчик по модели (Fable)', () => {
+  test('берёт weekly_scoped с моделью, общую неделю и сессию не трогает', async () => {
+    const { modelScopedWeekly } = await import('../src/anthropic-birth-placement.js')
+    const r = modelScopedWeekly({ limits: [
+      { kind: 'session', percent: 46, resets_at: 'a', scope: null },
+      { kind: 'weekly_all', percent: 43, resets_at: 'b', scope: null },
+      { kind: 'weekly_scoped', percent: 86, resets_at: '2026-12-02T13:59:59Z', scope: { model: { id: null, display_name: 'Fable' }, surface: null } },
+    ] } as any)
+    expect(r).toEqual([{ model: 'Fable', util: 0.86, resetAt: '2026-12-02T13:59:59Z' }])
   })
-  test('пустой или кривой ответ — пустой список, не исключение', async () => {
-    const { extraUsageWindows } = await import('../src/anthropic-birth-placement.js')
-    expect(extraUsageWindows(null)).toEqual([])
-    expect(extraUsageWindows({ five_hour: null } as any)).toEqual([])
-    expect(extraUsageWindows({ seven_day_x: { utilization: 'a' } } as any)).toEqual([])
+  test('нет поля, кривые записи, нет имени модели — пустой список, не исключение', async () => {
+    const { modelScopedWeekly } = await import('../src/anthropic-birth-placement.js')
+    expect(modelScopedWeekly(null)).toEqual([])
+    expect(modelScopedWeekly({} as any)).toEqual([])
+    expect(modelScopedWeekly({ limits: [{ kind: 'weekly_scoped', percent: 'x', scope: { model: { display_name: 'Fable' } } }, { kind: 'weekly_scoped', percent: 5, scope: null }] } as any)).toEqual([])
   })
 })

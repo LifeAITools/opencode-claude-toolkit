@@ -76,7 +76,7 @@ import {
 } from './proxy-adapters.js'
 import type { StreamEvent, TokenUsage } from './types.js'
 import { ANTHROPIC_API_BASE } from './anthropic-endpoints.js'
-import { chooseBirthOrg, chooseNonWalledFallback, usageToWindows, extraUsageWindows, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
+import { chooseBirthOrg, chooseNonWalledFallback, usageToWindows, modelScopedWeekly, headerSnapshotToWindows, type OrgUsageReading, type OauthUsage } from './anthropic-birth-placement.js'
 import { getCompatVersion } from './subscription-compat.js'
 import { PlacementController, loadPlacementControl, loadModelAllowlist, activeLoadByOrg } from './placement-control.js'
 import { orgsAllowedForModel, parseModelAllowlist, type ModelAllowlist } from './org-model-allowlist.js'
@@ -1702,7 +1702,7 @@ export class ProxyClient {
    * старое «99%» больше не правда, а «не измерено» распределитель честно не сравнивает.
    */
   async remeasureOrgUsage(orgQuery: string): Promise<
-    { ok: true; orgId: string; windows: Array<{ window: string; util: number | null; resetAt: string | null }>; extraWindows: Array<{ name: string; util: number; resetAt: string | null }> }
+    { ok: true; orgId: string; windows: Array<{ window: string; util: number | null; resetAt: string | null }>; modelWeekly: Array<{ model: string; util: number; resetAt: string | null }> }
     | { ok: false; orgId?: string; error: string; retryAfterSec?: number }
   > {
     const entry = this.orgVault.resolve(orgQuery)
@@ -1727,10 +1727,10 @@ export class ProxyClient {
     const measuredAt = Date.now()
     this.orgUsage.set(orgId, { orgId, windows, measuredAt })
     const view = windows.map(w => ({ window: w.name, util: w.util, resetAt: w.resetAt ? new Date(w.resetAt).toISOString() : null }))
-    // Окна по моделям (если поставщик их отдаёт) — только в ответ и в событие, в выбор не идут.
-    const extraWindows = extraUsageWindows(res.data as OauthUsage)
-    this.events.emit({ level: 'info', kind: 'ORG_USAGE_MEASURED', orgId, source: 'oauth-usage:remeasure', measuredAt: new Date(measuredAt).toISOString(), windows: view, extraWindows })
-    return { ok: true, orgId, windows: view, extraWindows }
+    // Недельные счётчики по моделям (Fable и др.) — только в ответ и в событие, в выбор не идут.
+    const modelWeekly = modelScopedWeekly(res.data as OauthUsage)
+    this.events.emit({ level: 'info', kind: 'ORG_USAGE_MEASURED', orgId, source: 'oauth-usage:remeasure', measuredAt: new Date(measuredAt).toISOString(), windows: view, modelWeekly })
+    return { ok: true, orgId, windows: view, modelWeekly }
   }
 
   /** Test seam — один проход опроса запаса. */

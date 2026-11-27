@@ -22,7 +22,12 @@ import { planPlacement, type PlacementOrg, type PlacementPlan, type PlacementWin
 
 /** Ответ `/api/oauth/usage` — только то, что читаем. */
 export interface OauthUsageWindow { utilization: number | null; resets_at: string | null }
-export interface OauthUsage { five_hour?: OauthUsageWindow | null; seven_day?: OauthUsageWindow | null }
+export interface OauthUsage {
+  five_hour?: OauthUsageWindow | null
+  seven_day?: OauthUsageWindow | null
+  /** Остальные окна поставщика (по моделям: seven_day_opus, seven_day_sonnet…) — имена не фиксируем. */
+  [other: string]: unknown
+}
 
 /** Показание запаса одной организации. `windows` пуст — не измерено (НЕ ноль). */
 export interface OrgUsageReading {
@@ -75,6 +80,24 @@ export function usageToWindows(u: OauthUsage | null | undefined): PlacementWindo
   }
   add('5h', u.five_hour)
   add('week', u.seven_day)
+  return out
+}
+
+/**
+ * Прочие окна ответа `/api/oauth/usage` — те, что регулятор НЕ использует (по моделям). Нужны,
+ * чтобы видеть, отдаёт ли поставщик отдельный счётчик (27.11.2026: у Fable 5.2 фаундер видит в
+ * панели свой недельный счётчик, а в заголовках ответов его нет). Только чтение: в выбор
+ * организации они не попадают, пока владелец не решит иначе.
+ */
+export function extraUsageWindows(u: OauthUsage | null | undefined): Array<{ name: string; util: number; resetAt: string | null }> {
+  if (!u || typeof u !== 'object') return []
+  const out: Array<{ name: string; util: number; resetAt: string | null }> = []
+  for (const [name, v] of Object.entries(u)) {
+    if (name === 'five_hour' || name === 'seven_day') continue
+    const w = v as OauthUsageWindow | null
+    if (!w || typeof w !== 'object' || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) continue
+    out.push({ name, util: w.utilization / 100, resetAt: typeof w.resets_at === 'string' ? w.resets_at : null })
+  }
   return out
 }
 

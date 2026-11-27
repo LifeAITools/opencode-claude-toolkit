@@ -941,3 +941,23 @@ describe('цели окон разведены: 5ч к 0.97, недельный 
     expect(plan.org?.name).toBe('soon')
   })
 })
+
+describe('extraUsageWindows — прочие окна ответа квоты (счётчики по моделям)', () => {
+  test('берёт окна по моделям, не трогает five_hour и seven_day, доли 0..1', async () => {
+    const { extraUsageWindows } = await import('../src/anthropic-birth-placement.js')
+    const r = extraUsageWindows({
+      five_hour: { utilization: 41, resets_at: '2026-11-27T17:00:00Z' },
+      seven_day: { utilization: 42, resets_at: '2026-12-01T18:00:00Z' },
+      seven_day_fable: { utilization: 85, resets_at: '2026-12-01T18:00:00Z' },
+      seven_day_opus: null,
+      note: 'x',
+    } as any)
+    expect(r).toEqual([{ name: 'seven_day_fable', util: 0.85, resetAt: '2026-12-01T18:00:00Z' }])
+  })
+  test('пустой или кривой ответ — пустой список, не исключение', async () => {
+    const { extraUsageWindows } = await import('../src/anthropic-birth-placement.js')
+    expect(extraUsageWindows(null)).toEqual([])
+    expect(extraUsageWindows({ five_hour: null } as any)).toEqual([])
+    expect(extraUsageWindows({ seven_day_x: { utilization: 'a' } } as any)).toEqual([])
+  })
+})

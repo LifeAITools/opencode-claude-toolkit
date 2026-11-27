@@ -348,6 +348,36 @@ StandardOutput=append:$HOME/.claude/claude-max-open-design-quota.log
 StandardError=append:$HOME/.claude/claude-max-open-design-quota.log
 UNIT
 
+# Одноразовый переключатель «после ручного сброса Fable» (слово фаундера 27.11.2026): следит за
+# недельным счётчиком Fable на названной организации; при резком падении (кнопка сброса в панели)
+# один раз переписывает orgModels в placement.json и сам снимает взвод. Нет ~/.claude-local/fable-switch.json
+# или armed=false — ничего не делает. Опрос редкий: ручка квоты Anthropic делит лимит частоты на машину.
+cat > "$UNIT_DIR/claude-max-fable-switch.service" <<UNIT
+[Unit]
+Description=claude-max-fable-switch — after a manual Fable reset, swap the org model rules once
+Documentation=file://$INSTALLED/src/fable-switch-watch.ts
+After=claude-max-proxy.service
+
+[Service]
+Type=oneshot
+ExecStart=$BUN $INSTALLED/src/fable-switch-watch.ts
+StandardOutput=append:$HOME/.claude/claude-max-fable-switch.log
+StandardError=append:$HOME/.claude/claude-max-fable-switch.log
+UNIT
+
+cat > "$UNIT_DIR/claude-max-fable-switch.timer" <<UNIT
+[Unit]
+Description=Check the Fable weekly counter every 10 minutes (one-shot switch)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+Unit=claude-max-fable-switch.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 cat > "$UNIT_DIR/claude-max-open-design-quota.timer" <<UNIT
 [Unit]
 Description=Refresh OpenDesign Go quota every 5 minutes
@@ -483,6 +513,7 @@ UNIT
 systemctl --user daemon-reload
 systemctl --user enable --now claude-max-alibaba-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-alibaba-quota.timer"
 systemctl --user enable --now claude-max-open-design-quota.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-open-design-quota.timer"
+systemctl --user enable --now claude-max-fable-switch.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-fable-switch.timer"
 systemctl --user enable --now claude-max-quota-unified.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-quota-unified.timer"
 systemctl --user enable --now claude-max-placement-sample.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-placement-sample.timer"
 systemctl --user enable --now claude-max-quota-ship-muid.timer >/dev/null 2>&1 || log "WARN: could not enable claude-max-quota-ship-muid.timer"
